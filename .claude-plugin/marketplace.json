@@ -6,13 +6,10 @@
     "name": "Claudio Schirmer Guedes",
     "email": "csgcad@icloud.com"
   },
-  "metadata": {
-    "pluginRoot": "./plugins"
-  },
   "plugins": [
     {
       "name": "omnicore",
-      "source": "omnicore",
+      "source": "./plugins/omnicore",
       "description": "Scaffold services & entities, upgrade the framework pin, and get docs-first help — invoked as /omnicore:scaffold-service, /omnicore:scaffold-entity, /omnicore:upgrade, /omnicore:help.",
       "category": "development"
     }
