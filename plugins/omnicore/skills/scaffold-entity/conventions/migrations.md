@@ -39,6 +39,17 @@ default as belt-and-suspenders (the framework stamps actively). If the entity ha
 Archive mode, there is no `deleted_at` — keep `Modes()` ⟺ `SoftDelete` ⟺ the column in
 lockstep.
 
+## Self-documenting DDL — table & column descriptions
+
+Every generated table and column carries its description as a SQL COMMENT, sourced from
+the spec (§2 `Description` per column; the §1 one-liner per table) — the schema documents
+itself. The mechanism is standard DDL, per dialect: **Postgres** = `COMMENT ON TABLE …` /
+`COMMENT ON COLUMN <table>.<col> IS '…'` statements after the `CREATE TABLE`; **MySQL** =
+inline `COMMENT '…'` on each column + a trailing `COMMENT='…'` table option. The `.down`
+needs nothing extra — dropping the table drops its comments. Applies to EVERY table the
+entity emits (base, role, children, siblings). Column types still come only from
+`table-schema.html`; a description never changes a type.
+
 ## Traps
 
 - **⚠️ MySQL: every entity id AND every FK is `BINARY(16)` — never `CHAR(36)`/`VARCHAR`.**

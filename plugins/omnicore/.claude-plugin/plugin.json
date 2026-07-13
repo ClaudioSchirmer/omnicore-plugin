@@ -1,6 +1,6 @@
 {
   "name": "omnicore",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Tooling for the omnicore DDD + CQRS framework: scaffold a new service, add CRUD entities, upgrade the framework pin, and ask docs-first questions.",
   "author": {
     "name": "Claudio Schirmer Guedes",

@@ -28,8 +28,9 @@ Approved: <pending>      <!-- who/when -->
   ⚠️ OPEN — ask "could this also become another role for the same person one day?". It
   cannot be self-answered from the request (the second role never exists yet when the
   first is modeled) and it is NOT covered by a blanket "ok". No smell → propose flat.**
-- ER sketch: every table, PK/FK, and which table each field lives on (the 1a thinking,
-  written down). **Child/sibling table names are OWNER-PREFIXED** (`person_addresses`,
+- ER sketch: every table, PK/FK, which table each field lives on, **plus a one-line
+  description per table** (→ becomes the table COMMENT in the migration). **Child/sibling
+  table names are OWNER-PREFIXED** (`person_addresses`,
   `student_grades`, `student_scholarships` — never bare `addresses`/`grades`); name them
   right HERE so the sketch and the migrations agree (`migrations.md`).
 - If sharedbase-role (else `N/A — flat`):
@@ -41,12 +42,15 @@ Approved: <pending>      <!-- who/when -->
   - Identity view (SharedBaseView): create | add-role (bump Version) | skip
 
 ## 2. Fields                                 [one row per field — none may be missing]
-| Field | Go type | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: |
-|---|---|---|---|---|---|
+| Field | Go type | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
+|---|---|---|---|---|---|---|
 - Nullable ⇒ pointer. Money = int64 minor units, never float. Exact decimals → `string`
   (float64 rounds); `float64` is fine for non-money numerics. Column types per dialect:
   the "Go ↔ …" tables in `table-schema.html` — the authority, never from memory.
   `example:` always filled (low-risk).
+- `Description` = one concise line on what the field means (low-risk, always filled). It
+  becomes the column COMMENT in the migration DDL (`migrations.md`); reuse it for the
+  OpenAPI field doc where the surface wants one.
 - **Unique is high-risk — confirm per field AND surface the enforcement style:**
   - **(recommended) domain pre-check + DB backstop**: a `domain.Service` check in
     `BuildRules` (with exclude-self semantics on update; unarchive included when
