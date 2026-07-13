@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "omnicore",
+  "description": "Claudio Schirmer's marketplace for omnicore framework tooling.",
+  "owner": {
+    "name": "Claudio Schirmer Guedes",
+    "email": "csgcad@icloud.com"
+  },
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "omnicore",
+      "source": "omnicore",
+      "description": "Scaffold services & entities, upgrade the framework pin, and get docs-first help — invoked as /omnicore:scaffold-service, /omnicore:scaffold-entity, /omnicore:upgrade, /omnicore:help.",
+      "category": "development"
+    }
+  ]
+}

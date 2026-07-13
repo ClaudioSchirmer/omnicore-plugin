@@ -1,0 +1,17 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Claude Code local state (should not ship with the marketplace)
+.claude/settings.local.json
+
+# Scratch / working dirs the skills create in a consumer project (never here, but guard anyway)
+scaffold-entity/
+scaffold-service/
+
+# Archives produced when packaging the plugin
+*.zip
