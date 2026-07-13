@@ -266,8 +266,9 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
       Ask: "who can read/modify which rows?" If the answer is "anyone with the
       permission," say so explicitly; don't just skip it.
 
-Fields + Go types (nullable ⇒ pointer), `example:` tags, and filter operators are low-risk:
-decide them yourself and show them FILLED in the spec (§2/§9) — do NOT punt them.
+Fields + Go types (nullable ⇒ pointer), `example:` tags, per-field + per-table
+descriptions, and filter operators are low-risk: decide them yourself and show them FILLED
+in the spec (§2/§9) — do NOT punt them.
 
 **This is a hard STOP gate, and the SPEC is what passes through it.** Send ONE consolidated
 message that **OPENS with a single loud status line — `⏸️ PAUSED — spec awaiting your
