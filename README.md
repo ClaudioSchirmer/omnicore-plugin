@@ -50,6 +50,35 @@ Validate the manifest before publishing (CI-friendly):
 claude plugin validate ./plugins/omnicore --strict
 ```
 
+The skills in `plugins/omnicore/skills/` are the **single source of truth** — edit them
+here, not in any `~/.claude/skills` copy. During development, `--plugin-dir` above loads
+your working tree directly, so changes show up on the next `/reload-plugins` without a
+reinstall.
+
+## Releasing
+
+Clients pin to a released **version**, so a code change reaches them only when you bump it:
+
+1. Edit skills under `plugins/omnicore/skills/` and verify with `--plugin-dir`.
+2. **Bump `version`** in `plugins/omnicore/.claude-plugin/plugin.json` (semver). Pushing
+   commits *without* bumping does not deliver the change — installed clients stay on the
+   cached version.
+3. Commit → open a PR → merge to `main` → push. `main` is the source of truth; there is no
+   Anthropic-hosted copy.
+4. Clients pick it up with:
+   ```
+   claude plugin marketplace update omnicore   # re-pull the catalog
+   claude plugin update omnicore@omnicore       # fetch the new version
+   ```
+   Auto-update is off by default for self-hosted marketplaces; clients opt in per
+   marketplace to get background checks + a "run `/reload-plugins`" notification instead.
+
+> **Manifest gotchas (bench-proven):** the marketplace entry's `source` must be the explicit
+> relative path `./plugins/omnicore` — a bare string (`"omnicore"`) is rejected at install as
+> an unsupported source type. And keep `.gitignore` from matching the skill directories
+> (`scaffold-entity/` / `scaffold-service/` as bare patterns silently exclude them from the
+> push).
+
 ## Layout
 
 ```
