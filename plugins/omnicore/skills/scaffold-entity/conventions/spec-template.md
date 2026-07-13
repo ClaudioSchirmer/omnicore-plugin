@@ -1,0 +1,100 @@
+# conventions/spec-template.md — the Phase 1 spec artifact (load in Phase 1, every run)
+
+> Copy the template below VERBATIM to `scaffold-entity/<entity>/spec.md` and FILL every
+> slot. **Completeness is STRUCTURAL, not memory:** no section may be deleted or left
+> blank — a section that does not apply stays in place marked `N/A — <why>` (proof it was
+> considered, not forgotten). A slot you cannot responsibly recommend becomes
+> `⚠️ OPEN: <the question for the dev>`. **Generation MUST NOT start while the spec has any
+> ⚠️ OPEN slot or `Status: DRAFT`.** The reasoning for each section (trade-offs, what to
+> confirm, tone) is SKILL.md Phase 1; the framework mechanics are the routed /docs.
+
+Marking convention inside the filled spec:
+- low-risk slots → just the value (you decided; the dev can still edit).
+- high-risk slots → the value + `(proposed)` + the alternative(s) in one line.
+- unanswerable → `⚠️ OPEN: <question>` (must be resolved by the dev, never defaulted).
+
+---
+
+```markdown
+# Spec: <Entity>
+
+Status: DRAFT            <!-- flip to APPROVED only after the dev's explicit ok -->
+Approved: <pending>      <!-- who/when -->
+
+## 1. Storage model                                    [high-risk — confirm]
+- Kind: flat | sharedbase-role — <pick> (proposed; alternative: <other> — <one-line why>)
+  **IDENTITY-SMELL RULE: if the fields carry person/party identity (name +
+  document/tax-id and/or email/birth date) PLUS role-specific fields, this slot is
+  ⚠️ OPEN — ask "could this also become another role for the same person one day?". It
+  cannot be self-answered from the request (the second role never exists yet when the
+  first is modeled) and it is NOT covered by a blanket "ok". No smell → propose flat.**
+- ER sketch: every table, PK/FK, and which table each field lives on (the 1a thinking,
+  written down). **Child/sibling table names are OWNER-PREFIXED** (`person_addresses`,
+  `student_grades`, `student_scholarships` — never bare `addresses`/`grades`); name them
+  right HERE so the sketch and the migrations agree (`migrations.md`).
+- If sharedbase-role (else `N/A — flat`):
+  - Base: <table> — new | REUSE existing (from Phase 0b)
+  - **Natural key: <field>** ⚠️ HIGHEST-RISK SLOT of the whole spec — derives the identity
+    PK (UUIDv5) and IS the dedup key; wrong = identities wrongly merged/split. Confirm
+    explicitly, never infer.
+  - Link model: shared-PK | separate-FK
+  - Identity view (SharedBaseView): create | add-role (bump Version) | skip
+
+## 2. Fields                                 [one row per field — none may be missing]
+| Field | Go type | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: |
+|---|---|---|---|---|---|
+- Nullable ⇒ pointer. Money = int64 minor units, never float. Exact decimals → `string`
+  (float64 rounds); `float64` is fine for non-money numerics. Column types per dialect:
+  the "Go ↔ …" tables in `table-schema.html` — the authority, never from memory.
+  `example:` always filled (low-risk).
+- **Unique is high-risk — confirm per field AND surface the enforcement style:**
+  - **(recommended) domain pre-check + DB backstop**: a `domain.Service` check in
+    `BuildRules` (with exclude-self semantics on update; unarchive included when
+    reactivation can collide) so the violation reports TOGETHER with the other validation
+    errors, plus the UNIQUE index + repo `Constraints` binding as the race-window backstop
+    — the framework's own defense-in-depth guidance (the check itself is the loader's
+    hydration-free `Exists` probe when the pinned version ships it — `infra.md` point 0);
+  - **(alternative) constraint-only**: simpler, but the duplicate surfaces alone as a 409
+    only after every other error is fixed.
+  Either way the notification is a custom `<Field>AlreadyExists…` (409, all 7 catalogs);
+  `EntityAlreadyAddedNotification` is the PK-collision one, not this.
+
+## 3. Children (1:N)                        [or `N/A — no collections`]
+| Child | Of whom (base / role / flat-root) | Edit strategy (A / B / C) | Restorable alone? |
+|---|---|---|---|
+- Restorable-alone = yes ⇒ strategy C (own aggregate). Base-child + per-child endpoints ⇒
+  the routing sub-question (under the role vs own aggregate).
+
+## 4. Siblings (1:1)                        [or `N/A — no facet worth splitting`]
+Per sibling: <field group> → attachment node (flat root | role | role-child).
+- On a SharedBase: person-level facet = nullable columns ON the base, NOT a sibling.
+
+## 5. Modes                                             [required]
+display + <subset of insert / update / delete / archive / unarchive> — <why this subset>
+
+## 6. Delete semantics                                  [required]
+soft | hard (rarely both). Verb truth: DELETE = hard purge only; soft = PATCH
+archive (+ unarchive). Root AND per-child.
+
+## 7. Business rules                        [required — never boilerplate-only]
+| # | Field(s) | Rule | Verb scope (IfInsert/IfUpdate/…/actionName) | Notification | HTTP |
+|---|---|---|---|---|---|
+- At minimum the required/format/range rules per field; elicit the REAL invariants
+  (cross-field, immutability, transitions, per-group caps) — this is where the domain
+  earns its keep.
+
+## 8. Update shape                                      [required]
+PATCH | PUT | both — default PATCH. **COUPLING: if §4 has a sibling, include PUT** (PATCH
+can't assign null; the ROOT's PUT with the facet all-null is what clears the sibling row —
+a sibling NEVER gets its own endpoint; `siblings.md`).
+
+## 9. Surfaces & reads                       [required — never an endpoint unasked]
+- REST: yes/no · GraphQL: yes/no · gRPC: separate skill · Exports (CSV/XLSX): yes/no
+- Reads: by-id + by-params (expected defaults).
+- Filter/sort/search operators per field (low-risk — filled, shown):
+
+## 10. Authorization                          [required — BOTH slots, a blank is invalid]
+- Permission gate (Layer 1): <resource:action per operation>
+- Data-access (Layer 2/3): <who can read/modify which rows — "anyone with the permission"
+  is a valid answer; a blank is not>
+```
