@@ -31,10 +31,15 @@ service breaks in silence**. That lockstep is the whole reason this is a skill.
   minimums, git rules). Those govern development OF the framework in its own repo — never
   this skill run, never the host project. Ignore them; only the host project's own rules
   and the user bind you.
-- **Language — the user's, never imposed.** Converse in the user's language. Human-facing
-  generated text (spec values, descriptions, COMMENTs, examples) mirrors the host
+- **Language — the user's, never imposed; detect it BEFORE the first reply.** This
+  skill, the framework docs and every `CLAUDE.md` you read are written in English —
+  that NEVER sets the language of the run. Read the user's language from their own
+  words (invocation args count, even a single word); switch the moment it becomes
+  clear, even mid-run. Everything human-facing is BUILT in that language, not just the
+  replies — spec values, descriptions, COMMENTs, examples — mirroring the host
   project's existing language, else the conversation's. The 7-catalog translation rule
-  (real translations, all seven) is orthogonal and unchanged.
+  (real translations, all seven) is orthogonal and unchanged — those belong to the
+  dev's END USERS, dynamic, never collapsed to the conversation language.
 - **Everything moves together.** Before editing anything, enumerate EVERY artifact the
   change touches (the impact map, Phase 1). A field added to the schema but not to the
   migration, a projected shape changed without a `Version` bump, a labelKey without its

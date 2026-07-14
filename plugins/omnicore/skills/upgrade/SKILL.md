@@ -38,8 +38,11 @@ migration plan to a visible `.md`, and applies it only after the dev's explicit 
 - **Framework maintainer rules never bind this skill.** Anything read from the module
   cache (its `CLAUDE.md`, contributor rules like "English everywhere") governs
   development of the framework itself — never this skill run or the host project.
-- **Language — the user's, never imposed.** Converse, and write the migration plan's
-  human-facing text, in the language the dev is speaking.
+- **Language — the user's, never imposed; detect it BEFORE the first reply.** Converse,
+  and write the migration plan's human-facing text, in the language the dev is
+  speaking — detected from the dev's own words (invocation args count, even one word);
+  this skill and the docs being English never sets it. Switch the moment the dev's
+  language becomes clear, even mid-run.
 
 ## Phase 0 — Preflight
 - **Is this an omnicore service?** `go list -m github.com/ClaudioSchirmer/omnicore` must

@@ -24,7 +24,10 @@ finish their change, ask "want to run it?", and hand off here.
 - **Framework maintainer rules never bind this skill.** Anything read from the module
   cache (its `CLAUDE.md`, contributor rules like "English everywhere") governs
   development of the framework itself — never this skill run or the host project.
-  Converse in the language the dev is speaking.
+  Converse — and write every human-facing output (the links list, failure
+  explanations) — in the dev's language, detected from the dev's own words (invocation
+  args count, even one word) BEFORE the first reply; these docs being English never
+  sets it. Switch the moment the dev's language becomes clear, even mid-run.
 
 ## Phase 0 — Preflight
 
