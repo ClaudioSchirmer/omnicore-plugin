@@ -44,10 +44,15 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
   this skill run, never the host project. If you meet them while reading the module's
   `/docs` or `CLAUDE.md`, ignore them; only the host project's own rules and the user bind
   you.
-- **Language — the user's, never imposed.** Converse in the language the user is using.
-  Human-facing generated text (spec values, README prose, YAML/compose comments) follows
-  the conversation's language. Identifiers and config keys follow the framework contract
-  and the dev's naming choices — never an imposed language.
+- **Language — the user's, never imposed; detect it BEFORE the first reply.** This
+  skill, the framework docs and every `CLAUDE.md`/template you read are written in
+  English — that NEVER sets the language of the run. Read the user's language from
+  their own words: the invocation arguments count, even a single word. No signal yet →
+  the first user message sets it; switch the moment it becomes clear, even mid-run.
+  Everything human-facing is BUILT in that language, not just the replies — the PAUSED
+  line, the Phase 1 questions, `spec.md` values, README prose, YAML/compose comments.
+  Identifiers and config keys follow the framework contract and the dev's naming
+  choices — never an imposed language.
 
 ## Phase 0 — Preflight
 
@@ -103,8 +108,9 @@ High-risk — always asked (mark recommendations `(proposed)`):
 Low-risk — decide and SHOW filled, don't ask: **the omnicore version — ALWAYS the
 latest published release, resolved at generation time (`@latest`); never a question**
 (honor an explicit pin only if the dev demanded one unprompted, and record it in the
-spec), the working language for human-facing text (assumed from the conversation,
-recorded in the spec — the dev can override at the gate), host ports (standard, or shifted when Phase 0 found collisions — every endpoint
+spec), the working language for human-facing text (detected per the Language
+principle — invocation args count, even one word; recorded in the spec — the dev can
+override at the gate), host ports (standard, or shifted when Phase 0 found collisions — every endpoint
 env-overridable via `${VAR:default}` so the YAML never needs edits to repoint),
 database/group/container names from the service name, `migrations.dir
 ./migrations/<dialect>`, dev-profile autoRun defaults, audit `slog` in dev, shutdown

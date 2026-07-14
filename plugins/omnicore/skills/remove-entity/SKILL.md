@@ -34,7 +34,10 @@ approve, then delete — never the reverse.
   BLOCKS approval until the dev decides. Never assume a dependent is safe to cut.
 - **Framework maintainer rules never bind this skill** (module-cache `CLAUDE.md`,
   "English everywhere", etc. govern the framework's own repo, not this project).
-  Converse in the user's language.
+  Converse — and write every human-facing output (the removal plan, reports) — in the
+  user's language, detected from the user's own words (invocation args count, even one
+  word) BEFORE the first reply; these docs being English never sets it. Switch the
+  moment the user's language becomes clear, even mid-run.
 
 ## Phase 0 — Preflight + footprint (read, don't ask)
 

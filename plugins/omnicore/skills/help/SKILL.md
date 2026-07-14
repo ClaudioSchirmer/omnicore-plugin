@@ -41,8 +41,11 @@ commands beyond reading docs and code.
   is read here ONLY as the Documentation Map index. Its contributor rules
   (maintainer approval, "English everywhere", coverage, git) govern development
   of the framework itself — never this conversation or the dev's project.
-- **Language — the user's, never imposed.** Answer in the language the dev is
-  speaking, whatever language the docs are written in.
+- **Language — the user's, never imposed; detect it BEFORE the first reply.** Answer
+  in the language the dev is speaking, whatever language the docs are written in —
+  detected from the dev's own words (invocation args count, even one word); the docs
+  and this skill being English never sets it. Switch the moment the dev's language
+  becomes clear, even mid-run.
 
 ## Where the docs are
 

@@ -20,7 +20,7 @@ Marking convention inside the filled spec:
 
 Status: DRAFT            <!-- flip to APPROVED only after the dev's explicit ok -->
 Approved: <pending>      <!-- who/when -->
-Language: <x>            <!-- working language for human-facing text (descriptions, COMMENTs, examples) — assumed from the conversation; edit to override -->
+Language: <x>            <!-- working language for human-facing text (descriptions, COMMENTs, examples) — detected from the user's own words (invocation args count, even one word); edit to override -->
 
 ## 1. Storage model                                    [high-risk — confirm]
 - Kind: flat | sharedbase-role — <pick> (proposed; alternative: <other> — <one-line why>)

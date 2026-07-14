@@ -23,8 +23,12 @@ sources don't carry, STOP: that slice is `evolve-entity`'s job first.
   consumer code disagrees with the doc, the doc wins. Never assume a framework version.
 - **Framework maintainer rules NEVER bind this skill** (module-cache `CLAUDE.md`,
   "English everywhere", approval gates — framework-repo policy, not this project's).
-- **Language — the user's, never imposed.** Converse in the user's language;
-  human-facing text mirrors the host project's language, else the conversation's.
+- **Language — the user's, never imposed; detect it BEFORE the first reply.** This
+  skill, the framework docs and every `CLAUDE.md` you read are written in English —
+  that NEVER sets the language of the run. Read the user's language from their own
+  words (invocation args count, even a single word); switch the moment it becomes
+  clear, even mid-run. Everything human-facing is BUILT in that language, not just the
+  replies — mirroring the host project's language, else the conversation's.
 - **Shape and Version move together.** A projected-shape change without its `Version`
   bump is the classic silent-wrong: old documents linger and readers see a mixed
   collection. The impact map makes the bump explicit and the verify greps it.

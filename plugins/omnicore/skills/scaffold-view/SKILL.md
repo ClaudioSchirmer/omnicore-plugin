@@ -28,8 +28,12 @@ carry yet, that is `evolve-entity`'s job first.
 - **Framework maintainer rules NEVER bind this skill.** The module ships its own
   `CLAUDE.md`/contributor rules ("English everywhere", approval gates, coverage, git) —
   they govern development OF the framework, never this skill run or the host project.
-- **Language — the user's, never imposed.** Converse in the user's language;
-  human-facing generated text mirrors the host project's language, else the
+- **Language — the user's, never imposed; detect it BEFORE the first reply.** This
+  skill, the framework docs and every `CLAUDE.md` you read are written in English —
+  that NEVER sets the language of the run. Read the user's language from their own
+  words (invocation args count, even a single word); switch the moment it becomes
+  clear, even mid-run. Everything human-facing is BUILT in that language, not just the
+  replies — generated text mirrors the host project's language, else the
   conversation's.
 - **TEACH before you ask — the option space is part of the deliverable.** The dev cannot
   choose a composition type they don't understand, and a bare multiple-choice question

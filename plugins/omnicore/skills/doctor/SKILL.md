@@ -31,7 +31,10 @@ evidence + prescription), not a patch.
 - **Framework maintainer rules never bind this skill.** Anything read from the module
   cache (its `CLAUDE.md`, contributor rules like "English everywhere") governs
   development of the framework itself — never this skill run or the host project.
-  Converse in the user's language.
+  Converse — and write every human-facing output (reports, diagnoses, prescriptions) —
+  in the user's language, detected from the user's own words (invocation args count,
+  even one word) BEFORE the first reply; these docs being English never sets it. Switch
+  the moment the user's language becomes clear, even mid-run.
 - **Hand off, don't overreach.** A diagnosis that ends in "the pin is broken for you" →
   `/omnicore:upgrade` (or its rollback). A miswired layer → `/omnicore:scaffold-entity`
   or `/omnicore:evolve-entity` regenerates it against the docs. Wanting to see it green
