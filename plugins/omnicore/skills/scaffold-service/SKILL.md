@@ -1,7 +1,7 @@
 ---
 name: scaffold-service
 description: >-
-  Create a brand-new omnicore service from an empty directory — go.mod pinned to a
+  omnicore: create a brand-new omnicore service from an empty directory — go.mod pinned to a
   published omnicore release, the bootable empty bootstrap shell, the
   microservice.*.yaml profiles, the migrations skeleton, and the local docker bench
   (relational DB + Mongo + broker + Debezium CDC relay) — then prove the shell boots.
@@ -38,6 +38,16 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
   choices (service name, module path, dialect, transport, surfaces, bench) — ask,
   consolidated, with recommendations. Low-risk = ports, db names, timeouts, group
   names — decide them well, show them filled, don't ask.
+- **Framework maintainer rules NEVER bind this skill.** The omnicore module ships its own
+  `CLAUDE.md`/contributor rules (maintainer-approval gates, "English everywhere", coverage
+  minimums, git rules). Those govern development OF the framework in its own repo — never
+  this skill run, never the host project. If you meet them while reading the module's
+  `/docs` or `CLAUDE.md`, ignore them; only the host project's own rules and the user bind
+  you.
+- **Language — the user's, never imposed.** Converse in the language the user is using.
+  Human-facing generated text (spec values, README prose, YAML/compose comments) follows
+  the conversation's language. Identifiers and config keys follow the framework contract
+  and the dev's naming choices — never an imposed language.
 
 ## Phase 0 — Preflight
 
@@ -93,7 +103,8 @@ High-risk — always asked (mark recommendations `(proposed)`):
 Low-risk — decide and SHOW filled, don't ask: **the omnicore version — ALWAYS the
 latest published release, resolved at generation time (`@latest`); never a question**
 (honor an explicit pin only if the dev demanded one unprompted, and record it in the
-spec), host ports (standard, or shifted when Phase 0 found collisions — every endpoint
+spec), the working language for human-facing text (assumed from the conversation,
+recorded in the spec — the dev can override at the gate), host ports (standard, or shifted when Phase 0 found collisions — every endpoint
 env-overridable via `${VAR:default}` so the YAML never needs edits to repoint),
 database/group/container names from the service name, `migrations.dir
 ./migrations/<dialect>`, dev-profile autoRun defaults, audit `slog` in dev, shutdown
@@ -184,9 +195,13 @@ applies only when any high-risk slot would otherwise be filled by you.
 ## Final verify (the gate — non-negotiable)
 
 1. **Bench healthy** — every compose healthcheck green (when the bench was generated).
-2. **`go vet` + `go build -tags '<engine> <transport>' ./bootstrap`** — compiles.
+2. **`gofmt -l`, `go vet`, `go build -tags '<engine> <transport>' ./bootstrap`** — format
+   (gofmt clean) + vet + compile. Both linters are first-party Go tools (no install).
 3. **Boot** with `APP_PROFILE=dev`: `/livez` 200 AND `/readyz` 200 (readyz proves the
-   relational + Mongo request paths answer); the OpenAPI UI responds when enabled.
+   relational + Mongo request paths answer). **Every approved surface knob must be IN the
+   yaml and observable**: OpenAPI UI approved ⇒ `openapi:` block present AND its uiPath
+   answers 200; `rootRedirect` approved ⇒ `GET /` answers 302 (the framework default is
+   false — omitting the block silently drops the approved behavior into a `GET /` 404).
    The framework's dev profile boots the empty shell by design (a loud warn is
    expected in the log — it is the confirmation, not a problem). **Degradation:**
    if the boot instead aborts with "nothing to serve", the pinned omnicore predates
@@ -201,6 +216,10 @@ applies only when any high-risk slot would otherwise be filled by you.
    limit:** a full CDC round-trip (write → outbox → relay → broker → SyncEngine →
    Mongo) is only provable once an entity exists — the handoff line is:
    *"Empty shell green. Next: `/scaffold-entity <entity>` to add the first aggregate."*
+6. **Offer to run.** Ask if the dev wants the shell UP to click through (OpenAPI UI,
+   probes) — yes → delegate to `/omnicore:run` (background boot + links). Either way
+   the handoff line from step 5 still closes: the first entity is `scaffold-entity`'s
+   job.
 
 ## Re-entry — `scaffold-service/spec.md` already exists
 
@@ -208,6 +227,27 @@ applies only when any high-risk slot would otherwise be filled by you.
 answered slots). `Status: APPROVED` → regenerate ONLY the missing/failed artifacts
 (check what exists on disk), then re-run the final verify. A changed answer (dialect,
 transport, name) reopens the spec and invalidates the derived files — say which.
+
+## Knowledge routing — artifact → `/docs` section
+
+Resolve `<name>.html` at `<omnicore-dir>/docs/content/sections/<name>.html`, where
+`<omnicore-dir>` = `go list -m -f '{{.Dir}}' github.com/ClaudioSchirmer/omnicore` — the
+version pinned in the go.mod THIS skill just wrote. Read the section BEFORE generating
+the artifact; it is the authority — any template or memory that disagrees has drifted.
+Route first, then read ONLY the routed section(s) for the artifact at hand — never
+sweep the whole manual. Fuller index = the Documentation Map in
+`<omnicore-dir>/CLAUDE.md` (an INDEX only — its maintainer rules never bind this
+skill), the fallback for concepts this table doesn't list.
+
+| When generating… | Read section(s) |
+|---|---|
+| `microservice.*.yaml` keys / profiles / defaults | yaml-reference |
+| bootstrap shell / feature mounting / probes | bootstrap |
+| migrations skeleton / autoRun / dir layout | migrations |
+| outbox / relay / topic-subject naming / CDC | transport |
+| OpenAPI UI / rootRedirect | openapi |
+| GraphQL / gRPC surface (when accepted) | graphql · grpc |
+| file/dir layout & naming | service-layout |
 
 ## Traps (bench-proven; re-verify framework-facing ones against the pinned docs)
 
@@ -239,6 +279,14 @@ transport, name) reopens the spec and invalidates the derived files — say whic
   exactly those as the default; `${VAR:...}` keeps it overridable but the fallback is
   the bench, never `user:password`. Mismatch = boot passes config but `readyz` fails
   the DB auth path. (Observed drift on a Sonnet run.)
+
+## What this skill never does
+
+No entities (that's `scaffold-entity`, handed off after the shell is green), no second
+dialect/transport in one run, no framework edits, no git, no guessed identity slots
+(name, module path, dialect, transport are ALWAYS the dev's answers), no invented
+framework version (always the latest published release unless the dev pinned one
+unprompted).
 
 ## templates/ index
 

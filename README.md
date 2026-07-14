@@ -13,7 +13,13 @@ Invoked as `/omnicore:<skill>` once installed:
 |---|---|
 | `/omnicore:scaffold-service` | Create a brand-new omnicore service from an empty directory — `go.mod` pinned to a published release, the bootable bootstrap shell, the `microservice.*.yaml` profiles, migrations skeleton, and the local docker bench (DB + Mongo + broker + Debezium CDC relay) — then prove the shell boots. |
 | `/omnicore:scaffold-entity` | Scaffold a complete CRUD entity across every layer (domain → application → web → infra → migrations → bootstrap) of an existing omnicore service. |
-| `/omnicore:upgrade` | Upgrade a service's omnicore pin: check the current version, show the target release's changelog, and on your ok run `go get` + `go mod tidy` + build — with rollback to the previous version if the build breaks. |
+| `/omnicore:evolve-entity` | Change an EXISTING entity — add/remove/rename fields, uniqueness, children, modes — with schema evolution done right: migration, TableSchema, DTOs, translations, view `Version` bump and OpenAPI move together, via an approved impact-map spec. |
+| `/omnicore:remove-entity` | Surgically remove an entity from every layer via an inventory-first removal plan you approve before anything is deleted; shared bases, composed views and integration-event consumers are detected and block until you decide. |
+| `/omnicore:scaffold-view` | Create a NEW read model beyond an entity's own view — ComposedView across entities, SharedBaseView identity, Upstream/Embed composition, or an aggregated view — projected to Mongo and exposed on REST/GraphQL, via an approved spec. |
+| `/omnicore:evolve-view` | Change an EXISTING view — projected fields, legs/roles, indexes, operators, surfaces — with the `Version` bump and rebuild discipline done right, write side untouched. |
+| `/omnicore:run` | Boot the service locally (bench up, background boot, readiness) and hand you clickable links — OpenAPI UI, GraphQL, probes. The app stays running. |
+| `/omnicore:doctor` | Diagnose a misbehaving service or bench: walks the pipeline (build → boot → serve → write → relay → broker → projection), proves the cause with evidence, and prescribes the fix. Read-only — it never edits your files. |
+| `/omnicore:upgrade` | Upgrade a service's omnicore pin: check the current version, show the target release's changelog, and on your ok run `go get` + `go mod tidy` + build — with rollback to the previous version if the build breaks, or an approved migration plan to fix the breaking-change fallout. |
 | `/omnicore:help` | Docs-first conversational guide to how the framework works. Read-only: it explains, it never changes anything. |
 
 All skills are **version-agnostic**: they read the framework version from the project's
@@ -92,6 +98,12 @@ omnicore-plugin/                     # repo root = marketplace
         └── skills/
             ├── scaffold-service/
             ├── scaffold-entity/
+            ├── evolve-entity/
+            ├── remove-entity/
+            ├── scaffold-view/
+            ├── evolve-view/
+            ├── run/
+            ├── doctor/
             ├── upgrade/
             └── help/
 ```

@@ -67,7 +67,9 @@ table-agnostic: base-table unique constraints (e.g. `persons_email_key`) bind HE
   index on postgres; a soft-delete-gated generated column on mysql — see
   `table-schema.html`, Active-only uniqueness) to allow a remnant beside a new active row.
 - **⚠️ MySQL: every id/FK here is `BINARY(16)`** — base id, role id, `person_id`, every
-  base-child/role-child FK (`migrations.md`).
+  base-child/role-child FK. These are all framework-MANAGED slots, native on EVERY pin —
+  the pin-driven id-typing rule (SKILL.md boot-traps, "Id typing") governs only the
+  non-managed reference fields (`migrations.md`).
 
 ## Lifecycle & 409 semantics (for generated comments)
 

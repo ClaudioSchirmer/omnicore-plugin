@@ -20,6 +20,7 @@ Marking convention inside the filled spec:
 
 Status: DRAFT            <!-- flip to APPROVED only after the dev's explicit ok -->
 Approved: <pending>      <!-- who/when -->
+Language: <x>            <!-- working language for human-facing text (descriptions, COMMENTs, examples) — assumed from the conversation; edit to override -->
 
 ## 1. Storage model                                    [high-risk — confirm]
 - Kind: flat | sharedbase-role — <pick> (proposed; alternative: <other> — <one-line why>)
@@ -48,6 +49,10 @@ Approved: <pending>      <!-- who/when -->
   (float64 rounds); `float64` is fine for non-money numerics. Column types per dialect:
   the "Go ↔ …" tables in `table-schema.html` — the authority, never from memory.
   `example:` always filled (low-risk).
+- Id/uuid fields (the PK, every FK, any cross-aggregate reference): the Go type follows
+  the PIN's identity contract (SKILL.md boot-traps, "Id typing") — on a typed-identity
+  pin write **`domain.ID`** (nullable ⇒ `*domain.ID`); on older pins (≤ v0.29.0) write
+  **`string (uuid)`**, never `domain.ID`.
 - `Description` = one concise line on what the field means (low-risk, always filled). It
   becomes the column COMMENT in the migration DDL (`migrations.md`); reuse it for the
   OpenAPI field doc where the surface wants one.
