@@ -52,11 +52,16 @@ entity emits (base, role, children, siblings). Column types still come only from
 
 ## Traps
 
-- **⚠️ MySQL: every entity id AND every FK is `BINARY(16)` — never `CHAR(36)`/`VARCHAR`.**
-  A text column throws `Error 1366 Incorrect string value` at the FIRST INSERT — a runtime
-  500 `go build` cannot catch. (The framework's own control-plane tables use `CHAR(36)`
-  via a different write path — do NOT mirror them.) Confirm in `table-schema.html`
-  ("Go ↔ MySQL").
+- **⚠️ Id column types follow the pin's identity contract — pair DDL with the field's Go
+  type per the PINNED `table-schema.html` ("Supported column shapes"; detection + full
+  rule: SKILL.md boot-traps, "Id typing").** Managed slots (entity id, every FK) are
+  always native: Postgres `UUID`, MySQL `BINARY(16)`. On a TYPED-IDENTITY pin, a
+  reference column follows the field type — `domain.ID`/`*domain.ID` ⇒ `UUID`/`BINARY(16)`
+  (NULL-able for the pointer), `string`/`*string` ⇒ `CHAR(36)`/`VARCHAR(36)`; a
+  mismatched pair throws `Error 1366/1406` at the FIRST INSERT — a runtime 500 `go build`
+  cannot catch. On older pins (≤ v0.29.0): required reference ⇒ `BINARY(16)`, nullable
+  (`*string`) ⇒ `VARCHAR(36)`; Postgres `UUID` for both. (The framework's own
+  control-plane tables use `CHAR(36)` via a different write path — do NOT mirror them.)
 - **Unique constraints are named `<table>_<col>_key` in EVERY dialect** so the repo binds
   one name — unlike the PK, whose name diverges (postgres `<table>_pkey` / mysql
   `PRIMARY`). Name them on the OWNING table (a base field's constraint lives on the base

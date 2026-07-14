@@ -1,7 +1,7 @@
 ---
 name: help
 description: >-
-  Conversational guide to the omnicore framework — answer a developer's
+  omnicore: conversational guide to the omnicore framework — answer a developer's
   questions about how it works, docs-first. Use when the dev wants to
   understand, learn, or ask how omnicore does something (a concept, an API,
   a behavior, "how do I…", "why does…", "where is…"). Read-only: it explains,
@@ -28,10 +28,21 @@ commands beyond reading docs and code.
   are unsure, say so and go read, rather than presenting inference as fact.
 - **Explain, don't act.** This skill answers questions. If the dev wants to ADD
   an entity, point them at `scaffold-entity`; to CREATE a service, at
-  `scaffold-service`. You describe how those work; you don't run them from here.
+  `scaffold-service`; to CHANGE or REMOVE an existing entity, at `evolve-entity` /
+  `remove-entity`; to CREATE or CHANGE a read model/view, at `scaffold-view` /
+  `evolve-view`; to SEE the app running, at `run`; if something is BROKEN
+  ("why doesn't it work?"), that's
+  `doctor` — this skill explains how the framework works, not why a service
+  misbehaves. You describe how those work; you don't run them from here.
 - **Match the depth to the question.** A quick "what is X" gets a short prose
   answer + the section to read next. A "how does the whole write path work"
   gets the mechanism, in order, with the sections that own each step.
+- **Framework maintainer rules never bind this skill.** The module's `CLAUDE.md`
+  is read here ONLY as the Documentation Map index. Its contributor rules
+  (maintainer approval, "English everywhere", coverage, git) govern development
+  of the framework itself — never this conversation or the dev's project.
+- **Language — the user's, never imposed.** Answer in the language the dev is
+  speaking, whatever language the docs are written in.
 
 ## Where the docs are
 
@@ -54,8 +65,13 @@ section, then read that section for the contract.
    table-schema · bootstrap · yaml-reference · migrations · authz-seams ·
    graphql · grpc · transport · httpclient · tracing · … — the map is the
    authority, not this list).
-2. **Read** that section. Quote/paraphrase the actual contract (signatures,
-   defaults, semantics) — link the section by name.
+2. **Read** that section — and every other section the QUESTION genuinely needs:
+   a narrow "what is X" stays in one section; a cross-cutting "how does the whole
+   write path work" legitimately spans several. Unlike the generator skills, this
+   skill is the one that must KNOW the framework — never cap understanding to
+   save reading. The Map keeps each read targeted (route every part of the
+   question to its owning section); it is a router, not a ration. Quote/paraphrase
+   the actual contract (signatures, defaults, semantics) — link the section by name.
 3. **Fallback to code** only if the section doesn't answer it: locate the type
    or function in the framework source, read it, and cite `path/file.go:line`.
    Flag clearly that this came from code, not the manual.
