@@ -31,7 +31,7 @@ Language: <x>            <!-- working language for human-facing text (descriptio
   first is modeled) and it is NOT covered by a blanket "ok". No smell → propose flat.**
 - ER sketch: every table, PK/FK, which table each field lives on, **plus a one-line
   description per table** (→ becomes the table COMMENT in the migration). **Child/sibling
-  table names are OWNER-PREFIXED** (`person_addresses`,
+  table names are OWNER-PREFIXED** (e.g. `person_addresses`,
   `student_grades`, `student_scholarships` — never bare `addresses`/`grades`); name them
   right HERE so the sketch and the migrations agree (`migrations.md`).
 - If sharedbase-role (else `N/A — flat`):
@@ -76,7 +76,7 @@ Language: <x>            <!-- working language for human-facing text (descriptio
 
 ## 4. Siblings (1:1)                        [or `N/A — no facet worth splitting`]
 Per sibling: <field group> → attachment node (flat root | role | role-child).
-- On a SharedBase: person-level facet = nullable columns ON the base, NOT a sibling.
+- On a SharedBase: base-level (identity-wide) facet = nullable columns ON the base, NOT a sibling.
 
 ## 5. Modes                                             [required]
 display + <subset of insert / update / delete / archive / unarchive> — <why this subset>

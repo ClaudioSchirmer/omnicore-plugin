@@ -13,9 +13,9 @@ SyncEngine), and its `Mount` is a **ONE-LINE delegation** to the web layer's
 
 - **❌ Route bodies in a feature file = the web layer leaked into the composition root** —
   the single most common structural failure. `bootstrap/` imports NO route constructors.
-- **❌ SharedBase models: the person/identity view is NOT the role's cargo** — it gets its
-  OWN feature (`persons_feature.go`: holds the view, mounts the person routes), registered
-  beside the role features. A role's feature carries the ROLE only.
+- **❌ SharedBase models: the identity view is NOT the role's cargo** — it gets its
+  OWN feature, named after the BASE (holds the view, mounts the identity read routes),
+  registered beside the role features. A role's feature carries the ROLE only.
 - **Service-backed entity:** build the infra Service impl in the feature constructor and
   pass it through `Mount<Entity>`'s `svc` param; a no-service entity OMITS the param
   entirely (no dead nil) — the pairing is enforced at runtime (application.md).
