@@ -43,6 +43,17 @@ interface is what lets this layer compile before infra exists.
   lenient handler, on child ADD exactly as on UPDATE (a strict add 400s an omitted
   optional); all-required (especially numeric — a missing number defaults to 0 and can
   slip range rules) ⇒ strict.
+- **Read-request query params default to OPTIONAL — pointer fields.** Every scalar
+  `query:`-tagged field on a read request (filters, pagination keys, the reserved
+  archived-visibility flag included) is optional by default: declare it a pointer and
+  resolve absent → its default at the boundary mapper. A filter is REQUIRED only when the
+  dev explicitly says so in the spec — then the non-pointer IS the honest contract. Why it
+  bites: the OpenAPI generator marks any non-pointer field required (`openapi.html`,
+  required-field rule), so one accidental value-typed flag turns an optional parameter
+  mandatory and Swagger refuses the call until it is set. The required→value /
+  optional→pointer ruler below is for COMMAND bodies; on reads it only encodes an
+  EXPLICIT spec decision. (Struct-typed filter GROUPS are namespaces, not params — see
+  `auto-query-handlers.html`.)
 
 ## Boundary rules
 
