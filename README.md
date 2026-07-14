@@ -69,9 +69,10 @@ Clients pin to a released **version**, so a code change reaches them only when y
 2. **Bump `version`** in `plugins/omnicore/.claude-plugin/plugin.json` (semver). Pushing
    commits *without* bumping does not deliver the change — installed clients stay on the
    cached version.
-3. Commit → open a PR → merge to `main` → push. `main` is the source of truth; there is no
-   Anthropic-hosted copy.
-4. Clients pick it up with:
+3. Record the release in [`CHANGELOG.md`](CHANGELOG.md) (same PR as the bump).
+4. Commit → open a PR → merge to `main` → push, then tag the bump commit `v<version>`.
+   `main` is the source of truth; there is no Anthropic-hosted copy.
+5. Clients pick it up with:
    ```
    claude plugin marketplace update omnicore   # re-pull the catalog
    claude plugin update omnicore@omnicore       # fetch the new version
