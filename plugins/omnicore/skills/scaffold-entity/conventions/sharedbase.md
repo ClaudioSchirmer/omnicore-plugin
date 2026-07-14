@@ -66,7 +66,7 @@ table-agnostic: base-table unique constraints (e.g. `persons_email_key`) bind HE
   `UNIQUE(fk)` (an archived remnant blocks a new POST) OR active-only uniqueness (partial
   index on postgres; a soft-delete-gated generated column on mysql — see
   `table-schema.html`, Active-only uniqueness) to allow a remnant beside a new active row.
-- **⚠️ MySQL: every id/FK here is `BINARY(16)`** — base id, role id, `person_id`, every
+- **⚠️ MySQL: every id/FK here is `BINARY(16)`** — base id, role id, the role→base FK, every
   base-child/role-child FK. These are all framework-MANAGED slots, native on EVERY pin —
   the pin-driven id-typing rule (SKILL.md boot-traps, "Id typing") governs only the
   non-managed reference fields (`migrations.md`).
@@ -94,9 +94,10 @@ Offer neutrally, no manufactured debt. Role segments are named by the role's Go 
 an absent role is an omitted key (response fields pointer + omitempty); it COMPLEMENTS the
 per-role views, never replaces them.
 
-**Placement — person is its OWN bounded context** (`service-layout.html`): own
-`person_routes.go` (read-only, own `person:read` permission), own `persons_feature.go` —
-never inside a role's routes or feature. Roles write; the person view reads.
+**Placement — the shared identity is its OWN bounded context** (`service-layout.html`):
+the identity view gets its OWN routes file, its OWN feature and its OWN `<identity>:read`
+permission — all named after the BASE, never after a role, and never mounted inside a
+role's routes or feature. Roles write; the identity view reads.
 
 **Read surface — the standard PAIR, never by-id alone.** The identity view mounts by-id
 AND by-params (a paged, filtered list; filterable paths cover base fields, base-children

@@ -146,7 +146,7 @@ Self-configure by reading the project:
 - **An existing SharedBase?** Look for a `NewSharedBase("…")` schema (e.g. `persons`) + its
   identity view (a `SharedBaseView(…)`, e.g. `person_view.go`) + the roles already on it. If
   the entity being scaffolded is a NEW role over that SAME identity, you REUSE the base (declare
-  `NewSharedBase("persons")` identically — the registry keys by table) and ADD to the existing
+  the SAME `NewSharedBase("…")` — the registry keys by table) and ADD to the existing
   identity view (don't recreate either). This is the "add a role to an existing base" path
   (drives item 1's create-vs-add-role question).
 - **`/docs` + `conventions/` are the ALWAYS-ON basis — read them every run, whether the
@@ -197,7 +197,7 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      person/party one day?"* State the cost asymmetry when asking: starting flat and
      migrating to a base later is a REAL migration (new base table, PK re-derivation to
      UUIDv5, data move); a SharedBase that never gains a second role is only mild extra
-     structure (base table + upsert semantics + a person view).
+     structure (base table + upsert semantics + an identity view).
    - **No identity smell** (Product, Invoice, Warehouse…) → propose **flat** and move on —
      no question, no friction.
    Yes → SharedBase (`sharedbase.md`); genuinely standalone → flat.
@@ -207,11 +207,11 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      Propose the field (a document/tax-id is the usual pick), say why, and CONFIRM it
      explicitly — never infer it silently.
    - **If SharedBase → ALWAYS offer the all-in-one identity read (the `SharedBaseView` /
-     person view — the READ counterpart of the shared write, unique to SharedBase; always
+     identity view — the READ counterpart of the shared write, unique to SharedBase; always
      surface the option).** Explain WHAT it is: one document per identity, base fields +
      base-children flat, a sub-document per role, roles added one at a time. Two cases,
      detected in Phase 0b: (a) **no identity view exists yet** → offer to CREATE it
-     (`SharedBaseView(base, "persons").Role(<thisRole>)…`); (b) **an identity view already
+     (`SharedBaseView(<base>, "<identity-collection>").Role(<thisRole>)…`); (b) **an identity view already
      exists** (you're adding a NEW role to an existing base) → offer to ADD this role: append
      `.Role(<thisRole>Schema())` **and BUMP its `Version(N)`** (the role set is in the rebuild
      hash — forgetting the bump aborts boot). **Ask which** (create / add-role / skip);
@@ -219,14 +219,14 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      additive projection over the same CDC stream (nothing changes on the write side), so
      adding or extending it later is the SAME effort as now; it just triggers the standard
      automatic view rebuild (trivial on a fresh service; a one-time automatic rebuild over
-     existing data later). Present it as a neutral "want the person view?" — no manufactured
+     existing data later). Present it as a neutral "want the identity view?" — no manufactured
      debt. The offer INCLUDES its read surface: the standard by-id + by-params pair with
      filters (`sharedbase.md`) — never a lone by-id. See `sharedbase.md` (Read).
 2. **Siblings (1:1).** Any optional/sparse/bulky field group better split into a 1:1
    satellite than left as nullable columns? Name it, recommend, ask. **A sibling attaches
    ONLY to a single-owner node — a flat root, a ROLE, or a role-child — NEVER to a SharedBase
    (the base) or a base-child (the framework panics).** So in a SharedBase model, split the
-   ask: a PERSON-level 1:1 facet (shared across roles) → nullable columns ON the base, NOT a
+   ask: a BASE-level 1:1 facet (shared across roles) → nullable columns ON the base, NOT a
    sibling; a ROLE-specific 1:1 facet → a sibling on the role table. (`siblings.md`)
 3. **Children (1:N).** Which collections? For each: **child of whom** (base vs role/flat)?
    Independently-managed child → its OWN aggregate (FK), not nested. (`aggregate-children.md`)

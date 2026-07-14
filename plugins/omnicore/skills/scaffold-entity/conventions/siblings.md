@@ -14,8 +14,8 @@ A **single-owner node only**: a flat root, a ROLE, or a role-child. Width unlimi
 
 > **⚠️ A sibling CANNOT attach to a SharedBase (the base) nor to a base-child — boot
 > PANIC.** A base has many roles, so the 1:1 doesn't apply. In a SharedBase model the
-> elicitation splits: a PERSON-level 1:1 facet → nullable columns ON the base (not a
-> sibling); a ROLE-specific facet → a sibling on the role table.
+> elicitation splits: a BASE-level (identity-wide) 1:1 facet → nullable columns ON the
+> base (not a sibling); a ROLE-specific facet → a sibling on the role table.
 
 ## Shape rules (decisions)
 

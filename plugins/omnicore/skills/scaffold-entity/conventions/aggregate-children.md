@@ -95,7 +95,7 @@ preference. When per-child endpoints are wanted for a base-child, offer a light 
 valid permanently; a future role would expose its own edit routes over the same shared
 rows — a consequence, not a problem); **B)** promote the child to its own aggregate with
 one dedicated edit surface. Recommend by the dev's intent; reads of the shared identity
-stay under the person view either way. Role-private children skip this entirely.
+stay under the identity view either way. Role-private children skip this entirely.
 
 ## Cascade & audit (for generated comments)
 

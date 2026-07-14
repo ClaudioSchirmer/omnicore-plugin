@@ -16,7 +16,7 @@ Mount → `openapi.html` · read control keys + filter operators + export →
 
 Per `service-layout.html`: wire DTOs one file per OPERATION (request+response co-located);
 all of an entity's surfaces in ONE `<entity>_routes.go`; the shared-identity read surface
-(person view) in its OWN routes file + feature + permission — never inside the role's.
+(the identity view) in its OWN routes file + feature + permission — never inside the role's.
 **Routes never live in `bootstrap/`** — the feature's Mount is a one-line delegation to
 this layer.
 

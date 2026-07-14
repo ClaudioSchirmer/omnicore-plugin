@@ -1,11 +1,13 @@
 {
   "name": "omnicore",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Tooling for the omnicore DDD + CQRS framework: scaffold a new service, add/evolve/remove CRUD entities, create and evolve read-side views, run the service with clickable links, diagnose a misbehaving service, upgrade the framework pin, and ask docs-first questions.",
   "author": {
     "name": "Claudio Schirmer Guedes",
     "email": "csgcad@icloud.com"
   },
   "homepage": "https://github.com/ClaudioSchirmer/omnicore",
+  "repository": "https://github.com/ClaudioSchirmer/omnicore-plugin",
+  "license": "Apache-2.0",
   "keywords": ["omnicore", "ddd", "cqrs", "go", "scaffold", "microservice"]
 }
