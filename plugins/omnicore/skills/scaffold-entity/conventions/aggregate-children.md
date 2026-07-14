@@ -22,6 +22,12 @@ Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.htm
     children; found → apply via the framework's change primitive; absent → the canonical
     not-found notification, 404 — never the framework's does-not-exist one, which is 422).
   - **ARCHIVE** (`PATCH …/:id/<children>/:childId/archive`) — soft removal; same guard.
+  - **Wiring — all THREE ops are partial updates of the ROOT**: each rides the
+    partial-update auto handler + `ApplyPartiallyTo` (load root → your domain method
+    mutates the one child → the framework persists the diff). Child ops are NOT in
+    `auto-handlers.html`'s six-verb table — that table is root-only. In the docs this
+    is `aggregate-persistence.html`'s "Update(root) with items StatusRemoved →
+    Archive of those specific items".
 - **A — replace-all (only when the dev asks).** The root update replaces the whole
   collection — omitting a child DELETES it. Destructive; never default to it silently.
 - **C — promote to its OWN aggregate** when the child has an independent lifecycle, is
@@ -34,6 +40,13 @@ web.md.
 
 ## Traps
 
+- **⚠️ "Archive" the word ≠ the archive handler.** The child ARCHIVE op shares the
+  root's verb, route shape and id-only command — but NEVER its handler. The root's
+  archive auto handler takes an id and archives the WHOLE aggregate (cascading to
+  every child); wired to a child op it type-checks, boots and returns 200 while
+  silently archiving the entire root. Child archive = partial update of the root
+  with the item removed (see the wiring note above). If a routes file instantiates
+  the root-archive handler more than once per aggregate, one of them is this trap.
 - **⚠️ The root does NOT declare a `[]Child` struct field** — a dead footgun: the loader
   hydrates children into the framework's internal aggregate map, never into a slice (on
   read the field stays empty forever; on write it's never consumed). Children live ONLY in

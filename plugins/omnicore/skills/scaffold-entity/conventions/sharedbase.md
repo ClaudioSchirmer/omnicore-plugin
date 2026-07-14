@@ -97,3 +97,10 @@ per-role views, never replaces them.
 **Placement — person is its OWN bounded context** (`service-layout.html`): own
 `person_routes.go` (read-only, own `person:read` permission), own `persons_feature.go` —
 never inside a role's routes or feature. Roles write; the person view reads.
+
+**Read surface — the standard PAIR, never by-id alone.** The identity view mounts by-id
+AND by-params (a paged, filtered list; filterable paths cover base fields, base-children
+and role segments — the filter-path mechanics are in `auto-query-handlers.html`), exactly
+like any entity's read surface — an identity view without its list is half a feature.
+Elicit its filters in the same breath as the role's, and offer the view's exports only if
+the dev asks (same rule as any view).

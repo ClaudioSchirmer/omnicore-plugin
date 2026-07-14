@@ -220,7 +220,8 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      adding or extending it later is the SAME effort as now; it just triggers the standard
      automatic view rebuild (trivial on a fresh service; a one-time automatic rebuild over
      existing data later). Present it as a neutral "want the person view?" — no manufactured
-     debt. See `sharedbase.md` (Read).
+     debt. The offer INCLUDES its read surface: the standard by-id + by-params pair with
+     filters (`sharedbase.md`) — never a lone by-id. See `sharedbase.md` (Read).
 2. **Siblings (1:1).** Any optional/sparse/bulky field group better split into a 1:1
    satellite than left as nullable columns? Name it, recommend, ask. **A sibling attaches
    ONLY to a single-owner node — a flat root, a ROLE, or a role-child — NEVER to a SharedBase
@@ -431,6 +432,17 @@ Four DISTINCT levels — do not conflate them:
      paired list Response + its nested types and confirm EVERY field is `*T`/slice WITH
      `,omitempty` (a bare value type, or a tag missing `,omitempty`, IS the panic).
    - `Modes()` lists Archive ⟺ schema declares `SoftDelete` ⟺ migration has `deleted_at`.
+   - model has children (model B): in each `*_routes.go`, the ROOT-archive auto handler
+     (name per `auto-handlers.html`) is instantiated AT MOST once per aggregate — its own
+     archive route. A child-op route instantiating it is the whole-aggregate-archive trap
+     (`aggregate-children.md`): it compiles and answers 200 while archiving the entire
+     root. Child ops ride the partial-update handler, all three (add/update/archive).
+   - every SCALAR `query:`-tagged field in `internal/web/requests/` is a pointer/slice
+     UNLESS the spec explicitly declares that filter required (`grep -rn 'query:"'
+     internal/web/requests/` → each value-typed hit must trace to a spec'd required
+     filter; struct filter-groups are exempt): a value scalar renders REQUIRED in the
+     OpenAPI spec (`openapi.html`, required-field rule) — one accidental value type turns
+     an optional parameter mandatory and Swagger refuses the call without it.
    - any EXISTING view this run touched (e.g. a SharedBaseView gaining a role) had its
      `Version(N)` bumped.
    - every entity whose domain declares `RequiresService() … return true` must wire the
