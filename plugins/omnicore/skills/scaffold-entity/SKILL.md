@@ -57,9 +57,13 @@ drift.
   once — heavy context makes you shortcut (copy instead of read). PLAN first (Phase 1),
   then execute ONE layer at a time from a per-layer task file, each with focused context
   and its own required doc reads.
-- **FLAT is the default.** Load `conventions/sharedbase.md` / `aggregate-children.md` /
-  `siblings.md` **only** when the model has that variant. If you don't need SharedBase,
-  don't load it.
+- **FLAT is the default CONTEXT LOAD — not a modeling bias.** Load
+  `conventions/sharedbase.md` / `aggregate-children.md` / `siblings.md` **only** when the
+  model has that variant. If you don't need SharedBase, don't load it. This rule decides
+  which files you READ, and nothing else: it carries ZERO weight in the flat-vs-SharedBase
+  recommendation, which comes only from item 1's cost asymmetry. (You don't need the full
+  delta at question time either — item 1's role-cardinality digest is the authority for
+  the option text.)
 - **Balance judgement against RISK — this is why this is a skill, not a template.** Your
   intelligence is here to help the dev SHAPE the entity from what the framework can do — not
   to guess everything, and not to interrogate them about everything. Split every decision by
@@ -187,10 +191,12 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    `persons`-like identity that could gain OTHER roles later? **The signal is the entity's
    NATURE, never the request's wording — when the FIRST role is modeled, the second role
    does not exist yet, so "the request doesn't mention another role" detects nothing.**
-   Detect the **identity smell** instead: the field set carries person/party identity
-   (name + document/tax-id and/or email/birth date) PLUS role-specific fields (enrollment
-   number, salary, grades…) — that is a person PLAYING A ROLE (student, employee,
-   customer, patient…), the classic party-role shape. Then:
+   Detect the **identity smell** instead: the field set carries a real-world party/asset
+   identity — a person (name + document/tax-id and/or email/birth date) or any asset with
+   a natural registry key (a property by land-registry number, a vehicle by VIN, a company
+   by tax-id) — PLUS role-specific fields (enrollment number, salary, grades, rent
+   amount…) — that is an identity PLAYING A ROLE (student, employee, customer, patient,
+   listing, sale mandate…), the classic party-role shape. Then:
    - **Identity smell present → the Kind slot is ⚠️ OPEN, never self-answered.** Whether a
      future role will share this identity lives in the dev's head, not in the request —
      ask literally: *"could this also become a &lt;other-role&gt; for the same
@@ -198,6 +204,23 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      migrating to a base later is a REAL migration (new base table, PK re-derivation to
      UUIDv5, data move); a SharedBase that never gains a second role is only mild extra
      structure (base table + upsert semantics + an identity view).
+   - **If the request ALREADY names the other roles** (even as "out of scope for now"),
+     that question is answered — do NOT re-ask it, and do NOT self-answer the one that
+     replaces it. The OPEN question becomes role cardinality, asked literally: *"can the
+     same &lt;identity&gt; hold TWO ACTIVE &lt;this-role&gt; rows at the same time?"*
+     No → this entity IS a role: SharedBase fits natively, and its 409 enforces that
+     business rule for free. Yes → it is not a role (a plain 1:N off the identity):
+     propose flat, noting the shared identity can still be extracted later when the
+     other roles arrive.
+   - **Role-cardinality digest — the ONLY mechanism facts the option text may state.**
+     Never describe SharedBase mechanics from memory when formulating the question; use
+     these lines, or quote the shared-base section of `table-schema.html`: the framework
+     invariant is **at most ONE ACTIVE role row per identity per role table** (409 on
+     `POST` and on `/unarchive`); **separate-FK** permits 0..N archived remnants plus one
+     new active row — sequential re-role over time fits natively; **shared-PK** caps the
+     role at one row per identity forever. Writing "1:1 per role" without the word
+     ACTIVE is the canonical mis-summary — it conflates the two link models and wrongly
+     disqualifies sequential over-time cases.
    - **No identity smell** (Product, Invoice, Warehouse…) → propose **flat** and move on —
      no question, no friction.
    Yes → SharedBase (`sharedbase.md`); genuinely standalone → flat.
