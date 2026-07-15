@@ -1,0 +1,98 @@
+# conventions/domain-map-template.md — the Phase 1 domain map skeleton
+
+Copy VERBATIM to `scaffold-system/domain-map.md`, then fill. Rules: every section
+stays (inapplicable → `N/A — <why>`); a decision only the dev can make is
+`⚠️ OPEN: <question>`; high-risk picks carry `(proposed)` + the alternative(s) beside
+them; NO code and NO field-level detail beyond what's needed to place a field group on
+a table — those belong to the delegated per-entity specs. Approval flips `Status` to
+`APPROVED`; no delegation before that.
+
+---
+
+# Domain map — <system name>
+
+Status: DRAFT
+Framework pin: <from `go.mod` — informative only; docs of that pin are the authority>
+
+## §0 Source request (verbatim)
+
+> <the dev's prose, untranslated, unabridged — every delegated run receives its slice
+> of THIS text>
+
+## §1 The system, in one paragraph
+
+<what is being built, restated in the run's language>
+
+## §2 Aggregate inventory
+
+| # | Aggregate | Kind | Purpose (one line) | Depends on | Status |
+|---|---|---|---|---|---|
+| 1 | <name> | flat · role of `<base>` | … | — · #n | pending |
+
+Kind and dependencies come from §3/§4. `Status`: `pending` → `scaffolded` (Phase 2
+marks it) · `exists → evolve-entity` (Phase 0b collision) · `parked` (§8).
+
+## §3 Shared identities (SharedBase)
+
+Apply `scaffold-entity` Phase 1 item 1 — identity smell, the two-active question asked
+literally, the role-cardinality digest — across ALL §2 entities at once. One block per
+base; `N/A — no shared identity detected` if none.
+
+- **Base:** `<table>` — create NEW · REUSE existing (per Phase 0b)
+- **Natural key:** `<field>` (proposed — CONFIRM; the highest-risk slot of the map)
+- **Shared fields:** <the identity's field group>
+- **Roles now:** <which §2 entities>  ·  **Roles later:** <named-but-parked, from §8>
+- **Two ACTIVE rows of the same role per identity?** ⚠️ OPEN — asked literally, per
+  role; the answer decides role vs plain 1:N
+- **Identity view:** create · add-role · skip (decided ONCE here; the delegated run
+  executes, doesn't re-ask)
+
+## §4 Cross-aggregate references
+
+| From (#) | To (#) | Field | Nullable? | Why this direction |
+|---|---|---|---|---|
+
+The referenced side scaffolds first (§7). `N/A — single cluster, no cross links` if
+none.
+
+## §5 Read models beyond per-entity
+
+| View | Kind (composed · aggregated · upstream · embed) | Joins / covers | After rows |
+|---|---|---|---|
+
+Delegated to `scaffold-view` in Phase 3. Identity views do NOT list here — they ride
+with their base's first role (§3).
+
+## §6 Integration events / external systems
+
+<events consumed/produced across services, external sources to embed — or
+`N/A — self-contained`>
+
+## §7 Scaffolding order
+
+1. #<n> `<aggregate>` — <forcing reason: first role of base X · referenced by #m · …>
+2. …
+Then Phase 3: <§5 views, in order>.
+
+## §8 Out of scope — parked explicitly
+
+<what the request named but excluded, and the map consequence — e.g. "sale/management
+parked, BUT they are named roles of the same asset, so the identity is modeled NOW
+(§3) and they arrive later as add-role runs">
+
+## §9 Pre-answered slots, per entity (the delegation contract)
+
+One block per §2 row. These are handed to the delegated run AS ANSWERS — it must not
+re-derive them; everything absent stays the run's own to decide or ask.
+
+### #<n> <Aggregate>
+
+- **Kind:** flat · role of `<base>` (create/reuse per §3)
+- **Natural key (if role):** <from §3>
+- **Children (1:N):** <name → child of role/flat root vs child of base> — hint only;
+  edit strategy, DTOs, endpoints are the run's
+- **Sibling hint (1:1 optional group):** <name it if the prose shows one — the run
+  details it>
+- **Cross-references:** <fields from §4, with the referenced aggregate's status at
+  delegation time>
+- **Slice of §0:** <the sentences of the source request this entity owns>
