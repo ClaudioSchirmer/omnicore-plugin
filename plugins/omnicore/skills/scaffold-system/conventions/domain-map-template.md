@@ -65,8 +65,8 @@ with their base's first role (§3).
 
 ## §6 Integration events / external systems
 
-<events consumed/produced across services, external sources to embed — or
-`N/A — self-contained`>
+<events consumed/produced across services, external calls, extra surfaces — or
+`N/A — self-contained`. Executed in Phase 3, one `implement` delegation per item>
 
 ## §7 Scaffolding order
 

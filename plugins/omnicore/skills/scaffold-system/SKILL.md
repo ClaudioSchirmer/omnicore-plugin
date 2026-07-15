@@ -146,7 +146,10 @@ pre-answered slots. Rules of engagement:
 
 All §2 rows `scaffolded` → delegate each §5 read model to **`/omnicore:scaffold-view`**,
 in §7 order, same rules (one per invocation, mark the row, conflicts surface). Then the
-single wrap-up offer: boot the service and click through? Yes → delegate to
+§6 items: each integration event, external call or extra surface that maps to a
+framework capability is delegated to **`/omnicore:implement`** (it routes the item
+against the pin's docs and runs its own plan gate), same one-per-invocation rules.
+Then the single wrap-up offer: boot the service and click through? Yes → delegate to
 **`/omnicore:run`** (never boot inline). Leave `scaffold-system/domain-map.md` and every
 delegated run's spec folder in place — together they are the review trail of the whole
 system.

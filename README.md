@@ -18,6 +18,7 @@ Invoked as `/omnicore:<skill>` once installed:
 | `/omnicore:remove-entity` | Surgically remove an entity from every layer via an inventory-first removal plan you approve before anything is deleted; shared bases, composed views and integration-event consumers are detected and block until you decide. |
 | `/omnicore:scaffold-view` | Create a NEW read model beyond an entity's own view — ComposedView across entities, SharedBaseView identity, Upstream/Embed composition, or an aggregated view — projected to Mongo and exposed on REST/GraphQL, via an approved spec. |
 | `/omnicore:evolve-view` | Change an EXISTING view — projected fields, legs/roles, indexes, operators, surfaces — with the `Version` bump and rebuild discipline done right, write side untouched. |
+| `/omnicore:implement` | Wire a framework capability into an existing service — another surface (gRPC, GraphQL), an external API call from a handler (httpclient + middleware), cache, integration events, lifecycle hooks, authz, tracing — anything the pinned framework offers that no dedicated skill owns. Routes the request against the pin's docs (the capability catalog); if the framework doesn't offer it, it says so honestly. |
 | `/omnicore:run` | Boot the service locally (bench up, background boot, readiness) and hand you clickable links — OpenAPI UI, GraphQL, probes. The app stays running. |
 | `/omnicore:doctor` | Diagnose a misbehaving service or bench: walks the pipeline (build → boot → serve → write → relay → broker → projection), proves the cause with evidence, and prescribes the fix. Read-only — it never edits your files. |
 | `/omnicore:upgrade` | Upgrade a service's omnicore pin: check the current version, show the target release's changelog, and on your ok run `go get` + `go mod tidy` + build — with rollback to the previous version if the build breaks, or an approved migration plan to fix the breaking-change fallout. |
@@ -108,6 +109,7 @@ omnicore-plugin/                     # repo root = marketplace
             ├── remove-entity/
             ├── scaffold-view/
             ├── evolve-view/
+            ├── implement/
             ├── run/
             ├── doctor/
             ├── upgrade/

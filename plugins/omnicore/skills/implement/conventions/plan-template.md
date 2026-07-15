@@ -1,0 +1,71 @@
+# conventions/plan-template.md — the Phase 1 capability plan skeleton
+
+Copy VERBATIM to `implement/<slug>/plan.md`, then fill. Rules: every section stays
+(inapplicable → `N/A — <why>`); a decision only the dev can make is `⚠️ OPEN:
+<question>`; high-risk picks carry `(proposed)` + the alternative(s) beside them; NO
+code — code shapes live in the routed `/docs` sections cited in §2. Approval flips
+`Status` to `APPROVED`; no edit before that.
+
+---
+
+# Capability plan — <slug>
+
+Status: DRAFT
+Framework pin: <from `go.mod` — informative; that pin's docs are the authority>
+
+## §1 The request (restated)
+
+> <the dev's ask, verbatim>
+
+<one paragraph: what will exist when this is done, in the run's language>
+
+## §2 Routing evidence — the owning docs
+
+| Capability piece | Owning section(s) at this pin | Existence check |
+|---|---|---|
+| <piece> | `<name>.html` — <the contract it owns> | features/reference · changelog (newer pin) |
+
+Routing outcome: **offered at pin** · **offered at <newer version> only → upgrade
+offered (accepted/declined)** · **not offered → honest-no path: <what was recommended
+instead>**. A plan line with no §2 row behind it is a defect.
+
+## §3 Integration semantics [high-risk — propose + CONFIRM]
+
+- **Seam:** <in-TX lifecycle hook · after-commit integration event · middleware ·
+  surface registration · …> (proposed — why, and the alternative)
+- **Sync or async** relative to the command/query flow: <…>
+- **Failure policy:** ⚠️ OPEN unless the dev already said it — external dependency
+  down/slow ⇒ reject? degrade? queue? (timeouts/retries proposed from the docs'
+  defaults)
+- **Idempotency / replay:** <what happens on retry, redelivery, double-fire>
+- **Wire/API impact:** <new surface = new public contract; anything breaking for
+  existing consumers is listed here, flagged, dev decides>
+
+## §4 External contract (integrations only)
+
+Source of truth for the external API: <dev-provided spec / doc link — NEVER invented>.
+Auth model, environments (sandbox/prod), and who owns the credentials. `N/A — no
+external system` otherwise.
+
+## §5 Impact map — every artifact touched
+
+| Artifact | Change | Owning doc section |
+|---|---|---|
+| `microservice.*.yaml` (ALL boot profiles) | <keys added> | <section> |
+| bootstrap/wiring | <…> | <section> |
+| <handlers/middleware/proto/views/…> | <…> | <section> |
+| tests | <new branches covered> | — |
+
+Phase 2 edits ONLY these rows, in dependency order (config → wiring → artifacts →
+tests).
+
+## §6 Config & secrets
+
+Keys per profile, env placeholders per the configuration reference; secrets are env
+refs, never literals. Which profiles boot in dev/QA/prod and got the keys.
+
+## §7 Verify step — how this will be PROVEN
+
+<the concrete proof: the surface answers a real call · cache hit observed on repeat ·
+event lands on the broker · sandbox call succeeds — plus what CANNOT be proven locally
+and the exact step the dev must run to close it>
