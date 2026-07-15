@@ -2,7 +2,8 @@
 
 Debezium Server for EVERY combination — one container, static config, no REST
 registration step. Compose ONE file: the shared core + the chosen SOURCE block
-(mysql | postgres) + the chosen SINK block (nats | kafka), names from the spec.
+(mysql | postgres | sqlserver) + the chosen SINK block (nats | kafka), names from
+the spec.
 
 **Validate before writing** (against the pinned `transport.html`): the payload format
 (`simplestring` — pass the payload through as OPAQUE TEXT, never let the relay type
@@ -96,7 +97,36 @@ debezium.source.table.include.list=public.outbox
 ```
 
 Predicate pattern: `debezium.predicates.isOutbox.pattern=.*\\.public\\.outbox`
-(No schema-history block — that is a MySQL-only concern.)
+(No schema-history block — postgres does not need one.)
+
+## Source — sqlserver
+
+PREREQUISITE — CDC must be ENABLED before the connector can stream: the SQL Server
+Agent on the container (`MSSQL_AGENT_ENABLED=true` in the bench) plus
+`sp_cdc_enable_db` / `sp_cdc_enable_table` on the outbox — only possible AFTER the
+first app boot creates the table, so the start wrapper carries the idempotent
+enable arm (see `templates/docker-bench.md`). Until it lands the relay crash-loops;
+`restart: unless-stopped` absorbs that window.
+
+```properties
+debezium.source.connector.class=io.debezium.connector.sqlserver.SqlServerConnector
+debezium.source.database.hostname=sqlserver    # in-network compose name
+debezium.source.database.port=1433
+debezium.source.database.user=sa
+debezium.source.database.password=<strong-password>   # the bench's SA password
+debezium.source.database.names=<svc>_db        # PLURAL key on this connector
+debezium.source.database.encrypt=false         # dev bench runs without TLS
+debezium.source.topic.prefix=omnicore_<svc>
+debezium.source.table.include.list=dbo.outbox
+
+# schema history — required like MySQL (file-backed, survives restarts)
+debezium.source.schema.history.internal=io.debezium.storage.file.history.FileSchemaHistory
+debezium.source.schema.history.internal.file.filename=/debezium/data/schema-history.dat
+# schema-change events have no consumer; on a NATS sink the publish KILLS the relay
+debezium.source.include.schema.changes=false
+```
+
+Predicate pattern: `debezium.predicates.isOutbox.pattern=.*\\.dbo\\.outbox`
 
 ## Sink — nats
 
@@ -132,6 +162,7 @@ normalizes both quoted and bare — documented in `transport.html`.)
 
 - **Integration events**: when the service enables them, the relay gains a SECOND
   predicate-gated EventRouter tailing `integration_events` (see the reference
-  consumer's QA bench config for the proven shape). Do not add it to a fresh shell.
+  consumer's QA bench config for the proven shape) — and on sqlserver that table
+  needs its own `sp_cdc_enable_table`. Do not add it to a fresh shell.
 - **A second engine/transport**: a new combination means a new relay config (and on
   MySQL a new unique `server.id`) — a separate step, never part of this start.

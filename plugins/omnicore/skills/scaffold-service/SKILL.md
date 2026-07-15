@@ -31,9 +31,12 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
   naming, header contract, payload format) MUST be validated against the pinned
   `transport.html` before writing — **if the doc disagrees with a template, the doc
   wins** and you say so.
-- **ONE dialect + ONE transport per start.** The dev picks postgres OR mysql, kafka OR
-  nats; the relay config is derived for exactly that combination. Multi-engine /
-  multi-transport setups are out of scope — if asked, say it's a later, separate step.
+- **ONE dialect + ONE transport per start.** The dev picks ONE relational dialect and
+  ONE transport from the closed sets the pinned release supports — read them from the
+  pinned docs (`table-schema.html` / `transport.html`; today's latest: `postgres` |
+  `mysql` | `sqlserver` × `kafka` | `nats`); the relay config is derived for exactly
+  that combination. Multi-engine / multi-transport setups are out of scope — if asked,
+  say it's a later, separate step.
 - **Same risk split as `scaffold-entity`.** High-risk = the identity + infrastructure
   choices (service name, module path, dialect, transport, surfaces, bench) — ask,
   consolidated, with recommendations. Low-risk = ports, db names, timeouts, group
@@ -68,8 +71,8 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
   start wrapper (the baseline the final verify actually boots): darwin|linux → `start.sh`,
   windows → `start.cmd` + `start.ps1`. Feeds the Phase 1 cross-platform question.
 - **Port scan:** `docker ps` for containers already holding the standard host ports
-  (8080, 5432/3306, 27017, 4222/9092-range). Collisions don't block — they feed the
-  shifted-port proposal in Phase 1 (see `templates/docker-bench.md`).
+  (8080, 5432/3306/1433, 27017, 4222/9092-range). Collisions don't block — they feed
+  the shifted-port proposal in Phase 1 (see `templates/docker-bench.md`).
 
 ## Phase 1 — Q&A + spec gate
 
@@ -87,8 +90,10 @@ High-risk — always asked (mark recommendations `(proposed)`):
    `<svc>_views`), the sync group (`<svc>-sync`), the compose project (`<svc>-dev`)
    and container names. No default possible.
 2. **Go module path** (e.g. `github.com/org/<svc>`). No default possible.
-3. **Relational dialect: `postgres` | `mysql`.** The framework itself refuses a
-   default — so does this skill. Neutral advice: match what production will run.
+3. **Relational dialect** — the closed set the pinned release supports, read from the
+   pinned `table-schema.html` (today's latest: `postgres` | `mysql` | `sqlserver`).
+   The framework itself refuses a default — so does this skill. Neutral advice: match
+   what production will run.
 4. **Transport: `kafka` | `nats`.** Same advice: match production; NATS is the
    lighter local bench when there's no constraint yet.
 5. **Surfaces** — one question, three parts: OpenAPI UI `(proposed: yes, /docs +
@@ -257,8 +262,9 @@ skill), the fallback for concepts this table doesn't list.
 
 ## Traps (bench-proven; re-verify framework-facing ones against the pinned docs)
 
-- **Both build tags are mandatory** — an engine (`postgres`|`mysql`) AND a transport
-  (`kafka`|`nats`); no default on either axis, a tagless build aborts at boot.
+- **Both build tags are mandatory** — an engine AND a transport (the pinned release's
+  sets; today's latest: `postgres`|`mysql`|`sqlserver` and `kafka`|`nats`); no default
+  on either axis, a tagless build aborts at boot.
 - **`go mod tidy` prunes/misses tag-gated deps** → always follow with
   `GOFLAGS=-mod=mod go build` (step 10). Shipping `go.mod` without the matching
   `go.sum` is the classic silent break (a `go.work` overlay masks it locally).
@@ -277,10 +283,18 @@ skill), the fallback for concepts this table doesn't list.
   schema-change topic has no home — on a NATS sink it dies with "No Responders").
 - **Postgres relay:** the container must run `wal_level=logical` (+ wal senders/
   replication slots); source uses `pgoutput` + `publication.autocreate.mode=filtered`.
+- **SQL Server relay:** CDC depends on the SQL Server Agent being enabled on the
+  container AND on CDC being enabled per database and per tracked table — which is
+  only possible AFTER the first app boot creates the outbox, so the start wrapper
+  carries an idempotent enable arm. The concrete shape lives in
+  `templates/cdc-relay.md` / `templates/docker-bench.md`, validated against the
+  pinned `transport.html` — the doc wins on any drift.
 - **Mongo database is per-service** (`<svc>_views`); the `rebuild:` block is
   strict-decoded — unknown keys abort boot.
 - **DSN defaults must equal the bench, not placeholders** — the compose creds are
-  `omnicore:omnicore` on `<svc>_db` (docker-bench template). The dev YAML's
+  `omnicore:omnicore` on `<svc>_db` (docker-bench template; exception: the sqlserver
+  bench logs in as `sa` with a strong password — the image enforces password
+  complexity, so `omnicore:omnicore` cannot exist there). The dev YAML's
   `${VAR:default}` for the relational DSN (and mongo URI, broker endpoints) must embed
   exactly those as the default; `${VAR:...}` keeps it overridable but the fallback is
   the bench, never `user:password`. Mismatch = boot passes config but `readyz` fails
@@ -298,8 +312,8 @@ unprompted).
 
 | File | Covers |
 |---|---|
-| `templates/docker-bench.md` | compose skeleton per choice (postgres\|mysql × kafka\|nats + Mongo + relay), healthchecks, volumes, port table + shifted-port rule, `start.sh` + `start.cmd` + `start.ps1` |
-| `templates/cdc-relay.md` | Debezium Server `application.properties` — source blocks (mysql/postgres) × sink blocks (nats/kafka), the EventRouter contract, predicates, relay traps |
+| `templates/docker-bench.md` | compose skeleton per choice (postgres\|mysql\|sqlserver × kafka\|nats + Mongo + relay), healthchecks, volumes, port table + shifted-port rule, `start.sh` + `start.cmd` + `start.ps1` |
+| `templates/cdc-relay.md` | Debezium Server `application.properties` — source blocks (mysql/postgres/sqlserver) × sink blocks (nats/kafka), the EventRouter contract, predicates, relay traps |
 
 Both are DEVOPS GLUE templates (the sanctioned exception) — instantiate names/ports
 from the spec, validate framework-facing values against the pinned `transport.html`.

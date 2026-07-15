@@ -11,7 +11,8 @@ lanes) — keep the healthchecks and the relay restart policy; they are load-bea
 - Volumes named per component (`db_data`, `mongo_data`, `nats_data`/`kafka_data`,
   `debezium_data`).
 - **Standard host ports** (default when free): app `8080`, postgres `5432` / mysql
-  `3306`, mongo `27017`, nats `4222` (+ monitor `8222`), kafka external `9094`.
+  `3306` / sqlserver `1433`, mongo `27017`, nats `4222` (+ monitor `8222`), kafka
+  external `9094`.
 - **Shifted ports** when Phase 0 found collisions: pick free ports near the standard
   ones (the reference QA bench shifts to mysql `3317` / mongo `27028` / nats `4232` to
   coexist with its dev bench — same idea). The YAML's `${VAR:default}` defaults must
@@ -68,6 +69,32 @@ Unix/WSL; `start.cmd` or `pwsh -File .\start.ps1` on Windows).
       interval: 5s
       timeout: 5s
       retries: 10
+```
+
+### Relational — sqlserver variant
+
+The mssql image is amd64-only (Apple-Silicon hosts run it via Rosetta). It enforces
+SA-password complexity — pick a strong password for the spec and use it EVERYWHERE
+the bench references it (compose, healthcheck, relay source, the YAML's DSN default);
+there is no `omnicore:omnicore` on this dialect. `MSSQL_AGENT_ENABLED` is
+load-bearing: the CDC relay cannot stream without the Agent.
+
+```yaml
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: <svc>-dev-sqlserver
+    ports: ["<hostport>:1433"]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "<strong-password>"  # image-enforced complexity
+      MSSQL_AGENT_ENABLED: "true"             # LOAD-BEARING: CDC requires the Agent
+      MSSQL_PID: "Developer"
+    volumes: [db_data:/var/opt/mssql]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P '<strong-password>' -Q 'SELECT 1' -h -1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 ```
 
 ### Read side — always
@@ -151,7 +178,7 @@ the host. The YAML's `transport.endpoints` default must be `localhost:<hostport>
         condition: service_healthy
     volumes:
       - ./debezium:/debezium/config:ro
-      - debezium_data:/debezium/data    # offsets + (mysql) schema history survive restarts
+      - debezium_data:/debezium/data    # offsets + (mysql/sqlserver) schema history survive restarts
 ```
 
 ## `start.sh` / `start.cmd` / `start.ps1` — the one-command dev loop
@@ -203,6 +230,23 @@ Notes:
 - First run: migrations create the outbox, the app creates the NATS stream (when
   NATS), the relay settles into streaming on its next restart — tell the user the
   read side goes live moments after the first boot, not before.
+- **sqlserver only — the CDC-enable arm.** On SQL Server the relay cannot stream
+  until CDC is enabled on the database AND on the outbox table — and the table
+  enable is only possible after the first app boot creates it. All three wrappers
+  gain an idempotent arm, launched in the BACKGROUND before the foreground `go run`,
+  that polls `<svc>_db` via `sqlcmd` (in-container `/opt/mssql-tools18/bin/sqlcmd`
+  through `docker exec` works) until the outbox table exists, then runs (proven
+  shape: the reference consumer's `register-connector.sh`):
+
+  ```sql
+  IF (SELECT is_cdc_enabled FROM sys.databases WHERE name='<svc>_db') = 0
+    EXEC sys.sp_cdc_enable_db
+  IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name='outbox' AND is_tracked_by_cdc=1)
+    EXEC sys.sp_cdc_enable_table @source_schema=N'dbo', @source_name=N'outbox', @role_name=NULL
+  ```
+
+  Idempotent by the guards — safe on every start. The relay's `restart:
+  unless-stopped` absorbs the window until the enable lands.
 - `start.cmd` and `start.ps1` mirror `start.sh` step-for-step — keep all three in
   lockstep; any change to one applies to the others. On Windows the default execution
   policy may block a bare `.\start.ps1`, so document the PowerShell invocation as

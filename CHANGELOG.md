@@ -5,6 +5,38 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.4.0] — 2026-07-14
+
+SQL Server joins the dialect set (framework v0.31.0). The skills stay
+version-agnostic: every dialect list is phrased as "the closed set the pinned
+release supports — read it from the pinned docs", with today's latest named for
+visibility; a service pinned to a pre-SQL-Server release is unaffected.
+
+### Added
+- `scaffold-service`: sqlserver bench variant in `templates/docker-bench.md`
+  (mssql 2022 image, amd64-only note, image-enforced strong SA password,
+  `MSSQL_AGENT_ENABLED` as load-bearing for CDC) plus the idempotent CDC-enable
+  arm in the start wrappers (per-database and per-table enablement is only
+  possible after the first boot creates the outbox); sqlserver source block in
+  `templates/cdc-relay.md` (plural `database.names`, no-TLS dev bench, MySQL-like
+  file-backed schema history, `dbo.outbox` predicate) and the note that
+  `integration_events` needs its own table enablement later.
+- `scaffold-service` traps: SQL Server relay prerequisites (Agent + CDC enable
+  ordering) and the SA-credentials exception to the bench-DSN rule.
+
+### Changed
+- Dialect/engine enumerations in `scaffold-service`, `run` and `upgrade` are now
+  doc-routed instead of hardcoded (`postgres` | `mysql` | `sqlserver` named as
+  today's latest set; the pinned docs are the authority).
+- `scaffold-entity`: the id-typing trap and the migrations/infra/sharedbase
+  conventions carry the SQL Server facts per the pinned `table-schema.html` —
+  ids/FKs are `BINARY(16)` (never `UNIQUEIDENTIFIER`; GUID sort order would
+  destroy the UUIDv7 time locality), the PK is named `<table>_pkey` explicitly
+  (unlike MySQL's `PRIMARY`), and the mechanical `CHAR(36)`/`VARCHAR(36)` sweep
+  also covers `migrations/sqlserver/`. Where the pinned docs define no mechanism
+  for a dialect (self-documenting DDL comments, active-only uniqueness on SQL
+  Server today), the skill routes to the doc instead of inventing one.
+
 ## [0.3.3] — 2026-07-13
 
 ### Changed
