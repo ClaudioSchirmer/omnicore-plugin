@@ -422,8 +422,9 @@ You never hold all layers at once — each stage loads only its task + docs + co
 
 Four DISTINCT levels — do not conflate them:
 1. **Mechanical boot-trap checklist** — cheap checks; run ALL that apply, report each:
-   - `grep -rn "CHAR(36)\|VARCHAR(36)" migrations/mysql/` → must hit NOTHING for the
-     generated tables (every entity id/FK is `BINARY(16)`).
+   - `grep -rn "CHAR(36)\|VARCHAR(36)" migrations/mysql/ migrations/sqlserver/` → must
+     hit NOTHING for the generated tables (every entity id/FK is `BINARY(16)` on both
+     dialects; skip a directory the service doesn't have).
    - every generated `NNNN_*.up.sql` has its `NNNN_*.down.sql` twin.
    - `grep -rn 'path:"id"' internal/web/requests/` → nothing (boot panic).
    - if a read request declares `Fields *string`, every field of its Response AND of every
@@ -529,7 +530,8 @@ only a genuinely missing docs file does.
     type — "identity is a TYPE"): an id-holding field (child PK `ID`, every
     cross-aggregate reference like a `CourseID`/`BuyerID`) is declared **`domain.ID`**
     (nullable ⇒ `*domain.ID`), and the field's Go type alone drives the dialect's native
-    column (`UUID` on Postgres / `BINARY(16)` on MySQL) across write, criteria and scan —
+    column (`UUID` on Postgres / `BINARY(16)` on MySQL and SQL Server — never
+    `UNIQUEIDENTIFIER`, per the pinned `table-schema.html`) across write, criteria and scan —
     `nil` ⇄ SQL NULL included. A **`string` field is text, ALWAYS** (pairs with
     `CHAR(36)`/`VARCHAR(36)`; nothing is guessed from a value's shape) — both choices are
     first-class; pair field type and DDL or the FIRST INSERT fails (runtime 500 `go

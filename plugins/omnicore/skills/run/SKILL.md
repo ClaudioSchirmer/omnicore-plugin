@@ -33,9 +33,11 @@ finish their change, ask "want to run it?", and hand off here.
 
 - **omnicore service?** `go list -m github.com/ClaudioSchirmer/omnicore` resolves —
   else STOP (to create one, that's `scaffold-service`).
-- **Tags:** engine (`postgres`|`mysql`) + transport (`kafka`|`nats`) from
-  `relational.dialect` / `transport` in `microservice.*.yaml` (both mandatory — a
-  tagless build aborts at boot).
+- **Tags:** engine + transport from `relational.dialect` / `transport` in
+  `microservice.*.yaml` — the value IS the build tag (today's latest release:
+  `postgres`|`mysql`|`sqlserver` and `kafka`|`nats`; the pinned docs are the
+  authority on what the pin supports). Both mandatory — a tagless build aborts
+  at boot.
 - **Profile + ports:** `APP_PROFILE=dev` unless the dev says otherwise; resolve the
   EFFECTIVE host port from the yaml (`${VAR:default}` — apply the env override rule).
 - **Already up?** Probe `/livez` on the resolved port first — answering ⇒ skip boot,

@@ -45,8 +45,10 @@ Every generated table and column carries its description as a SQL COMMENT, sourc
 the spec (§2 `Description` per column; the §1 one-liner per table) — the schema documents
 itself. The mechanism is standard DDL, per dialect: **Postgres** = `COMMENT ON TABLE …` /
 `COMMENT ON COLUMN <table>.<col> IS '…'` statements after the `CREATE TABLE`; **MySQL** =
-inline `COMMENT '…'` on each column + a trailing `COMMENT='…'` table option. The `.down`
-needs nothing extra — dropping the table drops its comments. Applies to EVERY table the
+inline `COMMENT '…'` on each column + a trailing `COMMENT='…'` table option. For any other
+dialect the pinned docs define the mechanism — and when the pin documents NONE (today:
+SQL Server), emit no comment DDL rather than inventing one; the descriptions live in the
+spec regardless. The `.down` needs nothing extra — dropping the table drops its comments. Applies to EVERY table the
 entity emits (base, role, children, siblings). Column types still come only from
 `table-schema.html`; a description never changes a type.
 
@@ -55,7 +57,9 @@ entity emits (base, role, children, siblings). Column types still come only from
 - **⚠️ Id column types follow the pin's identity contract — pair DDL with the field's Go
   type per the PINNED `table-schema.html` ("Supported column shapes"; detection + full
   rule: SKILL.md boot-traps, "Id typing").** Managed slots (entity id, every FK) are
-  always native: Postgres `UUID`, MySQL `BINARY(16)`. On a TYPED-IDENTITY pin, a
+  always native: Postgres `UUID`, MySQL and SQL Server `BINARY(16)` (never
+  `UNIQUEIDENTIFIER` — its GUID sort order destroys the v7 time locality; per the
+  pinned `table-schema.html`). On a TYPED-IDENTITY pin, a
   reference column follows the field type — `domain.ID`/`*domain.ID` ⇒ `UUID`/`BINARY(16)`
   (NULL-able for the pointer), `string`/`*string` ⇒ `CHAR(36)`/`VARCHAR(36)`; a
   mismatched pair throws `Error 1366/1406` at the FIRST INSERT — a runtime 500 `go build`
@@ -63,7 +67,8 @@ entity emits (base, role, children, siblings). Column types still come only from
   (`*string`) ⇒ `VARCHAR(36)`; Postgres `UUID` for both. (The framework's own
   control-plane tables use `CHAR(36)` via a different write path — do NOT mirror them.)
 - **Unique constraints are named `<table>_<col>_key` in EVERY dialect** so the repo binds
-  one name — unlike the PK, whose name diverges (postgres `<table>_pkey` / mysql
+  one name — unlike the PK, whose name diverges (postgres `<table>_pkey` / sqlserver
+`<table>_pkey` named explicitly on the `CONSTRAINT` / mysql
   `PRIMARY`). Name them on the OWNING table (a base field's constraint lives on the base
   table — e.g. `persons_email_key`, not `students_email_key`).
 - Children get an FK + covering index; siblings share the owner's PK with
