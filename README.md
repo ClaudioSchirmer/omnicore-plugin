@@ -26,6 +26,9 @@ All skills are **version-agnostic**: they read the framework version from the pr
 `go.mod` and treat that version's bundled `/docs` as the sole authority, so they never
 drift as the framework evolves.
 
+Works with any published omnicore release (docs-pinned by design). Latest release
+exercised: framework v0.32.0 · plugin 0.4.1.
+
 ## Install
 
 ```

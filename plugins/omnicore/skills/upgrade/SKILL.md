@@ -126,10 +126,11 @@ owning section per item, at each pin — never sweep either manual.
 ## Phase 3 — Outcome
 - **Green →** report success: the new version, the headline changes, and — from the
   changelog — any BREAKING items the dev still must reconcile in their own code (a green
-  build doesn't prove those are handled). Point at `help` (understand a new API) or
+  build doesn't prove those are handled — several framework guards are BOOT panics that
+  no compile surfaces). Point at `help` (understand a new API) or
   `scaffold-entity` (regenerate a layer against the new docs) as next steps. Then offer
-  to run: boot the upgraded service for a click-through? Yes → delegate to
-  `/omnicore:run`.
+  to run: boot the upgraded service — with boot-panic guards this IS the verify, not
+  just a click-through. Yes → delegate to `/omnicore:run`.
 - **Broken (vet/build/test fails) → OFFER ROLLBACK, don't force it:**
   - Show the failure verbatim (the first compile errors are usually the breaking surface).
   - **Roll back?** yes → restore the snapshotted `go.mod` + `go.sum`, `go build` to confirm

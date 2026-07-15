@@ -21,7 +21,10 @@ regenerated.
 ## The aggregate struct — decisions
 
 - Nullable ⇒ pointer; money = `int64` minor units, never float; every persisted field
-  carries a `labelKey`; **no `db:` tags** (physical names live only in the infra schema).
+  carries a `labelKey` and NOTHING else — **no `db:` tags** (physical names live only in
+  the infra schema) and **no `json:` tags** (wire names belong to the web-layer DTOs;
+  worse, a `json:"-"` silently drops the field from the `Old()` snapshot the framework
+  builds via a json round-trip).
 - A **flat** entity does NOT implement `domain.AggregateRootProvider` — that is the
   children delta.
 
