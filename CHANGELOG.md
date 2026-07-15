@@ -5,6 +5,18 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.4.1] — 2026-07-14
+
+### Changed
+- `scaffold-entity` `conventions/domain.md`: persisted fields carry `labelKey`
+  and NOTHING else — the no-tags rule now names `json:` explicitly (a real
+  scaffold run added wire tags to the domain by Go reflex). Framework ≥ v0.32.0
+  turns the dangerous case (`json:"-"`, custom entity JSON codecs) into a boot
+  panic; the convention keeps generated code clean on every pin.
+- `upgrade` Phase 3 (green): the run offer is part of the VERIFY, not a
+  click-through — several framework guards are boot panics no compile surfaces
+  (e.g. the closed persistable type set, old-clone safety).
+
 ## [0.4.0] — 2026-07-14
 
 SQL Server joins the dialect set (framework v0.31.0). The skills stay
