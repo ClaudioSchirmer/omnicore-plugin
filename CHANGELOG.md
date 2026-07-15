@@ -5,6 +5,28 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.6.0] — 2026-07-15
+
+### Added
+- **New skill `implement`** (`/omnicore:implement`, 12th skill): wire a framework
+  capability into an existing service — another surface (gRPC/GraphQL), an external
+  API call from a handler, cache, integration events, lifecycle hooks, authz,
+  tracing, resilience — anything the PINNED framework offers that no dedicated skill
+  owns. The pin's docs are the capability catalog: requests route dynamically
+  against the Documentation Map (`features.html`/`reference.html` as existence
+  check); a capability claim with no doc section behind it never enters the plan.
+  Honest-no path: not at this pin but in a newer release → offer
+  `/omnicore:upgrade`; not offered at all → name the closest legitimate path, never
+  a workaround. Standard rituals: plan gate (`conventions/plan-template.md` —
+  routing evidence, integration semantics, impact map, config/secrets, verify
+  step), doc-read-before-artifact, capability PROOF in the final verify (unprovable
+  steps reported honestly), fallback-router handoffs to every dedicated skill.
+
+### Changed
+- `scaffold-system` Phase 3: the domain map's §6 items (integration events,
+  external calls, extra surfaces) now have an executor — each is delegated to
+  `/omnicore:implement`, one per invocation, after the §5 read models.
+
 ## [0.5.0] — 2026-07-15
 
 ### Added
