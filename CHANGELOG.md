@@ -5,6 +5,32 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.4.3] — 2026-07-15
+
+Fix from a real scaffold run: the flat-vs-SharedBase question described the
+SharedBase mechanism from memory ("1:1 per role"), conflating the ≤1-ACTIVE-row
+invariant with one-row-forever, and used that to disqualify a case (sequential
+listings over the same property) the separate-FK model handles natively.
+
+### Fixed
+- `scaffold-entity` `SKILL.md` item 1: new **role-cardinality digest** — the only
+  mechanism facts the question's option text may state (≤1 ACTIVE role row per
+  identity per role table, 409 on `POST`/`/unarchive`; separate-FK allows archived
+  remnants + a new active row; shared-PK caps at one row forever). Names "1:1 per
+  role" without ACTIVE as the canonical mis-summary.
+- `scaffold-entity` `SKILL.md` item 1: when the request ALREADY names the other
+  roles (even "out of scope for now"), the scripted question is answered — the
+  OPEN slot becomes role cardinality, asked literally ("can the same identity
+  hold TWO ACTIVE rows of this role at once?"), never self-answered.
+
+### Changed
+- `scaffold-entity` `SKILL.md`: "FLAT is the default" retitled "FLAT is the
+  default CONTEXT LOAD — not a modeling bias" — it decides which conventions to
+  read and carries zero weight in the recommendation.
+- `scaffold-entity` `SKILL.md` item 1: identity smell broadened beyond persons to
+  any party/asset with a natural registry key (property by land-registry number,
+  vehicle by VIN, company by tax-id).
+
 ## [0.4.2] — 2026-07-15
 
 Fixes from the first real sqlserver×nats scaffold runs: both templates carried
