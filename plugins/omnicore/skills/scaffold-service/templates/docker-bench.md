@@ -77,7 +77,10 @@ The mssql image is amd64-only (Apple-Silicon hosts run it via Rosetta). It enfor
 SA-password complexity — pick a strong password for the spec and use it EVERYWHERE
 the bench references it (compose, healthcheck, relay source, the YAML's DSN default);
 there is no `omnicore:omnicore` on this dialect. `MSSQL_AGENT_ENABLED` is
-load-bearing: the CDC relay cannot stream without the Agent.
+load-bearing: the CDC relay cannot stream without the Agent. And unlike
+`MYSQL_DATABASE` / `POSTGRES_DB`, the image has NO auto-create-database env —
+the start wrappers must create `<svc>_db` themselves (see the sqlserver-only
+notes below) or the first app boot dies with `Cannot open database "<svc>_db"`.
 
 ```yaml
   sqlserver:
@@ -230,6 +233,16 @@ Notes:
 - First run: migrations create the outbox, the app creates the NATS stream (when
   NATS), the relay settles into streaming on its next restart — tell the user the
   read side goes live moments after the first boot, not before.
+- **sqlserver only — create the database.** After `up -d --wait` and BEFORE the
+  foreground `go run`, all wrappers run synchronously (idempotent):
+
+  ```
+  docker exec <svc>-dev-sqlserver /opt/mssql-tools18/bin/sqlcmd -C -S localhost \
+    -U sa -P '<strong-password>' -Q "IF DB_ID('<svc>_db') IS NULL CREATE DATABASE <svc>_db"
+  ```
+
+  The image creates no databases on its own; without this step the app cannot
+  connect on first boot.
 - **sqlserver only — the CDC-enable arm.** On SQL Server the relay cannot stream
   until CDC is enabled on the database AND on the outbox table — and the table
   enable is only possible after the first app boot creates it. All three wrappers
