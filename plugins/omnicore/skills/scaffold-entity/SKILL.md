@@ -153,6 +153,19 @@ Self-configure by reading the project:
   the SAME `NewSharedBase("…")` — the registry keys by table) and ADD to the existing
   identity view (don't recreate either). This is the "add a role to an existing base" path
   (drives item 1's create-vs-add-role question).
+- **A domain map from `scaffold-system`?** Look for `scaffold-system/domain-map.md` —
+  whether this run was delegated by that skill or invoked directly in a project that has
+  one; if it exists, reading it is MANDATORY, not optional. `Status: APPROVED` and it
+  lists THIS entity → its §9 block is the dev's already-approved answers: Kind, base
+  create-vs-reuse, natural key, child-of-whom enter the spec as DECIDED (marked `per
+  domain-map §9`, not `(proposed)`, never re-asked); everything §9 doesn't answer stays
+  this run's own, per the normal risk split. Your 0b discovery contradicts the map →
+  STOP and surface; the dev amends the map first (never silently obey either side).
+  `Status: DRAFT` → the system gate isn't done: surface it and ask — finish the map in
+  `scaffold-system` (recommended) or proceed explicitly independent of it. Entity absent
+  from an APPROVED map → flag advisorily (the system plan may be stale) and proceed
+  normally. When the run was delegated, also skip Phase 0v — the orchestrator resolved
+  it once for the whole system.
 - **`/docs` + `conventions/` are the ALWAYS-ON basis — read them every run, whether the
   project is empty OR already full of entities.** Existing code is never a substitute for
   the mandatory per-layer doc read (Core principles); "the project already has entities"
@@ -182,7 +195,10 @@ marked `(proposed)` with the alternative(s) named beside it; a slot you cannot r
 recommend becomes `⚠️ OPEN: <question>`. No section may be deleted — an inapplicable
 section stays, marked `N/A — <why>`. **Completeness is STRUCTURAL:** a blank or missing
 slot is a visible defect at the gate, not a forgotten question, and generation cannot start
-while one exists.
+while one exists. Slots pre-answered by an APPROVED domain map (Phase 0b) enter as
+DECIDED, marked `per domain-map §9` — the `(proposed)`/`⚠️ OPEN` discipline applies to
+what the map left open, and items 1–11 below are read through that filter (an answered
+fork is not re-asked).
 
 The guidance for filling each section — the reasoning, trade-offs, and what to confirm
 (items → spec sections: 1→§1 · 2→§4 · 3,4→§3 · 5→§5 · 6→§7 · 7→§6 · 8→§2 · 9→§8 ·

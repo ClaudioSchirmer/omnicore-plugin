@@ -12,6 +12,7 @@ Invoked as `/omnicore:<skill>` once installed:
 | Skill | What it does |
 |---|---|
 | `/omnicore:scaffold-service` | Create a brand-new omnicore service from an empty directory — `go.mod` pinned to a published release, the bootable bootstrap shell, the `microservice.*.yaml` profiles, migrations skeleton, and the local docker bench (DB + Mongo + broker + Debezium CDC relay) — then prove the shell boots. |
+| `/omnicore:scaffold-system` | Turn a whole-system/MVP description — several entities, shared identities and read models in one prose drop — into an approved domain map, then scaffold it entity by entity by delegating to `scaffold-entity` (and cross-entity read models to `scaffold-view`). Decomposition only: it never generates code itself. |
 | `/omnicore:scaffold-entity` | Scaffold a complete CRUD entity across every layer (domain → application → web → infra → migrations → bootstrap) of an existing omnicore service. |
 | `/omnicore:evolve-entity` | Change an EXISTING entity — add/remove/rename fields, uniqueness, children, modes — with schema evolution done right: migration, TableSchema, DTOs, translations, view `Version` bump and OpenAPI move together, via an approved impact-map spec. |
 | `/omnicore:remove-entity` | Surgically remove an entity from every layer via an inventory-first removal plan you approve before anything is deleted; shared bases, composed views and integration-event consumers are detected and block until you decide. |
@@ -101,6 +102,7 @@ omnicore-plugin/                     # repo root = marketplace
         │   └── plugin.json          # plugin manifest (name: omnicore)
         └── skills/
             ├── scaffold-service/
+            ├── scaffold-system/
             ├── scaffold-entity/
             ├── evolve-entity/
             ├── remove-entity/

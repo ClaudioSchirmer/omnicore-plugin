@@ -5,6 +5,29 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.5.0] — 2026-07-15
+
+### Added
+- **New skill `scaffold-system`** (`/omnicore:scaffold-system`, 11th skill): turn a
+  whole-system/MVP description — several entities, shared identities and read models
+  handed in one prose drop — into an approved **domain map**
+  (`conventions/domain-map-template.md`), then scaffold it entity by entity by
+  delegating each one to `scaffold-entity` (and each cross-entity read model to
+  `scaffold-view`). Decomposition at SYSTEM altitude only (boundaries, shared
+  identities + natural keys, role cardinalities, references, order); generation stays
+  per-entity with fresh context — the map pre-answers the structural spec slots
+  (§9 delegation contract) but never waives the per-entity gates. The map is the
+  durable checklist: re-entry resumes at the first `pending` row; conflicts between
+  the map and a delegated run's discovery stop and surface, never silently resolve.
+
+### Changed
+- `scaffold-entity` — receiving hook for the domain map: Phase 0b now looks for
+  `scaffold-system/domain-map.md` (delegated run or direct invocation alike — if it
+  exists, reading it is mandatory). APPROVED + entity listed → §9 slots enter the
+  spec as DECIDED (`per domain-map §9`), never re-asked; discovery-vs-map conflicts
+  stop and surface; DRAFT map → surface and ask; entity absent → advisory flag;
+  delegated runs skip their own Phase 0v (the orchestrator resolved it once).
+
 ## [0.4.3] — 2026-07-15
 
 Fix from a real scaffold run: the flat-vs-SharedBase question described the
