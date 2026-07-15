@@ -5,6 +5,32 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.4.2] — 2026-07-15
+
+Fixes from the first real sqlserver×nats scaffold runs: both templates carried
+traps that made the fresh bench fail its first boot.
+
+### Fixed
+- `scaffold-service` `templates/cdc-relay.md`: the properties blocks carried
+  inline `# …` comments — Java `.properties` files have no end-of-line
+  comments, so a faithful copy shipped `snapshot.mode=no_data   # …` as a
+  literal (invalid) value and killed the relay at boot. Every comment now sits
+  on its own line, plus an explicit no-inline-comments warning.
+- `scaffold-service` `templates/docker-bench.md`: the mssql image has no
+  auto-create-database env (no `MYSQL_DATABASE`/`POSTGRES_DB` equivalent), so
+  the first app boot died with `Cannot open database "<svc>_db"`. The sqlserver
+  variant now says so, and the start wrappers gain a synchronous idempotent
+  `CREATE DATABASE` step before the app boot (the reference consumer's
+  `qa/_backend.sh` shape).
+
+### Changed
+- `scaffold-service` build steps (Phase 2 step 10 and the final verify) use
+  `go build -o /dev/null … ./bootstrap` — the default output name `bootstrap`
+  collides with the directory of the same name (hit in every real run).
+- `scaffold-service` Phase 2 step 1: after `go get @latest`, cross-check
+  `go list -m -versions` — the proxy's `@latest` endpoint can lag a
+  just-published tag (a run pinned v0.31.0 minutes after v0.32.0 shipped).
+
 ## [0.4.1] — 2026-07-14
 
 ### Changed

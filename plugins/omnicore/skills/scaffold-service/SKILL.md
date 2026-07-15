@@ -139,8 +139,11 @@ applies only when any high-risk slot would otherwise be filled by you.
    require. Then `GOFLAGS=-mod=mod go get github.com/ClaudioSchirmer/omnicore@latest`
    — ALWAYS the most current published release (an explicit dev-demanded pin is the
    only exception) — so the pinned module — **and its `/docs`** — lands in the module
-   cache. Until this step the docs don't exist locally; nothing else may be generated
-   before them. Record the resolved version in the spec.
+   cache. The proxy's `@latest` endpoint can lag a just-published tag: cross-check
+   with `go list -m -versions github.com/ClaudioSchirmer/omnicore` and, if a newer
+   release is listed, `go get` that one instead. Until this step the docs don't exist
+   locally; nothing else may be generated before them. Record the resolved version in
+   the spec.
 2. **READ the pinned docs** (resolution — same rule as `scaffold-entity`: the section
    file is `<omnicore-dir>/docs/content/sections/<name>.html` where `<omnicore-dir>` =
    `go list -m -f '{{.Dir}}' github.com/ClaudioSchirmer/omnicore`):
@@ -198,7 +201,9 @@ applies only when any high-risk slot would otherwise be filled by you.
    other platform's when #7 was accepted (`start.cmd` = zero-friction batch, `start.ps1`
    = robust PowerShell, `start.sh` = bash/WSL). Whatever ships stays in lockstep — same
    steps in every wrapper. Skipped (compose half) when the dev chose existing infra.
-10. **Resolve deps:** `go mod tidy` **then** `GOFLAGS=-mod=mod go build` — tidy alone
+10. **Resolve deps:** `go mod tidy` **then** `GOFLAGS=-mod=mod go build -o /dev/null
+    -tags '<engine> <transport>' ./bootstrap` (`-o` is required: the default output
+    name `bootstrap` collides with the directory) — tidy alone
     CANNOT see the tag-gated transport dependency behind `//go:build kafka|nats`, so
     the build must be allowed to add its go.sum entries. Both `go.mod` AND `go.sum`
     ship — never one without the other.
@@ -206,7 +211,7 @@ applies only when any high-risk slot would otherwise be filled by you.
 ## Final verify (the gate — non-negotiable)
 
 1. **Bench healthy** — every compose healthcheck green (when the bench was generated).
-2. **`gofmt -l`, `go vet`, `go build -tags '<engine> <transport>' ./bootstrap`** — format
+2. **`gofmt -l`, `go vet`, `go build -o /dev/null -tags '<engine> <transport>' ./bootstrap`** — format
    (gofmt clean) + vet + compile. Both linters are first-party Go tools (no install).
 3. **Boot** with `APP_PROFILE=dev`: `/livez` 200 AND `/readyz` 200 (readyz proves the
    relational + Mongo request paths answer). **Every approved surface knob must be IN the

@@ -12,6 +12,11 @@ wins over this template on any drift.
 
 Properties-file escaping: `$${routedByValue}` (the `$$` is the literal-`$` escape).
 
+Java `.properties` files have NO end-of-line comments — a trailing `# …` on a value
+line becomes PART OF THE VALUE (`snapshot.mode=no_data   # comment` is an invalid
+mode that kills the relay at boot). Every comment in the blocks below sits on its
+own line; keep it that way in the generated file.
+
 ## Shared core — formats + the outbox EventRouter
 
 ```properties
@@ -27,7 +32,8 @@ debezium.source.offset.storage.file.filename=/debezium/data/offsets.dat
 debezium.source.offset.flush.interval.ms=1000
 
 debezium.source.tombstones.on.delete=false
-debezium.source.snapshot.mode=no_data          # fresh service — stream only
+# fresh service — stream only, no initial snapshot
+debezium.source.snapshot.mode=no_data
 debezium.source.poll.interval.ms=100
 
 # --- one EventRouter: outbox -> the per-aggregate topic/subject ---
@@ -57,14 +63,15 @@ gets its key from `table.field.event.key`) — keep it in both.
 
 ```properties
 debezium.source.connector.class=io.debezium.connector.mysql.MySqlConnector
-debezium.source.database.hostname=mysql        # in-network compose name
+# hostname is the in-network compose name; the binlog client needs root
+debezium.source.database.hostname=mysql
 debezium.source.database.port=3306
-debezium.source.database.user=root             # binlog client needs root
+debezium.source.database.user=root
 debezium.source.database.password=root
 debezium.source.database.include.list=<svc>_db
-debezium.source.database.server.id=<unique>    # UNIQUE per binlog client on this
-                                               # server — pick e.g. 1840NN, never
-                                               # reuse across services/relays
+# server.id must be UNIQUE per binlog client on this server — pick e.g. 1840NN,
+# never reuse across services/relays
+debezium.source.database.server.id=<unique>
 debezium.source.topic.prefix=omnicore_<svc>
 debezium.source.table.include.list=<svc>_db.outbox
 
@@ -85,13 +92,15 @@ Predicate pattern: `debezium.predicates.isOutbox.pattern=.*\\.<svc>_db\\.outbox`
 
 ```properties
 debezium.source.connector.class=io.debezium.connector.postgresql.PostgresConnector
-debezium.source.database.hostname=postgres     # in-network compose name
+# hostname is the in-network compose name
+debezium.source.database.hostname=postgres
 debezium.source.database.port=5432
 debezium.source.database.user=omnicore
 debezium.source.database.password=omnicore
 debezium.source.database.dbname=<svc>_db
 debezium.source.topic.prefix=omnicore_<svc>
-debezium.source.plugin.name=pgoutput           # container must run wal_level=logical
+# pgoutput requires the container to run wal_level=logical
+debezium.source.plugin.name=pgoutput
 debezium.source.publication.autocreate.mode=filtered
 debezium.source.table.include.list=public.outbox
 ```
@@ -110,12 +119,15 @@ enable arm (see `templates/docker-bench.md`). Until it lands the relay crash-loo
 
 ```properties
 debezium.source.connector.class=io.debezium.connector.sqlserver.SqlServerConnector
-debezium.source.database.hostname=sqlserver    # in-network compose name
+# hostname is the in-network compose name; password is the bench's SA password
+debezium.source.database.hostname=sqlserver
 debezium.source.database.port=1433
 debezium.source.database.user=sa
-debezium.source.database.password=<strong-password>   # the bench's SA password
-debezium.source.database.names=<svc>_db        # PLURAL key on this connector
-debezium.source.database.encrypt=false         # dev bench runs without TLS
+debezium.source.database.password=<strong-password>
+# database.names is the PLURAL key on this connector; encrypt=false because the
+# dev bench runs without TLS
+debezium.source.database.names=<svc>_db
+debezium.source.database.encrypt=false
 debezium.source.topic.prefix=omnicore_<svc>
 debezium.source.table.include.list=dbo.outbox
 
@@ -133,9 +145,9 @@ Predicate pattern: `debezium.predicates.isOutbox.pattern=.*\\.dbo\\.outbox`
 ```properties
 debezium.sink.type=nats-jetstream
 debezium.sink.nats-jetstream.url=nats://nats:4222
-debezium.sink.nats-jetstream.create-stream=false   # the FRAMEWORK owns the stream
-                                                   # (created at app boot) — the relay
-                                                   # only publishes into it
+# the FRAMEWORK owns the stream (created at app boot) — the relay only
+# publishes into it
+debezium.sink.nats-jetstream.create-stream=false
 ```
 
 Route (in the shared EventRouter block):
@@ -146,7 +158,8 @@ Route (in the shared EventRouter block):
 
 ```properties
 debezium.sink.type=kafka
-debezium.sink.kafka.producer.bootstrap.servers=kafka:9092   # in-network listener
+# bootstrap.servers is the in-network listener
+debezium.sink.kafka.producer.bootstrap.servers=kafka:9092
 debezium.sink.kafka.producer.key.serializer=org.apache.kafka.common.serialization.StringSerializer
 debezium.sink.kafka.producer.value.serializer=org.apache.kafka.common.serialization.StringSerializer
 ```
