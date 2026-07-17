@@ -5,6 +5,36 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.8.2] — 2026-07-17
+
+### Changed
+- `help`: doc-URL resolution on the published site hardened. Section file names
+  come from the Documentation Map ONLY — never derived from the concept's
+  wording (the names are asymmetric and unguessable: read side is
+  `query-side.html` not `query-handler`, write side is `command-handler.html`
+  not `command-side`). The index is a single-page app, so its nav can't be
+  scraped from a plain fetch of `/`; a `sections/<name>.html` that 404s means
+  the name was a guess — STOP and get the real one from the Map, never
+  improvise another URL. Inline concept list corrected accordingly
+  (`command/query-handler` → `command-handler · query-side`). (Observed: a
+  session guessed `query-handler.html`, hit a 404, then escalated to a raw
+  GitHub URL of the framework repo.)
+- `help`: added a hard guardrail against fetching
+  `raw.githubusercontent.com/ClaudioSchirmer/omnicore/…` — the framework repo
+  is PRIVATE, so every raw URL 404s regardless of path or branch (that failure
+  reads as "missing docs" but isn't). The only sanctioned remote for framework
+  docs is the published Pages site; the only legitimate raw-GitHub fetch stays
+  the PUBLIC `omnicore-plugin` repo in the plugin self-check.
+- `help`: "Never guess — verify" now covers claims of ABSENCE. A confident "no"
+  is a claim like any other — before telling the dev their premise is mistaken
+  or that a capability doesn't exist, read the section that would OWN it; never
+  let a strong prior stand in for a read. Concretely: "reads come from Mongo" is
+  true of the query path but not the whole story — the write path has its own
+  read/aggregate primitives (count, sum, group-by, uniqueness probes) whose
+  purpose is enforcing business rules, in the write-side handler section, not
+  the query side. (Observed: a session denied write-side aggregation exists and
+  called a correct premise a misunderstanding.)
+
 ## [0.8.1] — 2026-07-17
 
 ### Changed
