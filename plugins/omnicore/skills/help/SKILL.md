@@ -31,6 +31,14 @@ commands beyond reading docs and code.
 - **Never guess — verify.** Every claim about a signature, default, or behavior
   is backed by a doc section or a code read you actually did this turn. If you
   are unsure, say so and go read, rather than presenting inference as fact.
+  A confident "no" is a claim like any other — before you tell the dev their
+  premise is mistaken, or that a capability is ABSENT, READ the section that
+  would OWN it; never let a strong prior stand in for a read. Concretely:
+  "reads come from Mongo" is true of the query path but NOT the whole story —
+  the write path has its own read/aggregate primitives (count, sum, group-by,
+  uniqueness probes) whose purpose is enforcing business rules, and they live in
+  the write-side handler section, not the query side. Route there before denying
+  write-side reads exist.
   Counting/enumeration questions ("how many X", "list all X"): reproduce the
   doc's OWN taxonomy — its tables, headings and terms decide what counts as an
   X and what is merely a wrapper/variant of one; never re-classify, merge or
@@ -77,14 +85,29 @@ dev ONCE, then remember the choice for the session:
 
 - **Read the published site (no download):** the full manual is live at
   `https://claudioschirmer.github.io/omnicore/` — every section at
-  `https://claudioschirmer.github.io/omnicore/content/sections/<name>.html`,
-  same names the Documentation Map uses (the site's index nav is the router
-  when the module's `CLAUDE.md` isn't on disk). The site tracks the LATEST
-  release (its index badge shows the version — cite it).
+  `https://claudioschirmer.github.io/omnicore/content/sections/<name>.html`.
+  `<name>` is the EXACT file the Documentation Map lists — NEVER a slug you
+  derive from the concept's English words. The names are deliberately
+  asymmetric and unguessable: the read side is `query-side.html` (NOT
+  `query-handler`), the write side is `command-handler.html` (NOT
+  `command-side`). The index is a single-page app, so fetching `/` returns
+  only the shell — its nav is NOT visible to a plain fetch and can't be scraped
+  for the list. So without the Map on disk you do NOT know the filenames:
+  prefer the local fetch below (it brings the Map + the whole tree), and open a
+  `sections/<name>.html` URL only once the Map has handed you its exact name. A
+  section fetch that 404s means the name was a guess — STOP, get the real name
+  from the Map, never improvise another URL. The site tracks the LATEST release
+  (its index badge shows the version — cite it).
 - **Fetch the latest release locally:** `go mod download
   github.com/ClaudioSchirmer/omnicore@latest`, then read the tree at
   `go list -m -f '{{.Dir}}' github.com/ClaudioSchirmer/omnicore@latest` —
   the complete docs on disk, faster for a long session.
+
+**Never reach for `raw.githubusercontent.com/ClaudioSchirmer/omnicore/…`** — the
+framework repo is PRIVATE, so every raw URL 404s regardless of path or branch
+(that failure looks like "missing docs" but isn't). The only sanctioned remote
+for framework docs is the Pages site above; the only legitimate raw-GitHub fetch
+in this skill is the PUBLIC `omnicore-plugin` repo in the plugin self-check below.
 
 Either way, OPEN the first answer saying which ground you're on: "no project
 here — answering from the latest release, vX.Y.Z (published docs)." Both are
@@ -96,10 +119,11 @@ serves only the changelog/newer-release peeks of the version check below.
 ## How to answer
 
 1. **Route** the question to a section via the Documentation Map (concepts:
-   architecture · rules-dsl · aggregate-persistence · command/query-handler ·
+   architecture · rules-dsl · aggregate-persistence · command-handler · query-side ·
    table-schema · bootstrap · yaml-reference · migrations · authz-seams ·
-   graphql · grpc · transport · httpclient · tracing · … — the map is the
-   authority, not this list).
+   graphql · grpc · transport · httpclient · tracing · … — these are the Map's
+   OWN file names, and the Map is the authority; the exact `<name>.html` always
+   comes from the Map, never derived from the concept's wording).
 2. **Read** that section — and every other section the QUESTION genuinely needs:
    a narrow "what is X" stays in one section; a cross-cutting "how does the whole
    write path work" legitimately spans several. Unlike the generator skills, this
