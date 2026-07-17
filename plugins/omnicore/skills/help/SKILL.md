@@ -139,8 +139,12 @@ serves only the changelog/newer-release peeks of the version check below.
 
 ## Version check (stays read-only)
 
-Run the same cheap check the other skills do BEFORE the first answer of the
-session:
+Run the same cheap check the other skills do on your VERY FIRST turn of the
+session — including a bare `/omnicore:help` that only greets, before any
+question has been asked. Do NOT defer these checks to the first substantive
+answer: a no-question invocation is still a session start, and the greeting
+turn must carry them. (The plugin self-check below does NOT depend on a project,
+so it runs even from an unrelated directory where the pin check below skips.)
 
 - **Current pin:** `go list -m -f '{{.Version}}' github.com/ClaudioSchirmer/omnicore`.
   A LOCAL checkout (`replace`/`go.work` → `(devel)` or a path) → **skip silently**, you
@@ -172,10 +176,12 @@ and a gated migration plan) — never at a raw `go get`.
 
 ## Plugin self-check (once, non-blocking)
 
-Once per session, alongside the version check above: compare THIS plugin's
-installed version — the `version` field of
-`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` — with the published one —
-the same field at
+On your FIRST turn of the session — including the orientation greeting of a
+bare `/omnicore:help`, never deferred to the first substantive answer —
+actually PERFORM this check (read the file AND fetch the URL this turn; don't
+assume a prior turn already did it): compare THIS plugin's installed version —
+the `version` field of `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` —
+with the published one — the same field at
 `https://raw.githubusercontent.com/ClaudioSchirmer/omnicore-plugin/main/plugins/omnicore/.claude-plugin/plugin.json`.
 Offline, or either side unreadable → skip silently. Newer published → ONE
 non-blocking line riding along with the next reply — "omnicore plugin vX → vY

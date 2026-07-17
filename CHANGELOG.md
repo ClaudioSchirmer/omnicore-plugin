@@ -5,6 +5,21 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.8.3] — 2026-07-17
+
+### Changed
+- `help`: version check + plugin self-check now fire on the session's FIRST turn
+  — explicitly including a bare `/omnicore:help` that only prints the
+  orientation greeting, no longer deferred to the first substantive answer. The
+  plugin self-check must actually read the local `plugin.json` AND fetch the
+  published one that turn (not assume a prior turn did it). (Observed: repeated
+  no-question `/omnicore:help` invocations never surfaced an available plugin
+  update because the checks were gated behind answering a question; the running
+  install was genuinely behind — 0.8.1 vs 0.8.2 published.) Note: the check is
+  prompt-driven, so a stale fetch cache (WebFetch's ~15-min per-URL cache /
+  raw.githubusercontent's CDN) can still delay detection until it expires — this
+  narrows the miss, it does not eliminate it.
+
 ## [0.8.2] — 2026-07-17
 
 ### Changed
