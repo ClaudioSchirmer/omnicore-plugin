@@ -142,6 +142,19 @@ contract. The bump has an owner: point the dev at `/omnicore:upgrade` (current
 pin → target changelog → `go get` + build verify, with exact-snapshot rollback
 and a gated migration plan) — never at a raw `go get`.
 
+## Plugin self-check (once, non-blocking)
+
+Once per session, alongside the version check above: compare THIS plugin's
+installed version — the `version` field of
+`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` — with the published one —
+the same field at
+`https://raw.githubusercontent.com/ClaudioSchirmer/omnicore-plugin/main/plugins/omnicore/.claude-plugin/plugin.json`.
+Offline, or either side unreadable → skip silently. Newer published → ONE
+non-blocking line riding along with the next reply — "omnicore plugin vX → vY
+available — update with `claude plugin update omnicore@omnicore` (marketplace
+stale? `/plugin marketplace update omnicore` first); it takes effect next
+session." Never a gate: this session continues on the installed skills.
+
 ## What this skill never does
 
 No file writes, no edits, no scaffolding, no migrations, no git, no config

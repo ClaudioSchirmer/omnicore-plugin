@@ -5,6 +5,19 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.8.0] — 2026-07-17
+
+### Added
+- **All 12 skills: plugin self-check.** Once per run, during preflight, each
+  skill compares its own installed plugin version
+  (`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`) with the published one
+  (the same file on the marketplace repo's `main`, read over raw.githubusercontent)
+  and, when behind, rides ONE non-blocking line along with the next reply
+  handing the dev the update command (`claude plugin update omnicore@omnicore`;
+  `/plugin marketplace update omnicore` first if the marketplace is stale).
+  Offline → silent skip; never a gate — the run continues on the installed
+  skills and the update takes effect next session.
+
 ## [0.7.0] — 2026-07-17
 
 ### Changed

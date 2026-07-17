@@ -57,6 +57,18 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
   Identifiers and config keys follow the framework contract and the dev's naming
   choices — never an imposed language.
 
+## Plugin self-check (once, non-blocking)
+
+Once per run, during preflight: compare THIS plugin's installed version — the
+`version` field of `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` — with the
+published one — the same field at
+`https://raw.githubusercontent.com/ClaudioSchirmer/omnicore-plugin/main/plugins/omnicore/.claude-plugin/plugin.json`.
+Offline, or either side unreadable → skip silently. Newer published → ONE
+non-blocking line riding along with the next reply — "omnicore plugin vX → vY
+available — update with `claude plugin update omnicore@omnicore` (marketplace
+stale? `/plugin marketplace update omnicore` first); it takes effect next
+session." Never a gate: this run continues on the installed skills.
+
 ## Phase 0 — Preflight
 
 - **Already an omnicore service?** If `go.mod` exists AND requires
