@@ -31,6 +31,10 @@ commands beyond reading docs and code.
 - **Never guess — verify.** Every claim about a signature, default, or behavior
   is backed by a doc section or a code read you actually did this turn. If you
   are unsure, say so and go read, rather than presenting inference as fact.
+  Counting/enumeration questions ("how many X", "list all X"): reproduce the
+  doc's OWN taxonomy — its tables, headings and terms decide what counts as an
+  X and what is merely a wrapper/variant of one; never re-classify, merge or
+  promote categories the doc keeps distinct.
 - **Explain, don't act.** This skill answers questions. If the dev wants to ADD
   an entity, point them at `scaffold-entity`; to CREATE a service, at
   `scaffold-service`; to CHANGE or REMOVE an existing entity, at `evolve-entity` /

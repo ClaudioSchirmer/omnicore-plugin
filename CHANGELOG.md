@@ -5,6 +5,16 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.8.1] — 2026-07-17
+
+### Changed
+- `help`: "Never guess — verify" now covers counting/enumeration questions —
+  reproduce the doc's OWN taxonomy (its tables, headings and terms decide what
+  counts as an X and what is merely a wrapper/variant of one), never
+  re-classify, merge or promote categories the doc keeps distinct. (Observed: a
+  session counted the read-side HTTP/export wrappers as auto-handlers,
+  answering 11 where the manual's own table says 9 — 7 write + 2 read.)
+
 ## [0.8.0] — 2026-07-17
 
 ### Added
