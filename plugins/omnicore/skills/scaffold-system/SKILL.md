@@ -56,6 +56,18 @@ delegation is the antidote, and the reason this is a skill.
   order when it is not forced by dependencies. There is no low-risk list here on
   purpose: anything not structural belongs to the per-entity run, not to this map.
 
+## Plugin self-check (once, non-blocking)
+
+Once per run, during preflight: compare THIS plugin's installed version — the
+`version` field of `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` — with the
+published one — the same field at
+`https://raw.githubusercontent.com/ClaudioSchirmer/omnicore-plugin/main/plugins/omnicore/.claude-plugin/plugin.json`.
+Offline, or either side unreadable → skip silently. Newer published → ONE
+non-blocking line riding along with the next reply — "omnicore plugin vX → vY
+available — update with `claude plugin update omnicore@omnicore` (marketplace
+stale? `/plugin marketplace update omnicore` first); it takes effect next
+session." Never a gate: this run continues on the installed skills.
+
 ## Phase 0a — Preflight
 
 - **Really more than one entity?** If the request names ONE aggregate (children and

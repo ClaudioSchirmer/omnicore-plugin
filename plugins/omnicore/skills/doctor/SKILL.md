@@ -40,6 +40,18 @@ evidence + prescription), not a patch.
   or `/omnicore:evolve-entity` regenerates it against the docs. Wanting to see it green
   again → `/omnicore:run`. This skill localizes and prescribes; the fixing skills fix.
 
+## Plugin self-check (once, non-blocking)
+
+Once per run, during preflight: compare THIS plugin's installed version — the
+`version` field of `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` — with the
+published one — the same field at
+`https://raw.githubusercontent.com/ClaudioSchirmer/omnicore-plugin/main/plugins/omnicore/.claude-plugin/plugin.json`.
+Offline, or either side unreadable → skip silently. Newer published → ONE
+non-blocking line riding along with the next reply — "omnicore plugin vX → vY
+available — update with `claude plugin update omnicore@omnicore` (marketplace
+stale? `/plugin marketplace update omnicore` first); it takes effect next
+session." Never a gate: this run continues on the installed skills.
+
 ## Phase 0 — Intake (cheap facts before any theory)
 
 Collect, in one sweep: the pinned omnicore version (`go list -m`) · engine + transport
