@@ -5,6 +5,55 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.7.0] — 2026-07-17
+
+### Changed
+- **Oracle joins the dialect set across the skills** (framework v0.33.0 shipped it
+  as the fourth first-class engine, Oracle Database 23ai+). Every "today's latest"
+  dialect hint now reads `postgres|mysql|sqlserver|oracle` (`scaffold-service`,
+  `run`, `upgrade`); the closed sets remain read from the PINNED docs, which stay
+  the authority.
+- `scaffold-service`: new **Oracle relay** trap (database-level LogMiner
+  provisioning at first DB boot + per-table supplemental logging after the first
+  app boot, CLOB CDC payloads by framework design) and the oracle DSN exception
+  (no `<svc>_db` — the app connects to the `FREEPDB1` PDB as the app user;
+  `ORACLE_PASSWORD` is the separate admin password). Port scan covers `1521`.
+- `templates/docker-bench.md`: **Relational — oracle variant** (gvenzl
+  `oracle-free` PINNED to a 23ai Release Update — the floating `:23` ships the
+  "26ai" banner Debezium's version parser fails on; `APP_USER` envs; init-scripts
+  contract: app grants incl. the documented `GRANT EXECUTE ON SYS.DBMS_LOCK`, and
+  CDC provisioning — ARCHIVELOG + bounded FRA, `logminer_tbs`, the `c##dbzuser`
+  COMMON user per Debezium's documented grant set, the seeded heartbeat table) +
+  two wrapper arms: idempotent per-table supplemental logging (background, the
+  sqlserver pattern) and the NATS-only `DEBEZIUM_HEARTBEAT` stream pre-create.
+- `templates/cdc-relay.md`: **Source — oracle** block (OracleConnector over
+  LogMiner: CDB+PDB pair, `lob.enabled` for the CLOB payloads,
+  `skip.unparseable.ddl` + `store.only.captured.tables.ddl`, tight mining
+  cadence, `heartbeat.action.query`) + the oracle-only EventRouter override
+  (UPPERCASE catalog field names with lowercase header aliases — wire contract
+  identical across dialects) and the UPPERCASE predicate pattern.
+- `help`: the version heads-up grew into a **version check** — behind the latest
+  now OPENS the first answer with a loud warning (grounded in the pinned vX while
+  vY is out) pointing at `/omnicore:upgrade` (the bump's owner — the stale
+  scaffold-skill/raw-`go get` pointers are gone) and offering the changelog —
+  answers stay SCOPED to the pin (a feature that only exists in a newer release
+  is named as such, never explained as if available); and
+  the **no-project case is now defined**: never "I can't tell without a project" —
+  ask once whether to read the published site
+  (https://claudioschirmer.github.io/omnicore, always the LATEST release, section
+  URLs mirror the Documentation Map names) or `go mod download` the latest for
+  local docs, opening the answer with which ground it's on. With a pinned project
+  the pin's module-cache docs remain the authority (the site would reintroduce
+  version drift); the site also serves as the online changelog source.
+- `scaffold-entity`: final-verify UUID grep extended to `migrations/oracle/`
+  (`RAW(16)` ids, `VARCHAR2(36)` in the reject pattern); conventions updated —
+  id/FK types add Oracle `RAW(16)` (`VARCHAR2(36)` for uuid-valued text), the PK
+  name on oracle is `<table>_pkey` named explicitly (like sqlserver), the
+  self-documenting DDL mechanism on oracle is `COMMENT ON TABLE/COLUMN` (the
+  Postgres shape, single statements — compatible with the runner's plain-SQL
+  split), and active-only uniqueness names all four dialect mechanisms (routing
+  to the pinned `table-schema.html`, which now covers them).
+
 ## [0.6.0] — 2026-07-15
 
 ### Added

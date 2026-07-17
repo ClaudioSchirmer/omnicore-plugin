@@ -50,8 +50,8 @@ root; the domain-service implementation in its own file here.
   2. repo `Constraints` binding (constraint NAME → notification + field) — the match is by
      NAME and table-agnostic, so a ROLE repo binds BASE-table constraints too (e.g.
      `persons_email_key`); the PK name diverges per dialect (postgres `<table>_pkey`,
-     sqlserver `<table>_pkey` — named explicitly, mysql `PRIMARY`) — bind every
-     TARGET dialect's;
+     sqlserver and oracle `<table>_pkey` — named explicitly, mysql `PRIMARY`) — bind
+     every TARGET dialect's;
   3. a custom `<Field>AlreadyExistsNotification` (409, all 7 catalogs);
   4. an immutability rule in the domain when it's the natural key.
   A flat entity with no unique business column needs no `Constraints` map at all.

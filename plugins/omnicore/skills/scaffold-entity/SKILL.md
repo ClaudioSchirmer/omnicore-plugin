@@ -461,9 +461,10 @@ You never hold all layers at once — each stage loads only its task + docs + co
 
 Four DISTINCT levels — do not conflate them:
 1. **Mechanical boot-trap checklist** — cheap checks; run ALL that apply, report each:
-   - `grep -rn "CHAR(36)\|VARCHAR(36)" migrations/mysql/ migrations/sqlserver/` → must
-     hit NOTHING for the generated tables (every entity id/FK is `BINARY(16)` on both
-     dialects; skip a directory the service doesn't have).
+   - `grep -rn "CHAR(36)\|VARCHAR(36)\|VARCHAR2(36)" migrations/mysql/ migrations/sqlserver/ migrations/oracle/`
+     → must hit NOTHING for the generated tables (every entity id/FK is `BINARY(16)`
+     on mysql/sqlserver and `RAW(16)` on oracle; skip a directory the service
+     doesn't have).
    - every generated `NNNN_*.up.sql` has its `NNNN_*.down.sql` twin.
    - `grep -rn 'path:"id"' internal/web/requests/` → nothing (boot panic).
    - if a read request declares `Fields *string`, every field of its Response AND of every

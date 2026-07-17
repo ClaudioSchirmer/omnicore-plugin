@@ -35,7 +35,7 @@ finish their change, ask "want to run it?", and hand off here.
   else STOP (to create one, that's `scaffold-service`).
 - **Tags:** engine + transport from `relational.dialect` / `transport` in
   `microservice.*.yaml` — the value IS the build tag (today's latest release:
-  `postgres`|`mysql`|`sqlserver` and `kafka`|`nats`; the pinned docs are the
+  `postgres`|`mysql`|`sqlserver`|`oracle` and `kafka`|`nats`; the pinned docs are the
   authority on what the pin supports). Both mandatory — a tagless build aborts
   at boot.
 - **Profile + ports:** `APP_PROFILE=dev` unless the dev says otherwise; resolve the

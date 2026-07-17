@@ -53,7 +53,7 @@ migration plan to a visible `.md`, and applies it only after the dev's explicit 
   skill targets real consumer projects.)
 - **Build tags:** discover engine + transport from `relational.dialect` / `transport`
   in `microservice.*.yaml` — the value IS the build tag (today's latest release:
-  `postgres|mysql|sqlserver` and `kafka|nats`; the pinned docs say what the pin
+  `postgres|mysql|sqlserver|oracle` and `kafka|nats`; the pinned docs say what the pin
   supports). Every verify below needs both tags or it aborts at boot.
 
 ## Phase 1 — Check + bring the release

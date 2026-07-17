@@ -11,8 +11,8 @@ lanes) — keep the healthchecks and the relay restart policy; they are load-bea
 - Volumes named per component (`db_data`, `mongo_data`, `nats_data`/`kafka_data`,
   `debezium_data`).
 - **Standard host ports** (default when free): app `8080`, postgres `5432` / mysql
-  `3306` / sqlserver `1433`, mongo `27017`, nats `4222` (+ monitor `8222`), kafka
-  external `9094`.
+  `3306` / sqlserver `1433` / oracle `1521`, mongo `27017`, nats `4222` (+ monitor
+  `8222`), kafka external `9094`.
 - **Shifted ports** when Phase 0 found collisions: pick free ports near the standard
   ones (the reference QA bench shifts to mysql `3317` / mongo `27028` / nats `4232` to
   coexist with its dev bench — same idea). The YAML's `${VAR:default}` defaults must
@@ -99,6 +99,76 @@ notes below) or the first app boot dies with `Cannot open database "<svc>_db"`.
       timeout: 5s
       retries: 12
 ```
+
+### Relational — oracle variant
+
+ARM64-native (unlike mssql — no Rosetta needed). Peculiarities the bench must
+respect: (1) **PIN a 23ai Release Update tag** (e.g. `:23.5`), never the floating
+`:23` — newer builds ship the "Oracle AI Database 26ai" banner rebrand that
+Debezium's Oracle version parser fails on ("Failed to resolve Oracle database
+version"), and 23ai is also the framework's floor; (2) there is **NO `<svc>_db`** —
+the app connects to the image's `FREEPDB1` PDB as the app user (`omnicore`, created
+by the `APP_USER` envs; the schema IS the user), so the YAML's DSN default is
+`oracle://omnicore:omnicore@localhost:<hostport>/FREEPDB1`. `ORACLE_PASSWORD` is
+the ADMIN password — separate, strong, never the app user's.
+
+```yaml
+  oracle:
+    image: gvenzl/oracle-free:23.5      # PINNED RU — the version-parser trap above
+    container_name: <svc>-dev-oracle
+    ports: ["<hostport>:1521"]
+    environment:
+      ORACLE_PASSWORD: "<strong-password>"
+      APP_USER: "omnicore"
+      APP_USER_PASSWORD: "omnicore"
+    volumes:
+      - db_data:/opt/oracle/oradata
+      - ./oracle/init:/container-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]   # shipped by the image
+      interval: 10s
+      timeout: 5s
+      retries: 30
+```
+
+The mounted `devops/oracle/init/` dir runs ONCE, at the image's first boot:
+
+- **`01_grants.sql` — app grants** (both after `ALTER SESSION SET CONTAINER =
+  FREEPDB1`): `GRANT EXECUTE ON SYS.DBMS_LOCK TO omnicore` — a DOCUMENTED
+  operational requirement (the framework's rebuild + migration locks ride
+  `DBMS_LOCK` session locks; pinned `migrations.html`) — plus
+  `GRANT SELECT_CATALOG_ROLE TO omnicore` (the lock's best-effort holder
+  diagnostic; degrades to empty without it).
+- **`02_cdc.sh` — CDC provisioning** (a SHELL script, not `.sql` — the FRA
+  directory must exist before the spfile points at it, `ORA-01261` otherwise).
+  Four pieces, in one `sqlplus / as sysdba` heredoc:
+  1. ARCHIVELOG mode with a BOUNDED FRA (`db_recovery_file_dest_size` ~10G, dest
+     under `/opt/oracle/oradata/recovery_area` — created by the script first;
+     `SHUTDOWN IMMEDIATE` → `STARTUP MOUNT` → `ALTER DATABASE ARCHIVELOG` →
+     open, plus `ALTER PLUGGABLE DATABASE ALL OPEN`) and `ALTER DATABASE ADD
+     SUPPLEMENTAL LOG DATA` — LogMiner reads archived+online redo; the bounded
+     FRA keeps archived redo from growing unbounded on a long-lived bench.
+  2. A `logminer_tbs` tablespace in CDB$ROOT AND FREEPDB1 (small, autoextend —
+     the canonical Debezium recipe).
+  3. The `c##dbzuser` COMMON user (multitenant REQUIRES the `c##` prefix),
+     default tablespace `logminer_tbs`, with Debezium's documented Oracle
+     LogMiner grant set, every grant `CONTAINER=ALL`: `CREATE SESSION`,
+     `SET CONTAINER`, `LOGMINING`, `SELECT ANY TABLE`, `FLASHBACK ANY TABLE`,
+     `SELECT ANY TRANSACTION`, `SELECT_CATALOG_ROLE`, `EXECUTE_CATALOG_ROLE`,
+     `CREATE TABLE`, `LOCK ANY TABLE`, `CREATE SEQUENCE`, `EXECUTE ON
+     DBMS_LOGMNR` + `DBMS_LOGMNR_D`, and `SELECT` on the `V_$…` views the
+     connector reads (`V_$DATABASE`, `V_$LOG`, `V_$LOG_HISTORY`,
+     `V_$LOGMNR_LOGS`, `V_$LOGMNR_CONTENTS`, `V_$LOGMNR_PARAMETERS`,
+     `V_$LOGFILE`, `V_$ARCHIVED_LOG`, `V_$ARCHIVE_DEST_STATUS`,
+     `V_$TRANSACTION`, `V_$MYSTAT`, `V_$STATNAME`) — Debezium's Oracle
+     connector docs are the authority on this list; validate against them.
+  4. The heartbeat table, in FREEPDB1, seeded with its single row:
+     `CREATE TABLE c##dbzuser.debezium_heartbeat (id NUMBER(1) PRIMARY KEY,
+     ts TIMESTAMP(6));` + `INSERT … VALUES (1, SYSTIMESTAMP); COMMIT;` —
+     load-bearing, see `templates/cdc-relay.md`.
+
+  Per-TABLE supplemental logging is NOT here — the outbox only exists after the
+  first app boot; the start wrapper's oracle arm adds it (see the notes below).
 
 ### Read side — always
 
@@ -260,6 +330,26 @@ Notes:
 
   Idempotent by the guards — safe on every start. The relay's `restart:
   unless-stopped` absorbs the window until the enable lands.
+- **oracle only — the supplemental-logging arm.** LogMiner cannot capture the
+  outbox until the table carries per-table supplemental logging — only possible
+  AFTER the first app boot creates it. All three wrappers gain an idempotent arm,
+  launched in the BACKGROUND before the foreground `go run` (the sqlserver
+  pattern), that polls via in-container sqlplus (`docker exec … sqlplus -S
+  omnicore/omnicore@localhost/FREEPDB1`) until `outbox` exists, then runs:
+
+  ```sql
+  ALTER TABLE outbox ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+  ```
+
+  guarded by a `user_log_groups` lookup (`log_group_type='ALL COLUMN LOGGING'`)
+  so re-runs are no-ops. The relay's `restart: unless-stopped` absorbs the window.
+- **oracle × nats only — the heartbeat stream.** The relay's heartbeat records
+  are PUBLISHED too, to `__debezium-heartbeat.<topic.prefix>` — a subject the
+  framework-owned stream (`omnicore.>`) does NOT cover, and with
+  `create-stream=false` an uncovered JetStream publish gets "503 No Responders"
+  and KILLS the connector. The wrapper pre-creates a tiny dedicated stream
+  (idempotent): subjects `__debezium-heartbeat.>`, memory storage, max-msgs 1.
+  A kafka sink auto-creates the topic — no step needed.
 - `start.cmd` and `start.ps1` mirror `start.sh` step-for-step — keep all three in
   lockstep; any change to one applies to the others. On Windows the default execution
   policy may block a bare `.\start.ps1`, so document the PowerShell invocation as
