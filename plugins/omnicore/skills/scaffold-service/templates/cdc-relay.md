@@ -2,8 +2,8 @@
 
 Debezium Server for EVERY combination — one container, static config, no REST
 registration step. Compose ONE file: the shared core + the chosen SOURCE block
-(mysql | postgres | sqlserver) + the chosen SINK block (nats | kafka), names from
-the spec.
+(mysql | postgres | sqlserver | oracle) + the chosen SINK block (nats | kafka),
+names from the spec.
 
 **Validate before writing** (against the pinned `transport.html`): the payload format
 (`simplestring` — pass the payload through as OPAQUE TEXT, never let the relay type
@@ -139,6 +139,82 @@ debezium.source.include.schema.changes=false
 ```
 
 Predicate pattern: `debezium.predicates.isOutbox.pattern=.*\\.dbo\\.outbox`
+
+## Source — oracle
+
+PREREQUISITES — two layers, both provisioned by the bench
+(`templates/docker-bench.md`): database-level at the DB's first boot (ARCHIVELOG,
+supplemental logging, the `c##dbzuser` LogMiner user, the seeded
+`debezium_heartbeat` table) and per-table supplemental logging on the outbox —
+only possible AFTER the first app boot creates it (the start wrapper's idempotent
+arm). Until both land the relay crash-loops; `restart: unless-stopped` absorbs
+that window. Expect a ~2-3s write→doc floor — the LogMiner mining cadence, not a
+bug.
+
+```properties
+debezium.source.connector.class=io.debezium.connector.oracle.OracleConnector
+# hostname is the in-network compose name; the LogMiner user is the COMMON user
+debezium.source.database.hostname=oracle
+debezium.source.database.port=1521
+debezium.source.database.user=c##dbzuser
+debezium.source.database.password=<strong-password>
+# CDB + PDB pair: LogMiner attaches to the CDB, the tables live in the PDB
+debezium.source.database.dbname=FREE
+debezium.source.database.pdb.name=FREEPDB1
+debezium.source.topic.prefix=omnicore_<svc>
+# schema = the app user, UPPERCASE (the Oracle catalog form)
+debezium.source.table.include.list=OMNICORE.OUTBOX
+
+# schema history — required like MySQL (file-backed, survives restarts); BOTH
+# extra knobs are LOAD-BEARING: the DDL parser dies on 23ai syntax from OTHER
+# schemas/tables without them
+debezium.source.schema.history.internal=io.debezium.storage.file.history.FileSchemaHistory
+debezium.source.schema.history.internal.file.filename=/debezium/data/schema-history.dat
+debezium.source.schema.history.internal.skip.unparseable.ddl=true
+debezium.source.schema.history.internal.store.only.captured.tables.ddl=true
+# schema-change events have no consumer; on a NATS sink the publish KILLS the relay
+debezium.source.include.schema.changes=false
+
+# LOAD-BEARING: the CDC-tailed payload columns are CLOB by framework design
+# (LogMiner cannot decode native-JSON/OSON redo — pinned table-schema.html,
+# Oracle column shapes); lob.enabled makes the connector deliver their values
+debezium.source.lob.enabled=true
+debezium.source.log.mining.strategy=online_catalog
+
+# tight mining cadence — default sleeps push the write→doc floor further
+debezium.source.log.mining.sleep.time.default.ms=100
+debezium.source.log.mining.sleep.time.max.ms=300
+debezium.source.log.mining.sleep.time.increment.ms=100
+
+# LogMiner holds the LAST event of a burst until new redo advances the SCN — the
+# periodic UPDATE keeps it moving (table seeded by the bench's init script)
+debezium.source.heartbeat.interval.ms=1000
+debezium.source.heartbeat.action.query=UPDATE debezium_heartbeat SET ts = SYSTIMESTAMP WHERE id = 1
+```
+
+Predicate pattern: `debezium.predicates.isOutbox.pattern=.*\\.OMNICORE\\.OUTBOX`
+(schema AND table UPPERCASE — the catalog form).
+
+**Oracle-only EventRouter override — UPPERCASE fields, lowercase header aliases.**
+Column names arrive UPPERCASE from the Oracle catalog, so the shared core's
+lowercase `table.field.event.*` values do not match on this source. Override them
+with the UPPERCASE forms and alias every header back to lowercase, so the wire
+contract stays IDENTICAL to the other dialects:
+
+```properties
+debezium.transforms.outboxRoute.table.field.event.id=ID
+debezium.transforms.outboxRoute.table.field.event.key=AGGREGATE_ID
+debezium.transforms.outboxRoute.table.field.event.type=EVENT_TYPE
+debezium.transforms.outboxRoute.table.field.event.payload=PAYLOAD
+debezium.transforms.outboxRoute.route.by.field=AGGREGATE_TYPE
+debezium.transforms.outboxRoute.table.fields.additional.placement=AGGREGATE_TYPE:header:aggregate_type,EVENT_TYPE:header:event_type,TRACEPARENT:header:traceparent,AGGREGATE_ID:header:aggregate_id
+```
+
+**NATS sink trap:** the heartbeat records are PUBLISHED too
+(`__debezium-heartbeat.<prefix>`); with `create-stream=false` an uncovered publish
+503s and kills the connector — the start wrapper pre-creates the tiny
+`DEBEZIUM_HEARTBEAT` stream (`templates/docker-bench.md`). Kafka sinks
+auto-create the topic — no step needed.
 
 ## Sink — nats
 

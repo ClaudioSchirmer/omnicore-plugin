@@ -64,10 +64,11 @@ table-agnostic: base-table unique constraints (e.g. `persons_email_key`) bind HE
   purge).
 - **Role-row uniqueness:** shared-PK gets it free (the PK). Separate-FK: plain
   `UNIQUE(fk)` (an archived remnant blocks a new POST) OR active-only uniqueness (the
-  mechanism is per dialect — partial index on postgres, a soft-delete-gated generated
-  column on mysql; read the PINNED `table-schema.html`, Active-only uniqueness, for the
-  target dialect's shape) to allow a remnant beside a new active row.
-- **⚠️ MySQL & SQL Server: every id/FK here is `BINARY(16)`** — base id, role id, the role→base FK, every
+  mechanism is per dialect — partial index on postgres, filtered index on sqlserver, a
+  soft-delete-gated generated column on mysql, a function-based index on oracle; read
+  the PINNED `table-schema.html`, Active-only uniqueness, for the target dialect's
+  shape) to allow a remnant beside a new active row.
+- **⚠️ MySQL & SQL Server `BINARY(16)`, Oracle `RAW(16)`: every id/FK here** — base id, role id, the role→base FK, every
   base-child/role-child FK. These are all framework-MANAGED slots, native on EVERY pin —
   the pin-driven id-typing rule (SKILL.md boot-traps, "Id typing") governs only the
   non-managed reference fields (`migrations.md`).

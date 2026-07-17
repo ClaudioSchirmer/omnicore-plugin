@@ -34,7 +34,7 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
 - **ONE dialect + ONE transport per start.** The dev picks ONE relational dialect and
   ONE transport from the closed sets the pinned release supports — read them from the
   pinned docs (`table-schema.html` / `transport.html`; today's latest: `postgres` |
-  `mysql` | `sqlserver` × `kafka` | `nats`); the relay config is derived for exactly
+  `mysql` | `sqlserver` | `oracle` × `kafka` | `nats`); the relay config is derived for exactly
   that combination. Multi-engine / multi-transport setups are out of scope — if asked,
   say it's a later, separate step.
 - **Same risk split as `scaffold-entity`.** High-risk = the identity + infrastructure
@@ -71,7 +71,7 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
   start wrapper (the baseline the final verify actually boots): darwin|linux → `start.sh`,
   windows → `start.cmd` + `start.ps1`. Feeds the Phase 1 cross-platform question.
 - **Port scan:** `docker ps` for containers already holding the standard host ports
-  (8080, 5432/3306/1433, 27017, 4222/9092-range). Collisions don't block — they feed
+  (8080, 5432/3306/1433/1521, 27017, 4222/9092-range). Collisions don't block — they feed
   the shifted-port proposal in Phase 1 (see `templates/docker-bench.md`).
 
 ## Phase 1 — Q&A + spec gate
@@ -91,7 +91,7 @@ High-risk — always asked (mark recommendations `(proposed)`):
    and container names. No default possible.
 2. **Go module path** (e.g. `github.com/org/<svc>`). No default possible.
 3. **Relational dialect** — the closed set the pinned release supports, read from the
-   pinned `table-schema.html` (today's latest: `postgres` | `mysql` | `sqlserver`).
+   pinned `table-schema.html` (today's latest: `postgres` | `mysql` | `sqlserver` | `oracle`).
    The framework itself refuses a default — so does this skill. Neutral advice: match
    what production will run.
 4. **Transport: `kafka` | `nats`.** Same advice: match production; NATS is the
@@ -268,7 +268,7 @@ skill), the fallback for concepts this table doesn't list.
 ## Traps (bench-proven; re-verify framework-facing ones against the pinned docs)
 
 - **Both build tags are mandatory** — an engine AND a transport (the pinned release's
-  sets; today's latest: `postgres`|`mysql`|`sqlserver` and `kafka`|`nats`); no default
+  sets; today's latest: `postgres`|`mysql`|`sqlserver`|`oracle` and `kafka`|`nats`); no default
   on either axis, a tagless build aborts at boot.
 - **`go mod tidy` prunes/misses tag-gated deps** → always follow with
   `GOFLAGS=-mod=mod go build` (step 10). Shipping `go.mod` without the matching
@@ -294,12 +294,26 @@ skill), the fallback for concepts this table doesn't list.
   carries an idempotent enable arm. The concrete shape lives in
   `templates/cdc-relay.md` / `templates/docker-bench.md`, validated against the
   pinned `transport.html` — the doc wins on any drift.
+- **Oracle relay:** LogMiner needs DATABASE-level provisioning at the DB's first
+  boot (ARCHIVELOG + minimal supplemental logging + the `c##dbzuser` LogMiner user
+  + the heartbeat table — image init scripts in the bench) AND per-table
+  supplemental logging on the outbox — only possible AFTER the first app boot
+  creates it, so the start wrapper carries an idempotent enable arm (the sqlserver
+  pattern). The CDC-tailed payload columns are CLOB by framework design (LogMiner
+  cannot decode native-JSON redo — pinned `table-schema.html`, Oracle column
+  shapes). Concrete shape in `templates/cdc-relay.md` / `templates/docker-bench.md`,
+  validated against the pinned `transport.html` — the doc wins on any drift.
 - **Mongo database is per-service** (`<svc>_views`); the `rebuild:` block is
   strict-decoded — unknown keys abort boot.
 - **DSN defaults must equal the bench, not placeholders** — the compose creds are
   `omnicore:omnicore` on `<svc>_db` (docker-bench template; exception: the sqlserver
   bench logs in as `sa` with a strong password — the image enforces password
-  complexity, so `omnicore:omnicore` cannot exist there). The dev YAML's
+  complexity, so `omnicore:omnicore` cannot exist there; second exception: the
+  oracle bench KEEPS `omnicore:omnicore` — the image's APP_USER — but has NO
+  `<svc>_db`: the app connects to the `FREEPDB1` PDB, where the schema IS the app
+  user, so the DSN default is
+  `oracle://omnicore:omnicore@localhost:<hostport>/FREEPDB1`; the image's admin
+  `ORACLE_PASSWORD` is separate and strong). The dev YAML's
   `${VAR:default}` for the relational DSN (and mongo URI, broker endpoints) must embed
   exactly those as the default; `${VAR:...}` keeps it overridable but the fallback is
   the bench, never `user:password`. Mismatch = boot passes config but `readyz` fails
@@ -317,8 +331,8 @@ unprompted).
 
 | File | Covers |
 |---|---|
-| `templates/docker-bench.md` | compose skeleton per choice (postgres\|mysql\|sqlserver × kafka\|nats + Mongo + relay), healthchecks, volumes, port table + shifted-port rule, `start.sh` + `start.cmd` + `start.ps1` |
-| `templates/cdc-relay.md` | Debezium Server `application.properties` — source blocks (mysql/postgres/sqlserver) × sink blocks (nats/kafka), the EventRouter contract, predicates, relay traps |
+| `templates/docker-bench.md` | compose skeleton per choice (postgres\|mysql\|sqlserver\|oracle × kafka\|nats + Mongo + relay), healthchecks, volumes, port table + shifted-port rule, `start.sh` + `start.cmd` + `start.ps1` |
+| `templates/cdc-relay.md` | Debezium Server `application.properties` — source blocks (mysql/postgres/sqlserver/oracle) × sink blocks (nats/kafka), the EventRouter contract, predicates, relay traps |
 
 Both are DEVOPS GLUE templates (the sanctioned exception) — instantiate names/ports
 from the spec, validate framework-facing values against the pinned `transport.html`.
