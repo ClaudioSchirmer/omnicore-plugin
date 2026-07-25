@@ -5,6 +5,19 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [Unreleased]
+
+### Changed
+- Skill references updated to track the framework's read-side surface renames
+  (they ship together with the framework release that carries them):
+  `core.NewSharedBase` → `core.NewSharedBaseSchema`, and
+  `SharedBaseView(base, name)` → `SharedBaseView(name).Schema(base)` (the base
+  schema now attaches via `.Schema(...)` like a regular view). Touches
+  `scaffold-entity` (impact map + shared-base convention) and `scaffold-system`.
+  The framework also removed the view `.Root(table)` builder (the root now
+  derives from the attached schema); the skills never spelled out `.Root()`, so
+  no skill change was needed there.
+
 ## [0.8.3] — 2026-07-17
 
 ### Changed
