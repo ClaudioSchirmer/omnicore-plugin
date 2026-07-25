@@ -88,7 +88,7 @@ runs to skip their own 0v (one offer per system, not one per entity).
 ## Phase 0b — Discover (read, don't ask)
 
 A system drop rarely lands on virgin ground. Inventory what exists BEFORE mapping:
-entities (features + wiring), SharedBases (`NewSharedBase` schemas + identity views) and
+entities (features + wiring), SharedBases (`NewSharedBaseSchema` schemas + identity views) and
 their roles, views, dialects, surfaces. An identity in the request that matches an
 existing base is an **add-role, not a create** — the map must say which. An entity in
 the request that already exists routes to `evolve-entity`, flagged in the map — never

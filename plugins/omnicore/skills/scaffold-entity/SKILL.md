@@ -159,10 +159,10 @@ Self-configure by reading the project:
   — resolved from the module cache — are the authority this skill reads. The skill itself
   is version-agnostic and never assumes a release: the doc-first read is the whole
   anti-drift mechanism.
-- **An existing SharedBase?** Look for a `NewSharedBase("…")` schema (e.g. `persons`) + its
+- **An existing SharedBase?** Look for a `NewSharedBaseSchema("…")` schema (e.g. `persons`) + its
   identity view (a `SharedBaseView(…)`, e.g. `person_view.go`) + the roles already on it. If
   the entity being scaffolded is a NEW role over that SAME identity, you REUSE the base (declare
-  the SAME `NewSharedBase("…")` — the registry keys by table) and ADD to the existing
+  the SAME `NewSharedBaseSchema("…")` — the registry keys by table) and ADD to the existing
   identity view (don't recreate either). This is the "add a role to an existing base" path
   (drives item 1's create-vs-add-role question).
 - **A domain map from `scaffold-system`?** Look for `scaffold-system/domain-map.md` —
@@ -262,7 +262,7 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      surface the option).** Explain WHAT it is: one document per identity, base fields +
      base-children flat, a sub-document per role, roles added one at a time. Two cases,
      detected in Phase 0b: (a) **no identity view exists yet** → offer to CREATE it
-     (`SharedBaseView(<base>, "<identity-collection>").Role(<thisRole>)…`); (b) **an identity view already
+     (`SharedBaseView("<identity-collection>").Schema(<base>).Role(<thisRole>)…`); (b) **an identity view already
      exists** (you're adding a NEW role to an existing base) → offer to ADD this role: append
      `.Role(<thisRole>Schema())` **and BUMP its `Version(N)`** (the role set is in the rebuild
      hash — forgetting the bump aborts boot). **Ask which** (create / add-role / skip);
