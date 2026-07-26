@@ -129,8 +129,8 @@ index for concepts this table doesn't list.
 |---|---|
 | feature unmounting / boot wiring | bootstrap |
 | tables / drop DDL / down twins | migrations · table-schema |
-| shared base / role slices | table-schema · query-side |
-| views / surviving embeds / `Version` | auto-query-handlers · mongo-schema-evolution · query-side |
+| shared base / role slices | table-schema · views |
+| views / surviving embeds / `Version` | views · mongo-schema-evolution · auto-query-handlers |
 | routes / OpenAPI cleanup | openapi · reference |
 | GraphQL / gRPC surface cleanup | graphql · grpc |
 | outbox / topics / integration events | transport |

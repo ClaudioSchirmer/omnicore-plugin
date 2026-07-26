@@ -5,6 +5,29 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.8.4] — 2026-07-25
+
+### Changed
+- Skill references updated to track the framework's read-side surface renames
+  (they ship together with the framework release that carries them):
+  `core.NewSharedBase` → `core.NewSharedBaseSchema`, and
+  `SharedBaseView(base, name)` → `SharedBaseView(name).Schema(base)` (the base
+  schema now attaches via `.Schema(...)` like a regular view). Touches
+  `scaffold-entity` (impact map + shared-base convention) and `scaffold-system`.
+  The framework also removed the view `.Root(table)` builder (the root now
+  derives from the attached schema); the skills never spelled out `.Root()`, so
+  no skill change was needed there.
+- Doc-routing pointers realigned to the framework's new consolidated **`views`**
+  section (`docs/content/sections/views.html`, introduced in framework v0.37.0),
+  which centralizes all read-side view declaration — the three view kinds, the
+  view-exclusive external schema, `Embed`/`EmbedMany`, `SharedBaseView`,
+  `ComposedView`, and the SyncEngine/recompose fan-out. `scaffold-view`,
+  `evolve-view`, `scaffold-system`, and `remove-entity` now route view-kind /
+  composition-type / view-shape questions to `views` instead of the former
+  `query-side` + `table-schema` split. Write-side shared-base normalization
+  references (`scaffold-entity`, and the base-schema rows) still point to
+  `table-schema`, which retains that write-side material.
+
 ## [0.8.3] — 2026-07-17
 
 ### Changed

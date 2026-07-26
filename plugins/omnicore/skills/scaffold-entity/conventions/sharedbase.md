@@ -24,7 +24,7 @@ framework's check.
 
 ## Schema — decisions
 
-- The base is a type-less `NewSharedBase(table)` declared as an **exported function in
+- The base is a type-less `NewSharedBaseSchema(table)` declared as an **exported function in
   `schemas/`**, callable from every role file — the engine registers by the base's TABLE,
   so N identical declarations behave as one; two DIVERGENT declarations panic at boot.
 - **Link model (one-line choice, surface it in the spec):** shared-PK (role.id == base.id;

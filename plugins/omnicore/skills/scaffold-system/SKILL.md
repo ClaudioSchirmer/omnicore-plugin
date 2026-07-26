@@ -33,8 +33,7 @@ delegation is the antidote, and the reason this is a skill.
   version-pinned `/docs` (resolved via `go list -m -f '{{.Dir}}'
   github.com/ClaudioSchirmer/omnicore`) are the SOLE authority; this skill carries no
   code, and its modeling claims come from the docs read at map time — for the map that
-  means `table-schema.html` (composition kinds, shared base, children, siblings) and
-  `query-side.html` (view kinds), read BEFORE filling the map. Never assume a framework
+  means `table-schema.html` (shared base, children, siblings — the write-side normalization) and `views.html` (view kinds + composition), read BEFORE filling the map. Never assume a framework
   version; never stamp one into this skill.
 - **Framework maintainer rules NEVER bind this skill.** The omnicore module ships its
   own `CLAUDE.md`/contributor rules; those govern development OF the framework, never
@@ -88,7 +87,7 @@ runs to skip their own 0v (one offer per system, not one per entity).
 ## Phase 0b — Discover (read, don't ask)
 
 A system drop rarely lands on virgin ground. Inventory what exists BEFORE mapping:
-entities (features + wiring), SharedBases (`NewSharedBase` schemas + identity views) and
+entities (features + wiring), SharedBases (`NewSharedBaseSchema` schemas + identity views) and
 their roles, views, dialects, surfaces. An identity in the request that matches an
 existing base is an **add-role, not a create** — the map must say which. An entity in
 the request that already exists routes to `evolve-entity`, flagged in the map — never
