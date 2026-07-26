@@ -22,7 +22,7 @@ carry yet, that is `evolve-entity`'s job first.
 - **Docs-first, version-agnostic — no code in this skill, by design.** The
   version-pinned `/docs` in the module cache are the SOLE authority; every shape you
   compose from lives in the routed sections (table below). The **composition-types
-  catalog in `query-side`** is where the central decision comes from — read it at the
+  catalog in `views`** is where the central decision comes from — read it at the
   pin BEFORE proposing a type; never from memory. If any text or consumer code disagrees
   with the doc, the doc wins.
 - **Framework maintainer rules NEVER bind this skill.** The module ships its own
@@ -38,7 +38,7 @@ carry yet, that is `evolve-entity`'s job first.
 - **TEACH before you ask — the option space is part of the deliverable.** The dev cannot
   choose a composition type they don't understand, and a bare multiple-choice question
   is a guess pushed onto them. Before proposing, UNDERSTAND every view type the pinned
-  `query-side` catalog offers, then EXPLAIN — in plain language, the user's language —
+  `views` catalog offers, then EXPLAIN — in plain language, the user's language —
   each type that could plausibly serve the request and its trade-offs. Only then
   recommend and confirm.
 - **Read models are EVENTUAL.** The pipeline is CDC: write → outbox → relay → broker →
@@ -88,7 +88,7 @@ usage against the docs.
 sections structural (`N/A — <why>`, never deleted):
 
 1. **Composition type** [high-risk — THE decision, taught before asked]: read the FULL
-   composition-types catalog in `query-side` at the pin (the type set is the PIN's, not
+   view catalog + composition contracts in `views` at the pin (the type set is the PIN's, not
    this skill's — e.g. a local cross-entity join like ComposedView vs the external
    family sourcing another service's data vs a shared-base identity view vs an
    aggregated view). For EVERY type that could plausibly serve the request, give the
@@ -104,7 +104,7 @@ sections structural (`N/A — <why>`, never deleted):
    rule stated (shape change later ⇒ `Version` bump ⇒ rebuild — `mongo-schema-evolution`).
 4. **Consistency contract** [high-risk]: eventual via CDC; expected lag tolerance; what
    the consumer must NOT assume. For Upstream/Embed: what happens when the remote is
-   down (per the pinned contract in `query-side`).
+   down (per the pinned contract in `views`).
 5. **Surfaces** — REST endpoints, GraphQL exposure, filter operators per field
    (operators are low-risk — decide well), pagination/options.
 6. **Naming** — collection, view type, routes; owner-prefixed and consistent with the
@@ -126,11 +126,11 @@ index for concepts this table doesn't list.
 
 | When deciding/generating… | Read section(s) |
 |---|---|
-| composition type (the catalog + contracts) | query-side |
-| view declaration / options / indexes / aggregations | auto-query-handlers |
+| composition type (the catalog + contracts) | views |
+| view declaration / options / indexes / aggregations | views · auto-query-handlers |
 | custom projection / response shaping | custom-query-handler |
 | `Version` / rebuild / evolution | mongo-schema-evolution |
-| SharedBaseView / ComposedView shapes | table-schema · query-side |
+| SharedBaseView / ComposedView shapes | views |
 | REST routes / OpenAPI | openapi · reference |
 | GraphQL exposure | graphql |
 | registration / wiring | bootstrap |

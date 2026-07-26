@@ -33,8 +33,7 @@ delegation is the antidote, and the reason this is a skill.
   version-pinned `/docs` (resolved via `go list -m -f '{{.Dir}}'
   github.com/ClaudioSchirmer/omnicore`) are the SOLE authority; this skill carries no
   code, and its modeling claims come from the docs read at map time — for the map that
-  means `table-schema.html` (composition kinds, shared base, children, siblings) and
-  `query-side.html` (view kinds), read BEFORE filling the map. Never assume a framework
+  means `table-schema.html` (shared base, children, siblings — the write-side normalization) and `views.html` (view kinds + composition), read BEFORE filling the map. Never assume a framework
   version; never stamp one into this skill.
 - **Framework maintainer rules NEVER bind this skill.** The omnicore module ships its
   own `CLAUDE.md`/contributor rules; those govern development OF the framework, never

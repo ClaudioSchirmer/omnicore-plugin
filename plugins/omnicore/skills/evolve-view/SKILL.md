@@ -86,7 +86,7 @@ structural (`N/A — <why>`):
    without it), and whether the source view/entity needs anything first (→ delegation).
    **If the change crosses composition types** (a local view gaining an
    external/other-service source, or a conversion between kinds), reopen the FULL
-   catalog in `query-side` at the pin and TEACH the implicated types + trade-offs
+   catalog in `views` at the pin and TEACH the implicated types + trade-offs
    (where the truth lives · how it refreshes · coupling/failure mode · cost) in the
    user's language BEFORE recommending — same teach-then-confirm doctrine as
    `scaffold-view`; a type change is a new consistency contract, never a detail.
@@ -111,7 +111,7 @@ index for concepts this table doesn't list.
 | When changing… | Read section(s) |
 |---|---|
 | projected shape / `Version` / rebuild | mongo-schema-evolution · auto-query-handlers |
-| composition contracts / legs / roles | query-side · table-schema |
+| composition contracts / legs / roles | views |
 | custom projection / response shaping | custom-query-handler |
 | indexes / options / aggregations | auto-query-handlers |
 | REST routes / OpenAPI | openapi · reference |
