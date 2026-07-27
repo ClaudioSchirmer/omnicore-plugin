@@ -66,7 +66,7 @@ read. Never bump inline.
 
 ## Phase 0b — Discover the CURRENT view (read, don't ask)
 
-Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed |
+Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed | EmbedInChild |
 aggregated) · legs/roles and join keys · projected shape + current `Version` · indexes
 and options · collection name · surfaces exposing it (REST, GraphQL) · known consumers
 in-repo · the project's local flavor.
