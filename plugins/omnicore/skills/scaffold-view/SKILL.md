@@ -3,7 +3,8 @@ name: scaffold-view
 description: >-
   omnicore: create a NEW read model (view) on an omnicore-based service — a ComposedView
   joining entities, a SharedBaseView identity view, an Upstream composition, an external
-  Embed, or an aggregated view — projected to Mongo and exposed on REST/GraphQL. Use when
+  Embed, enriching a child array (EmbedInChild), or an aggregated view — projected to Mongo
+  and exposed on REST/GraphQL. Use when
   the user wants a new view, read model, listing, report-style query, or cross-entity /
   cross-service composition. The plain per-entity view ships with scaffold-entity; this
   skill is for read models beyond it. Only for projects that import
