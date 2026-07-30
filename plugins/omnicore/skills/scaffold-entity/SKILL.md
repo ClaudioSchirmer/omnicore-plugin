@@ -296,7 +296,13 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    switch later without rework." See `aggregate-children.md`.
 5. **Modes — ASK, never assume all six.** Which of insert / update / delete / archive /
    unarchive does this aggregate accept? Recommend a set from the entity's nature, but you
-   MUST confirm — do NOT silently emit all six. (Archive ⟺ SoftDelete.)
+   MUST confirm — do NOT silently emit all six. (Archive modes ⟺ the schema's
+   archive/deleted-at column declaration — the pin's table-schema docs name the builder.)
+   **When Archive is in the set, settle the VIEW's regime in the same breath** — you
+   already know the modes, so don't leave the read side to a silent default: archived
+   rows kept-but-hidden in the entity's view (default; `?includeArchived` reveals) or
+   dropped from it (`DeleteOnArchive()` — the hot-tier choice)? One question, confirmed
+   with the dev; the pin's `views` section carries the contract.
 6. **Business rules, validations, restrictions — ASK; do not skip and do not invent.** What
    must `BuildRules` enforce? Required fields, formats (email, document/tax-id), numeric
    ranges (e.g. a grade 0–100), string lengths, cross-field invariants, immutability, state
@@ -307,9 +313,10 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    real rules (propose sensible defaults per field type, then confirm), and map each to an
    `IfInsert/IfUpdate/IfInsertOrUpdate/IfDelete/IfDisplay`
    closure with a specific notification.
-7. **Delete semantics — soft OR hard (rarely both).** A soft-delete model (archive/unarchive
-   + `deleted_at`) OR a hard-delete model. One simple question; **default soft**. Don't emit
-   both a hard `DELETE` and archive/unarchive unless the user says so.
+7. **Delete semantics — archive OR hard delete (rarely both).** An archive model
+   (archive/unarchive + the schema's archive column) OR a hard-delete model. One simple
+   question; **default archive**. Don't emit both a hard `DELETE` and archive/unarchive
+   unless the user says so.
    - **The HTTP verb MUST match the truth (DDD/REST naming, not implicit surprises):** `DELETE`
      is EXCLUSIVELY a hard purge; a soft removal is `PATCH …/archive` (+ its `…/unarchive`
      undo). Never wire a soft/archive operation behind `DELETE` — it lies to the caller. This
@@ -484,7 +491,8 @@ Four DISTINCT levels — do not conflate them:
      mechanical: `grep -rln 'Fields \*string' internal/web/requests/` → for each hit, open the
      paired list Response + its nested types and confirm EVERY field is `*T`/slice WITH
      `,omitempty` (a bare value type, or a tag missing `,omitempty`, IS the panic).
-   - `Modes()` lists Archive ⟺ schema declares `SoftDelete` ⟺ migration has `deleted_at`.
+   - `Modes()` lists Archive ⟺ the schema declares its archive (deleted-at) column ⟺ the
+     migration carries that column.
    - model has children (model B): in each `*_routes.go`, the ROOT-archive auto handler
      (name per `auto-handlers.html`) is instantiated AT MOST once per aggregate — its own
      archive route. A child-op route instantiating it is the whole-aggregate-archive trap
@@ -609,7 +617,7 @@ only a genuinely missing docs file does.
   jsonSchema/collation/capped/time-series); index-only does NOT; forgetting panics.
 - **Every `.up.sql` needs a `.down.sql`** (may be a no-op) or boot aborts.
 - **A ComposedView 1:N leg's FK must be indexed** or boot is fatal.
-- **`Modes()` ⟺ `SoftDelete`** must agree.
+- **`Modes()` ⟺ the schema's archive-column declaration** must agree.
 - **Aggregate child-mutation methods open with `domain.EnsureInitialized(root)`** — else
   construction notifications are lost.
 - **`ApplyTo` on a SharedBase upsert may run twice** → pure/idempotent.

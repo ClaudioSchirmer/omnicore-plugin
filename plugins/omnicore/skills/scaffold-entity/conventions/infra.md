@@ -27,7 +27,7 @@ root; the domain-service implementation in its own file here.
   never rely on a DB `DEFAULT` for correctness (the DDL default is belt-and-suspenders).
   All three are OPTIONAL: undeclared ⇒ never mentioned in any SQL.
 - Boot checks the docs route you past: field-exists, column bijection, PK single-column,
-  **`Modes()` ⟺ `SoftDelete`** agreement.
+  **`Modes()` ⟺ archive-column** agreement.
 
 ## Repository — decisions
 

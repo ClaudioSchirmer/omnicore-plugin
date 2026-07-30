@@ -65,13 +65,13 @@ web.md.
 
 ## The verb tells the truth (soft removal)
 
-Removing a child with a soft-delete column ARCHIVES it (the row lingers, hidden) — so the
+Removing a child with an archive (deleted-at) column ARCHIVES it (the row lingers, hidden) — so the
 route is **`PATCH …/archive`, never `DELETE`** (a lying contract). A role child is ALWAYS
-soft-removable (no soft-delete column errors at the remove); only a base-child explicitly
-opting out of soft-delete is hard-deleted (then `DELETE` is honest).
+soft-removable (no archive column errors at the remove); only a base-child explicitly
+opting out of the archive column is hard-deleted (then `DELETE` is honest).
 
 > **⚠️ NO per-child unarchive** — the edit-path load hides archived children and the
-> update never clears the soft-delete, so a soft-removed child cannot be revived alone;
+> update never clears the archive stamp, so a soft-removed child cannot be revived alone;
 > only the ROOT's unarchive revives children, in cascade. **A child needing its own
 > reversible archive⇄unarchive is NOT a value object — promote it (model C).** Surface
 > this in the child-edit elicitation: "should a removed <child> be restorable on its

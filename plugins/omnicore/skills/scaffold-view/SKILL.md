@@ -105,7 +105,14 @@ sections structural (`N/A — <why>`, never deleted):
    rule stated (shape change later ⇒ `Version` bump ⇒ rebuild — `mongo-schema-evolution`).
 4. **Consistency contract** [high-risk]: eventual via CDC; expected lag tolerance; what
    the consumer must NOT assume. For Upstream/Embed: what happens when the remote is
-   down (per the pinned contract in `views`).
+   down (per the pinned contract in `views`). **AND the ARCHIVE regime — decide it
+   explicitly, never by silent default** [high-risk]: (a) per embedded/linked SEGMENT:
+   when the source row archives, does the segment FOLLOW it (hidden on default reads,
+   `?includeArchived` reveals) or RETAIN its data regardless (e.g. a sale keeping the
+   archived customer's name forever, renames still flowing in)? (b) the view's OWN root:
+   archived rows kept-but-hidden (default) or dropped (`DeleteOnArchive()` — hot tier)?
+   The pin's `views` section (the archived rule / the segment cut) names the exact
+   lever for each source kind — read it there, then CONFIRM per leg with the dev.
 5. **Surfaces** — REST endpoints, GraphQL exposure, filter operators per field
    (operators are low-risk — decide well), pagination/options.
 6. **Naming** — collection, view type, routes; owner-prefixed and consistent with the

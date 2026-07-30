@@ -36,7 +36,7 @@ Nullable Go pointer → nullable column; money = `int64` minor units, never floa
 decimals → `string` (float64 rounds); binary floats fine for non-money numerics. Managed
 columns when declared: `deleted_at` nullable, `created_at`/`updated_at` NOT NULL with a DB
 default as belt-and-suspenders (the framework stamps actively). If the entity has no
-Archive mode, there is no `deleted_at` — keep `Modes()` ⟺ `SoftDelete` ⟺ the column in
+Archive mode, there is no archive column — keep `Modes()` ⟺ the schema declaration ⟺ the migration in
 lockstep.
 
 ## Self-documenting DDL — table & column descriptions
