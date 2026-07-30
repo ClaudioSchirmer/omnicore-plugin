@@ -30,8 +30,9 @@ regenerated.
 
 ## Modes() + BuildRules — traps the docs route you past
 
-- **`Modes()` ⟺ `SoftDelete` must agree** — `ModeArchive` without a schema `SoftDelete`
-  panics at repo construction (and vice-versa keep them in lockstep).
+- **`Modes()` ⟺ the schema's archive-column declaration must agree** — `ModeArchive`
+  without the declared column
+  panics at repo construction (and vice-versa; keep them in lockstep).
 - **There is NO `IfArchive`/`IfUnarchive`** — archive/unarchive rules ride `actionName`
   (`"GetArchivable"`/`"GetUnarchivable"`) inside `IfUpdate`. Full actionName↔verb map:
   `rules-dsl.html`.

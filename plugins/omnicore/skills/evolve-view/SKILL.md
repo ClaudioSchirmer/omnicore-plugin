@@ -69,7 +69,11 @@ read. Never bump inline.
 Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed | EmbedInChild |
 aggregated) · legs/roles and join keys · projected shape + current `Version` · indexes
 and options · collection name · surfaces exposing it (REST, GraphQL) · known consumers
-in-repo · the project's local flavor.
+in-repo · the project's local flavor. For any change touching a segment's projected
+fields or lifecycle, check whether it FLIPS the segment's ARCHIVE regime
+(follow-the-source vs retain-regardless): that is a shape change like any other
+(`Version` bump ⇒ rebuild) AND it changes what consumers SEE on default reads — call
+it out explicitly in the impact map, per the pin's `views` archived rule.
 
 ## Phase 1 — Spec gate: `evolve-view/<view>/spec.md`
 

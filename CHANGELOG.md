@@ -5,6 +5,36 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.9.0] — 2026-07-30
+
+### Added
+- **Explicit ARCHIVE-regime decision gates** in the view-shaping skills — the
+  read-side archive behavior is never left to a silent default:
+  - `scaffold-view`: the spec gate's Consistency contract now forces, per
+    embedded/linked segment, the follow-the-source vs retain-regardless
+    decision (plus the view root's own kept-hidden vs `DeleteOnArchive()`
+    choice), routing to the pin's `views` section for the exact lever;
+  - `evolve-view`: the impact map flags when a change to a segment's projected
+    fields or lifecycle FLIPS its archive regime — a shape change (`Version`
+    bump ⇒ rebuild) that also changes what consumers see on default reads;
+  - `scaffold-entity`: when Archive is among the chosen modes, the entity
+    view's regime (kept-hidden default vs `DeleteOnArchive()`) is settled in
+    the same question.
+  Mechanics stay in the pinned docs — the skills only force the decision.
+  Pairs with framework v0.39.x (`JoinView(...).Fields` — the per-leg allowlist
+  whose `"DeletedAt"` entry is the segment's archive switch), while the
+  decision gates themselves apply on every pin (the lever set is the pin's).
+
+### Changed
+- **`scaffold-entity` stops naming the archive-column builder** — the
+  `Modes()` consistency invariant now names the CONCEPT (the schema's
+  archive/deleted-at column declaration) and routes to the pin's table-schema
+  docs for the builder name, staying correct on released pins (`SoftDelete`)
+  and on v0.39.x+ (`DeletedAt`) alike, as the version-agnostic design intends.
+  Prose sweeps soft-delete → archive vocabulary across the conventions
+  ("archive column", "archive stamp", "default archive"); "soft removal" as
+  the non-destructive-write concept stays.
+
 ## [0.8.4] — 2026-07-25
 
 ### Changed
