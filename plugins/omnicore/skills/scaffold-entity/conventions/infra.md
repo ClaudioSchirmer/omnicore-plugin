@@ -63,6 +63,11 @@ root; the domain-service implementation in its own file here.
   bump; forgetting when the hash changed = boot abort (`mongo-schema-evolution.html`).
 - Index what the spec's filter/sort list names; `TextIndex` for `?search`.
 - Options (`DeleteOnArchive`, `MaxLimit`) — ask; default neither.
+- **View backing (relational vs Mongo).** Per the project read-side posture / the spec's
+  §9 slot. Relational = `.RelationalSource(repo.Loader)` on the plain per-entity view —
+  the aggregate's OWN loader (shared with the repo; boot guard `BoundTable()==schema.Table()`),
+  never a second one; root-only reads, no collection. Mongo = the plain `View(name).Schema(...)`.
+  Only the plain per-entity view is eligible — never Composed/Shared/Embed. `relational-view.html`.
 - **Never `Embed` internal data** — children/siblings auto-project from the schema;
   embedding local data is a fatal boot error. Embeds are for EXTERNAL/upstream data only.
 

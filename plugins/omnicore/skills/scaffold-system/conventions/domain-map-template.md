@@ -23,6 +23,12 @@ Framework pin: <from `go.mod` — informative only; docs of that pin are the aut
 
 <what is being built, restated in the run's language>
 
+## §1p Read-side posture (system-wide)
+
+Full distributed CQRS (Mongo-projected, canonical) · Reduced/MVP (relational, SoR-served)
+— the DEFAULT backing for every entity view below; from `scaffold-service/spec.md` if it
+set one, else decided here. Per-entity override allowed (§9), with a reason.
+
 ## §2 Aggregate inventory
 
 | # | Aggregate | Kind | Purpose (one line) | Depends on | Status |
@@ -96,3 +102,4 @@ re-derive them; everything absent stays the run's own to decide or ask.
 - **Cross-references:** <fields from §4, with the referenced aggregate's status at
   delegation time>
 - **Slice of §0:** <the sentences of the source request this entity owns>
+- **View backing:** relational · Mongo (default = §1p posture; override only with a reason)

@@ -92,7 +92,7 @@ Ask in ONE consolidated round, opening with the loud status line —
 `⏸️ PAUSED — setup spec awaiting your answers; nothing generated yet.` **The agent
 chooses how to ask** — a structured multiple-choice prompt (e.g. AskUserQuestion) is a
 good fit for the closed-choice slots (dialect, transport, surfaces, docker bench,
-cross-platform); the free-text slots (service name, module path) are typed, so ask
+cross-platform, read-side posture); the free-text slots (service name, module path) are typed, so ask
 those as plain text. Either medium is fine — the only hard rules are: keep it
 consolidated (never drip questions one at a time) and lead with the loud PAUSED line so
 it's unmistakable that nothing is generated yet.
@@ -121,6 +121,24 @@ High-risk — always asked (mark recommendations `(proposed)`):
    platform's? `(proposed: yes)` — on a Unix host that adds `start.cmd` + `start.ps1`
    for Windows teammates; on a Windows host it adds `start.sh`. Purely additive, no
    rework — decline if the team is single-OS. Record the resolved set in the spec.
+8. **Read-side posture** — HOW entity read models are served, asked NEUTRALLY, NO
+   default: an empty dir is equally likely an MVP or a seasoned team's solid service,
+   and we can't tell which. Read `relational-view` at the pin before wording it.
+   - **Full distributed CQRS** — entity views Mongo-projected through the CDC pipeline
+     (the canonical omnicore path): O(1) document reads, the full read-side vocabulary
+     (embeds, links, composed/shared views, free-text search, child/sibling filter+sort),
+     eventually consistent (CDC lag).
+   - **Reduced / MVP** — entity views served RELATIONAL, straight from the SoR
+     (`.RelationalSource(...)`): read-your-writes with NO CDC lag, the projection
+     apparatus can wait. The cost, stated plainly: root-only reads on a single aggregate
+     — no embeds/links/composed/shared views, no free-text search, no child/sibling
+     filter+sort — and read-time aggregate composition instead of an O(1) fetch.
+   Say the reassuring truth: **this is not a lock-in.** The bench ships FULL (Mongo +
+   relay) either way, so moving a view to Mongo later is a per-view flag — drop
+   `.RelationalSource()` + bump `Version(N)`, one automatic online blue-green rebuild,
+   nothing re-scaffolded. Record the posture in the spec; it's handed to
+   `scaffold-entity` as the DEFAULT backing per entity view (still per-entity
+   overridable there).
 
 Low-risk — decide and SHOW filled, don't ask: **the omnicore version — ALWAYS the
 latest published release, resolved at generation time (`@latest`); never a question**
@@ -269,6 +287,7 @@ skill), the fallback for concepts this table doesn't list.
 
 | When generating… | Read section(s) |
 |---|---|
+| read-side posture (relational vs Mongo backing) | relational-view · views |
 | `microservice.*.yaml` keys / profiles / defaults | yaml-reference |
 | bootstrap shell / feature mounting / probes | bootstrap |
 | migrations skeleton / autoRun / dir layout | migrations |

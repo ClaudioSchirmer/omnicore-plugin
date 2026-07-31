@@ -5,6 +5,38 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.10.0] — 2026-07-31
+
+### Added
+- **Relational-view awareness across the view-shaping and project-init skills** —
+  the framework's `.RelationalSource(...)` read model (a plain view served straight
+  from the SoR, read-your-writes, the deliberate CQRS exception for MVPs and
+  freshest-possible dashboards) is now a first-class decision the skills teach and
+  route, always docs-first against the pin's `relational-view` section:
+  - `scaffold-service`: a new neutral, no-default Phase 1 question — **read-side
+    posture** (full distributed CQRS, Mongo-projected · reduced/MVP, relational
+    from the SoR) — recorded in the spec as the default backing for entity views.
+    Framed as no lock-in: the bench ships full either way, so moving a view to
+    Mongo later is a per-view flag (drop the marker + bump `Version` ⇒ one automatic
+    online blue-green rebuild).
+  - `scaffold-system`: the posture is decided ONCE at system altitude (`§1p` of the
+    domain map, read from `scaffold-service/spec.md` when it just set one) and handed
+    to every delegated run as the default view backing (per-entity overridable).
+  - `scaffold-entity`: honors the posture when emitting the plain per-entity view —
+    relational (`.RelationalSource(repo.Loader)`, root-only reads, no collection) vs
+    Mongo — asking once when no posture is on record; reuses the aggregate's existing
+    loader (boot guard `BoundTable()==schema.Table()`), never a second one.
+  - `scaffold-view`: teaches the LIMITATION — every composition type it creates
+    (ComposedView, SharedBaseView, the Embed/Link family, Upstream, aggregated) is
+    relational-ineligible (boot fail, 400, or a different declaration type), so the
+    option is never offered here; a plain single-aggregate listing routes to
+    `scaffold-entity` instead.
+  - `evolve-view`: the FLIP — adding/removing `.RelationalSource()` is a shape change
+    (`Version` bump) with its two drift transitions taught (`DriftRelationalSync`,
+    no rebuild ⇄ `DriftRebuildRequired`, full online blue-green rebuild).
+  Mechanics stay in the pinned docs — the skills only force and route the decision;
+  the capability applies on any pin that ships `relational-view`.
+
 ## [0.9.0] — 2026-07-30
 
 ### Added

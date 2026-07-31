@@ -303,6 +303,17 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    rows kept-but-hidden in the entity's view (default; `?includeArchived` reveals) or
    dropped from it (`DeleteOnArchive()` — the hot-tier choice)? One question, confirmed
    with the dev; the pin's `views` section carries the contract.
+   **Settle the view BACKING in the same pass (independent of modes/archive).** The
+   project read-side posture (from `scaffold-service`/`scaffold-system`, if set) is the
+   DEFAULT; with none on record (a lone entity run), ASK once, neutrally. It applies ONLY
+   to this entity's OWN plain per-entity view — never a Composed/Shared/Embed view
+   (`scaffold-view`'s, relational-ineligible by construction): **Mongo** (`View(name)…`)
+   = O(1), eventual, full vocabulary, canonical; **Relational** (`… .RelationalSource(
+   repo.Loader)`) = read-your-writes from the SoR, no CDC wait, but ROOT-ONLY (no
+   embeds/links/search/child+sibling filter+sort) and read-time composition — pass the
+   aggregate's EXISTING `repo.Loader`, never a second loader (boot guard
+   `BoundTable()==schema.Table()`). Reversible by a flag later (drop marker + bump
+   `Version` → auto rebuild) — no lock-in framing. Read `relational-view` at the pin.
 6. **Business rules, validations, restrictions — ASK; do not skip and do not invent.** What
    must `BuildRules` enforce? Required fields, formats (email, document/tax-id), numeric
    ranges (e.g. a grade 0–100), string lengths, cross-field invariants, immutability, state
@@ -573,6 +584,7 @@ only a genuinely missing docs file does.
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |
 | schema (Go↔column) | table-schema |
 | view: indexes / options / Version | auto-query-handlers · mongo-schema-evolution |
+| view backing: relational (SoR) vs Mongo | relational-view |
 | SharedBaseView / ComposedView (read) | table-schema · query-side |
 | response projection (AutoFromDoc / FromDoc) | auto-query-handlers · custom-query-handler |
 | REST routes / OpenAPI | openapi · reference |
@@ -615,6 +627,10 @@ only a genuinely missing docs file does.
 - **`?fields=` opt-in → every Response field must be `*T`/slice + `,omitempty`** or panic.
 - **View `Version(N)`** — bump on rebuild-relevant change (root/embeds/DeleteOnArchive/
   jsonSchema/collation/capped/time-series); index-only does NOT; forgetting panics.
+- **A relational view (`.RelationalSource`) has NO Mongo collection** — SyncEngine,
+  Mongo-spec and reconcile skip it by name; its reads are read-your-writes (provable
+  immediately, no CDC round-trip). Unsupported reads (search / child+sibling filter+sort)
+  return 400, not 500. Full contract: `relational-view`.
 - **Every `.up.sql` needs a `.down.sql`** (may be a no-op) or boot aborts.
 - **A ComposedView 1:N leg's FK must be indexed** or boot is fatal.
 - **`Modes()` ⟺ the schema's archive-column declaration** must agree.
