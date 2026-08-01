@@ -178,6 +178,12 @@ Self-configure by reading the project:
   from an APPROVED map → flag advisorily (the system plan may be stale) and proceed
   normally. When the run was delegated, also skip Phase 0v — the orchestrator resolved
   it once for the whole system.
+- **The read-side posture (view backing default).** In order: a delegated
+  `domain-map.md` §1p / this entity's §9 `View backing` (authoritative when present) →
+  else `scaffold-service/spec.md` in the project root (a fresh project just scaffolded)
+  → else INFER from existing per-entity views (do any carry `.RelationalSource()`?). It
+  sets the DEFAULT for item 5's view-backing decision; only when NONE of these is on
+  record does that item ASK. Never silently pick one when nothing is found.
 - **`/docs` + `conventions/` are the ALWAYS-ON basis — read them every run, whether the
   project is empty OR already full of entities.** Existing code is never a substitute for
   the mandatory per-layer doc read (Core principles); "the project already has entities"
