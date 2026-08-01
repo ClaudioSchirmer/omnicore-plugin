@@ -178,6 +178,12 @@ Self-configure by reading the project:
   from an APPROVED map → flag advisorily (the system plan may be stale) and proceed
   normally. When the run was delegated, also skip Phase 0v — the orchestrator resolved
   it once for the whole system.
+- **The read-side posture (view backing default).** In order: a delegated
+  `domain-map.md` §1p / this entity's §9 `View backing` (authoritative when present) →
+  else `scaffold-service/spec.md` in the project root (a fresh project just scaffolded)
+  → else INFER from existing per-entity views (do any carry `.RelationalSource()`?). It
+  sets the DEFAULT for item 5's view-backing decision; only when NONE of these is on
+  record does that item ASK. Never silently pick one when nothing is found.
 - **`/docs` + `conventions/` are the ALWAYS-ON basis — read them every run, whether the
   project is empty OR already full of entities.** Existing code is never a substitute for
   the mandatory per-layer doc read (Core principles); "the project already has entities"
@@ -303,6 +309,17 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    rows kept-but-hidden in the entity's view (default; `?includeArchived` reveals) or
    dropped from it (`DeleteOnArchive()` — the hot-tier choice)? One question, confirmed
    with the dev; the pin's `views` section carries the contract.
+   **Settle the view BACKING in the same pass (independent of modes/archive).** The
+   project read-side posture (from `scaffold-service`/`scaffold-system`, if set) is the
+   DEFAULT; with none on record (a lone entity run), ASK once, neutrally. It applies ONLY
+   to this entity's OWN plain per-entity view — never a Composed/Shared/Embed view
+   (`scaffold-view`'s, relational-ineligible by construction): **Mongo** (`View(name)…`)
+   = O(1), eventual, full vocabulary, canonical; **Relational** (`… .RelationalSource(
+   repo.Loader)`) = read-your-writes from the SoR, no CDC wait, but ROOT-ONLY (no
+   embeds/links/search/child+sibling filter+sort) and read-time composition — pass the
+   aggregate's EXISTING `repo.Loader`, never a second loader (boot guard
+   `BoundTable()==schema.Table()`). Reversible by a flag later (drop marker + bump
+   `Version` → auto rebuild) — no lock-in framing. Read `relational-view` at the pin.
 6. **Business rules, validations, restrictions — ASK; do not skip and do not invent.** What
    must `BuildRules` enforce? Required fields, formats (email, document/tax-id), numeric
    ranges (e.g. a grade 0–100), string lengths, cross-field invariants, immutability, state
@@ -573,6 +590,7 @@ only a genuinely missing docs file does.
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |
 | schema (Go↔column) | table-schema |
 | view: indexes / options / Version | auto-query-handlers · mongo-schema-evolution |
+| view backing: relational (SoR) vs Mongo | relational-view |
 | SharedBaseView / ComposedView (read) | table-schema · query-side |
 | response projection (AutoFromDoc / FromDoc) | auto-query-handlers · custom-query-handler |
 | REST routes / OpenAPI | openapi · reference |
@@ -608,6 +626,11 @@ only a genuinely missing docs file does.
     serves both.
   Either pin: the framework's OWN control-plane tables use `CHAR(36)` via a different
   write path — do NOT mirror that for entity tables. See `conventions/migrations.md`.
+  - **SQLite (zero-infra MVP pins)**: `domain.ID` → TEXT; a decimal-as-`string` field →
+    TEXT (never `NUMERIC` — SQLite coerces it to float64 and loses precision); case
+    folding is ASCII-only. Per the pin's `table-schema.html` SQLite type table. On SQLite
+    all views are relational (no Mongo), so the "filter on the Mongo view" fallbacks above
+    don't apply — root-only reads.
 - **Service migrations start at `0001`** (the service's own sequence; the framework's
   `0001_framework` is in a separate tracking table — no collision). Not `0002`.
 - **`path:"id"` on a by-id request → boot panic** (the `*Spec`/HasPathID owns `:id`; never
@@ -615,6 +638,10 @@ only a genuinely missing docs file does.
 - **`?fields=` opt-in → every Response field must be `*T`/slice + `,omitempty`** or panic.
 - **View `Version(N)`** — bump on rebuild-relevant change (root/embeds/DeleteOnArchive/
   jsonSchema/collation/capped/time-series); index-only does NOT; forgetting panics.
+- **A relational view (`.RelationalSource`) has NO Mongo collection** — SyncEngine,
+  Mongo-spec and reconcile skip it by name; its reads are read-your-writes (provable
+  immediately, no CDC round-trip). Unsupported reads (search / child+sibling filter+sort)
+  return 400, not 500. Full contract: `relational-view`.
 - **Every `.up.sql` needs a `.down.sql`** (may be a no-op) or boot aborts.
 - **A ComposedView 1:N leg's FK must be indexed** or boot is fatal.
 - **`Modes()` ⟺ the schema's archive-column declaration** must agree.

@@ -11,7 +11,7 @@ Invoked as `/omnicore:<skill>` once installed:
 
 | Skill | What it does |
 |---|---|
-| `/omnicore:scaffold-service` | Create a brand-new omnicore service from an empty directory — `go.mod` pinned to a published release, the bootable bootstrap shell, the `microservice.*.yaml` profiles, migrations skeleton, and the local docker bench (DB + Mongo + broker + Debezium CDC relay) — then prove the shell boots. |
+| `/omnicore:scaffold-service` | Create a brand-new omnicore service from an empty directory — `go.mod` pinned to a published release, the bootable bootstrap shell, the `microservice.*.yaml` profiles, migrations skeleton, and EITHER a local docker bench (DB + Mongo + broker + Debezium CDC relay) OR a zero-infra SQLite MVP (single pure-Go binary, one `app.db` or `:memory:`, no Docker) — then prove the shell boots. |
 | `/omnicore:scaffold-system` | Turn a whole-system/MVP description — several entities, shared identities and read models in one prose drop — into an approved domain map, then scaffold it entity by entity by delegating to `scaffold-entity` (and cross-entity read models to `scaffold-view`). Decomposition only: it never generates code itself. |
 | `/omnicore:scaffold-entity` | Scaffold a complete CRUD entity across every layer (domain → application → web → infra → migrations → bootstrap) of an existing omnicore service. |
 | `/omnicore:evolve-entity` | Change an EXISTING entity — add/remove/rename fields, uniqueness, children, modes — with schema evolution done right: migration, TableSchema, DTOs, translations, view `Version` bump and OpenAPI move together, via an approved impact-map spec. |
@@ -20,6 +20,7 @@ Invoked as `/omnicore:<skill>` once installed:
 | `/omnicore:evolve-view` | Change an EXISTING view — projected fields, legs/roles, indexes, operators, surfaces — with the `Version` bump and rebuild discipline done right, write side untouched. |
 | `/omnicore:implement` | Wire a framework capability into an existing service — another surface (gRPC, GraphQL), an external API call from a handler (httpclient + middleware), cache, integration events, lifecycle hooks, authz, tracing — anything the pinned framework offers that no dedicated skill owns. Routes the request against the pin's docs (the capability catalog); if the framework doesn't offer it, it says so honestly. |
 | `/omnicore:run` | Boot the service locally (bench up, background boot, readiness) and hand you clickable links — OpenAPI UI, GraphQL, probes. The app stays running. |
+| `/omnicore:configure` | Change a service's INFRASTRUCTURE POSTURE and configuration — convert a zero-infra/SQLite MVP into full distributed CQRS (add Mongo + broker + CDC relay + docker) or back, swap the relational engine, switch transport (kafka ⇄ nats), tune the `microservice.*.yaml` / devops glue. Every conversion is reversible and no application code is lost. |
 | `/omnicore:doctor` | Diagnose a misbehaving service or bench: walks the pipeline (build → boot → serve → write → relay → broker → projection), proves the cause with evidence, and prescribes the fix. Read-only — it never edits your files. |
 | `/omnicore:upgrade` | Upgrade a service's omnicore pin: check the current version, show the target release's changelog, and on your ok run `go get` + `go mod tidy` + build — with rollback to the previous version if the build breaks, or an approved migration plan to fix the breaking-change fallout. |
 | `/omnicore:help` | Docs-first conversational guide to how the framework works. Read-only: it explains, it never changes anything. |
@@ -110,6 +111,7 @@ omnicore-plugin/                     # repo root = marketplace
             ├── scaffold-view/
             ├── evolve-view/
             ├── implement/
+            ├── configure/
             ├── run/
             ├── doctor/
             ├── upgrade/

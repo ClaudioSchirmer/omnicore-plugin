@@ -41,12 +41,19 @@ skill can already plan it.
   closest legitimate path (plain code in the service, an external component, a framework
   feature request) — never a semantically-off workaround, and never reimplement inside
   the service something the framework DOES provide (the doc wins over the urge to
-  hand-roll).
+  hand-roll). Distinguish TWO nos: (a) the framework doesn't offer it → the honest no
+  above; (b) the framework DOES offer it but the current infra posture lacks what it
+  needs (e.g. integration-event publish with no broker/relay, or anything Mongo on an
+  infra-free / SQLite project) → NOT a no: name the infra it needs and OFFER to enable it
+  via `/omnicore:configure` (delegate, or point the dev at it), then continue. Never
+  refuse a capability the framework has — offer the conversion. Reversible, no code lost.
 - **Fallback router — dedicated skills own their turf; detect and hand off FIRST.** New
   entity → `scaffold-entity` · several entities/an MVP → `scaffold-system` · change to
   an existing entity's write side → `evolve-entity` · new/changed read model →
   `scaffold-view`/`evolve-view` · removal → `remove-entity` · no service yet →
-  `scaffold-service` · version bump → `upgrade` · "it should already work but doesn't" →
+  `scaffold-service` · version bump → `upgrade` · infra/posture change (add Mongo/broker,
+  swap engine, enable the infra a capability needs) → `configure` · "it should already
+  work but doesn't" →
   `doctor` (diagnose before implementing — a missing capability and a broken one look
   alike) · "how does it work?" → `help`. This skill takes what none of them claims. A
   mixed request (an entity AND a capability) is sequenced: the owner skill first, this
@@ -115,8 +122,10 @@ capability the pin lacks — that offer goes through the same skill, same rules.
    section(s); `features.html`/`reference.html` confirm the capability exists at this
    pin. Three outcomes: **offered** → continue · **offered in a newer release only**
    (its `changelog.html` says so) → present honestly, offer `/omnicore:upgrade`, and
-   only continue on the new pin if accepted · **not offered** → honest no + closest
-   legitimate path, and STOP unless the dev redirects. Examples of routings (examples
+   only continue on the new pin if accepted · **offered by the framework but the current
+   posture lacks its infra** (broker/relay/Mongo absent, e.g. an infra-free / SQLite
+   project) → offer `/omnicore:configure` to enable it, then continue · **not offered** →
+   honest no + closest legitimate path, and STOP unless the dev redirects. Examples of routings (examples
    only — the map at the pin is always the authority, sections may differ per version):
    another transport surface → the gRPC/GraphQL sections · outbound HTTP + resilience →
    the httpclient/middleware sections · cross-service events → the integration-events

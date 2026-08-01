@@ -33,7 +33,7 @@ delegation is the antidote, and the reason this is a skill.
   version-pinned `/docs` (resolved via `go list -m -f '{{.Dir}}'
   github.com/ClaudioSchirmer/omnicore`) are the SOLE authority; this skill carries no
   code, and its modeling claims come from the docs read at map time — for the map that
-  means `table-schema.html` (shared base, children, siblings — the write-side normalization) and `views.html` (view kinds + composition), read BEFORE filling the map. Never assume a framework
+  means `table-schema.html` (shared base, children, siblings — the write-side normalization), `views.html` (view kinds + composition) and `relational-view.html` (the read-side posture — relational vs Mongo backing), read BEFORE filling the map. Never assume a framework
   version; never stamp one into this skill.
 - **Framework maintainer rules NEVER bind this skill.** The omnicore module ships its
   own `CLAUDE.md`/contributor rules; those govern development OF the framework, never
@@ -121,6 +121,17 @@ per section:
   justify, CONFIRM.
 - **References (§4).** Direction and nullability of every cross-aggregate link — the
   referenced side scaffolds first (§7).
+- **Read-side posture (system-wide, §1p).** Decide ONCE, neutrally (no default — MVP
+  vs solid build, same doctrine as `scaffold-service` #8): entity views relational
+  (SoR, read-your-writes, defer the pipeline) or Mongo-projected (canonical). If
+  `scaffold-service` just set it, READ it from `scaffold-service/spec.md` — don't
+  re-ask; on existing ground, infer from existing views, else ask once. It's the
+  DEFAULT view backing handed to every delegated run (per-entity overridable). The
+  posture includes the ENGINE/infra choice (a SQLite/zero-infra MVP vs a full-CQRS
+  engine). **Infra-free doesn't forbid a SharedBase/ComposedView in the map** — it means
+  those read models (§5) and integration events (§6) belong to the standard path: note
+  them as "needs Mongo/broker — enable via `/omnicore:configure`", never drop them from
+  the map. Capability-aware, never a cut.
 - **Read models beyond per-entity (§5).** Anything joining entities (ComposedView),
   aggregating, or embedding external data is `scaffold-view`'s turf, executed in
   Phase 3. Identity views ride WITH their SharedBase entity's delegated run (item 1
@@ -137,7 +148,8 @@ executes and the checklist re-entry reads.
 
 For each §2 row in §7 order, invoke **`/omnicore:scaffold-entity`** handing it: the
 approved map's path, the entity's slice of the Source request (verbatim), and its §9
-pre-answered slots. Rules of engagement:
+pre-answered slots (including the read-side posture as the default view backing).
+Rules of engagement:
 
 - **ONE entity per invocation, fresh focus.** The delegated run performs its OWN phases
   (0a → final verify) and keeps its OWN spec gate — the map never waives it; it

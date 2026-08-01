@@ -68,8 +68,10 @@ read. Never bump inline.
 
 Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed | EmbedInChild |
 aggregated) · legs/roles and join keys · projected shape + current `Version` · indexes
-and options · collection name · surfaces exposing it (REST, GraphQL) · known consumers
-in-repo · the project's local flavor. For any change touching a segment's projected
+and options · collection name · **whether it currently carries `.RelationalSource()`**
+(SoR-served) · **is Mongo present in this project** (infra-free ⇒ a flip TO Mongo needs
+it enabled first) · surfaces exposing it (REST, GraphQL) · known consumers in-repo · the
+project's local flavor. For any change touching a segment's projected
 fields or lifecycle, check whether it FLIPS the segment's ARCHIVE regime
 (follow-the-source vs retain-regardless): that is a shape change like any other
 (`Version` bump ⇒ rebuild) AND it changes what consumers SEE on default reads — call
@@ -94,6 +96,20 @@ structural (`N/A — <why>`):
    (where the truth lives · how it refreshes · coupling/failure mode · cost) in the
    user's language BEFORE recommending — same teach-then-confirm doctrine as
    `scaffold-view`; a type change is a new consistency contract, never a detail.
+4b. **Flipping the backing (relational ⇄ Mongo)** [high-risk] — adding or removing
+   `.RelationalSource()` is a SHAPE change (it's in the rebuild hash), so it REQUIRES a
+   `Version(N)` bump like any other. Teach the two transitions from `relational-view`
+   at the pin: Mongo→relational = `DriftRelationalSync` (registry synced, NO rebuild;
+   reads move to the SoR, the old collection is left frozen, not dropped);
+   relational→Mongo = `DriftRebuildRequired` (full online blue-green rebuild from the
+   CURRENT SoR — zero-downtime, captures every write made during the relational phase).
+   Only a PLAIN single-aggregate view can flip — a Composed/Shared/Embed view is
+   relational-ineligible (different type or boot fail), so this item is `N/A` for them.
+   State the read-side consequence (relational = root-only, read-your-writes; Mongo =
+   full vocabulary, eventual) so the dev flips with open eyes. If the target is Mongo but
+   the project is infra-free (no `mongo.uri`), flipping would abort the boot — don't
+   refuse: offer to enable Mongo via `/omnicore:configure` (delegate now, or point the
+   dev at it), then flip. Reversible, no code lost.
 5. **Consumer impact** [high-risk]: wire-visible removals/renames on read responses are
    BREAKING for consumers — list them, flag them, the dev decides; never silent.
 6. **Surfaces** — endpoints/GraphQL changes; filter operators per new field (low-risk).
@@ -115,6 +131,7 @@ index for concepts this table doesn't list.
 | When changing… | Read section(s) |
 |---|---|
 | projected shape / `Version` / rebuild | mongo-schema-evolution · auto-query-handlers |
+| flipping backing: relational ⇄ Mongo (drift, rebuild) | relational-view · mongo-schema-evolution |
 | composition contracts / legs / roles | views |
 | custom projection / response shaping | custom-query-handler |
 | indexes / options / aggregations | auto-query-handlers |
