@@ -126,7 +126,12 @@ per section:
   (SoR, read-your-writes, defer the pipeline) or Mongo-projected (canonical). If
   `scaffold-service` just set it, READ it from `scaffold-service/spec.md` — don't
   re-ask; on existing ground, infer from existing views, else ask once. It's the
-  DEFAULT view backing handed to every delegated run (per-entity overridable).
+  DEFAULT view backing handed to every delegated run (per-entity overridable). The
+  posture includes the ENGINE/infra choice (a SQLite/zero-infra MVP vs a full-CQRS
+  engine). **Infra-free doesn't forbid a SharedBase/ComposedView in the map** — it means
+  those read models (§5) and integration events (§6) belong to the standard path: note
+  them as "needs Mongo/broker — enable via `/omnicore:configure`", never drop them from
+  the map. Capability-aware, never a cut.
 - **Read models beyond per-entity (§5).** Anything joining entities (ComposedView),
   aggregating, or embedding external data is `scaffold-view`'s turf, executed in
   Phase 3. Identity views ride WITH their SharedBase entity's delegated run (item 1

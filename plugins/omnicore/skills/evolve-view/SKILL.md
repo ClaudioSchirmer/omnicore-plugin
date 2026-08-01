@@ -69,7 +69,8 @@ read. Never bump inline.
 Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed | EmbedInChild |
 aggregated) · legs/roles and join keys · projected shape + current `Version` · indexes
 and options · collection name · **whether it currently carries `.RelationalSource()`**
-(SoR-served) · surfaces exposing it (REST, GraphQL) · known consumers in-repo · the
+(SoR-served) · **is Mongo present in this project** (infra-free ⇒ a flip TO Mongo needs
+it enabled first) · surfaces exposing it (REST, GraphQL) · known consumers in-repo · the
 project's local flavor. For any change touching a segment's projected
 fields or lifecycle, check whether it FLIPS the segment's ARCHIVE regime
 (follow-the-source vs retain-regardless): that is a shape change like any other
@@ -105,7 +106,10 @@ structural (`N/A — <why>`):
    Only a PLAIN single-aggregate view can flip — a Composed/Shared/Embed view is
    relational-ineligible (different type or boot fail), so this item is `N/A` for them.
    State the read-side consequence (relational = root-only, read-your-writes; Mongo =
-   full vocabulary, eventual) so the dev flips with open eyes.
+   full vocabulary, eventual) so the dev flips with open eyes. If the target is Mongo but
+   the project is infra-free (no `mongo.uri`), flipping would abort the boot — don't
+   refuse: offer to enable Mongo via `/omnicore:configure` (delegate now, or point the
+   dev at it), then flip. Reversible, no code lost.
 5. **Consumer impact** [high-risk]: wire-visible removals/renames on read responses are
    BREAKING for consumers — list them, flag them, the dev decides; never silent.
 6. **Surfaces** — endpoints/GraphQL changes; filter operators per new field (low-risk).

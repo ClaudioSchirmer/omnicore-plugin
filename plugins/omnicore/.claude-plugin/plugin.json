@@ -1,7 +1,7 @@
 {
   "name": "omnicore",
   "version": "0.10.0",
-  "description": "Tooling for the omnicore DDD + CQRS framework: scaffold a new service, decompose a whole-system/MVP description into a domain map and scaffold it entity by entity, add/evolve/remove CRUD entities, create and evolve read-side views, wire framework capabilities (gRPC surface, external API calls, cache, integration events, …) docs-first, run the service with clickable links, diagnose a misbehaving service, upgrade the framework pin, and ask docs-first questions.",
+  "description": "Tooling for the omnicore DDD + CQRS framework: scaffold a new service (full CDC bench or a zero-infra SQLite MVP), decompose a whole-system/MVP description into a domain map and scaffold it entity by entity, add/evolve/remove CRUD entities, create and evolve read-side views, wire framework capabilities (gRPC surface, external API calls, cache, integration events, …) docs-first, convert a service's infrastructure posture (MVP ⇄ full CQRS, engine/transport swaps) reversibly, run the service with clickable links, diagnose a misbehaving service, upgrade the framework pin, and ask docs-first questions.",
   "author": {
     "name": "Claudio Schirmer Guedes",
     "email": "csgcad@icloud.com"

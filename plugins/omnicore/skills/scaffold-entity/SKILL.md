@@ -626,6 +626,11 @@ only a genuinely missing docs file does.
     serves both.
   Either pin: the framework's OWN control-plane tables use `CHAR(36)` via a different
   write path — do NOT mirror that for entity tables. See `conventions/migrations.md`.
+  - **SQLite (zero-infra MVP pins)**: `domain.ID` → TEXT; a decimal-as-`string` field →
+    TEXT (never `NUMERIC` — SQLite coerces it to float64 and loses precision); case
+    folding is ASCII-only. Per the pin's `table-schema.html` SQLite type table. On SQLite
+    all views are relational (no Mongo), so the "filter on the Mongo view" fallbacks above
+    don't apply — root-only reads.
 - **Service migrations start at `0001`** (the service's own sequence; the framework's
   `0001_framework` is in a separate tracking table — no collision). Not `0002`.
 - **`path:"id"` on a by-id request → boot panic** (the `*Spec`/HasPathID owns `:id`; never

@@ -36,6 +36,42 @@ is the commit bumping that field on `main`, tagged `v<version>`.
     no rebuild ⇄ `DriftRebuildRequired`, full online blue-green rebuild).
   Mechanics stay in the pinned docs — the skills only force and route the decision;
   the capability applies on any pin that ships `relational-view`.
+- **SQLite zero-infra MVP + infrastructure-posture awareness, plus a new `configure`
+  skill** — the framework's SQLite engine and infra-optional boot (single pure-Go
+  binary, one `app.db` or `:memory:`, no Docker/Mongo/broker/relay) are now first-class
+  across the plugin, and every skill is **capability-aware, never capability-gated**:
+  it warns of a posture's consequences, then OFFERS to enable what's missing (delegating
+  `/omnicore:configure`), never refuses — every conversion reversible, no code lost.
+  - **new skill `/omnicore:configure`** — converts a service's infrastructure posture in
+    either direction (zero-infra/SQLite MVP ⇄ full distributed CQRS: add/remove Mongo +
+    broker + CDC relay + docker), swaps the relational engine (porting migrations to the
+    target dialect; data ETL flagged as the dev's), switches transport (kafka ⇄ nats),
+    and tunes the `microservice.*.yaml` / devops glue. Docs-first, plan-gated; delegates
+    each view flip to `evolve-view`, verification to `run`; reuses `scaffold-service`'s
+    devops templates.
+  - **new template `scaffold-service/templates/sqlite-mvp.md`** — the SQLite zero-infra
+    glue: `CGO_ENABLED=0 -tags sqlite` start wrappers (no compose), `file:app.db` /
+    `:memory:` DSN, `.gitignore` for the `app.db*` sidecars.
+  - `scaffold-service`: `sqlite` joins the engine set as the decisive zero-infra MVP
+    engine — picking it collapses the transport/bench/read-side questions (no Mongo, no
+    broker, no Docker; tagless), records the posture, and states plainly that it's not
+    optimized for it (canonical path is CDC + Mongo), that integration events + Mongo
+    projections belong to the standard path, and that switching later is a reversible
+    `/omnicore:configure` run.
+  - `scaffold-view` / `evolve-view`: on an infra-free project a Mongo-only view (or a
+    flip to Mongo) is never refused — the skill offers to enable Mongo via `configure`.
+  - `implement`: a capability the framework offers but the current posture lacks the
+    infra for (integration-event publish without a broker, anything Mongo on SQLite) is
+    NOT an honest-no — it offers `/omnicore:configure` to enable it.
+  - `run`: follows the chosen infra — a SQLite/infra-free project boots with no bench
+    (`CGO_ENABLED=0 -tags sqlite`, no compose), and absent-by-design infra is never
+    reported as unreachable.
+  - `scaffold-system` / `scaffold-entity` / `doctor`: posture-aware — the domain map
+    records the engine/infra choice (Mongo views + integration events deferred, never
+    dropped); SQLite type/DDL specifics route to `table-schema`; and "writes 2xx, views
+    never arrive" on an infra-free project is diagnosed as by-design, not a fault.
+  Mechanics stay in the pinned docs (`relational-view`, `yaml-reference`, `transport`,
+  `table-schema`, `integration-events`); the skills only teach, route and offer.
 
 ## [0.9.0] — 2026-07-30
 

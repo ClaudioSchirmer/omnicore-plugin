@@ -47,9 +47,10 @@ session." Never a gate: this run continues on the installed skills.
   else STOP (to create one, that's `scaffold-service`).
 - **Tags:** engine + transport from `relational.dialect` / `transport` in
   `microservice.*.yaml` — the value IS the build tag (today's latest release:
-  `postgres`|`mysql`|`sqlserver`|`oracle` and `kafka`|`nats`; the pinned docs are the
-  authority on what the pin supports). Both mandatory — a tagless build aborts
-  at boot.
+  `postgres`|`mysql`|`sqlserver`|`oracle`|`sqlite` and `kafka`|`nats`; the pinned docs are
+  the authority on what the pin supports). Both mandatory — a tagless build aborts
+  at boot — **except SQLite: engine-only `-tags sqlite` (transport tagless) + `CGO_ENABLED=0`;
+  no transport tag.**
 - **Profile + ports:** `APP_PROFILE=dev` unless the dev says otherwise; resolve the
   EFFECTIVE host port from the yaml (`${VAR:default}` — apply the env override rule).
 - **Already up?** Probe `/livez` on the resolved port first — answering ⇒ skip boot,
@@ -57,17 +58,21 @@ session." Never a gate: this run continues on the installed skills.
 
 ## Phase 1 — Bench
 
+- **SQLite / infra-free project** (no `devops/`, no `mongo`/`transport` in the yaml) → NO
+  bench, boot directly. Do NOT report "unreachable" for infra that's absent by design.
 - `devops/` compose exists → `docker compose ps`; anything down → `up -d`, wait
   healthy. Trap: stopping Docker / `compose down` KEEPS named volumes — a
   migration-version-mismatch abort at boot usually means a stale volume; surface
   `down -v` as the fix but the DEV decides (it destroys data).
-- Existing-infra project (no `devops/`) → check the yaml endpoints answer (relational,
-  Mongo, broker); unreachable → report WHICH and stop.
+- Existing-infra project (no `devops/`, but the yaml declares `mongo`/`transport`) →
+  check the yaml endpoints answer (relational, Mongo, broker); unreachable → report
+  WHICH and stop.
 
 ## Phase 2 — Boot
 
 - Prefer the project's start wrapper (`start.sh` / `start.cmd`); else
-  `APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap`.
+  `APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap` — SQLite:
+  `CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite ./bootstrap`.
 - Run in BACKGROUND, log to a file; poll `/readyz` until 200 (bounded ~60s).
 - Failure → show the FIRST error from the log verbatim and stop. This skill fixes
   nothing — point at `help` (understand) or the skill that generated the code.
@@ -99,6 +104,7 @@ section for the fact in doubt — never sweep the manual to boot an app.
 | yaml keys / ports / profiles / env overrides | yaml-reference |
 | boot order / probes semantics / surfaces enabled | bootstrap |
 | relay / broker / outbox expectations | transport |
+| SQLite / infra-free posture (no bench, tagless) | relational-view · yaml-reference |
 | OpenAPI UI path / rootRedirect | openapi |
 | GraphQL / gRPC endpoints | graphql · grpc |
 

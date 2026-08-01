@@ -3,8 +3,9 @@ name: scaffold-service
 description: >-
   omnicore: create a brand-new omnicore service from an empty directory — go.mod pinned to a
   published omnicore release, the bootable empty bootstrap shell, the
-  microservice.*.yaml profiles, the migrations skeleton, and the local docker bench
-  (relational DB + Mongo + broker + Debezium CDC relay) — then prove the shell boots.
+  microservice.*.yaml profiles, the migrations skeleton, and EITHER a local docker bench
+  (relational DB + Mongo + broker + Debezium CDC relay) OR a zero-infra SQLite MVP (single
+  pure-Go binary, one app.db or :memory:, no Docker) — then prove the shell boots.
   Use when the user wants to start/initialize/set up a NEW omnicore-based microservice
   or its local environment from scratch. Counterpart of scaffold-entity, which adds
   entities to an EXISTING omnicore service.
@@ -14,7 +15,9 @@ description: >-
 
 Create the smallest thing that is honestly a running omnicore service: an EMPTY shell
 that compiles, boots, answers its probes, and has a live CDC pipeline waiting for its
-first entity. Entities are NOT this skill's job — hand off to `scaffold-entity`.
+first entity. Entities are NOT this skill's job — hand off to `scaffold-entity`. Two
+postures: the full CDC bench (canonical), or — with SQLite — a zero-infra MVP that needs
+no Docker at all. Both boot to green; both are reversible via `/omnicore:configure`.
 
 ## Core principles — read FIRST
 
@@ -25,18 +28,22 @@ first entity. Entities are NOT this skill's job — hand off to `scaffold-entity
   the routed sections before generating is MANDATORY. Never assume a framework version;
   never stamp one into this skill.
 - **The ONE sanctioned exception: `templates/` carries the docker glue** (compose +
-  Debezium relay config). That is deployment infrastructure, not framework API — the
-  framework docs deliberately don't fully specify it, and keeping it here avoids
-  guessing. BUT every framework-facing value inside those templates (topic/subject
-  naming, header contract, payload format) MUST be validated against the pinned
-  `transport.html` before writing — **if the doc disagrees with a template, the doc
-  wins** and you say so.
+  Debezium relay config) plus the SQLite zero-infra glue (`sqlite-mvp.md` — the
+  no-Docker `-tags sqlite` start wrappers). That is deployment infrastructure, not
+  framework API — the framework docs deliberately don't fully specify it, and keeping
+  it here avoids guessing. BUT every framework-facing value inside those templates
+  (topic/subject naming, header contract, payload format, SQLite DSN/pragmas) MUST be
+  validated against the pinned docs before writing — **if the doc disagrees with a
+  template, the doc wins** and you say so.
 - **ONE dialect + ONE transport per start.** The dev picks ONE relational dialect and
   ONE transport from the closed sets the pinned release supports — read them from the
   pinned docs (`table-schema.html` / `transport.html`; today's latest: `postgres` |
-  `mysql` | `sqlserver` | `oracle` × `kafka` | `nats`); the relay config is derived for exactly
-  that combination. Multi-engine / multi-transport setups are out of scope — if asked,
-  say it's a later, separate step.
+  `mysql` | `sqlserver` | `oracle` | `sqlite` × `kafka` | `nats`); the relay config is derived for
+  exactly that combination. Multi-engine / multi-transport setups are out of scope — if
+  asked, say it's a later, separate step. **SQLite is the decisive one: it is the
+  zero-infra MVP engine** — Debezium can't tail it, so it forces the whole infra off (no
+  Mongo, no broker, no CDC relay, no Docker; transport built tagless). Picking it
+  collapses the transport / bench / read-side questions below.
 - **Same risk split as `scaffold-entity`.** High-risk = the identity + infrastructure
   choices (service name, module path, dialect, transport, surfaces, bench) — ask,
   consolidated, with recommendations. Low-risk = ports, db names, timeouts, group
@@ -78,7 +85,8 @@ session." Never a gate: this run continues on the installed skills.
 - **Non-empty directory with an unrelated `go.mod` or source tree?** STOP and ask —
   never scaffold on top of somebody else's project.
 - **Toolchain:** `go` available; `docker` + `docker compose` available (only required
-  when the docker bench is wanted — see Phase 1).
+  when the docker bench is wanted — see Phase 1; a SQLite MVP needs NO Docker at all —
+  no bench, no compose).
 - **Host OS:** `go env GOOS` (`darwin`/`linux`/`windows`) — picks the guaranteed-native
   start wrapper (the baseline the final verify actually boots): darwin|linux → `start.sh`,
   windows → `start.cmd` + `start.ps1`. Feeds the Phase 1 cross-platform question.
@@ -103,11 +111,15 @@ High-risk — always asked (mark recommendations `(proposed)`):
    and container names. No default possible.
 2. **Go module path** (e.g. `github.com/org/<svc>`). No default possible.
 3. **Relational dialect** — the closed set the pinned release supports, read from the
-   pinned `table-schema.html` (today's latest: `postgres` | `mysql` | `sqlserver` | `oracle`).
-   The framework itself refuses a default — so does this skill. Neutral advice: match
-   what production will run.
-4. **Transport: `kafka` | `nats`.** Same advice: match production; NATS is the
-   lighter local bench when there's no constraint yet.
+   pinned `table-schema.html` (today's latest: `postgres` | `mysql` | `sqlserver` | `oracle` |
+   `sqlite`). The framework itself refuses a default — so does this skill. Neutral advice:
+   match what production will run. **`sqlite` is decisive**: it is the zero-infra MVP
+   engine and collapses the transport / bench / read-side questions (see the SQLite block
+   below); the others take the full-infra path.
+4. **Transport: `kafka` | `nats`** — asked ONLY when the engine is not SQLite (SQLite is
+   tagless: no broker). Same advice: match production; NATS is the lighter local bench
+   when there's no constraint yet. No broker ⇒ no integration events (they ride the CDC
+   relay — the canonical path).
 5. **Surfaces** — one question, three parts: OpenAPI UI `(proposed: yes, /docs +
    rootRedirect)`; GraphQL `(proposed: no)`; gRPC `(proposed: no)`. All additive
    later without rework — say so, no manufactured urgency.
@@ -115,7 +127,9 @@ High-risk — always asked (mark recommendations `(proposed)`):
    CDC relay, one compose). Alternative: point at EXISTING infra — then ask only for
    the endpoints (relational DSN, Mongo URI, broker endpoints), skip `devops/`
    entirely, and warn plainly: without a CDC relay tailing the outbox, the read side
-   never projects — `templates/cdc-relay.md` is the reference for wiring their own.
+   never projects — `templates/cdc-relay.md` is the reference for wiring their own. For
+   **SQLite there is NO bench (zero Docker)** — skip this entirely and instead ask the
+   SQLite DSN: a file path `(proposed: file:app.db)` or `:memory:` (ephemeral, RAM-only).
 7. **Cross-platform start wrappers** — the host-native wrapper (from `go env GOOS`,
    Phase 0) ALWAYS ships and is the one the final verify boots. Also generate the OTHER
    platform's? `(proposed: yes)` — on a Unix host that adds `start.cmd` + `start.ps1`
@@ -133,12 +147,31 @@ High-risk — always asked (mark recommendations `(proposed)`):
      apparatus can wait. The cost, stated plainly: root-only reads on a single aggregate
      — no embeds/links/composed/shared views, no free-text search, no child/sibling
      filter+sort — and read-time aggregate composition instead of an O(1) fetch.
-   Say the reassuring truth: **this is not a lock-in.** The bench ships FULL (Mongo +
-   relay) either way, so moving a view to Mongo later is a per-view flag — drop
-   `.RelationalSource()` + bump `Version(N)`, one automatic online blue-green rebuild,
-   nothing re-scaffolded. Record the posture in the spec; it's handed to
-   `scaffold-entity` as the DEFAULT backing per entity view (still per-entity
-   overridable there).
+   Say the reassuring truth: **this is not a lock-in.** On a full engine the bench ships
+   FULL (Mongo + relay) either way, so moving a view to Mongo later is a per-view flag
+   (drop `.RelationalSource()` + bump `Version(N)`, one automatic online blue-green
+   rebuild, nothing re-scaffolded). **On SQLite the posture is forced relational** (no
+   Mongo exists) — gaining Mongo means the engine swap, which `/omnicore:configure` does;
+   still no code lost. Record the posture in the spec; it's handed to `scaffold-entity`
+   as the DEFAULT backing per entity view (still per-entity overridable there).
+
+**When the engine is SQLite — the zero-infra MVP posture (say all of this, calmly).**
+Picking SQLite auto-resolves the infra questions and the spec records them: no `mongo`,
+no `transport` (tagless), no `devops/`, no Docker — one pure-Go binary
+(`CGO_ENABLED=0 -tags sqlite`) against a `file:app.db` (created next to the binary) or a
+`:memory:` database (RAM-only, data ephemeral). All entity views are served relational
+from the SoR (read-your-writes). Be honest AND reassuring:
+- **Great for an MVP / a demo / a single-node tool** — it stands up with zero moving parts.
+- **The framework is NOT optimized for this** — the canonical path is CDC + MongoDB; a
+  relational view re-composes the aggregate per read (root-only: no embeds/links/
+  composed/shared views, no free-text search, no child/sibling filter+sort).
+- **Integration events and Mongo projections don't exist here** (both ride the CDC relay,
+  which needs a Debezium-tailable engine).
+- **Fully reversible, no code lost.** Every layer above infra is identical to a full
+  service — switching to Postgres/MySQL/SQL Server/Oracle (then gaining Mongo, composed/
+  shared views and integration events) is a `/omnicore:configure` run: it stands up the
+  devops, Mongo, broker and CDC relay, re-asks the infra questions, and ports the
+  migrations to the new dialect's SQL. You lose nothing by starting on SQLite.
 
 Low-risk — decide and SHOW filled, don't ask: **the omnicore version — ALWAYS the
 latest published release, resolved at generation time (`@latest`); never a question**
@@ -184,6 +217,10 @@ applies only when any high-risk slot would otherwise be filled by you.
    - `transport.html` — the broker contract + the CDC-relay reference (validates the
      `templates/` values: topic/subject naming, `simplestring` payload, headers).
    - `service-layout.html` — skeleton naming, when the pinned version ships it.
+   - **SQLite only:** `relational-view.html` (the zero-infra MVP posture — all views
+     relational) + `table-schema.html` (Go↔SQLite types, `:memory:`, ASCII case-fold,
+     decimal-as-TEXT, the forced correctness pragmas) + `yaml-reference.html` (the
+     `mongo`/`transport` opt-out-by-absence semantics).
 3. **`bootstrap/main.go` + `bootstrap/wire.go`** — the empty shell: `bootstrap.Run`
    wired to an empty `Wiring`, with a comment pointing at `scaffold-entity` as the way
    to add the first entity. Derive the exact signatures from `bootstrap.html` — this
@@ -206,7 +243,9 @@ applies only when any high-risk slot would otherwise be filled by you.
    mongo URI and broker endpoints likewise. A `user:password`-style default boots the
    shell against creds the container never created and `readyz` fails auth. Omit optional
    blocks whose framework defaults already do the right thing — the yaml-reference is the
-   manual; the profile file is not.
+   manual; the profile file is not. **SQLite ⇒ OMIT the `mongo` and `transport` blocks
+   entirely** (opt-out by absence); `relational.dsn` default `${SQLITE_PATH:file:app.db}`
+   (or `:memory:` when the dev chose ephemeral) — no compose creds to match.
 5. **`microservice.prd.yaml`** — the honest template: same core, `auth.mode: jwt` with
    `${JWT_ISSUER}` / `${JWT_AUDIENCE}` / `${JWKS_URL}` placeholders (prd without an
    `auth` block aborts boot — that's WHY the template ships), endpoints as pure
@@ -223,7 +262,8 @@ applies only when any high-risk slot would otherwise be filled by you.
 8. **`devops/docker-compose.yml` + `devops/debezium/application.properties`** — from
    `templates/docker-bench.md` + `templates/cdc-relay.md`, instantiated for the ONE
    chosen dialect × transport combination, names/ports from the spec. Validate the
-   framework-facing values against `transport.html` (step 2) before writing.
+   framework-facing values against `transport.html` (step 2) before writing. **SKIPPED
+   entirely for SQLite** — no `devops/`, no compose, no relay (zero Docker).
 9. **Start wrappers — the set resolved in the spec (Phase 1 #7).** The one-command dev
    loop: compose up + wait healthy, then `APP_PROFILE=dev go run -tags '<engine>
    <transport>' ./bootstrap` (dev profile, always). ALWAYS write the host-native wrapper
@@ -231,20 +271,26 @@ applies only when any high-risk slot would otherwise be filled by you.
    other platform's when #7 was accepted (`start.cmd` = zero-friction batch, `start.ps1`
    = robust PowerShell, `start.sh` = bash/WSL). Whatever ships stays in lockstep — same
    steps in every wrapper. Skipped (compose half) when the dev chose existing infra.
+   **For SQLite, from `templates/sqlite-mvp.md`** — no compose, just
+   `CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite ./bootstrap`.
 10. **Resolve deps:** `go mod tidy` **then** `GOFLAGS=-mod=mod go build -o /dev/null
     -tags '<engine> <transport>' ./bootstrap` (`-o` is required: the default output
     name `bootstrap` collides with the directory) — tidy alone
     CANNOT see the tag-gated transport dependency behind `//go:build kafka|nats`, so
     the build must be allowed to add its go.sum entries. Both `go.mod` AND `go.sum`
-    ship — never one without the other.
+    ship — never one without the other. **SQLite:** `CGO_ENABLED=0 GOFLAGS=-mod=mod go
+    build -o /dev/null -tags sqlite ./bootstrap` (engine tag only, transport tagless).
 
 ## Final verify (the gate — non-negotiable)
 
 1. **Bench healthy** — every compose healthcheck green (when the bench was generated).
+   N/A for SQLite (no bench).
 2. **`gofmt -l`, `go vet`, `go build -o /dev/null -tags '<engine> <transport>' ./bootstrap`** — format
    (gofmt clean) + vet + compile. Both linters are first-party Go tools (no install).
+   SQLite: `CGO_ENABLED=0 ... -tags sqlite` (engine only, transport tagless).
 3. **Boot** with `APP_PROFILE=dev`: `/livez` 200 AND `/readyz` 200 (readyz proves the
-   relational + Mongo request paths answer). **Every approved surface knob must be IN the
+   relational + Mongo request paths answer — on SQLite the Mongo path is absent, readyz
+   proves the relational path only). **Every approved surface knob must be IN the
    yaml and observable**: OpenAPI UI approved ⇒ `openapi:` block present AND its uiPath
    answers 200; `rootRedirect` approved ⇒ `GET /` answers 302 (the framework default is
    false — omitting the block silently drops the approved behavior into a `GET /` 404).
@@ -257,11 +303,14 @@ applies only when any high-risk slot would otherwise be filled by you.
    that creates the outbox; on NATS the app also creates the framework-owned stream),
    the relay's logs must reach streaming (`docker logs <relay>` → "Starting
    streaming"). Before that first boot a crash-looping relay is EXPECTED — the compose
-   restart policy absorbs it; don't chase it as a failure.
+   restart policy absorbs it; don't chase it as a failure. N/A for SQLite (no relay).
 5. Stop the foreground app. Report each check's result plainly. **Be honest about the
    limit:** a full CDC round-trip (write → outbox → relay → broker → SyncEngine →
    Mongo) is only provable once an entity exists — the handoff line is:
    *"Empty shell green. Next: `/scaffold-entity <entity>` to add the first aggregate."*
+   **SQLite:** the handoff is *"Zero-infra SQLite shell green (no Docker). Next:
+   `/scaffold-entity <entity>`."* — its reads are read-your-writes (no CDC round-trip to
+   prove), and `/omnicore:configure` is the path to full CQRS later.
 6. **Offer to run.** Ask if the dev wants the shell UP to click through (OpenAPI UI,
    probes) — yes → delegate to `/omnicore:run` (background boot + links). Either way
    the handoff line from step 5 still closes: the first entity is `scaffold-entity`'s
@@ -288,6 +337,7 @@ skill), the fallback for concepts this table doesn't list.
 | When generating… | Read section(s) |
 |---|---|
 | read-side posture (relational vs Mongo backing) | relational-view · views |
+| SQLite specifics · infra opt-out (no mongo/transport) · zero-infra MVP | table-schema · yaml-reference · relational-view |
 | `microservice.*.yaml` keys / profiles / defaults | yaml-reference |
 | bootstrap shell / feature mounting / probes | bootstrap |
 | migrations skeleton / autoRun / dir layout | migrations |
@@ -300,7 +350,15 @@ skill), the fallback for concepts this table doesn't list.
 
 - **Both build tags are mandatory** — an engine AND a transport (the pinned release's
   sets; today's latest: `postgres`|`mysql`|`sqlserver`|`oracle` and `kafka`|`nats`); no default
-  on either axis, a tagless build aborts at boot.
+  on either axis, a tagless build aborts at boot — **except SQLite, which is engine-only
+  (`-tags sqlite`) + tagless transport (valid: a no-op adapter, no broker, no messaging).**
+- **SQLite = zero-infra, no Docker.** `CGO_ENABLED=0` (pure-Go, no cgo). DSN is a file
+  path (`file:app.db` — relative resolves NEXT TO THE BINARY, created if absent) or
+  `:memory:` (RAM-only, data ephemeral — gone on exit). The factory FORCES the correctness
+  pragmas (`foreign_keys`, `case_sensitive_like`); no `mongo:`/`transport:` blocks, no
+  `devops/`. SQLite is MVP-not-production (ASCII-only case folding, decimal stored TEXT —
+  `table-schema.html`). Integration events + Mongo projections require a Debezium-tailable
+  engine — reaching them later is `/omnicore:configure` (an engine swap), fully reversible.
 - **`go mod tidy` prunes/misses tag-gated deps** → always follow with
   `GOFLAGS=-mod=mod go build` (step 10). Shipping `go.mod` without the matching
   `go.sum` is the classic silent break (a `go.work` overlay masks it locally).
@@ -354,9 +412,9 @@ skill), the fallback for concepts this table doesn't list.
 
 No entities (that's `scaffold-entity`, handed off after the shell is green), no second
 dialect/transport in one run, no framework edits, no git, no guessed identity slots
-(name, module path, dialect, transport are ALWAYS the dev's answers), no invented
-framework version (always the latest published release unless the dev pinned one
-unprompted).
+(name, module path, dialect are ALWAYS the dev's answers — transport too, except on
+SQLite where it is tagless by construction), no invented framework version (always the
+latest published release unless the dev pinned one unprompted).
 
 ## templates/ index
 
@@ -364,6 +422,8 @@ unprompted).
 |---|---|
 | `templates/docker-bench.md` | compose skeleton per choice (postgres\|mysql\|sqlserver\|oracle × kafka\|nats + Mongo + relay), healthchecks, volumes, port table + shifted-port rule, `start.sh` + `start.cmd` + `start.ps1` |
 | `templates/cdc-relay.md` | Debezium Server `application.properties` — source blocks (mysql/postgres/sqlserver/oracle) × sink blocks (nats/kafka), the EventRouter contract, predicates, relay traps |
+| `templates/sqlite-mvp.md` | SQLite zero-infra glue — **no Docker**: `CGO_ENABLED=0 -tags sqlite` start wrappers (no compose), `file:app.db`/`:memory:` DSN, `.gitignore` for the `app.db*` sidecars |
 
-Both are DEVOPS GLUE templates (the sanctioned exception) — instantiate names/ports
-from the spec, validate framework-facing values against the pinned `transport.html`.
+All three are DEVOPS GLUE templates (the sanctioned exception) — instantiate names/ports
+from the spec, validate framework-facing values against the pinned docs (`transport.html`
+for the bench/relay; `yaml-reference.html` + `table-schema.html` for the SQLite DSN/pragmas).

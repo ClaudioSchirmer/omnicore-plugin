@@ -80,8 +80,10 @@ an accepted upgrade changes which version's docs are authoritative. Never bump i
 
 Map what exists: the source entities' schemas and views (shapes, `Version`s,
 collections) · existing composed/shared views and their conventions · enabled surfaces
-(REST, GraphQL, gRPC) · local naming flavor. Mirror local convention; validate framework
-usage against the docs.
+(REST, GraphQL, gRPC) · the project's INFRA POSTURE — is Mongo present, or is this an
+infra-free / SQLite project? (decides whether a Mongo-only view type can be served here
+now) · local naming flavor. Mirror local convention; validate framework usage against
+the docs.
 
 ## Phase 1 — Spec gate: `scaffold-view/<view>/spec.md`
 
@@ -106,6 +108,15 @@ sections structural (`N/A — <why>`, never deleted):
    (SoR-served) read model exists only for a PLAIN single-aggregate listing — that is
    `scaffold-entity`'s per-entity view, not this skill's. If the request turns out to be
    exactly that, say so and route it there (honoring the project read-side posture).
+   **In an infra-free / SQLite project (no Mongo) — never refuse, offer the upgrade.** A
+   ComposedView / SharedBaseView / Embed / Upstream / aggregated view needs Mongo (it
+   projects a document; SQLite has no projection). Do NOT say "can't": say it runs on
+   Mongo, and offer to enable it — *"want me to stand up Mongo + CDC + Docker now? I'll
+   delegate `/omnicore:configure` (it swaps to a Debezium-tailable engine and re-asks the
+   infra questions), then come back and build the view — or you can run
+   `/omnicore:configure` yourself first."* All reversible, no code lost. A plain
+   single-aggregate listing still works today as a relational per-entity view
+   (`scaffold-entity`).
 2. **Sources + join keys** [high-risk]: which entity/view/service feeds each leg, joined
    by which key. Every 1:N leg's FK is INDEXED (boot-fatal otherwise — verify item).
 3. **Projected shape** — every projected field, its source, `Version(1)`; the evolution

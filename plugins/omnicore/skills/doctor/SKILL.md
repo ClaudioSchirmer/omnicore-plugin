@@ -56,10 +56,12 @@ session." Never a gate: this run continues on the installed skills.
 
 Collect, in one sweep: the pinned omnicore version (`go list -m`) · engine + transport
 from `relational.dialect` / `transport` in `microservice.*.yaml` (BOTH build tags are
-mandatory — a tagless build/boot is its own diagnosis) · effective ports and profile ·
-bench state (`docker compose ps` when a `devops/` exists) · where the app log is. Ask the
-dev only what cannot be read: what were you doing when it broke, and what does "broken"
-look like from where you sit?
+mandatory — a tagless build/boot is its own diagnosis, EXCEPT SQLite which is engine-only
++ tagless by design) · the INFRA POSTURE — Mongo/broker/relay present, or an infra-free /
+SQLite project (no `devops/`, no `mongo`/`transport`) — many "failures" are that posture
+working as designed · effective ports and profile · bench state (`docker compose ps` when
+a `devops/` exists) · where the app log is. Ask the dev only what cannot be read: what
+were you doing when it broke, and what does "broken" look like from where you sit?
 
 ## Phase 1 — Localize the failure to ONE stage
 
@@ -93,7 +95,10 @@ Bench-proven cause patterns to CHECK, not to assume:
 - **Writes 2xx forever, views never arrive** → walk relay → broker → sync in that
   order: a relay that never reaches "streaming", an unreachable broker, or a sync group
   that isn't consuming. A relay crash-looping BEFORE the app's first boot is expected
-  (the outbox doesn't exist yet) — not a failure.
+  (the outbox doesn't exist yet) — not a failure. **BUT in an infra-free / SQLite project
+  this is BY DESIGN, not a fault:** views are served relational (read-your-writes), there
+  is no relay/broker/sync. If the dev wants projections/events, that's a
+  `/omnicore:configure` conversion, not a bug.
 - **Shutdown hangs / SIGTERM takes forever** → an exporter blocking on a dead collector
   (tracing endpoint down) is a classic; the tracing section owns the contract.
 - **Readiness red with liveness green** → the DB/document request paths; check both
@@ -126,6 +131,7 @@ for concepts this table doesn't list.
 | yaml keys, defaults, profiles | yaml-reference |
 | migrations state / numbering / dirty | migrations |
 | outbox / relay / broker contract | transport |
+| infra-free / relational-view posture (views by design, no relay) | relational-view |
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
 | probes / liveness / readiness semantics | bootstrap · reference |
 | tracing / shutdown behavior | tracing |

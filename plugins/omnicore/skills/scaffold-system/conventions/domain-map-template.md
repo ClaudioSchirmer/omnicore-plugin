@@ -29,6 +29,10 @@ Full distributed CQRS (Mongo-projected, canonical) · Reduced/MVP (relational, S
 — the DEFAULT backing for every entity view below; from `scaffold-service/spec.md` if it
 set one, else decided here. Per-entity override allowed (§9), with a reason.
 
+Engine/infra: full-CQRS engine (Mongo + broker + CDC) · SQLite zero-infra (no Docker;
+Mongo views §5 + integration events §6 deferred to a later `/omnicore:configure`
+conversion — noted in the map, never dropped).
+
 ## §2 Aggregate inventory
 
 | # | Aggregate | Kind | Purpose (one line) | Depends on | Status |
