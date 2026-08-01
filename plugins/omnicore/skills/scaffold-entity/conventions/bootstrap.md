@@ -16,6 +16,15 @@ SyncEngine), and its `Mount` is a **ONE-LINE delegation** to the web layer's
 - **❌ SharedBase models: the identity view is NOT the role's cargo** — it gets its
   OWN feature, named after the BASE (holds the view, mounts the identity read routes),
   registered beside the role features. A role's feature carries the ROLE only.
+- **Relational view ⇒ reuse `repo.Loader`, never a second loader.** When the entity's
+  view is relational (`.RelationalSource(...)`, per the read-side posture), build the
+  aggregate repo ONCE in the feature constructor, store it in the `repo` field, and pass
+  that SAME `repo.Loader` into the view's constructor. Do NOT call the aggregate-loader
+  constructor a second time: a duplicate loader for the same aggregate boots fine and
+  reads correctly, so the boot guard (which catches a WRONG-aggregate loader via
+  `BoundTable()==schema.Table()`, not a redundant duplicate) will NOT flag it — it is
+  pure waste the doc's feature example is written to avoid. See the `NewGadgetFeature`
+  example in `relational-view.html`.
 - **Service-backed entity:** build the infra Service impl in the feature constructor and
   pass it through `Mount<Entity>`'s `svc` param; a no-service entity OMITS the param
   entirely (no dead nil) — the pairing is enforced at runtime (application.md).

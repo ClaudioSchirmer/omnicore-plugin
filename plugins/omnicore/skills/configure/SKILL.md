@@ -136,7 +136,10 @@ One pass in dependency order — read the owning `/docs` section BEFORE each art
 4. `migrations/<target>/` — on an engine swap, generate the ported DDL (docs-first per dialect);
    flag it for dev review.
 5. **View backings** — delegate each flip to `/omnicore:evolve-view` (it owns the `Version` bump
-   + rebuild discipline); this skill never rewrites a view declaration itself.
+   + rebuild discipline); this skill never rewrites a view declaration itself. When a flip
+   lands a relational view, its feature must reuse the aggregate's EXISTING `repo.Loader` —
+   never a second loader (a duplicate for the same aggregate boots fine, so the boot guard
+   won't flag it; it's pure waste). See the feature example in `relational-view.html`.
 6. `integration:` — enable/disable publishes/subscribes per the target.
 Edit ONLY what the plan lists.
 
