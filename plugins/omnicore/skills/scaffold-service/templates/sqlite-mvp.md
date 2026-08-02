@@ -16,13 +16,19 @@ pragmas, build tags) is validated against the pinned `yaml-reference.html` + `ta
 ## DSN — where the database lives
 
 `relational.dsn` default `${SQLITE_PATH:file:app.db}`:
-- **relative `file:app.db` (the DEFAULT)** — created NEXT TO THE BINARY, so the single-file MVP is
-  portable (a pendrive carries binary + `.db` together). Under `go run` the binary is a throwaway temp
-  file, so it falls back to the **working dir** — which is why the wrappers below `cd` into the project
-  first (the dev-loop `app.db` lands there). Parent dir auto-created.
-- **absolute `file:/var/lib/app/app.db`** — used verbatim; the escape hatch for a fixed external
-  location. NOT portable, so don't use it for a USB deploy.
-- **`:memory:`** — RAM-only, ephemeral (gone on exit); demos/tests.
+- **relative `file:app.db` (the yaml DEFAULT)** — the portable single-file story: the `.db` lives
+  NEXT TO THE BINARY (a pendrive carries binary + `.db` together). Reliable for a BUILT binary
+  launched from its own dir (one process, one stable CWD). **NOT reliable under `go run`** — the
+  throwaway temp binary makes the migration step and the runtime resolve a relative `file:app.db` to
+  DIFFERENT files (the temp exe dir vs the project dir), so migrations persist to one and the server
+  reads an empty other: the boot log says `migrations applied` and every request then fails with
+  `no such table`. **That is why the dev-loop wrappers below pin an ABSOLUTE `SQLITE_PATH` next to
+  the script** (recomputed each run, so the `.db` still travels with the project — portability kept)
+  instead of trusting the relative fallback. Parent dir auto-created.
+- **absolute `file:/var/lib/app/app.db`** — used verbatim; a fixed external location (also the form
+  the wrappers compute for the local `app.db`). Only a hand-typed external path is non-portable.
+- **`:memory:`** — RAM-only, ephemeral (gone on exit); demos/tests. An explicit `SQLITE_PATH` (this,
+  or any path) always wins over the wrapper's computed absolute default.
 
 The SQLite factory FORCES the correctness pragmas (`foreign_keys=ON`, `case_sensitive_like=ON`) —
 never the dev's job; tuning pragmas (`journal_mode=WAL`, `busy_timeout`) are overridable defaults.
@@ -34,11 +40,15 @@ decimal stored as TEXT). See `table-schema.html` for the Go↔SQLite type table 
 ```bash
 #!/usr/bin/env bash
 # Run <svc> in dev mode against SQLite — no bench, no Docker.
-# The cd makes this folder the working dir, so under `go run` the app.db is
-# created HERE (the project), not in the temp build dir. Set SQLITE_PATH to an
-# absolute path to pin it elsewhere.
+# Pin SQLITE_PATH to an ABSOLUTE path next to this script: under `go run` a
+# relative file:app.db is unreliable — the migration step and the runtime can
+# resolve it to different files ("migrations applied" then "no such table"), so
+# the dev loop hands the engine an absolute DSN. The .db still lives in the
+# project (recomputed each run → portable). An explicit SQLITE_PATH still wins.
 set -euo pipefail
 cd "$(dirname "$0")"
+: "${SQLITE_PATH:=file:$(pwd)/app.db}"
+export SQLITE_PATH
 APP_PROFILE=dev CGO_ENABLED=0 go run -tags sqlite ./bootstrap
 ```
 
@@ -46,9 +56,12 @@ APP_PROFILE=dev CGO_ENABLED=0 go run -tags sqlite ./bootstrap
 
 ```bat
 @echo off
-REM The cd makes this folder the working dir, so under `go run` app.db is created
-REM HERE (the project), not the temp build dir. Set SQLITE_PATH for a fixed path.
+REM Pin SQLITE_PATH to an ABSOLUTE path next to this script: under `go run` a
+REM relative file:app.db is unreliable (migration vs runtime resolve differently).
+REM The .db still lives in the project. An explicit SQLITE_PATH wins. Forward
+REM slashes in the file: URI (%CD:\=/% swaps backslashes) so it parses on Windows.
 cd /d "%~dp0"
+if "%SQLITE_PATH%"=="" set SQLITE_PATH=file:%CD:\=/%/app.db
 set APP_PROFILE=dev
 set CGO_ENABLED=0
 go run -tags sqlite ./bootstrap
@@ -58,9 +71,12 @@ go run -tags sqlite ./bootstrap
 
 ```powershell
 #!/usr/bin/env pwsh
-# Set-Location makes this folder the working dir, so under `go run` app.db is
-# created HERE (the project), not the temp build dir. Set SQLITE_PATH for a fixed path.
+# Pin SQLITE_PATH to an ABSOLUTE path next to this script: under `go run` a
+# relative file:app.db is unreliable (migration vs runtime resolve differently).
+# The .db still lives in the project. An explicit SQLITE_PATH wins. Forward slashes
+# in the file: URI so it parses on Windows.
 Set-Location $PSScriptRoot
+if (-not $env:SQLITE_PATH) { $env:SQLITE_PATH = 'file:' + ($PSScriptRoot -replace '\\','/') + '/app.db' }
 $env:APP_PROFILE = 'dev'; $env:CGO_ENABLED = '0'
 go run -tags sqlite ./bootstrap
 ```

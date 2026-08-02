@@ -68,10 +68,12 @@ entity emits (base, role, children, siblings). Column types still come only from
   cannot catch. On older pins (≤ v0.29.0): required reference ⇒ `BINARY(16)`, nullable
   (`*string`) ⇒ `VARCHAR(36)`; Postgres `UUID` for both. (The framework's own
   control-plane tables use `CHAR(36)` via a different write path — do NOT mirror them.)
-- **Unique constraints are named `<table>_<col>_key` in EVERY dialect** so the repo binds
-  one name — unlike the PK, whose name diverges (postgres `<table>_pkey` / sqlserver and
-  oracle `<table>_pkey` named explicitly on the `CONSTRAINT` / mysql
-  `PRIMARY`). Name them on the OWNING table (a base field's constraint lives on the base
-  table — e.g. `persons_email_key`, not `students_email_key`).
+- **Unique constraints are named `<table>_<col>_key` on the four SQL engines** so the repo
+  can bind that name; name them on the OWNING table (a base field's constraint lives on the
+  base table — e.g. `persons_email_key`, not `students_email_key`). The PK name and, on
+  SQLite, the WHOLE bind-key form diverge — **`${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md`
+  is the source of truth for what the repo binds** (SQLite reports the `<table>.<column>`
+  column list on a violation, not any index name, so naming the index is fine but does NOT
+  drive the bind — the repo key is dotted there).
 - Children get an FK + covering index; siblings share the owner's PK with
   `ON DELETE CASCADE` and NO lifecycle columns — see the deltas.

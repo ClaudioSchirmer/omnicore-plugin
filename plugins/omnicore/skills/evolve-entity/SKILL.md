@@ -135,6 +135,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | When changing… | Read section(s) |
 |---|---|
 | field add/remove/rename (Go ↔ column, id shapes) | table-schema · migrations |
+| unique field add/remove → `Constraints` binding · per-engine id/decimal/boolean columns | `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md` (read ONLY the service's) |
 | rules / notifications / actionName | rules-dsl · old-state · status-mapping |
 | children / siblings / cascade | aggregate-persistence |
 | write handlers / in-TX hooks | auto-handlers · lifecycle-hooks |

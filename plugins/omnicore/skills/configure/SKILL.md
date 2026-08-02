@@ -113,8 +113,12 @@ structural (`N/A — <why>`):
      requirement); subscribe works once a broker exists. (`transport`, `integration-events`.)
    - **Engine swap** — new `migrations/<target>/` in the TARGET dialect's SQL (types/constraints
      per that dialect's `table-schema` tables); the skill generates a first pass, the dev reviews —
-     DDL correctness in the new dialect is theirs to confirm. Moving existing MVP data is a manual
-     ETL, out of scope: say so. Application/domain/web code is untouched.
+     DDL correctness in the new dialect is theirs to confirm. **Re-key every repo `Constraints`
+     map to the TARGET dialect's violation-key form** (`${CLAUDE_PLUGIN_ROOT}/shared/dialects/<target>.md`):
+     swapping SQLite→SQL turns dotted `table.column` keys into `<table>_<col>_key` NAMES (and PKs
+     into `<table>_pkey`/`PRIMARY`); SQL→SQLite is the reverse. A stale key form silently misses →
+     the custom 409 regresses to a 500. Moving existing MVP data is a manual ETL, out of scope: say
+     so. Application/domain/web code is untouched.
    - **Remove infra (full → MVP)** — projections and integration events go away, views become
      relational (root-only reads), Mongo/broker/relay/compose are dropped (SQLite ⇒ no Docker).
      Honest loss list.
@@ -157,6 +161,7 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 | broker / CDC relay / transport swap / tagless | transport |
 | integration events (publish rides CDC · subscribe) | integration-events |
 | engine types / DSN / SQLite specifics (:memory:, ASCII, decimal-TEXT) | table-schema |
+| per-engine specifics: id/decimal/boolean columns · **constraint-violation KEY form** · active-only unique · read-side posture | `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md` (read ONLY the target's) |
 | migrations layout / autoRun / per-dialect | migrations |
 | bootstrap / build tags / probes | bootstrap · architecture |
 | docker bench + Debezium glue · SQLite zero-infra wrappers | scaffold-service/templates/ (validated vs transport) |
