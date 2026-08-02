@@ -96,16 +96,34 @@ session." Never a gate: this run continues on the installed skills.
 
 ## Phase 1 — Q&A + spec gate
 
-Ask in ONE consolidated round, opening with the loud status line —
-`⏸️ PAUSED — setup spec awaiting your answers; nothing generated yet.` **The agent
-chooses how to ask** — a structured multiple-choice prompt (e.g. AskUserQuestion) is a
-good fit for the closed-choice slots (dialect, transport, surfaces, docker bench,
-cross-platform, read-side posture); the free-text slots (service name, module path) are typed, so ask
-those as plain text. Either medium is fine — the only hard rules are: keep it
-consolidated (never drip questions one at a time) and lead with the loud PAUSED line so
-it's unmistakable that nothing is generated yet.
+Open with the loud status line — `⏸️ PAUSED — setup spec awaiting your answers;
+nothing generated yet.` — so it's unmistakable that nothing is generated yet.
 
-High-risk — always asked (mark recommendations `(proposed)`):
+**Ask staged on the dialect — never one flat dump (it forces the dev to answer infra
+slots SQLite makes moot), never a drip one question at a time.** The relational dialect
+is the pivot: SQLite collapses the whole infra half (no transport, no bench, no
+read-side posture — all forced off), so those slots must not be presented once SQLite is
+on the table.
+
+- **Round 1 — identity + the pivot:** service name, Go module path (typed, free-text),
+  and the relational dialect (closed choice). Nothing here depends on a later answer.
+- **Round 2 — branch on the dialect answer:**
+  - **SQLite →** ask ONLY the slots that still exist: the SQLite DSN (#6-SQLite),
+    surfaces (#5), cross-platform wrappers (#7). Do NOT ask transport, docker bench, or
+    read-side posture — SQLite forces them (tagless / no bench / relational). No
+    "ignored if sqlite" parentheticals, no answering-to-discard.
+  - **Full engine (postgres|mysql|sqlserver|oracle) →** ask transport (#4), surfaces
+    (#5), docker bench (#6), cross-platform wrappers (#7), read-side posture (#8) — all
+    in this one round.
+
+If the dev already named the dialect in their invocation ("scaffold a sqlite service"),
+the pivot is settled — skip Round 1's dialect slot and open directly on the right
+branch. **The agent chooses the medium** — a structured multiple-choice prompt (e.g.
+AskUserQuestion) fits the closed-choice slots; the typed slots (service name, module
+path) are plain text. Either medium is fine — lead every round with the loud PAUSED line.
+
+High-risk slots — asked per the staged branch above (transport/bench/read-side only on a
+full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
 1. **Service name** (kebab-case). Seeds `service:`, the databases (`<svc>_db`,
    `<svc>_views`), the sync group (`<svc>-sync`), the compose project (`<svc>-dev`)
    and container names. No default possible.
