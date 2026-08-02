@@ -5,6 +5,22 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.10.1] — 2026-08-01
+
+### Changed
+- **`scaffold-service` — SQLite DSN guidance rewritten for correctness, and the
+  final verify now exercises the real file DSN.** Matches the framework fix that
+  makes a relative `relational.dsn` resolve against the working directory under
+  `go run` (so the dev-loop `app.db` persists in the project instead of a temp
+  build dir). The skill + `templates/sqlite-mvp.md` now state the rule plainly:
+  **the `.db` always lives in the app's own folder** — a relative `file:app.db`
+  (the default) resolves next to the binary (portable, travels with it), and the
+  dev loop lands it in the project; an absolute path is only an escape hatch for a
+  fixed external location (not portable). The final-verify step boots the REAL
+  `file:app.db` (not `:memory:`) and confirms the file appeared — the persistence
+  it was silently failing to check before. The start-wrapper comments say where
+  `app.db` is created.
+
 ## [0.10.0] — 2026-07-31
 
 ### Added

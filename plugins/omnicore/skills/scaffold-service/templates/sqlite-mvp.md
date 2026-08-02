@@ -16,10 +16,13 @@ pragmas, build tags) is validated against the pinned `yaml-reference.html` + `ta
 ## DSN — where the database lives
 
 `relational.dsn` default `${SQLITE_PATH:file:app.db}`:
-- a **file path** (`file:app.db`, `file:data/app.db`) — a relative path resolves NEXT TO THE
-  BINARY and is created if absent;
-- or **`:memory:`** — entirely in RAM, nothing on disk, **data is ephemeral** (gone on exit);
-  great for demos/tests.
+- **relative `file:app.db` (the DEFAULT)** — created NEXT TO THE BINARY, so the single-file MVP is
+  portable (a pendrive carries binary + `.db` together). Under `go run` the binary is a throwaway temp
+  file, so it falls back to the **working dir** — which is why the wrappers below `cd` into the project
+  first (the dev-loop `app.db` lands there). Parent dir auto-created.
+- **absolute `file:/var/lib/app/app.db`** — used verbatim; the escape hatch for a fixed external
+  location. NOT portable, so don't use it for a USB deploy.
+- **`:memory:`** — RAM-only, ephemeral (gone on exit); demos/tests.
 
 The SQLite factory FORCES the correctness pragmas (`foreign_keys=ON`, `case_sensitive_like=ON`) —
 never the dev's job; tuning pragmas (`journal_mode=WAL`, `busy_timeout`) are overridable defaults.
@@ -31,6 +34,9 @@ decimal stored as TEXT). See `table-schema.html` for the Go↔SQLite type table 
 ```bash
 #!/usr/bin/env bash
 # Run <svc> in dev mode against SQLite — no bench, no Docker.
+# The cd makes this folder the working dir, so under `go run` the app.db is
+# created HERE (the project), not in the temp build dir. Set SQLITE_PATH to an
+# absolute path to pin it elsewhere.
 set -euo pipefail
 cd "$(dirname "$0")"
 APP_PROFILE=dev CGO_ENABLED=0 go run -tags sqlite ./bootstrap
@@ -40,6 +46,8 @@ APP_PROFILE=dev CGO_ENABLED=0 go run -tags sqlite ./bootstrap
 
 ```bat
 @echo off
+REM The cd makes this folder the working dir, so under `go run` app.db is created
+REM HERE (the project), not the temp build dir. Set SQLITE_PATH for a fixed path.
 cd /d "%~dp0"
 set APP_PROFILE=dev
 set CGO_ENABLED=0
@@ -50,6 +58,8 @@ go run -tags sqlite ./bootstrap
 
 ```powershell
 #!/usr/bin/env pwsh
+# Set-Location makes this folder the working dir, so under `go run` app.db is
+# created HERE (the project), not the temp build dir. Set SQLITE_PATH for a fixed path.
 Set-Location $PSScriptRoot
 $env:APP_PROFILE = 'dev'; $env:CGO_ENABLED = '0'
 go run -tags sqlite ./bootstrap

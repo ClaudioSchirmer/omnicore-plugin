@@ -129,7 +129,9 @@ High-risk — always asked (mark recommendations `(proposed)`):
    entirely, and warn plainly: without a CDC relay tailing the outbox, the read side
    never projects — `templates/cdc-relay.md` is the reference for wiring their own. For
    **SQLite there is NO bench (zero Docker)** — skip this entirely and instead ask the
-   SQLite DSN: a file path `(proposed: file:app.db)` or `:memory:` (ephemeral, RAM-only).
+   SQLite DSN: a file path — `(proposed: file:app.db)`, relative so the `.db` lives IN THE
+   APP'S OWN FOLDER (portable — travels with the binary); an absolute path is an escape
+   hatch for a fixed external location (not portable) — or `:memory:` (ephemeral, RAM-only).
 7. **Cross-platform start wrappers** — the host-native wrapper (from `go env GOOS`,
    Phase 0) ALWAYS ships and is the one the final verify boots. Also generate the OTHER
    platform's? `(proposed: yes)` — on a Unix host that adds `start.cmd` + `start.ps1`
@@ -158,9 +160,15 @@ High-risk — always asked (mark recommendations `(proposed)`):
 **When the engine is SQLite — the zero-infra MVP posture (say all of this, calmly).**
 Picking SQLite auto-resolves the infra questions and the spec records them: no `mongo`,
 no `transport` (tagless), no `devops/`, no Docker — one pure-Go binary
-(`CGO_ENABLED=0 -tags sqlite`) against a `file:app.db` (created next to the binary) or a
-`:memory:` database (RAM-only, data ephemeral). All entity views are served relational
-from the SoR (read-your-writes). Be honest AND reassuring:
+(`CGO_ENABLED=0 -tags sqlite`) against a `file:app.db` or a `:memory:` database (RAM-only,
+data ephemeral). All entity views are served relational from the SoR (read-your-writes).
+DSN: ship the relative default `${SQLITE_PATH:file:app.db}` — the `.db` is created next to
+the binary (portable: a pendrive carries app + `.db`; under `go run` it falls back to the
+project dir, which is why the wrappers `cd` there first). An absolute path is honored
+verbatim if the dev explicitly wants a fixed external location — don't propose one by
+default (it's not portable).
+
+Be honest AND reassuring:
 - **Great for an MVP / a demo / a single-node tool** — it stands up with zero moving parts.
 - **The framework is NOT optimized for this** — the canonical path is CDC + MongoDB; a
   relational view re-composes the aggregate per read (root-only: no embeds/links/
@@ -290,7 +298,14 @@ applies only when any high-risk slot would otherwise be filled by you.
    SQLite: `CGO_ENABLED=0 ... -tags sqlite` (engine only, transport tagless).
 3. **Boot** with `APP_PROFILE=dev`: `/livez` 200 AND `/readyz` 200 (readyz proves the
    relational + Mongo request paths answer — on SQLite the Mongo path is absent, readyz
-   proves the relational path only). **Every approved surface knob must be IN the
+   proves the relational path only). **SQLite with a file DSN — boot the REAL DSN, not
+   `:memory:`.** The point of the file posture is persistence; verify it. Boot via the
+   start wrapper (which `cd`s into the project) so the `app.db` is created, then CONFIRM
+   the file appeared in the project dir (`ls app.db`) — this is exactly the case that
+   silently regressed before (a relative path under `go run` landing in the temp build
+   dir). It is already in `.gitignore`; leave it (or remove it after the check and say so
+   — never claim persistence you did not observe). Only use `:memory:` when the dev chose
+   ephemeral. **Every approved surface knob must be IN the
    yaml and observable**: OpenAPI UI approved ⇒ `openapi:` block present AND its uiPath
    answers 200; `rootRedirect` approved ⇒ `GET /` answers 302 (the framework default is
    false — omitting the block silently drops the approved behavior into a `GET /` 404).
@@ -352,9 +367,10 @@ skill), the fallback for concepts this table doesn't list.
   sets; today's latest: `postgres`|`mysql`|`sqlserver`|`oracle` and `kafka`|`nats`); no default
   on either axis, a tagless build aborts at boot — **except SQLite, which is engine-only
   (`-tags sqlite`) + tagless transport (valid: a no-op adapter, no broker, no messaging).**
-- **SQLite = zero-infra, no Docker.** `CGO_ENABLED=0` (pure-Go, no cgo). DSN is a file
-  path (`file:app.db` — relative resolves NEXT TO THE BINARY, created if absent) or
-  `:memory:` (RAM-only, data ephemeral — gone on exit). The factory FORCES the correctness
+- **SQLite = zero-infra, no Docker.** `CGO_ENABLED=0` (pure-Go, no cgo). DSN is a file path
+  (default `file:app.db`, created next to the binary — portable; under `go run` falls back to
+  the project dir) or `:memory:` (ephemeral). An absolute path is honored verbatim (fixed
+  external location, not portable). The factory FORCES the correctness
   pragmas (`foreign_keys`, `case_sensitive_like`); no `mongo:`/`transport:` blocks, no
   `devops/`. SQLite is MVP-not-production (ASCII-only case folding, decimal stored TEXT —
   `table-schema.html`). Integration events + Mongo projections require a Debezium-tailable
