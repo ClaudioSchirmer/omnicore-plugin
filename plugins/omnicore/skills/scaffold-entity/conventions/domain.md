@@ -20,11 +20,14 @@ regenerated.
 
 ## The aggregate struct — decisions
 
-- Nullable ⇒ pointer; money = `int64` minor units, never float; every persisted field
-  carries a `labelKey` and NOTHING else — **no `db:` tags** (physical names live only in
-  the infra schema) and **no `json:` tags** (wire names belong to the web-layer DTOs;
-  worse, a `json:"-"` silently drops the field from the `Old()` snapshot the framework
-  builds via a json round-trip).
+- Nullable ⇒ pointer; money = `int64` minor units, never float.
+- **Struct tags: a persisted field carries `labelKey` and NOTHING ELSE — no `json:`
+  tag, no `db:` tag, ever.** This is the reflex to resist: a domain aggregate is NOT a
+  wire DTO, so the Go habit of stamping `json:"..."` on every field is WRONG here. Wire
+  names live on the web-layer DTOs (`internal/web/dtos`); physical column names live only
+  in the infra schema. Worse than redundant: a `json:"-"` silently drops the field from
+  the `Old()` snapshot the framework builds via a json round-trip. The canonical example's
+  domain structs carry `labelKey` only — match them.
 - A **flat** entity does NOT implement `domain.AggregateRootProvider` — that is the
   children delta.
 

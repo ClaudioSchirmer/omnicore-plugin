@@ -45,13 +45,15 @@ root; the domain-service implementation in its own file here.
      Confirm the pinned version's loader surface in `custom-command-handler.html`
      (Loading by criteria); a version without the probes falls back to a
      FindOne/FindAll-based check;
-  1. migration `UNIQUE` constraint, named `<table>_<col>_key` in every dialect
-     (active-only variants per `table-schema.html` when archived remnants must not block);
-  2. repo `Constraints` binding (constraint NAME → notification + field) — the match is by
-     NAME and table-agnostic, so a ROLE repo binds BASE-table constraints too (e.g.
-     `persons_email_key`); the PK name diverges per dialect (postgres `<table>_pkey`,
-     sqlserver and oracle `<table>_pkey` — named explicitly, mysql `PRIMARY`) — bind
-     every TARGET dialect's;
+  1. migration `UNIQUE` constraint (active-only variants per `table-schema.html` when
+     archived remnants must not block);
+  2. repo `Constraints` binding (violation KEY → notification + field) — the match is
+     table-agnostic, so a ROLE repo binds BASE-table constraints too (e.g.
+     `persons_email_key`). **The KEY form is PER DIALECT — the four SQL engines bind the
+     constraint/index NAME (`<table>_<col>_key`; PK `<table>_pkey`, except mysql `PRIMARY`),
+     SQLite binds the `<table>.<column>` column list (dotted, NOT any index name). Get the
+     exact form from `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md` and bind EVERY
+     target dialect's;**
   3. a custom `<Field>AlreadyExistsNotification` (409, all 7 catalogs);
   4. an immutability rule in the domain when it's the natural key.
   A flat entity with no unique business column needs no `Constraints` map at all.

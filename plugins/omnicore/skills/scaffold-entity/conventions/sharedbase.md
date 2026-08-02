@@ -39,9 +39,11 @@ framework's check.
 ## Repository
 
 Embed the SharedBase role repository (the plain aggregate one rejects a SharedBase
-schema). Bind the PK/FK-collision constraint names per dialect — the happy-path 409 for
-"this identity already holds an active role". The `Constraints` match is by NAME and
-table-agnostic: base-table unique constraints (e.g. `persons_email_key`) bind HERE too.
+schema). Bind the PK/FK-collision key per dialect — the happy-path 409 for "this identity
+already holds an active role". The `Constraints` match is table-agnostic: base-table unique
+constraints (e.g. `persons_email_key`) bind HERE too. **The key FORM is per dialect — SQL
+engines bind the constraint NAME, SQLite binds the `<table>.<column>` column list; see
+`${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md` and bind every target dialect's.**
 
 ## Insert — the 7th handler
 

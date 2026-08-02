@@ -503,6 +503,16 @@ Four DISTINCT levels — do not conflate them:
      doesn't have).
    - every generated `NNNN_*.up.sql` has its `NNNN_*.down.sql` twin.
    - `grep -rn 'path:"id"' internal/web/requests/` → nothing (boot panic).
+   - `grep -rn 'json:"' internal/domain/` → must hit NOTHING (also sweep `db:`): a domain
+     field carries `labelKey` and nothing else. A stray `json:` tag is the #1 reflex slip
+     (a domain aggregate is not a wire DTO); a `json:"-"` also corrupts the `Old()`
+     snapshot. Strip every hit — wire names live on the web-layer DTOs.
+   - **SQLite service only** — `grep -rnE '"[a-zA-Z_]+_(key|pkey)"|"PRIMARY"' internal/infra/`
+     over the repo `Constraints` maps → must hit NOTHING: SQLite binds a unique/PK violation
+     by the `<table>.<column>` column list, NEVER an index/constraint name
+     (`${CLAUDE_PLUGIN_ROOT}/shared/dialects/sqlite.md`). A key ending `_key`/`_pkey` or the
+     literal `PRIMARY` is the SQL-engine reflex leaking in — it silently misses, so the
+     intended custom 409 becomes a raw 500. Rewrite each to `table.column` (dot).
    - if a read request declares `Fields *string`, every field of its Response AND of every
      NESTED response type is `*T`/slice + `,omitempty` (boot panic otherwise). Make it
      mechanical: `grep -rln 'Fields \*string' internal/web/requests/` → for each hit, open the
@@ -603,34 +613,24 @@ only a genuinely missing docs file does.
 ## Boot-traps to respect AND verify (silent-wrong / panic / runtime-500)
 
 - **Id typing is VERSION-DEPENDENT — detect the pin's contract in `table-schema.html`
-  ("Supported column shapes") before generating any field or DDL.**
-  - **Typed-identity pin** (the tables list `domain.ID` / `*domain.ID` as a Go field
-    type — "identity is a TYPE"): an id-holding field (child PK `ID`, every
-    cross-aggregate reference like a `CourseID`/`BuyerID`) is declared **`domain.ID`**
-    (nullable ⇒ `*domain.ID`), and the field's Go type alone drives the dialect's native
-    column (`UUID` on Postgres / `BINARY(16)` on MySQL and SQL Server — never
-    `UNIQUEIDENTIFIER`, per the pinned `table-schema.html`) across write, criteria and scan —
-    `nil` ⇄ SQL NULL included. A **`string` field is text, ALWAYS** (pairs with
-    `CHAR(36)`/`VARCHAR(36)`; nothing is guessed from a value's shape) — both choices are
-    first-class; pair field type and DDL or the FIRST INSERT fails (runtime 500 `go
-    build` won't catch). AVO children carry `ID domain.ID`; `criteria.ByID` and the
-    `ValidEntity.ID()` family speak `domain.ID`; wire DTOs/requests stay `string` and
-    convert at the mappers (`domain.NewID(s)` / `.Value()`). The persistable field-type
-    set is CLOSED — an unknown Go type (incl. `uuid.UUID` and named enums) is a BOOT FAIL
-    at `Field(...)` with the fix in the message.
-  - **Older pins (≤ v0.29.0)**: ids are plain Go `string` everywhere and `domain.ID` is
-    NEVER a struct field type; MySQL forces `BINARY(16)` for every REQUIRED uuid column
-    (a text column is `Error 1366/1406` at the first INSERT) and a NULLABLE reference
-    (`*string`) must be `VARCHAR(36)` (the pointer bypasses the codec; relational-side
-    criteria on it don't match on MySQL — filter on the Mongo view). Postgres `UUID`
-    serves both.
-  Either pin: the framework's OWN control-plane tables use `CHAR(36)` via a different
-  write path — do NOT mirror that for entity tables. See `conventions/migrations.md`.
-  - **SQLite (zero-infra MVP pins)**: `domain.ID` → TEXT; a decimal-as-`string` field →
-    TEXT (never `NUMERIC` — SQLite coerces it to float64 and loses precision); case
-    folding is ASCII-only. Per the pin's `table-schema.html` SQLite type table. On SQLite
-    all views are relational (no Mongo), so the "filter on the Mongo view" fallbacks above
-    don't apply — root-only reads.
+  ("Supported column shapes") before generating any field or DDL.** On a typed-identity
+  pin an id-holding field (child PK `ID`, every cross-aggregate reference like a
+  `CourseID`/`BuyerID`) is declared **`domain.ID`** (nullable ⇒ `*domain.ID`) and the Go
+  type alone drives the dialect's native id column across write, criteria and scan (`nil`
+  ⇄ SQL NULL); a **`string` field is text, ALWAYS** (nothing is guessed from a value's
+  shape). Both are first-class — but pair the field type with the DDL column or the FIRST
+  INSERT fails (runtime 500 the build won't catch). The persistable field-type set is
+  CLOSED — an unknown Go type (incl. `uuid.UUID` and named enums) is a BOOT FAIL at
+  `Field(...)` with the fix in the message. Wire DTOs/requests stay `string` and convert at
+  the mappers (`domain.NewID(s)` / `.Value()`). On an older pin (≤ v0.29.0) ids are plain
+  `string` and `domain.ID` is never a field type — that divergence, and the exact native id
+  column per engine, live in the dialect sheet.
+  - **→ The per-engine specifics — id/decimal/boolean column types, the constraint-violation
+    KEY the `ConstraintBinding` map binds, active-only uniqueness, the read-side posture —
+    are in `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md`. Read ONLY the sheet(s) for
+    the service's target dialect(s) before generating any field, DDL or `Constraints`
+    binding.** The framework's OWN control-plane tables use a different write path — never
+    mirror them for entity tables (`conventions/migrations.md`).
 - **Service migrations start at `0001`** (the service's own sequence; the framework's
   `0001_framework` is in a separate tracking table — no collision). Not `0002`.
 - **`path:"id"` on a by-id request → boot panic** (the `*Spec`/HasPathID owns `:id`; never

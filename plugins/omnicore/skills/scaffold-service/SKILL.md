@@ -318,11 +318,19 @@ applies only when any high-risk slot would otherwise be filled by you.
    relational + Mongo request paths answer — on SQLite the Mongo path is absent, readyz
    proves the relational path only). **SQLite with a file DSN — boot the REAL DSN, not
    `:memory:`.** The point of the file posture is persistence; verify it. Boot via the
-   start wrapper (which `cd`s into the project) so the `app.db` is created, then CONFIRM
-   the file appeared in the project dir (`ls app.db`) — this is exactly the case that
-   silently regressed before (a relative path under `go run` landing in the temp build
-   dir). It is already in `.gitignore`; leave it (or remove it after the check and say so
-   — never claim persistence you did not observe). Only use `:memory:` when the dev chose
+   start wrapper (which pins an absolute `SQLITE_PATH` next to the project), then CONFIRM
+   THE MIGRATIONS ACTUALLY PERSISTED to the DB the runtime reads — not merely that a file
+   appeared. **`ls app.db` is NOT enough**: a 4096-byte empty `app.db` "appears" yet holds
+   ZERO tables when the relative-DSN split bit (the log says `migrations applied` but they
+   were written to a DIFFERENT file, and every request then fails `no such table`). Inspect
+   the SCHEMA — `sqlite3 app.db ".tables"` (or `SELECT count(*) FROM sqlite_master WHERE
+   type='table'`) — and confirm the framework control-plane tables are present
+   (`omnicore_migrations`, `outbox`, …; on an empty shell there are no entity tables yet,
+   the framework ones are the proof). Empty schema WITH `migrations applied` in the log IS
+   the relative-`file:app.db`-under-`go run` regression — the fix is the wrapper handing an
+   absolute `SQLITE_PATH` (`templates/sqlite-mvp.md`), never a relative fallback. It is
+   already in `.gitignore`; leave it (or remove it after the check and say so — never claim
+   persistence you did not observe). Only use `:memory:` when the dev chose
    ephemeral. **Every approved surface knob must be IN the
    yaml and observable**: OpenAPI UI approved ⇒ `openapi:` block present AND its uiPath
    answers 200; `rootRedirect` approved ⇒ `GET /` answers 302 (the framework default is

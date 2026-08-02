@@ -5,6 +5,65 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.11.0] — 2026-08-01
+
+### Added
+- **`shared/dialects/` — one knowledge sheet per relational engine, the single home for
+  per-dialect divergence.** New `plugins/omnicore/shared/dialects/{postgres,mysql,sqlserver,
+  oracle,sqlite}.md` (+ a `README.md` stating the contract). Each sheet carries the axes
+  where the dialects diverge — id/decimal/boolean column types, the **constraint-violation
+  KEY the repo `ConstraintBinding` map binds**, active-only uniqueness, the read-side
+  posture — as generic KNOWLEDGE (no SQL/Go code, by the skills' style rule), routing to the
+  pinned `table-schema.html` as the authority for exact forms. The generating agent reads
+  ONLY the sheet(s) for the service's target dialect(s) instead of wading through
+  every-dialect prose with the exceptions as footnotes.
+
+### Changed
+- **Per-dialect facts moved OUT of scattered inline prose and INTO the shared sheets.**
+  `scaffold-entity` (`SKILL.md` id-typing block + `conventions/infra.md` · `migrations.md` ·
+  `sharedbase.md`) dropped their "named `<table>_<col>_key` in EVERY dialect / match by
+  NAME" claims — which were false for SQLite — and now route to
+  `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md`. `configure` (engine swap) and
+  `evolve-entity` (unique field add/remove) gained routing rows into the same sheets;
+  `configure`'s engine-swap step now spells out re-keying every `Constraints` map to the
+  target dialect's form.
+
+### Fixed
+- **`scaffold-service` — the SQLite dev loop no longer boots against an empty database.**
+  Under `go run`, a relative `file:app.db` DSN was resolved to DIFFERENT files by the
+  migration step and the runtime (the throwaway temp binary vs the project dir), so the
+  boot logged `migrations applied` while the served `app.db` stayed empty and every request
+  failed `no such table: <entity>`. The `cd`-into-project trick the wrapper relied on was
+  not enough. Fixed in `templates/sqlite-mvp.md`: all three start wrappers now pin an
+  ABSOLUTE `SQLITE_PATH` next to the script (recomputed each run, so the `.db` still travels
+  with the project — portability kept; an explicit `SQLITE_PATH` still wins). And the
+  scaffold-service final-verify was hardened — it no longer accepts `ls app.db` as proof of
+  persistence (an empty 4096-byte file "appears"); it now inspects the SCHEMA and confirms
+  the framework control-plane tables actually landed in the DB the runtime reads.
+- **`scaffold-entity` — SQLite services no longer bind unique/PK violations by the wrong
+  key.** SQLite reports a violation as the COLUMN LIST (`UNIQUE constraint failed:
+  table.column`), never the index/constraint NAME the four SQL engines return — but the
+  conventions told the agent constraints are "named `<table>_<col>_key` in EVERY dialect"
+  and the repo "binds by NAME". On a SQLite service the agent therefore named its indexes
+  `<table>_<col>_key` and bound those names, which SQLite never emits — the lookup missed,
+  the raw DB error escaped unmapped, and the intended custom 409 became a generic 500 (it
+  compiled and booted; only a duplicate INSERT revealed it). Fixed at the root: the shared
+  `sqlite.md` sheet states the `table.column` bind-key rule prominently, the by-NAME claims
+  are gone, and the Level-1 checklist gained a guard — on a SQLite service, a repo
+  `Constraints` key ending `_key`/`_pkey` or the literal `PRIMARY` must hit NOTHING.
+- **`scaffold-entity` — domain structs no longer get `json:` tags.** The "a persisted
+  field carries `labelKey` and nothing else" rule was buried as a sub-clause of a dense
+  bullet in `conventions/domain.md`, and nothing in the pre-boot checklist caught a
+  violation — so the strong Go reflex of stamping `json:"..."` on every struct field won,
+  and generated aggregates came out with `json:"..." labelKey:"..."` on every field (the
+  canonical example's domain carries `labelKey` only). Two reinforcements: the tag rule is
+  now a loud standalone rule that names the reflex and the layering reason (wire names live
+  on the web-layer DTOs; a `json:"-"` even corrupts the `Old()` snapshot the framework
+  builds via a json round-trip), and the Level-1 mechanical checklist gained a
+  `grep -rn 'json:"' internal/domain/` → NOTHING guard (also sweeping `db:`) so a slip is
+  caught before boot. `scaffold-system` inherits the fix (it delegates per entity to
+  `scaffold-entity`).
+
 ## [0.10.2] — 2026-08-01
 
 ### Fixed
