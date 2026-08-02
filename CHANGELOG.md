@@ -5,6 +5,25 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.10.2] — 2026-08-01
+
+### Fixed
+- **`scaffold-service` — the Phase 1 questions are now staged on the dialect
+  instead of dumped in one flat round.** The old "ask in ONE consolidated round"
+  rule contradicted the skill's own SQLite carve-outs (transport "asked ONLY when
+  the engine is not SQLite", "no bench for SQLite", read-side "forced relational on
+  SQLite"): a slot can't be skipped based on an answer collected in the same round,
+  so the agent asked transport / broker / read-side alongside the dialect and
+  papered over it with "(ignored if sqlite)" parentheticals — forcing a dev who
+  picked SQLite to answer a broker and a read-side posture that get thrown away.
+  Phase 1 now asks in two staged rounds: **Round 1** = identity + the dialect pivot
+  (name, module, dialect); **Round 2** branches on the answer — SQLite asks only the
+  slots that still exist (SQLite DSN, surfaces, wrappers), a full engine asks
+  transport + bench + read-side + surfaces + wrappers. No more answer-to-discard,
+  no more "ignored if sqlite" parentheticals. (Slots #4/#6/#8 already carried the
+  correct SQLite semantics — they were simply unreachable behind the single-round
+  rule.)
+
 ## [0.10.1] — 2026-08-01
 
 ### Changed
