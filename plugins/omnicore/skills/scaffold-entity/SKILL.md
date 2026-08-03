@@ -165,6 +165,11 @@ Self-configure by reading the project:
   the SAME `NewSharedBaseSchema("…")` — the registry keys by table) and ADD to the existing
   identity view (don't recreate either). This is the "add a role to an existing base" path
   (drives item 1's create-vs-add-role question).
+- **Existing value objects (`internal/domain/vos/`).** Enumerate what the project already
+  has — an `Email`, `ZipCode`, `Document`, a `Relationship` enum — BEFORE modeling any
+  field: a field whose rule matches an existing VO REUSES it (import `vos`, no new type),
+  never a second copy; a new VO is created only when none fits. This inventory feeds the
+  spec's §2 `VO?` column so the reuse-vs-new call is decided per field, visibly.
 - **A domain map from `scaffold-system`?** Look for `scaffold-system/domain-map.md` —
   whether this run was delegated by that skill or invoked directly in a project that has
   one; if it exists, reading it is MANDATORY, not optional. `Status: APPROVED` and it
@@ -328,7 +333,7 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    The domain is where the entity earns its keep —
    a run that asks nothing ends up with only "required + length" boilerplate. Elicit the
    real rules (propose sensible defaults per field type, then confirm), and map each to an
-   `IfInsert/IfUpdate/IfInsertOrUpdate/IfDelete/IfDisplay`
+   `IfInsert/IfUpdate/IfInsertOrUpdate/IfArchive/IfUnarchive/IfDelete/IfDisplay`
    closure with a specific notification.
 7. **Delete semantics — archive OR hard delete (rarely both).** An archive model
    (archive/unarchive + the schema's archive column) OR a hard-delete model. One simple
@@ -507,6 +512,12 @@ Four DISTINCT levels — do not conflate them:
      field carries `labelKey` and nothing else. A stray `json:` tag is the #1 reflex slip
      (a domain aggregate is not a wire DTO); a `json:"-"` also corrupts the `Old()`
      snapshot. Strip every hit — wire names live on the web-layer DTOs.
+   - **VO smell (investigate, do NOT auto-fail):** `grep -rnE 'regexp|MatchString' internal/domain/*.go internal/domain/aggregatevos/`
+     → a format/regex/length/range check inline in a root's or an AVO's `BuildRules` is
+     usually a value object that wasn't extracted (its rule belongs in a `vos/` `IsValid`,
+     tested there). For each hit, confirm it is either a signed-off `plain` exception in the
+     spec's §2 `VO?` column or a genuine cross-field rule; otherwise lift it into a VO.
+     (`internal/domain/vos/` is EXPECTED to hold regex — that path is not swept.)
    - **SQLite service only** — `grep -rnE '"[a-zA-Z_]+_(key|pkey)"|"PRIMARY"' internal/infra/`
      over the repo `Constraints` maps → must hit NOTHING: SQLite binds a unique/PK violation
      by the `<table>.<column>` column list, NEVER an index/constraint name
@@ -595,6 +606,7 @@ only a genuinely missing docs file does.
 | When generating… | Read section(s) |
 |---|---|
 | rules / notifications / Old / actionName | rules-dsl · old-state · status-mapping |
+| value objects: raw vs enum, auto-validation, EnumByValue, Ignore/Validate | value-objects |
 | domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | custom-command-handler · service-to-service |
 | aggregate children / cascade | aggregate-persistence |
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |

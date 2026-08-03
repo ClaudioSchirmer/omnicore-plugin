@@ -42,6 +42,26 @@ parameter**; an input-echo silently hides every domain transformation. Contract 
 `auto-handlers.html` (projection contract). Bodyless verbs return the framework's empty
 result.
 
+## Wire → VO mapping — a CAST, not a constructor (avoid bloat)
+
+The Command holds the VO fields' UNDERLYING scalars (string VO/enum → `string`, int enum →
+`int`, nullable → a pointer), mirroring the Request 1:1. Turning them into VO fields in
+`ApplyTo`/`ApplyPartiallyTo` (and a child input DTO's `To<Child>()` builder) is a plain Go
+**type conversion** — never a constructor, never a per-field validate/normalize step (the
+framework auto-validates VO fields — domain.md):
+- raw / enum field → a direct cast (`vos.Email(c.Email)`, `vos.Ethnicity(c.Ethnicity)`); an
+  out-of-set enum value is caught by the automatic check, NOT by an `if` here — and NOT via
+  `EnumByValue` by default.
+- nullable field → a POINTER cast (`(*vos.Phone)(c.Phone)`) — nil-safe by construction, so
+  NO `if != nil` guard on insert/PUT.
+- `FromEntity` is the inverse: `.Value()` for a raw/enum field, a pointer cast back
+  (`(*string)(u.Phone)`) for a nullable one.
+
+**`if x != nil` belongs to PATCH only.** `ApplyPartiallyTo` is tri-state (nil = not sent), so
+each line is guarded `if c.X != nil { u.X = <same cast> }`; insert and PUT assign
+unconditionally. An `if != nil` on the insert/PUT mapper, or a hand-rolled validate/normalize
+per field, is the bloat to avoid — the cast plus automatic validation is the whole job.
+
 ## PUT vs PATCH — the decision + the trap
 
 Default PATCH; ask PUT/PATCH/both at the spec. **PATCH can never assign NULL** (absent and
