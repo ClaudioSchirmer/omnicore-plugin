@@ -27,7 +27,11 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   the exception — marked `plain` in the §2 `VO?` column and signed off by the dev. A companion
   Final-verify smell check (`scaffold-entity/SKILL.md`) greps for `regexp`/`MatchString` inline
   in a root's/AVO's `BuildRules` and prompts extraction into a VO (investigate, not auto-fail;
-  `vos/` is not swept).
+  `vos/` is not swept). A field whose valid values are a FIXED, CLOSED set is ALWAYS an enum
+  value object (no exception, no `plain`) — framed as a mechanical, property-based test ("are
+  the allowed values a fixed list known in advance?"), explicitly NOT a Go-typing question (Go
+  has no `enum` keyword; `EnumValueObject` is the framework's construct), so the agent decides
+  by fact, not by the ambiguous word "enum".
 - **`conventions/tests.md` follows the VO split.** Format/length/range/closed-set coverage now
   lives with the VO (tested DIRECTLY in `internal/domain/vos/` — `IsValid`/membership are plain
   methods), not as `BuildRules` branches; an AVO gets a direct `IsSameBusinessIdentity` test.

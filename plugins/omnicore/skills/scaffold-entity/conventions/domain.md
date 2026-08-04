@@ -52,17 +52,28 @@ DEFAULT.** Inline in `BuildRules` stays for exactly two cases: a pure-presence r
 (required non-empty) and a cross-field invariant (spanning two+ fields). "Only one aggregate
 carries it today" is NOT a reason to inline — a VO is single-responsibility + one home for
 the rule, not merely reuse. Model it as a VO type in `internal/domain/vos/`, never a bare
-`string`/`int` with the check re-written in `BuildRules`. A field the dev DELIBERATELY keeps
-as a local one-off shape check is the exception — marked `plain` in the spec's §2 `VO?`
-column and signed off there, never the agent's silent default. Full contract + examples:
+`string`/`int` with the check re-written in `BuildRules`.
+
+**A field whose valid values are a FIXED, CLOSED set is ALWAYS an enum value object — no
+exception, no judgment, no `plain`.** The test is mechanical and property-based, NOT a
+Go-typing question: Go has no `enum` keyword — `EnumValueObject` is the framework's construct
+(a named type over a `string`/`int` + a declared member list; the framework validates
+membership). So don't ask "is this a Go enum?" (there is none) — ask "are the allowed values
+a fixed list known in advance?" If yes — a status, kind, type, state, relationship,
+frequency, ANY "one of N" — it is an `EnumValueObject`, every time. The ONLY field that may
+stay inline as a `plain` exception is a RAW/format shape check (a local, one-off regex like a
+country-specific `State`) the dev deliberately signs off in §2's `VO?` column — NEVER a
+fixed-value set, never the agent's silent default. Full contract + examples:
 `value-objects.html` (read it before generating this layer).
 
 **Which kind — the two VO shapes:**
 - a formatted/constrained primitive — Name, Email, Phone, Document/tax-id, ZipCode, a card
   number, a bounded quantity: a **raw value object** (`ValueObject[T]`), owns a bespoke
   `IsValid` (a regex, a length cap, a range).
-- a closed classification set — a status, kind, relationship, frequency: an **enum value
-  object** (`EnumValueObject[E,T]`), int- OR string-backed. Declares the const block
+- a FIXED/closed set of allowed values known in advance — a status, kind, type,
+  relationship, frequency, ANY "one of N": ALWAYS an **enum value object**
+  (`EnumValueObject[E,T]` — the framework's stand-in for the enum Go lacks), int- OR
+  string-backed. Declares the const block
   (EXPLICIT values, never bare `iota`; the zero value is the `Unknown` sentinel, never a
   member) + `Values()` + an `Unknown…Notification`, and writes NO `IsValid` — the framework
   validates membership from the declared set.

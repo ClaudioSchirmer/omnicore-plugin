@@ -51,7 +51,8 @@ Language: <x>            <!-- working language for human-facing text (descriptio
   `example:` always filled (low-risk).
 - **The `VO?` column is MANDATORY per field (`value-objects.html`) — a blank cell = an
   incomplete spec.** Classify each field against the Phase 0b `vos/` inventory: `plain` (only
-  a presence rule, or none), `reuse vos.X` (an existing VO whose rule fits — REUSE it, never a
+  a presence rule, or none — NEVER a field whose values are a fixed set: that is ALWAYS an
+  enum VO), `reuse vos.X` (an existing VO whose rule fits — REUSE it, never a
   second copy), `new-raw vos.X` (a bespoke format/length/range → a new raw VO) or
   `new-enum vos.X` (a closed set/status/kind → a new enum VO). A 1:N child is an AGGREGATE
   value object → §3 (`internal/domain/aggregatevos/`). This is what lets the dev see, edit and
