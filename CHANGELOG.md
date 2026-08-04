@@ -5,6 +5,36 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.13.0] — 2026-08-04
+
+### Changed
+- **`scaffold-entity` now teaches clean `BuildRules` idiom + a context-bound Service probe.**
+  Additions to `conventions/domain.md` and `conventions/infra.md`, prose (no code — the skills
+  never carry code), from a real run whose generated rules had a duplicate-looking
+  `IfInsertOrUpdate` and a `return`-to-dodge:
+  - `domain.md`: **one clause per mode is the default — group a field's rules together, not by
+    mode.** Repeating a mode clause is legal (`IfInsertOrUpdate` just runs its closure each
+    time — nothing is registered or overwritten), but scattered blocks read as accidental
+    duplication.
+  - `domain.md`: **never write code to dodge an automation.** When a rule runs only if a VO
+    field has a value, the VO's own automatic check already raises the required — gate the rule
+    POSITIVELY (`if a.Field != "" { … }`), never an early `if a.Field == "" { return }`.
+  - `domain.md`: **the Service port is an interface with the method ON it, returning PURE VALUES
+    (never `(T, error)`), and `BuildRules` NEVER panics or guards the service defensively.** No
+    struct-wrapping-a-sub-port; no `(T, error)` shape that forces the domain to handle an infra
+    error; no `if !ok { panic }` / `if err != nil { panic }` — `RequiresService() true` + the
+    infra compile-time assertion already cover presence and type, so assert-and-use in one line.
+    A panic in a domain file is always a bug; the only rejection is a notification.
+  - `infra.md`: **the Service impl owns IO failure and FAILS LOUD.** The port returns pure
+    values, so an unrecoverable query error surfaces as a `panic` IN INFRA (→ 500 via the
+    pipeline recover) — never swallowed into a false/empty answer (which silently skips the
+    invariant), never pushed back to the domain to handle. The unique index stays defense in
+    depth, never a licence to guess.
+  - `infra.md`: **bind the request context to the probe.** Generate the Service impl with a
+    nil-able `ctx *configuration.AppContext` field + `ScopedService(ctx)` (shallow copy) and
+    query under it, via `persistence.ScopedServiceProvider` — the default shape for any Service
+    that queries. Mirror of the read side's `ScopedReaderProvider`.
+
 ## [0.12.0] — 2026-08-03
 
 ### Added
