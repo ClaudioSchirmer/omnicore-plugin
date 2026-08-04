@@ -106,6 +106,17 @@ own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
   will NOT fire on an archive transition. `actionName` is a free-form label, never a verb
   selector. Full clause set: `rules-dsl.html`.
 - **`domain.Old(e)` is nil on Insert** — guard before dereferencing.
+- **One clause per mode is the DEFAULT — group by field, not by mode.** Repeating a mode
+  clause is legal (`IfInsertOrUpdate` just runs its closure each time — nothing is registered,
+  stored, or overwritten), but two scattered `IfInsertOrUpdate` blocks read as accidental
+  duplication. Keep all of a field's rules (required / immutable / unique) adjacent under a
+  single clause of each kind it needs.
+- **Never write code to dodge an automation.** When a rule must run only if a VO field has a
+  value, remember the VO's own automatic check already raises the required — so gate the rule
+  POSITIVELY on the value you want (`if a.Matricula != "" { …uniqueness… }`), never an early
+  `if a.Matricula == "" { return }`. A `return // the VO already raised it` is ugly control
+  flow that exists only to escape a validation the framework already runs for you; state the
+  condition you DO want instead.
 - Prefer framework built-in notifications (`RequiredFieldNotification`,
   `SchemaViolationNotification`) — they need no translation entry. Regex validations:
   package-level compiled vars.
@@ -123,6 +134,22 @@ own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
   lives in infra (repo read for facts this service owns · httpclient for the external
   world · grpcclient for another microservice — decision matrix in
   `service-to-service.html`); injection at the wiring.
+- **The port declares the method(s) DIRECTLY and returns PURE VALUES — never an `error`.**
+  Shape it as `type FooService interface { domain.Service; ActiveThing() bool }` — the fact
+  method lives ON the interface, embedding `domain.Service`. Do NOT model a struct carrying a
+  separate sub-port (`struct{ domain.ServiceBase; Stats SomePort }`) — that indirection is the
+  over-engineering to avoid; one interface = the port with the method. And the method returns
+  ONLY the value the rule needs (a `bool`, a count, a `[]Fact`), **never `(T, error)`**: the
+  domain has zero IO and must never receive or handle an infra error. A port shaped
+  `(T, error)` forces the rule to panic / notify / swallow — all three are wrong. IO failure is
+  infra's problem (see `infra.md`).
+- **`BuildRules` NEVER panics, and NEVER guards the service defensively.** `RequiresService()
+  true` already guarantees a non-nil service (else `ServiceIsRequiredNotification` fires BEFORE
+  rules run), and the infra compile-time assertion (`var _ FooService = (*FooServiceImpl)(nil)`)
+  plus the wiring guarantee the concrete type. So assert-and-use in ONE line —
+  `facts := svc.(FooService).ActiveThing()` — with NO `if !ok { panic }`, NO nil-check, NO
+  `if err != nil { panic }`. The domain has no panic path whatsoever; the ONLY way a rule
+  rejects is `r.AddNotification`. A panic in a domain file is always a bug.
 - **The canonical use is uniqueness/anti-duplication among actives**: the pre-check with
   exclude-self semantics (and unarchive in scope when reactivation can collide) that lets
   the duplicate report TOGETHER with the other validation errors — the DB unique index

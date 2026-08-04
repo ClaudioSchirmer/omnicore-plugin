@@ -85,3 +85,32 @@ per key, distinct-key cardinality) — use the loader's hydration-free surface
 `custom-command-handler.html`, "Loading by criteria", ships — newer versions compute
 several facts in ONE query, grouped or ungrouped); loading aggregates to answer a scalar
 question is the anti-pattern that surface exists to kill.
+
+- **On an infra error the impl FAILS LOUD — it never swallows, and never pushes the error up
+  to the domain.** The domain port returns pure values (no `error`), so an unrecoverable query
+  failure surfaces HERE as a `panic` — the pipeline's single recover point turns it into a 500
+  and the write never happens. Do NOT fold the failure into a plausible-but-wrong answer
+  (`if err != nil { return false }`, an empty slice): that silently skips the very invariant
+  the rule exists to enforce — a duplicate or a 4th category slips past to the DB backstop (or
+  worse, past it). "Cannot answer" is a FAULT, not a "not taken". The panic lives in INFRA,
+  where IO happens — NEVER in a domain file, and the port never carries the error back to the
+  domain to handle. (The unique index / other backstop is defense in depth, never a licence to
+  guess an answer.)
+- **Bind the request context — the probe is a read, run it under the request scope.** The
+  domain `Service` port is pure and `BuildRules` carries no `context`, so a naive impl runs
+  its query on `context.Background()` — outside the request deadline
+  (`http.requestTimeoutSeconds`), cancellation, and trace. Don't. Implement the framework's
+  `persistence.ScopedServiceProvider` on THIS impl — the service-side counterpart of
+  `ScopedReaderProvider`, but mind the asymmetry: the reader mirror comes free from the
+  framework's base aggregate repo, whereas a `domain.Service` is your own code, so no framework
+  base can provide it — you generate the method here (documented in `auto-handlers.html`,
+  "Binding the request context to a Service probe"). The
+  impl carries a nil-able `ctx *configuration.AppContext` field and a `ScopedService(ctx)
+  domain.Service` method returning a **shallow copy** that closes over the ctx (never mutate
+  the receiver — the wired impl is a singleton shared across requests); the probe queries
+  under `s.ctx` (an `*AppContext` IS a `context.Context`), falling back to
+  `context.Background()` only when `s.ctx == nil` (singleton use — tests, background jobs).
+  The Auto handlers bind it for you via `persistence.ScopeService`; in a custom command
+  handler wrap the service the same way at the `domain.Get*` call — one line, keeping the
+  manual path feature-equivalent. This is the default shape for any Service that queries;
+  generate it, don't emit a ctx-less probe.
