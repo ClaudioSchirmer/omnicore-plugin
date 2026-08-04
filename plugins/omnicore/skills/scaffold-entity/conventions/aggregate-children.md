@@ -57,11 +57,20 @@ web.md.
   declaring its own child panics; model a separate aggregate instead.
 - **Every child-mutation method opens with the framework's ensure-initialized call** —
   else construction-time notifications are lost.
-- **The change/remove primitives match the child BY VALUE (deep equality), not by id** —
-  operate on the LOADED item, never a hand-built value carrying only the id. The by-id
-  semantics is YOUR domain method's lookup, not the framework's.
-- **A child is a value type (struct, not pointer)** with a string id field + its own
-  scoped `BuildRules` (notifications surface as `children[i].field`).
+- **The framework matches a child through its MANDATORY `IsSameBusinessIdentity`, never
+  `reflect.DeepEqual`** — every AVO must declare it (an interface method: omit it → compile
+  fail) and `GetID` comes from the embedded `domain.Managed`. It answers "is this the SAME
+  child?" from the aggregate's BUSINESS view, not "did nothing change?": implement it on the
+  natural-key subset (so a cosmetic edit is still the same child), and delegate to
+  `domain.IsSameByBusinessFields` ONLY when identity genuinely = every field. The choice
+  changes PUT re-send behavior (id-preserving re-activation vs archive-then-reinsert as
+  history) — `aggregate-persistence.html`. Operate the change/remove primitives on the LOADED
+  item, and REUSE this method as the root's duplicate rule instead of a second check.
+- **A child is a value type (struct, not pointer)** — an AGGREGATE value object, in
+  `internal/domain/aggregatevos/` (its own file + that package's `notifications.go`). It has
+  a string id field + its own scoped `BuildRules` (notifications surface as
+  `children[i].field`); its VO-typed fields auto-validate exactly like a root's, so
+  `BuildRules` carries ONLY the non-VO rules (`value-objects.html`).
 
 ## The verb tells the truth (soft removal)
 

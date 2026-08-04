@@ -43,12 +43,20 @@ Language: <x>            <!-- working language for human-facing text (descriptio
   - Identity view (SharedBaseView): create | add-role (bump Version) | skip
 
 ## 2. Fields                                 [one row per field — none may be missing]
-| Field | Go type | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
-|---|---|---|---|---|---|---|
+| Field | Go type | VO? (reuse/new-raw/new-enum/plain) | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
+|---|---|---|---|---|---|---|---|
 - Nullable ⇒ pointer. Money = int64 minor units, never float. Exact decimals → `string`
   (float64 rounds); `float64` is fine for non-money numerics. Column types per dialect:
   the "Go ↔ …" tables in `table-schema.html` — the authority, never from memory.
   `example:` always filled (low-risk).
+- **The `VO?` column is MANDATORY per field (`value-objects.html`) — a blank cell = an
+  incomplete spec.** Classify each field against the Phase 0b `vos/` inventory: `plain` (only
+  a presence rule, or none — NEVER a field whose values are a fixed set: that is ALWAYS an
+  enum VO), `reuse vos.X` (an existing VO whose rule fits — REUSE it, never a
+  second copy), `new-raw vos.X` (a bespoke format/length/range → a new raw VO) or
+  `new-enum vos.X` (a closed set/status/kind → a new enum VO). A 1:N child is an AGGREGATE
+  value object → §3 (`internal/domain/aggregatevos/`). This is what lets the dev see, edit and
+  APPROVE the VO/reuse decision before any code is generated.
 - Id/uuid fields (the PK, every FK, any cross-aggregate reference): the Go type follows
   the PIN's identity contract (SKILL.md boot-traps, "Id typing") — on a typed-identity
   pin write **`domain.ID`** (nullable ⇒ `*domain.ID`); on older pins (≤ v0.29.0) write
@@ -86,7 +94,7 @@ soft | hard (rarely both). Verb truth: DELETE = hard purge only; soft = PATCH
 archive (+ unarchive). Root AND per-child.
 
 ## 7. Business rules                        [required — never boilerplate-only]
-| # | Field(s) | Rule | Verb scope (IfInsert/IfUpdate/…/actionName) | Notification | HTTP |
+| # | Field(s) | Rule | Verb scope (IfInsert/IfUpdate/IfArchive/IfUnarchive/…) | Notification | HTTP |
 |---|---|---|---|---|---|
 - At minimum the required/format/range rules per field; elicit the REAL invariants
   (cross-field, immutability, transitions, per-group caps) — this is where the domain

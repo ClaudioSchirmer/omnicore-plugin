@@ -10,13 +10,26 @@ Covers a **flat** entity's domain. Deltas load separately: children →
 Docs for this layer: rules DSL → `rules-dsl.html` · notification→status →
 `status-mapping.html` · `Old()` → `old-state.html` · authz → `authz-seams.html`.
 
-## Files
+## Files — THREE domain packages (per `service-layout.html`)
 
-Per `service-layout.html`: one domain type per file (root, each VO, the service port in its
-own `<entity>_service.go`); `notifications.go` is the single shared home of every custom
-notification. Both `notifications.go` and the translation catalogs are **registration
-sites** — existing files you APPEND to (like `wire.go`), never per-entity copies, never
-regenerated.
+The domain layer is not one flat folder. One domain type per file, split across three
+packages by what the type IS:
+
+- `internal/domain/` — the **root aggregate** (`<entity>.go`), its `domain.Service` port
+  (`<entity>_service.go`), and `notifications.go` for the notifications the ROOT emits.
+- `internal/domain/vos/` — the **value objects** (one file each: `email.go`, `zip_code.go`,
+  `relationship.go`, …) + this package's own `notifications.go` + a `doc.go` package comment.
+  A VO used ONLY by a child still lives here (an enum a `Dependent` carries → `vos/`, never in
+  `aggregatevos/` or the child's file); `aggregatevos` imports `vos`, never the reverse (`vos`
+  stays a leaf).
+- `internal/domain/aggregatevos/` — the **aggregate value objects** (the children:
+  `address.go`, `dependent.go`, …) + this package's own `notifications.go`.
+
+**Three separate `notifications.go`, by necessity not taste:** `domain` imports `vos` and
+`aggregatevos`, so a notification a VO emits cannot live in `domain` (it would cycle) — each
+package owns the notifications ITS types emit. All three `notifications.go` and the seven
+translation catalogs are **registration sites** — existing files you APPEND to (like
+`wire.go`), never per-entity copies, never regenerated.
 
 ## The aggregate struct — decisions
 
@@ -31,16 +44,68 @@ regenerated.
 - A **flat** entity does NOT implement `domain.AggregateRootProvider` — that is the
   children delta.
 
+## Value objects — the DEFAULT for any validated field, never inline the rule
+
+**The decision rule (inverted on purpose): a field that needs ANY validation beyond
+presence/nullability — a format, a length/range bound, a closed set — IS a value object, by
+DEFAULT.** Inline in `BuildRules` stays for exactly two cases: a pure-presence rule
+(required non-empty) and a cross-field invariant (spanning two+ fields). "Only one aggregate
+carries it today" is NOT a reason to inline — a VO is single-responsibility + one home for
+the rule, not merely reuse. Model it as a VO type in `internal/domain/vos/`, never a bare
+`string`/`int` with the check re-written in `BuildRules`.
+
+**A field whose valid values are a FIXED, CLOSED set is ALWAYS an enum value object — no
+exception, no judgment, no `plain`.** The test is mechanical and property-based, NOT a
+Go-typing question: Go has no `enum` keyword — `EnumValueObject` is the framework's construct
+(a named type over a `string`/`int` + a declared member list; the framework validates
+membership). So don't ask "is this a Go enum?" (there is none) — ask "are the allowed values
+a fixed list known in advance?" If yes — a status, kind, type, state, relationship,
+frequency, ANY "one of N" — it is an `EnumValueObject`, every time. The ONLY field that may
+stay inline as a `plain` exception is a RAW/format shape check (a local, one-off regex like a
+country-specific `State`) the dev deliberately signs off in §2's `VO?` column — NEVER a
+fixed-value set, never the agent's silent default. Full contract + examples:
+`value-objects.html` (read it before generating this layer).
+
+**Which kind — the two VO shapes:**
+- a formatted/constrained primitive — Name, Email, Phone, Document/tax-id, ZipCode, a card
+  number, a bounded quantity: a **raw value object** (`ValueObject[T]`), owns a bespoke
+  `IsValid` (a regex, a length cap, a range).
+- a FIXED/closed set of allowed values known in advance — a status, kind, type,
+  relationship, frequency, ANY "one of N": ALWAYS an **enum value object**
+  (`EnumValueObject[E,T]` — the framework's stand-in for the enum Go lacks), int- OR
+  string-backed. Declares the const block
+  (EXPLICIT values, never bare `iota`; the zero value is the `Unknown` sentinel, never a
+  member) + `Values()` + an `Unknown…Notification`, and writes NO `IsValid` — the framework
+  validates membership from the declared set.
+
+**Validation is AUTOMATIC — the part a code-first reflex trips on.** You never call a VO's
+validation by hand. The framework discovers every VO-typed field by reflection and
+validates it on every write, IDENTICALLY on a root AND on an aggregate value object (a
+`nil` pointer field is skipped as absent). So `BuildRules` carries ONLY the non-VO rules (a
+required plain `string`, a cross-field invariant); an Email/ZipCode/enum field has nothing
+to wire. To opt one out in a mode, `r.IgnoreValueObject("Field")` inside that mode's gate;
+to force a VO that is not a plain field (computed, in a slice), `r.ValidateValueObject(name,
+vo)`. Both on `*Rules`, root and child alike.
+
+**Boundary + labels.** Turning a wire scalar into a VO field is a plain type CAST in the
+command mapper — not a constructor, not hand-validation (details + the PATCH exception are in
+application.md); an out-of-set enum value is caught by the automatic check, not by an `if`.
+`domain.EnumByValue[E](raw)` is the OPTIONAL convergence helper for when you must fold junk to
+`Unknown` explicitly (a differing wire type) — never the default mapper move. A VO never names
+a label or a translation — the field LABEL stays on the aggregate struct field's `labelKey`
+tag, enum values render per-locale via `EnumDescriptionKey` + the translator, and the VO's
+own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
+
 ## Modes() + BuildRules — traps the docs route you past
 
 - **`Modes()` ⟺ the schema's archive-column declaration must agree** — `ModeArchive`
   without the declared column
   panics at repo construction (and vice-versa; keep them in lockstep).
-- **There is NO `IfArchive`/`IfUnarchive`** — archive/unarchive rules ride `actionName`
-  (`"GetArchivable"`/`"GetUnarchivable"`) inside `IfUpdate`. Full actionName↔verb map:
-  `rules-dsl.html`.
-- **`domain.Old(e)` is nil on Insert** — guard before dereferencing (transition rules run
-  under `IfUpdate`).
+- **Archive/unarchive have their OWN clauses — `IfArchive`/`IfUnarchive`** (gate on
+  ModeArchive/ModeUnarchive). `IfUpdate` is PUT/PATCH exclusively; a rule left in `IfUpdate`
+  will NOT fire on an archive transition. `actionName` is a free-form label, never a verb
+  selector. Full clause set: `rules-dsl.html`.
+- **`domain.Old(e)` is nil on Insert** — guard before dereferencing.
 - Prefer framework built-in notifications (`RequiredFieldNotification`,
   `SchemaViolationNotification`) — they need no translation entry. Regex validations:
   package-level compiled vars.

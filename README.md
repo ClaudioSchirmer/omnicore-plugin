@@ -29,8 +29,9 @@ All skills are **version-agnostic**: they read the framework version from the pr
 `go.mod` and treat that version's bundled `/docs` as the sole authority, so they never
 drift as the framework evolves.
 
-Works with any published omnicore release (docs-pinned by design). Latest release
-exercised: framework v0.32.0 · plugin 0.4.2.
+Works with any published omnicore release (docs-pinned by design). Version-matched to the
+framework's v0.43.0 (value objects + IfArchive/IfUnarchive) · plugin 0.12.0 — publish the two
+in sync.
 
 ## Install
 
@@ -80,11 +81,14 @@ Clients pin to a released **version**, so a code change reaches them only when y
    `main` is the source of truth; there is no Anthropic-hosted copy.
 5. Clients pick it up with:
    ```
-   claude plugin marketplace update omnicore   # re-pull the catalog
-   claude plugin update omnicore@omnicore       # fetch the new version
+   claude plugin marketplace update omnicore     # re-pull the catalog
+   claude plugin install omnicore@omnicore       # reinstall to fetch the new version
+   /reload-plugins                               # (in-session) activate it
    ```
-   Auto-update is off by default for self-hosted marketplaces; clients opt in per
-   marketplace to get background checks + a "run `/reload-plugins`" notification instead.
+   There is NO per-plugin `update` command — refresh the marketplace, then reinstall (or let
+   auto-update fetch it where enabled). Auto-update is off by default for self-hosted
+   marketplaces; clients opt in per marketplace to get background checks + a
+   "run `/reload-plugins`" notification instead.
 
 > **Manifest gotchas (bench-proven):** the marketplace entry's `source` must be the explicit
 > relative path `./plugins/omnicore` — a bare string (`"omnicore"`) is rejected at install as

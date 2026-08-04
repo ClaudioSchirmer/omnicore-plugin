@@ -5,6 +5,74 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.12.0] — 2026-08-03
+
+### Added
+- **Value objects are now a first-class, self-taught concept in `scaffold-entity`.** A new
+  descriptive section in `conventions/domain.md` ("Value objects — PERCEIVE them, never
+  inline the rule") teaches the agent to distinguish a **raw value object** (`ValueObject[T]`,
+  bespoke `IsValid` — Name/Email/Phone/Document/ZipCode) from an **enum value object**
+  (`EnumValueObject[E,T]`, declares `Values()` + an Unknown notification, framework validates
+  membership), that VO validation is AUTOMATIC on root AND aggregate value object alike
+  (`IgnoreValueObject`/`ValidateValueObject` to opt out/force), and the boundary parse via
+  `EnumByValue`. Deliberately more prose than the skills' usual doc-pointer style — VO
+  perception is a judgement the agent must make on its own. Routes to the framework's new
+  `value-objects.html`. New docs-map rows in `scaffold-entity` and `evolve-entity`, and a
+  spec-time "perceive value objects" cue in `conventions/spec-template.md` (§2 Fields).
+- **The VO decision criterion is INVERTED — VO is the default for any validated field.**
+  `conventions/domain.md` now states the rule as: a field needing ANY validation beyond
+  presence/nullability (a format, a bound, a closed set) IS a value object by default; only a
+  pure-presence rule or a cross-field invariant stays inline in `BuildRules`; "only one
+  aggregate carries it" is not a reason to inline. A deliberately-local one-off shape check is
+  the exception — marked `plain` in the §2 `VO?` column and signed off by the dev. A companion
+  Final-verify smell check (`scaffold-entity/SKILL.md`) greps for `regexp`/`MatchString` inline
+  in a root's/AVO's `BuildRules` and prompts extraction into a VO (investigate, not auto-fail;
+  `vos/` is not swept). A field whose valid values are a FIXED, CLOSED set is ALWAYS an enum
+  value object (no exception, no `plain`) — framed as a mechanical, property-based test ("are
+  the allowed values a fixed list known in advance?"), explicitly NOT a Go-typing question (Go
+  has no `enum` keyword; `EnumValueObject` is the framework's construct), so the agent decides
+  by fact, not by the ambiguous word "enum".
+- **`conventions/tests.md` follows the VO split.** Format/length/range/closed-set coverage now
+  lives with the VO (tested DIRECTLY in `internal/domain/vos/` — `IsValid`/membership are plain
+  methods), not as `BuildRules` branches; an AVO gets a direct `IsSameBusinessIdentity` test.
+- **VO reuse is now investigated up front and approved per field.** `scaffold-entity` Phase 0b
+  gains a "existing value objects (`internal/domain/vos/`)" inventory step — a field whose rule
+  matches an existing VO REUSES it (never a second copy); a new VO only when none fits.
+  `conventions/spec-template.md` §2 Fields gains a MANDATORY `VO?` column
+  (`reuse`/`new-raw`/`new-enum`/`plain`) so the VO/reuse decision is visible, editable and
+  APPROVED by the dev before generation (a blank cell = an incomplete spec, blocked by the
+  existing DRAFT gate).
+- **The wire→VO mapping is taught as a plain type CAST, to prevent bloated mappers.**
+  `conventions/application.md` gains a "Wire → VO mapping — a CAST, not a constructor"
+  section: raw/enum fields convert by a direct cast (out-of-set caught by automatic
+  validation, NOT `EnumByValue` by default), nullable fields by a nil-safe pointer cast, and
+  the `if x != nil` guard belongs to PATCH's tri-state `ApplyPartiallyTo` ONLY — insert/PUT
+  assign unconditionally. `conventions/web.md` adds a Boundary rule that wire DTOs carry the
+  VO's underlying scalar (never the VO type; don't import `vos` into `web/`), and
+  `conventions/domain.md`'s VO "Boundary" note now frames `EnumByValue` as the optional
+  convergence helper rather than the default mapper move.
+
+### Fixed
+- **`conventions/aggregate-children.md` no longer claims children are matched by
+  `reflect.DeepEqual`.** The framework now matches an aggregate value object exclusively
+  through its MANDATORY `IsSameBusinessIdentity` (an interface method — omitting it is a
+  compile fail; `GetID` comes from the embedded `domain.Managed`). The trap note now teaches
+  business-identity-vs-"did-anything-change", the natural-key-subset choice (vs
+  `domain.IsSameByBusinessFields`) and its PUT re-send consequence, and reusing the method as
+  the root's duplicate rule. Also: a value object used only by a child still lives in `vos/`
+  (never `aggregatevos/` or the child's file); `aggregatevos` imports `vos`, never the reverse.
+
+### Changed
+- **Domain-layer layout updated to the THREE-package split** (`service-layout.html`):
+  `conventions/domain.md` "Files" now describes `internal/domain/` (root aggregate + its
+  `notifications.go` + service port), `internal/domain/vos/` (value objects + own
+  `notifications.go` + `doc.go`) and `internal/domain/aggregatevos/` (children + own
+  `notifications.go`) — three `notifications.go` by necessity (the `domain` package imports
+  the sub-packages, so a shared file would cycle). Replaces the former single-folder,
+  single-`notifications.go` description. `conventions/aggregate-children.md` now places a
+  child in `aggregatevos/` and notes its VO fields auto-validate (its `BuildRules` carries
+  only non-VO rules).
+
 ## [0.11.0] — 2026-08-01
 
 ### Added

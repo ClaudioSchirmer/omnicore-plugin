@@ -135,6 +135,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | When changing… | Read section(s) |
 |---|---|
 | field add/remove/rename (Go ↔ column, id shapes) | table-schema · migrations |
+| value objects: add/rename a VO field, a new enum, place in vos/ or aggregatevos/ | value-objects · service-layout |
 | unique field add/remove → `Constraints` binding · per-engine id/decimal/boolean columns | `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md` (read ONLY the service's) |
 | rules / notifications / actionName | rules-dsl · old-state · status-mapping |
 | children / siblings / cascade | aggregate-persistence |

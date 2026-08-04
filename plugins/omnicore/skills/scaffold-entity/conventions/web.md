@@ -59,6 +59,10 @@ interface is what lets this layer compile before infra exists.
 
 - `ToCommand()` is body-only — NO ctx (identity enters at the Command layer); request ≡
   command shape (required → value, optional → pointer), 1:1, no normalization.
+- Wire DTOs carry the VO's UNDERLYING scalar (`string`/`int`/pointer), NEVER the VO type —
+  a request field for a `vos.Email`/`vos.Ethnicity` is a plain `string` (int enum → plain
+  `int`). The wire→VO cast is the Command's job (`application.md`); keep `ToCommand`/
+  `FromResult` raw 1:1 and don't import `vos` into `web/`.
 - Write responses project via `FromResult`; reads via the framework's doc projector keyed
   by Go field name; bodyless verbs use the no-body responder (204).
 - Filter operators are AI-chosen per field type (strings: eq/ne/in/startswith/contains +
