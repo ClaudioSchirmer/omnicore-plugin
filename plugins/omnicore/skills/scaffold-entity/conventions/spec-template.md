@@ -41,6 +41,9 @@ Language: <x>            <!-- working language for human-facing text (descriptio
     explicitly, never infer.
   - Link model: shared-PK | separate-FK
   - Identity view (SharedBaseView): create | add-role (bump Version) | skip
+    — only where the project HAS Mongo (a full engine with relational-backed views still
+    does). A Mongo-less infra (SQLite / zero-infra MVP) ⇒ the slot reads
+    `n/a — no Mongo; the per-role view serves the base's fields flattened`, never a choice.
 
 ## 2. Fields                                 [one row per field — none may be missing]
 | Field | Go type | VO? (reuse/new-raw/new-enum/plain) | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
@@ -49,6 +52,9 @@ Language: <x>            <!-- working language for human-facing text (descriptio
   (float64 rounds); `float64` is fine for non-money numerics. Column types per dialect:
   the "Go ↔ …" tables in `table-schema.html` — the authority, never from memory.
   `example:` always filled (low-risk).
+- **`Lives on = root` for an OPTIONAL field is a DECISION, not a default** — it must have
+  been shown at the model gate (SKILL.md Phase 1 item 2) with its alternative (a sibling).
+  A spec where no optional field ever had that trade-off surfaced is incomplete.
 - **The `VO?` column is MANDATORY per field (`value-objects.html`) — a blank cell = an
   incomplete spec.** Classify each field against the Phase 0b `vos/` inventory: `plain` (only
   a presence rule, or none — NEVER a field whose values are a fixed set: that is ALWAYS an

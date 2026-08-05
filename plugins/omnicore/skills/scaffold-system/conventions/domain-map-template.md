@@ -55,7 +55,10 @@ base; `N/A — no shared identity detected` if none.
 - **Two ACTIVE rows of the same role per identity?** ⚠️ OPEN — asked literally, per
   role; the answer decides role vs plain 1:N
 - **Identity view:** create · add-role · skip (decided ONCE here; the delegated run
-  executes, doesn't re-ask)
+  executes, doesn't re-ask) — gated on §1p's infra: no Mongo (SQLite / zero-infra MVP) ⇒
+  `n/a — needs Mongo (enable via /omnicore:configure)`, never offered as available; a full
+  engine still HAS Mongo even when its entity views are relational-backed. The base and its
+  roles stay in the map either way (§3 is write side).
 
 ## §4 Cross-aggregate references
 

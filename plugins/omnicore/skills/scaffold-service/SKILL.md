@@ -201,6 +201,14 @@ database/group/container names from the service name, `migrations.dir
 ./migrations/<dialect>`, dev-profile autoRun defaults, audit `slog` in dev, shutdown
 defaults, the prd template's JWT `${VARS}` placeholders.
 
+Also low-risk, and easy to lose: **the service description** — ONE sentence saying what
+the service is for, taken from the dev's OWN words in the invocation ("scaffold a service
+for managing orders" ⇒ `Manages orders.`); with nothing to go on, the neutral
+`<Service Name> service.`. Record it in the spec like every other filled slot, so the dev
+can correct it at the gate. It becomes `openapi.Config.Description` — the paragraph under
+the title on the `/docs` page. Free to set here, permanent if skipped: NO skill downstream
+revisits this config.
+
 Write the resolved answers to **`scaffold-service/spec.md`** (project root, visible,
 one small file — no per-layer task files; generation is one pass): every slot filled,
 `Status: DRAFT`. **Hard STOP** until the dev answers; a plain "ok" accepts every
@@ -243,7 +251,8 @@ applies only when any high-risk slot would otherwise be filled by you.
    to add the first entity. Derive the exact signatures from `bootstrap.html` — this
    skill carries no Go by design. Two wiring rules:
    - **OpenAPI surface chosen ⇒ set `Wiring.OpenAPI`** (Title from the service name,
-     an initial Version, AND `LanguageSelector: true`) — the yaml `openapi:` block only
+     an initial Version, the one-line Description recorded in the spec, AND
+     `LanguageSelector: true`) — the yaml `openapi:` block only
      tunes HOW the UI is served and is ignored unless `Wiring.OpenAPI` is set; without
      it the `/docs` check in the final verify can never pass. Derive the config
      type/fields from `bootstrap.html` / `openapi.html`. **`LanguageSelector` costs

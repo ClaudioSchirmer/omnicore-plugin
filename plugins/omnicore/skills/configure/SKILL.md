@@ -109,6 +109,13 @@ structural (`N/A — <why>`):
    - **Add Mongo** — requires a Debezium-tailable engine (so on SQLite this implies an engine
      swap) + the broker + the CDC relay; each view flipped relational→Mongo triggers an online
      blue-green rebuild (`mongo-schema-evolution`, `Version` bump — delegated to `evolve-view`).
+     **And say WHAT it unlocks** — usually the actual reason for the conversion: the view KINDS
+     that were unavailable (identity / `SharedBaseView`, `ComposedView`, the Embed/Link family,
+     Upstream) and integration events. Name the ones THIS project was told it could not have —
+     they are on record as `n/a — needs Mongo` in `scaffold-system/domain-map.md` (§3/§5) and in
+     the entity specs. Availability in BOTH directions:
+     `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` + `shared/read-side.md` (owners) — route to
+     them, don't restate.
    - **Add broker** — enables integration events. Publish rides the CDC relay (same tailable-engine
      requirement); subscribe works once a broker exists. (`transport`, `integration-events`.)
    - **Engine swap** — new `migrations/<target>/` in the TARGET dialect's SQL (types/constraints
@@ -181,7 +188,16 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 3. **Functional honesty:** a full CDC round-trip / a view rebuild proves itself only after writes
    flow — state what was verified (boot, registration) vs what needs a write-and-wait.
 4. **Regression** — the project's suite if it has one.
-5. **Offer to run.** ONE question: boot to click through? Yes → delegate `/omnicore:run` (it follows
+5. **Honor what the conversion unlocked.** On a run that GAINS Mongo/relay, close the loop the
+   earlier skills opened: the map and the specs PROMISED these kinds would arrive "later via
+   `/omnicore:configure`" — this is later. Name what is now servible (the `n/a — needs Mongo`
+   slots collected in Phase 1) and OFFER the route: a NEW kind is `/omnicore:scaffold-view`; an
+   existing view merely changing backing was already Phase 2 step 5's `evolve-view`. **Offer,
+   never auto-create** — this skill writes no view declaration. Nothing on record ⇒ state that
+   the kinds are available now and move on. On a run that REMOVES infra, the mirror: name what
+   stops being servible (it is in the plan's honest loss list). No silent capability change in
+   either direction.
+6. **Offer to run.** ONE question: boot to click through? Yes → delegate `/omnicore:run` (it follows
    the chosen infra). No → done.
 
 Leave `configure/plan.md` in place for review.

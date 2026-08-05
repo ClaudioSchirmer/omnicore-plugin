@@ -48,6 +48,10 @@ absent facet means "remove it"). Hence:
 
 ## Elicitation reminder
 
+**The elicitation happens BEFORE this file is loaded** — Phase 1 item 2 owns it and carries
+the option text; if you are reading this, the dev already chose. What follows is the
+post-decision reminder, never the trigger.
+
 Siblings are hard to infer from prose — for any group of optional/sparse fields, weigh
 *sibling table* vs *plain nullable columns on the owner*, plus the attachment node, and
 surface the choice in `spec.md` §4 (guidance: SKILL.md Phase 1, item 2).

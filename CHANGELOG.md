@@ -5,6 +5,90 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.14.2] — 2026-08-05
+
+### Added
+- **Release notes are now published automatically** (`.github/workflows/release.yml`,
+  ported from the framework repo). A `vX.Y.Z` tag — pushed from the CLI or drafted in the
+  web UI — publishes the GitHub Release with this file's matching `## [X.Y.Z]` section as
+  the body: created from a CLI tag, synced in place when the release came from the UI.
+  CHANGELOG.md is the single source of truth, so notes typed into the UI form are
+  replaced. Two guards: the run fails before touching any release when the tag disagrees
+  with `plugin.json`'s `version` (clients install what the manifest declares, so a
+  mismatch would advertise a version nobody can install), and a missing CHANGELOG section
+  warns instead of clobbering an existing body. Prerelease tags (`-rc1`, `-beta.2`) keep
+  the "Latest" badge off.
+
+### Fixed
+- **`SharedBaseView` was offered on Mongo-less (SQLite / zero-infra) projects — again.**
+  The gate was already correct in its owner (`shared/read-side.md`, Kinds + elicitation)
+  and in `scaffold-entity`'s `sharedbase.md`, and `scaffold-entity`'s own posture invariant
+  says "never offer a view kind the posture cannot serve" — but 80 lines later, at the exact
+  moment of the question, Phase 1 item 1 ordered the opposite in bold: "ALWAYS offer the
+  all-in-one identity read … always surface the option", with no gate and no route to the
+  owner. A local, imperative, bolded instruction beats a general invariant stated earlier,
+  which is why this recurred. That bullet is now gated on the one question that decides it —
+  **does the project HAVE Mongo?** — with the axis spelled out (a full engine whose entity
+  views are relational-backed still has Mongo: keep offering there; only a Mongo-less infra
+  closes the door) and the no-Mongo script routed to the owner instead of restated. Same
+  gate added to the two templates that presented the slot unconditionally: `scaffold-entity`'s
+  `spec-template.md` and `scaffold-system`'s `domain-map-template.md` (§3 — where the choice
+  is made ONCE at map time, before delegation). Nothing changes on a CDC/Mongo project: the
+  offer, both cases (create / add-role + `Version` bump), the tone rule and the by-id +
+  by-params pair are untouched.
+- **The sibling (1:1) trade-off could be decided silently and never reach the dev.**
+  `scaffold-entity` classes siblings as high-risk modeling — "never guess these, PROPOSE
+  with a recommended pick and CONFIRM", and explicitly forbids burying them as "defaults
+  I'll apply, veto later". But Phase 1 item 2 was phrased as a self-question ("any
+  optional/sparse/bulky field group better split…? Name it, recommend, ask"), so an
+  internal "no" produced NO output at all: the run considered a satellite for a couple of
+  optional fields, dropped it, and moved on. The rule that says to surface the choice lived
+  in `conventions/siblings.md`, which by policy is loaded only once the model HAS a sibling —
+  circular: you had to have decided in order to read the instruction to offer. Item 2 now
+  states that ANY optional/nullable field makes the question one answered in the open —
+  deciding NOT to split is the same decision, of the same risk class — with the honest
+  threshold (two optional scalars usually stay nullable columns on the root; that is a
+  recommendation to SHOW, not a call to bury). The context-load rule now says a sibling is
+  offered WITHOUT `siblings.md` loaded, that file marks itself post-decision, and the spec
+  template marks `Lives on = root` on an optional field as a decision that must have been
+  surfaced.
+- **`/omnicore:configure` never honored the promise the other skills make in its name.**
+  Three places now tell the dev that a Mongo-only view kind "arrives later via
+  `/omnicore:configure`" — `shared/read-side.md`, the generated domain map and the entity
+  specs. But `configure` mentioned view KINDS nowhere: it converted the infra, delegated
+  backing flips to `evolve-view`, and finished, leaving the dev to work out on their own that
+  the identity view they were promised had just become possible. The plan gate now states what
+  adding Mongo UNLOCKS (naming the slots this project has on record as `n/a — needs Mongo`),
+  and the final verify closes the loop — naming what became servible and routing to
+  `scaffold-view` (new kind) or `evolve-view` (backing flip), offering and never auto-creating,
+  since this skill writes no view declaration. The removal direction gets the mirror, so no
+  conversion changes capabilities silently either way. Not covered by the blind run: proving
+  it needs a full SQLite→Postgres+Mongo conversion.
+- **Two more decision points that could resolve in silence** — found by sweeping all 11
+  high-risk elicitation slots of `scaffold-entity` Phase 1 for the pattern behind the three
+  fixes above (a rule stated correctly in an owner sheet, absent or contradicted at the
+  moment of the question). Item 3: "independently-managed child → its OWN aggregate, not
+  nested" read as a rule the run APPLIES — now a call it must SHOW (nested vs own aggregate
+  is a regenerate-everything mistake). Item 10: the surface question never routed to
+  `shared/capabilities.md`, whose whole point is stating availability BOTH ways — GraphQL,
+  gRPC and exports work on every posture, SQLite included, and refusing an available
+  capability "because it's an MVP" is the mirror image of offering an unavailable one. The
+  other nine slots hold; item 11 (authorization) is the pattern to copy — it already spells
+  out that even the "anyone with the permission" answer must be said out loud.
+- **Scaffolded services shipped an OpenAPI spec with no description.**
+  `openapi.Config.Description` is what the framework renders as the paragraph under the
+  title on `/docs` (omitted from `info` entirely when empty), and no skill owned it:
+  `scaffold-service` named only `Title`/`Version`/`LanguageSelector` when writing
+  `Wiring.OpenAPI`, and — as that same rule states — no skill downstream ever revisits
+  this config, so a service born without a description kept none. Same shape as the
+  `LanguageSelector` gap fixed in 0.14.1, one field over. `scaffold-service` now carries
+  the description as a low-risk filled slot: ONE sentence taken from the dev's own words
+  in the invocation (fallback `<Service Name> service.`), recorded in `spec.md` so it is
+  correctable at the gate, and wired into `Wiring.OpenAPI`. Unlike the selector this one
+  has no automatic retrofit — it is service intent, which no entity-level skill can
+  infer; for a service generated before this fix, add `Description:` to the existing
+  `&openapi.Config{...}` in `bootstrap/wire.go`.
+
 ## [0.14.1] — 2026-08-05
 
 ### Fixed

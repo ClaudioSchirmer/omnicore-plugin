@@ -77,9 +77,18 @@ Clients pin to a released **version**, so a code change reaches them only when y
 2. **Bump `version`** in `plugins/omnicore/.claude-plugin/plugin.json` (semver). Pushing
    commits *without* bumping does not deliver the change — installed clients stay on the
    cached version.
-3. Record the release in [`CHANGELOG.md`](CHANGELOG.md) (same PR as the bump).
+3. Record the release in [`CHANGELOG.md`](CHANGELOG.md) (same PR as the bump), under a
+   `## [<version>]` heading — that section IS the release notes (see step 4).
 4. Commit → open a PR → merge to `main` → push, then tag the bump commit `v<version>`.
    `main` is the source of truth; there is no Anthropic-hosted copy.
+   Pushing the tag (or drafting the release in the web UI) fires
+   [`.github/workflows/release.yml`](.github/workflows/release.yml), which publishes the
+   GitHub Release with the matching `## [<version>]` CHANGELOG section as its body —
+   creating the release from a CLI tag, or syncing the body in place when the release came
+   from the UI. Two guards: the run fails BEFORE touching any release if the tag disagrees
+   with `plugin.json`'s `version` (clients install what the manifest declares), and a
+   missing CHANGELOG section never clobbers an existing release body — it warns instead.
+   Nothing to do by hand; the Release page stops drifting behind the tag list.
 5. Clients pick it up with:
    ```
    claude plugin marketplace update omnicore     # re-pull the catalog
