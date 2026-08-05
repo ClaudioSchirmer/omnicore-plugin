@@ -52,6 +52,18 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   offered WITHOUT `siblings.md` loaded, that file marks itself post-decision, and the spec
   template marks `Lives on = root` on an optional field as a decision that must have been
   surfaced.
+- **Generated child-mutation methods carried a redundant ensure-initialized call, and
+  empty wrappers passed unchallenged.** Two lines (`SKILL.md` traps and
+  `conventions/aggregate-children.md`) stated flatly that EVERY child-mutation method opens
+  with `domain.EnsureInitialized(root)`. The framework's own contract is narrower: it matters
+  only when the method emits a notification BEFORE delegating (`AddNotification` is a no-op
+  while the context is nil) — and `Add/Change/RemoveAggregateChild` already ensure-init the
+  root themselves, so on a method that only delegates the call is noise. Both lines now say
+  when it is needed and when it is not. Separately, nothing pushed back on a wrapper that
+  adds nothing at all: a child-mutation method must carry an aggregate-spanning invariant,
+  strategy B's by-id guard, or a real domain verb — and a change/archive method taking the
+  AVO instead of a childId is now called what it is, the by-id guard MISSING (per-child
+  routes with no not-found path), not a style choice.
 - **`/omnicore:configure` never honored the promise the other skills make in its name.**
   Three places now tell the dev that a Mongo-only view kind "arrives later via
   `/omnicore:configure`" — `shared/read-side.md`, the generated domain map and the entity
