@@ -68,8 +68,9 @@ root; the domain-service implementation in its own file here.
 - **View backing (relational vs Mongo).** Per the project read-side posture / the spec's
   §9 slot. Relational = `.RelationalSource(repo.Loader)` on the plain per-entity view —
   the aggregate's OWN loader (shared with the repo; boot guard `BoundTable()==schema.Table()`),
-  never a second one; root-only reads, no collection. Mongo = the plain `View(name).Schema(...)`.
-  Only the plain per-entity view is eligible — never Composed/Shared/Embed. `relational-view.html`.
+  never a second one; no collection. Mongo = the plain `View(name).Schema(...)`.
+  Only the plain per-entity view is eligible — never a view KIND. What it serves:
+  `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`; version-exact: `relational-view.html`.
 - **Never `Embed` internal data** — children/siblings auto-project from the schema;
   embedding local data is a fatal boot error. Embeds are for EXTERNAL/upstream data only.
 

@@ -105,8 +105,9 @@ structural (`N/A — <why>`):
    CURRENT SoR — zero-downtime, captures every write made during the relational phase).
    Only a PLAIN single-aggregate view can flip — a Composed/Shared/Embed view is
    relational-ineligible (different type or boot fail), so this item is `N/A` for them.
-   State the read-side consequence (relational = root-only, read-your-writes; Mongo =
-   full vocabulary, eventual) so the dev flips with open eyes. If the target is Mongo but
+   State the read-side consequence (relational = read-your-writes, 1:1-reach filters
+   only; Mongo = full vocabulary, eventual — per `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`)
+   so the dev flips with open eyes. If the target is Mongo but
    the project is infra-free (no `mongo.uri`), flipping would abort the boot — don't
    refuse: offer to enable Mongo via `/omnicore:configure` (delegate now, or point the
    dev at it), then flip. Reversible, no code lost.
@@ -132,6 +133,7 @@ index for concepts this table doesn't list.
 |---|---|
 | projected shape / `Version` / rebuild | mongo-schema-evolution · auto-query-handlers |
 | flipping backing: relational ⇄ Mongo (drift, rebuild) | relational-view · mongo-schema-evolution |
+| read-side posture / what each backing serves & asks | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) |
 | composition contracts / legs / roles | views |
 | custom projection / response shaping | custom-query-handler |
 | indexes / options / aggregations | auto-query-handlers |

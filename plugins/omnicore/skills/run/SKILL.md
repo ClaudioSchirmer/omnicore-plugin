@@ -104,7 +104,7 @@ section for the fact in doubt — never sweep the manual to boot an app.
 | yaml keys / ports / profiles / env overrides | yaml-reference |
 | boot order / probes semantics / surfaces enabled | bootstrap |
 | relay / broker / outbox expectations | transport |
-| SQLite / infra-free posture (no bench, tagless) | relational-view · yaml-reference |
+| SQLite / infra-free posture (no bench, tagless) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · yaml-reference |
 | OpenAPI UI path / rootRedirect | openapi |
 | GraphQL / gRPC endpoints | graphql · grpc |
 

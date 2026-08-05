@@ -6,6 +6,10 @@ type choices, `ConstraintBinding` keys, active-only uniqueness, engine swaps) ro
 HERE instead of restating dialect facts inline — so the knowledge has ONE owner and the
 generating agent reads ONLY the dialect(s) it needs.
 
+> Engine-INDEPENDENT read-side knowledge (posture, what a relational view serves, the
+> write-side invariant, elicitation) lives in the sibling `../read-side.md` — same
+> one-owner contract, different axis.
+
 ## The contract
 
 - **Read only what applies.** A service runs ONE dialect per build (occasionally a

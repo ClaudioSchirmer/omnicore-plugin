@@ -131,7 +131,7 @@ for concepts this table doesn't list.
 | yaml keys, defaults, profiles | yaml-reference |
 | migrations state / numbering / dirty | migrations |
 | outbox / relay / broker contract | transport |
-| infra-free / relational-view posture (views by design, no relay) | relational-view |
+| infra-free / relational-view posture (views by design, no relay) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
 | probes / liveness / readiness semantics | bootstrap · reference |
 | tracing / shutdown behavior | tracing |

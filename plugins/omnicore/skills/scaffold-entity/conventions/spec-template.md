@@ -108,7 +108,7 @@ a sibling NEVER gets its own endpoint; `siblings.md`).
 ## 9. Surfaces & reads                       [required — never an endpoint unasked]
 - REST: yes/no · GraphQL: yes/no · gRPC: separate skill · Exports (CSV/XLSX): yes/no
 - Reads: by-id + by-params (expected defaults).
-- View backing: relational (SoR, root-only, read-your-writes) | Mongo (canonical) — default = project posture.
+- View backing: relational (SoR, read-your-writes) | Mongo (canonical) — default = project posture (`shared/read-side.md`).
 - Filter/sort/search operators per field (low-risk — filled, shown):
 
 ## 10. Authorization                          [required — BOTH slots, a blank is invalid]

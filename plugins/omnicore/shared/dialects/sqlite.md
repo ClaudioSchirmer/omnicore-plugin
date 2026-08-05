@@ -50,11 +50,7 @@ shape.
 
 ## Read side — no Mongo, so no CDC-projected views
 
-SQLite has NO CDC source (Debezium cannot tail a SQLite file), so there is NO MongoDB
-projection. **All entity views are served RELATIONAL, straight from the SoR**
-(read-your-writes, no CDC lag) — root-only reads: no embeds/links/composed/shared views, no
-free-text search, no child/sibling filter+sort (those return 400
-`RelationalCapabilityNotification`, not 500). Any "filter on the Mongo view" fallback that
-applies to the SQL engines does NOT apply here. Gaining Mongo (and integration events, and
-composed/shared views) later is an engine swap via `/omnicore:configure` — fully reversible,
-no application code lost.
+SQLite has NO CDC source (Debezium cannot tail a SQLite file), so the read-side posture
+is FORCED relational — all entity views served straight from the SoR. What that serves
+vs rejects, what it never constrains (write-side modeling), and the upgrade path are
+owned by `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` — route there, do not restate.

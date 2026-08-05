@@ -157,22 +157,12 @@ full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
    rework — decline if the team is single-OS. Record the resolved set in the spec.
 8. **Read-side posture** — HOW entity read models are served, asked NEUTRALLY, NO
    default: an empty dir is equally likely an MVP or a seasoned team's solid service,
-   and we can't tell which. Read `relational-view` at the pin before wording it.
-   - **Full distributed CQRS** — entity views Mongo-projected through the CDC pipeline
-     (the canonical omnicore path): O(1) document reads, the full read-side vocabulary
-     (embeds, links, composed/shared views, free-text search, child/sibling filter+sort),
-     eventually consistent (CDC lag).
-   - **Reduced / MVP** — entity views served RELATIONAL, straight from the SoR
-     (`.RelationalSource(...)`): read-your-writes with NO CDC lag, the projection
-     apparatus can wait. The cost, stated plainly: root-only reads on a single aggregate
-     — no embeds/links/composed/shared views, no free-text search, no child/sibling
-     filter+sort — and read-time aggregate composition instead of an O(1) fetch.
-   Say the reassuring truth: **this is not a lock-in.** On a full engine the bench ships
-   FULL (Mongo + relay) either way, so moving a view to Mongo later is a per-view flag
-   (drop `.RelationalSource()` + bump `Version(N)`, one automatic online blue-green
-   rebuild, nothing re-scaffolded). **On SQLite the posture is forced relational** (no
-   Mongo exists) — gaining Mongo means the engine swap, which `/omnicore:configure` does;
-   still no code lost. Record the posture in the spec; it's handed to `scaffold-entity`
+   and we can't tell which. The two postures, their honest trade-offs, the capability
+   rule, the no-lock-in truth and the wording discipline are OWNED by
+   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` — read it BEFORE wording the question,
+   and route to it instead of restating (consult `relational-view` at the pin only for
+   version-exact capability answers). **On SQLite the posture is forced relational** —
+   nothing to ask. Record the posture in the spec; it's handed to `scaffold-entity`
    as the DEFAULT backing per entity view (still per-entity overridable there).
 
 **When the engine is SQLite — the zero-infra MVP posture (say all of this, calmly).**
@@ -189,8 +179,9 @@ default (it's not portable).
 Be honest AND reassuring:
 - **Great for an MVP / a demo / a single-node tool** — it stands up with zero moving parts.
 - **The framework is NOT optimized for this** — the canonical path is CDC + MongoDB; a
-  relational view re-composes the aggregate per read (root-only: no embeds/links/
-  composed/shared views, no free-text search, no child/sibling filter+sort).
+  relational view re-composes the aggregate per read, and only plain per-entity views
+  are servable (what they serve vs reject, and what the posture never constrains —
+  write-side modeling — per `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`, the owner).
 - **Integration events and Mongo projections don't exist here** (both ride the CDC relay,
   which needs a Debezium-tailable engine).
 - **Fully reversible, no code lost.** Every layer above infra is identical to a full
@@ -243,10 +234,10 @@ applies only when any high-risk slot would otherwise be filled by you.
    - `transport.html` — the broker contract + the CDC-relay reference (validates the
      `templates/` values: topic/subject naming, `simplestring` payload, headers).
    - `service-layout.html` — skeleton naming, when the pinned version ships it.
-   - **SQLite only:** `relational-view.html` (the zero-infra MVP posture — all views
-     relational) + `table-schema.html` (Go↔SQLite types, `:memory:`, ASCII case-fold,
-     decimal-as-TEXT, the forced correctness pragmas) + `yaml-reference.html` (the
-     `mongo`/`transport` opt-out-by-absence semantics).
+   - **SQLite only:** `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (the zero-infra MVP
+     posture — all views relational; the owner) + `table-schema.html` (Go↔SQLite types,
+     `:memory:`, ASCII case-fold, decimal-as-TEXT, the forced correctness pragmas) +
+     `yaml-reference.html` (the `mongo`/`transport` opt-out-by-absence semantics).
 3. **`bootstrap/main.go` + `bootstrap/wire.go`** — the empty shell: `bootstrap.Run`
    wired to an empty `Wiring`, with a comment pointing at `scaffold-entity` as the way
    to add the first entity. Derive the exact signatures from `bootstrap.html` — this
@@ -377,8 +368,8 @@ skill), the fallback for concepts this table doesn't list.
 
 | When generating… | Read section(s) |
 |---|---|
-| read-side posture (relational vs Mongo backing) | relational-view · views |
-| SQLite specifics · infra opt-out (no mongo/transport) · zero-infra MVP | table-schema · yaml-reference · relational-view |
+| read-side posture (relational vs Mongo backing) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
+| SQLite specifics · infra opt-out (no mongo/transport) · zero-infra MVP | table-schema · yaml-reference · `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` |
 | `microservice.*.yaml` keys / profiles / defaults | yaml-reference |
 | bootstrap shell / feature mounting / probes | bootstrap |
 | migrations skeleton / autoRun / dir layout | migrations |

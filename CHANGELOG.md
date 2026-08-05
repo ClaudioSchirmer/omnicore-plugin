@@ -5,6 +5,60 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.14.0] — 2026-08-04
+
+### Added
+- **`shared/read-side.md` — the read-side posture gets ONE owner.** New sibling of
+  `shared/dialects/` under the same contract (route there, never restate; the pinned docs
+  win on version-exact facts). It owns: the two postures and their honest trade-offs ·
+  the INVARIANT that the infra posture never constrains write-side modeling (SharedBase,
+  children, siblings, modes model identically on every engine — it restricts only which
+  view KINDS can be served) · kinds vs plain views (a plain view rooted at a shared-base
+  ROLE stays relational-eligible, base fields flattened — it is the `SharedBaseView` KIND
+  that needs Mongo, worth it at 2+ roles) · the capability rule (serves what a 1:1 load
+  reaches — root, sibling, shared-base; rejects 1:N pushdown as a typed 400) · mechanics
+  (loader reuse, `DeleteOnArchive()` is a Mongo-projection knob, the no-lock-in flip, the
+  real upgrade path: Mongo + CDC relay via `/omnicore:configure` — an engine swap alone
+  does not unlock the kinds) · an **elicitation contract**: what to ASK vs decide
+  (backing only when nothing on record; archive regime ALWAYS but gated on backing;
+  SharedBaseView offered when servable, pointed-at + upgrade-framed when not) — so the
+  agent asks exactly what needs asking, never what the posture already answered.
+  **Anti-drift boundary stated in the file:** the version-exact capability/parity table
+  is `relational-view` at the PIN — older pins genuinely differ; the plugin never
+  restates pin-dependent capability lists again.
+
+### Fixed
+- **From a real run: `scaffold-entity` offered a `SharedBaseView` on a zero-infra SQLite
+  service** (a Mongo projection, refused at boot with `RelationalSource`) **and asked the
+  archive question in Mongo-document vocabulary.** Root cause was the convention itself:
+  `conventions/sharedbase.md` said *"ALWAYS OFFER IT"*, unconditional and CDC-framed,
+  with no infra-posture branch — while `scaffold-view` already carried the correct
+  policy. Now the section is *"OFFER IT WHENEVER IT CAN BE SERVED"*, gated on posture via
+  `shared/read-side.md`; `SKILL.md` item 5 settles the view BACKING before the archive
+  regime and gates the `DeleteOnArchive()` half on it; Phase 0b carries the write-side
+  invariant trigger.
+- **Nine stale restatements of the relational-view capability list removed** — all
+  claimed "root-only reads / no child/sibling filter+sort", outdated since satellite
+  filter/projection (root-level siblings and shared-base fields DO filter/sort/project
+  via LEFT JOIN on current pins): `scaffold-entity/SKILL.md` item 5 + gotchas bullet,
+  `scaffold-entity/conventions/infra.md`, `.../spec-template.md`,
+  `shared/dialects/sqlite.md` §Read side, `scaffold-service/SKILL.md` item 8 + SQLite
+  block, `configure/SKILL.md` (full → MVP loss list), `evolve-view/SKILL.md` (flip
+  consequence). Each now routes to `shared/read-side.md` (structure) and
+  `relational-view` at the pin (version-exact table).
+
+### Changed
+- **Skills slimmed to trigger + route** (`scaffold-entity`, `scaffold-service`,
+  `scaffold-view`, `scaffold-system`, `configure`, `evolve-view`, `run`, `doctor`):
+  posture knowledge deduplicated from ~6 inline copies into the one owner; routing
+  tables point at `shared/read-side.md` first, `relational-view` only for version-exact
+  answers. `scaffold-service` item 8 and `scaffold-system`'s map-time reads no longer
+  force a full `relational-view.html` read on every run — the owner file covers the
+  common path, the pin is consulted on demand. No rule or tip was dropped: every inline
+  fact either moved into `shared/read-side.md` or stayed where it was skill-specific
+  (e.g. `scaffold-view`'s never-refuse upgrade script, `sharedbase.md`'s CREATE-vs-ADD
+  offer mechanics + `Version` bump, SQLite DSN/portability guidance).
+
 ## [0.13.0] — 2026-08-04
 
 ### Changed

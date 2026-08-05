@@ -120,8 +120,8 @@ structural (`N/A — <why>`):
      the custom 409 regresses to a 500. Moving existing MVP data is a manual ETL, out of scope: say
      so. Application/domain/web code is untouched.
    - **Remove infra (full → MVP)** — projections and integration events go away, views become
-     relational (root-only reads), Mongo/broker/relay/compose are dropped (SQLite ⇒ no Docker).
-     Honest loss list.
+     relational (what that serves: `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`), Mongo/broker/
+     relay/compose are dropped (SQLite ⇒ no Docker). Honest loss list.
    - **Transport swap (kafka ⇄ nats)** — build tag + `transport:` endpoints + the Debezium sink
      block; consumers are byte-identical by contract (`transport`).
 4. **Reversibility** — restate: application code is untouched; the inverse conversion is another
@@ -142,8 +142,8 @@ One pass in dependency order — read the owning `/docs` section BEFORE each art
 5. **View backings** — delegate each flip to `/omnicore:evolve-view` (it owns the `Version` bump
    + rebuild discipline); this skill never rewrites a view declaration itself. When a flip
    lands a relational view, its feature must reuse the aggregate's EXISTING `repo.Loader` —
-   never a second loader (a duplicate for the same aggregate boots fine, so the boot guard
-   won't flag it; it's pure waste). See the feature example in `relational-view.html`.
+   never a second loader (the rule and why: `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`,
+   Mechanics). See the feature example in `relational-view.html`.
 6. `integration:` — enable/disable publishes/subscribes per the target.
 Edit ONLY what the plan lists.
 
@@ -156,7 +156,7 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 | When changing… | Read section(s) |
 |---|---|
 | infra opt-out semantics (mongo/transport absent) · yaml blocks | yaml-reference |
-| relational-view backing · MVP framing · parity limits | relational-view |
+| read-side posture · MVP framing · what each backing serves | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact parity |
 | view flip / Version / rebuild | mongo-schema-evolution · evolve-view (skill) |
 | broker / CDC relay / transport swap / tagless | transport |
 | integration events (publish rides CDC · subscribe) | integration-events |
