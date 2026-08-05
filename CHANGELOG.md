@@ -5,6 +5,22 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.14.1] — 2026-08-05
+
+### Fixed
+- **Scaffolded services shipped a Swagger UI with no language dropdown.**
+  `openapi.Config.LanguageSelector` (default `false`) opts the rendered `/docs` page
+  into the `Accept-Language` selector, and no skill owned it: `scaffold-service` named
+  only `Title`/`Version` when writing `Wiring.OpenAPI`, and `scaffold-entity` — the
+  skill that wires the translation catalogs, i.e. the very thing that makes the
+  dropdown renderable — never revisited that config. The gap was structural, not an
+  oversight: the flag is invisible on a translation-less shell (bootstrap populates
+  `Languages` from `Wiring.Translations`, and an empty slice renders no selector), so
+  neither side could see it was missing. `scaffold-service` now sets it from the shell
+  (free there, and the only moment anyone looks at this config), and
+  `scaffold-entity`'s catalog step flips it on when absent — which is also the retrofit
+  path for services generated before this fix.
+
 ## [0.14.0] — 2026-08-04
 
 Two workstreams in one release: the read-side one-owner refactor (below), and a
