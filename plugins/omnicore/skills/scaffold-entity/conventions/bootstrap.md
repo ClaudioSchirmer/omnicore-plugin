@@ -39,6 +39,15 @@ Adding an entity means INSERTING (never creating a file): (1) instantiate the fe
 (declaration order = the Swagger sidebar order); (4) on a first entity, also wire the 7
 translation catalogs.
 
+- **Catalogs and the Swagger language dropdown are ONE edit.** Wiring the catalogs is
+  precisely what makes the dropdown renderable: `openapi.Config.LanguageSelector`
+  (default `false`) opts in, and bootstrap then auto-populates the options from
+  `Wiring.Translations` — with no translations the selector renders nothing, which is
+  why a shell can look correctly configured and still show no combo. So in the SAME
+  edit that adds the catalogs, if `Wiring.OpenAPI` is set WITHOUT
+  `LanguageSelector: true`, flip it on. This is also the retrofit path for services
+  scaffolded before their generator set it. See `openapi.html`.
+
 ## Boot order (context)
 
 `Wire(deps)` → migrations (down-validation → framework → service) → features' `Views()`

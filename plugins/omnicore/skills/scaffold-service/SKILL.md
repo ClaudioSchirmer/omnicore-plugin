@@ -243,10 +243,15 @@ applies only when any high-risk slot would otherwise be filled by you.
    to add the first entity. Derive the exact signatures from `bootstrap.html` — this
    skill carries no Go by design. Two wiring rules:
    - **OpenAPI surface chosen ⇒ set `Wiring.OpenAPI`** (Title from the service name,
-     an initial Version) — the yaml `openapi:` block only tunes HOW the UI is served
-     and is ignored unless `Wiring.OpenAPI` is set; without it the `/docs` check in
-     the final verify can never pass. Derive the config type/fields from
-     `bootstrap.html` / `openapi.html`.
+     an initial Version, AND `LanguageSelector: true`) — the yaml `openapi:` block only
+     tunes HOW the UI is served and is ignored unless `Wiring.OpenAPI` is set; without
+     it the `/docs` check in the final verify can never pass. Derive the config
+     type/fields from `bootstrap.html` / `openapi.html`. **`LanguageSelector` costs
+     nothing on the shell and MUST be set here anyway**: bootstrap fills `Languages`
+     from `Wiring.Translations` (still empty at this step) and an empty slice renders
+     NO selector — the page stays byte-identical to the baseline. It starts rendering
+     the moment the first entity wires the catalogs. Set here it is free; left for
+     later it is left forever, because no skill downstream revisits this config.
    - **NO translations, NO features, NO `BeforeServe`.** The framework's dev profile
      accepts the fully empty shell (features + translations arrive with the first
      entity — they are `scaffold-entity`'s job; translations on a shell with zero
