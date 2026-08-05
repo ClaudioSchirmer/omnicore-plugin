@@ -63,7 +63,12 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   adds nothing at all: a child-mutation method must carry an aggregate-spanning invariant,
   strategy B's by-id guard, or a real domain verb — and a change/archive method taking the
   AVO instead of a childId is now called what it is, the by-id guard MISSING (per-child
-  routes with no not-found path), not a style choice.
+  routes with no not-found path), not a style choice. And the guard's HOME is now explicit:
+  a `<Verb><Child>ByID` domain method the command calls in one line — not a collection scan
+  inside `ApplyPartiallyTo`, which writes the same invariant once per child op in the layer
+  that does not own it. That method is also where the change-time duplicate guard belongs:
+  the framework rejects a same-identity duplicate on ADD but CHANGE only swaps, so a payload
+  can edit one child into another's identity unchallenged.
 - **`/omnicore:configure` never honored the promise the other skills make in its name.**
   Three places now tell the dev that a Mongo-only view kind "arrives later via
   `/omnicore:configure`" — `shared/read-side.md`, the generated domain map and the entity
