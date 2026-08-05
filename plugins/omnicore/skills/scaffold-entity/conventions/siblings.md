@@ -38,6 +38,13 @@ absent facet means "remove it"). Hence:
 > never assigns NULL, so with PATCH-only a granted facet could NEVER be cleared. The
 > clear path is the framework's native one: the ROOT's PUT with the facet's fields all
 > null/absent. Surface this §4↔§8 coupling in the spec.
+>
+> **⚠️ And the GraphQL corollary — check it whenever GraphQL: yes.** GraphQL input can't
+> express explicit null (strict rejects it at parse; lenient nil ≡ absent), so the
+> PUT-all-null clear path does NOT exist on that surface. A clearable facet + GraphQL
+> demands the documented idiom — an intent-specific mini-PATCH mutation (a dedicated
+> Cmd whose `ApplyPartiallyTo` assigns nil, via `MutationByID`; `graphql.html` at the
+> pin). Offer it in the spec, or the dev approves a contract one surface can't keep.
 
 ## Elicitation reminder
 

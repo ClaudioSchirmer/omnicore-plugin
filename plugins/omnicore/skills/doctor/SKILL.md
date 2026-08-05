@@ -127,11 +127,16 @@ for concepts this table doesn't list.
 
 | Diagnosing… | Read section(s) |
 |---|---|
+| boot aborts / probes 401·503 / autoRun / env vars / drain — the quick-map | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) · bootstrap for version-exact |
+| capability availability / events fan-out (2×·never) / subscribe⇄receiver aborts / cache slots | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) · the pin's section for exact contracts |
+| write accepted but view/audit/outbox wrong — the cross-layer triage table | lifecycle-map · read-lifecycle-map |
+| log anatomy (`threadId`/`traceId`/`msg` anchors) / ELK bench profile | logs |
+| authz boot panic (missing RequirePermission sweep) / blank `/docs` (CDN, air-gapped) | authz-seams · openapi |
 | boot order / guards / feature wiring | bootstrap |
 | yaml keys, defaults, profiles | yaml-reference |
 | migrations state / numbering / dirty | migrations |
 | outbox / relay / broker contract | transport |
-| infra-free / relational-view posture (views by design, no relay) | relational-view |
+| infra-free / relational-view posture (views by design, no relay) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
 | probes / liveness / readiness semantics | bootstrap · reference |
 | tracing / shutdown behavior | tracing |

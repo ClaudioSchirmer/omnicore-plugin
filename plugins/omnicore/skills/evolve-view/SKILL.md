@@ -87,9 +87,16 @@ structural (`N/A — <why>`):
    surfaces, tests). The contract: Phase 2 edits nothing outside it.
 3. **Shape change** [high-risk]: fields in/out, the `Version` bump, and the REBUILD
    consequence (the collection re-projects — on large data, say what that costs and
-   when it's safe to run, per `mongo-schema-evolution` at the pin).
+   when it's safe to run, per `mongo-schema-evolution` at the pin). **Views that EMBED
+   this one do NOT follow automatically** — a rebuild here leaves them serving the
+   stale embedded shape until their OWN `Version` decision; list each embedding view
+   found in Phase 0b with its verdict (bump now / consciously later), per `views` +
+   `mongo-schema-evolution`.
 4. **New leg / role** [high-risk]: source, join key, the 1:N-leg FK index (boot-fatal
    without it), and whether the source view/entity needs anything first (→ delegation).
+   Adding a ROLE to a SharedBaseView: the role set is in the rebuild hash — the
+   `Version(N)` bump is MANDATORY, forgetting it aborts boot (scaffold-entity's
+   `conventions/sharedbase.md`, Read).
    **If the change crosses composition types** (a local view gaining an
    external/other-service source, or a conversion between kinds), reopen the FULL
    catalog in `views` at the pin and TEACH the implicated types + trade-offs
@@ -105,8 +112,9 @@ structural (`N/A — <why>`):
    CURRENT SoR — zero-downtime, captures every write made during the relational phase).
    Only a PLAIN single-aggregate view can flip — a Composed/Shared/Embed view is
    relational-ineligible (different type or boot fail), so this item is `N/A` for them.
-   State the read-side consequence (relational = root-only, read-your-writes; Mongo =
-   full vocabulary, eventual) so the dev flips with open eyes. If the target is Mongo but
+   State the read-side consequence (relational = read-your-writes, 1:1-reach filters
+   only; Mongo = full vocabulary, eventual — per `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`)
+   so the dev flips with open eyes. If the target is Mongo but
    the project is infra-free (no `mongo.uri`), flipping would abort the boot — don't
    refuse: offer to enable Mongo via `/omnicore:configure` (delegate now, or point the
    dev at it), then flip. Reversible, no code lost.
@@ -132,6 +140,7 @@ index for concepts this table doesn't list.
 |---|---|
 | projected shape / `Version` / rebuild | mongo-schema-evolution · auto-query-handlers |
 | flipping backing: relational ⇄ Mongo (drift, rebuild) | relational-view · mongo-schema-evolution |
+| read-side posture / what each backing serves & asks | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) |
 | composition contracts / legs / roles | views |
 | custom projection / response shaping | custom-query-handler |
 | indexes / options / aggregations | auto-query-handlers |
@@ -142,6 +151,9 @@ index for concepts this table doesn't list.
 
 ## Final verify (the gate)
 
+0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk the
+   plan's own promises item by item with evidence; an unmet target is RED or an explicit
+   dev-accepted deviation.
 1. **Mechanical, pre-boot:** shape changed ⇒ `Version` bumped · every new 1:N leg FK
    indexed · grep the OLD projected-field names → no stale references (code, surfaces,
    tests) · no write-side file touched.

@@ -5,8 +5,8 @@
 > generating this layer is MANDATORY. This file carries only skill-level process, decisions
 > and traps.
 
-This skill scaffolds **REST + GraphQL**; gRPC is a separate skill (needs a proto contract —
-leave its slot in the routes file).
+This skill scaffolds **REST + GraphQL**; the gRPC surface is `/omnicore:implement`'s job
+(needs a proto contract — leave its slot in the routes file and point the dev there).
 
 Docs for this layer: route wrappers + strict body → `auto-handlers.html` · OpenAPI specs +
 Mount → `openapi.html` · read control keys + filter operators + export →
@@ -74,7 +74,10 @@ interface is what lets this layer compile before infra exists.
 
 `RequirePermission("<resource>:<action>")` on every registration; by handler invariance
 the SAME permission attaches at each surface's unit (REST route · GraphQL field · gRPC
-procedure) — decide once per operation, apply on all. Taxonomy shape per
+procedure) — decide once per operation, apply on all. **This is boot-FATAL, not
+convention**: under `auth.authorization.enabled: true` a sweep panics at boot listing
+every non-public route missing `RequirePermission`, and a parallel scan panics on any
+route registered outside Mount/MountRaw while OpenAPI is on (`authz-seams.html`). Taxonomy shape per
 `service-layout.html`; granularity is a modeling choice confirmed at the spec.
 
 ## GraphQL

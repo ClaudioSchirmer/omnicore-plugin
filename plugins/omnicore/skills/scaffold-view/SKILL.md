@@ -101,18 +101,20 @@ sections structural (`N/A — <why>`, never deleted):
    (what the reader sees when a source is down or lagging) · **cost** (storage,
    rebuild, latency). Then recommend ONE with the why, name the runner-up, and CONFIRM.
    Never self-answer; never ask without the explanation.
-   **Relational backing is NOT on this menu.** Every type this skill creates
-   (ComposedView, SharedBaseView, the Embed/Link family, Upstream, aggregated) is
-   relational-INELIGIBLE — a boot fail, a 400, or a different declaration type carrying
-   no `.RelationalSource()` at all (parity table in `relational-view`). A relational
-   (SoR-served) read model exists only for a PLAIN single-aggregate listing — that is
-   `scaffold-entity`'s per-entity view, not this skill's. If the request turns out to be
-   exactly that, say so and route it there (honoring the project read-side posture).
-   **In an infra-free / SQLite project (no Mongo) — never refuse, offer the upgrade.** A
-   ComposedView / SharedBaseView / Embed / Upstream / aggregated view needs Mongo (it
-   projects a document; SQLite has no projection). Do NOT say "can't": say it runs on
-   Mongo, and offer to enable it — *"want me to stand up Mongo + CDC + Docker now? I'll
-   delegate `/omnicore:configure` (it swaps to a Debezium-tailable engine and re-asks the
+   **Relational backing is NOT on this menu.** Every type this skill creates is a view
+   KIND, relational-INELIGIBLE by construction — the rule, the plain-view exception and
+   the anti-drift boundary are owned by `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`
+   (exact kind set + failure mode per kind: parity table in `relational-view` at the
+   pin). A relational (SoR-served) read model exists only for a PLAIN single-aggregate
+   listing — that is `scaffold-entity`'s per-entity view, not this skill's. If the
+   request turns out to be exactly that, say so and route it there (honoring the project
+   read-side posture) — note a plain view rooted at a shared-base ROLE qualifies (base
+   fields flattened; `shared/read-side.md`, Kinds), so a "SharedBase view" ask may
+   already be served today without Mongo.
+   **In an infra-free / SQLite project (no Mongo) — never refuse, offer the upgrade.**
+   Do NOT say "can't": say the kind runs on Mongo + the CDC relay, and offer to enable
+   it — *"want me to stand up Mongo + CDC + Docker now? I'll delegate
+   `/omnicore:configure` (it swaps to a Debezium-tailable engine and re-asks the
    infra questions), then come back and build the view — or you can run
    `/omnicore:configure` yourself first."* All reversible, no code lost. A plain
    single-aggregate listing still works today as a relational per-entity view
@@ -153,7 +155,8 @@ index for concepts this table doesn't list.
 | When deciding/generating… | Read section(s) |
 |---|---|
 | composition type (the catalog + contracts) | views |
-| relational backing — eligibility / limits | relational-view |
+| relational backing — eligibility / limits | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view |
+| cross-service data: subscription vs call vs event — the choice matrix | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) · service-to-service |
 | view declaration / options / indexes / aggregations | views · auto-query-handlers |
 | custom projection / response shaping | custom-query-handler |
 | `Version` / rebuild / evolution | mongo-schema-evolution |
@@ -165,6 +168,9 @@ index for concepts this table doesn't list.
 
 ## Final verify (the gate)
 
+0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk the
+   spec's own promises item by item with evidence; an unmet target is RED or an explicit
+   dev-accepted deviation.
 1. **Mechanical, pre-boot:** every 1:N leg FK indexed · `Version` declared on the new
    view · ONE view per file (`service-layout`) · no write-side file touched.
 2. **`gofmt -l` + `go vet` + `go build`** (engine + transport tags) — clean.

@@ -64,14 +64,21 @@ session." Never a gate: this run continues on the installed skills.
   every surface (REST, GraphQL, gRPC) · views it owns AND views of others it appears in
   (SharedBaseView roles, ComposedView legs, embeds) · translation keys in the seven
   catalogs · migrations that created its tables · feature/bootstrap wiring · tests ·
-  topics/subjects and integration events it publishes.
+  topics/subjects and integration events it publishes · **the `microservice.*.yaml`
+  blocks that reference it** (`integration:` publishes AND subscribes,
+  `upstreamSubscriptions` entries) — event/topic names rarely contain the entity's Go
+  name, so READ those blocks, don't just grep the names: a subscribe left behind with
+  its receiver removed is a boot ABORT, and those blocks are strict-decoded
+  (`${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`).
 
 ## Phase 1 — The gate: `remove-entity/<entity>/plan.md`
 
 `Status: DRAFT`, hard STOP until the dev approves; `⚠️ OPEN` slots must be answered,
 never defaulted. Sections (structural — `N/A — <why>`, never deleted):
 
-1. **Inventory** — every file to delete and every file to EDIT (unwiring), per layer.
+1. **Inventory** — every file to delete and every file to EDIT (unwiring), per layer —
+   **including the `microservice.*.yaml` edits** (integration publishes/subscribes,
+   upstreamSubscriptions) from the Phase 0 sweep.
    This list is the contract; Phase 2 touches nothing outside it.
 2. **Dependents** [blocking]: every shared surface found in Phase 0 — shared base with
    other roles (the base STAYS; only this role's slice goes), composed/embedding views
@@ -100,7 +107,9 @@ mandatory-read rule as the scaffold skills.
    base, kept data migration history — historical migration files are NEVER rewritten).
 2. **`gofmt -l` + `go vet` + `go build`** (engine + transport tags) — clean.
 3. **Boot** — the service comes up with the entity gone; probes green; surviving
-   surfaces still answer.
+   surfaces still answer. The boot itself proves no orphan yaml subscribe survived
+   (a declared subscribe with no receiver aborts boot — that abort here means the
+   Phase 0 yaml sweep missed an entry).
 4. **Regression** — the project's existing suite if it has one; report honestly if the
    suite itself referenced the removed entity (those tests were in the plan's inventory).
 5. **Report the leftovers the dev owns:** data kept (tables/collections) per the

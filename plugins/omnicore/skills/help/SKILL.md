@@ -22,6 +22,10 @@ commands beyond reading docs and code.
 - **Docs first, code as fallback — and SAY which you used.** The version-pinned
   `/docs` are the authority on the framework's API + behavior — and the SCOPE:
   an answer never describes something the dev's pinned version doesn't have.
+  For posture/availability questions ("why can't my SQLite service have a
+  ComposedView?"), the plugin's `${CLAUDE_PLUGIN_ROOT}/shared/*.md` owner sheets
+  (read-side, boot-contract, capabilities) supply the plugin-consistent FRAMING
+  (what to offer, the upgrade path) — the pin's docs stay the factual authority.
   Asked about a feature that only exists in a newer release → say exactly that
   ("not at your vX — it arrived in vY") and point at `/omnicore:upgrade`, never
   explain it as if it were available. Answer from the

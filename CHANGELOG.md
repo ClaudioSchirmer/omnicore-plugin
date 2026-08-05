@@ -5,6 +5,171 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.14.0] — 2026-08-04
+
+Two workstreams in one release: the read-side one-owner refactor (below), and a
+five-layer framework-vs-skills audit (web · write side · domain · infra/read side ·
+bootstrap/ops) whose findings land here as two more owner sheets, two real bug fixes
+and ~20 targeted convention/routing additions.
+
+### Fixed (audit)
+- **`scaffold-service`'s prd template shipped unreachable probes.** `auth.mode: jwt`
+  with no `auth.publicRoutes` — probes are framework-registered but NOT auto-public, so
+  a tokenless kubelet gets 401 and the orchestrator kills a healthy pod; a hand-fix with
+  a typo then hits the exact-match boot validation and ABORTS boot. The template now
+  ships `auth.publicRoutes: ["/livez", "/readyz"]` with the exact-match warning, and
+  `doctor`/`run` know both signatures via `shared/boot-contract.md`.
+- **`scaffold-entity` pointed at a nonexistent "separate gRPC skill"**
+  (`conventions/web.md`, `spec-template.md`) — the gRPC surface is
+  `/omnicore:implement`'s job; both lines now say so.
+- **`run` polled `/readyz` blind.** It now reads the 503 reason — `initializing:
+  rebuilding view` means UP-and-rebuilding (wait), store-unreachable means diagnose —
+  instead of timing out a healthy first boot.
+
+### Added (audit)
+- **`shared/boot-contract.md`** — one owner for the operational contract: probes +
+  `publicRoutes` exact-match validation (+ `Doc.Public` for param routes), the three
+  ordered `/readyz` 503 reasons (transport excluded by design), dev-only gates
+  (`auth: disabled`, featureless shell), `autoRun`'s three profile-aware modes (prd
+  pending = designed abort), interpolation strictness (`${file:}`/`${vault:}` abort,
+  env silent), the closed four-env-var set (+ `OMNICORE_MONGO_FORCE_REBUILD` scope),
+  strict-decoded yaml blocks, the narrated drain contract, and a doctor quick-map.
+  Routed by `scaffold-service`, `run`, `doctor`, `configure`.
+- **`shared/capabilities.md`** — one owner for capability choice: availability under
+  the posture stated BOTH ways (events/Mongo-kinds/Upstream need Mongo+CDC; httpclient,
+  cache, gRPC/GraphQL, authz, audit, tracing, hooks work EVERYWHERE, SQLite included —
+  the mirror-image refusal is as wrong as the phantom offer), the service-to-service
+  decision matrix + the no-cross-service-command doctrine, integration-event contracts
+  (at-least-once ⇒ receiver idempotency is a design question; consumer-group fan-out;
+  subscribe⇄receiver boot aborts), the two cache slots (+ `shared.store: memory` boot
+  reject, nil degradation), and the already-automatic list (audit, domain events) that
+  `implement` now checks BEFORE planning any wiring.
+- **`scaffold-entity` conventions — the traps the audit found missing** (all
+  version-stable structure; pin stays the authority): the managed-slot contract
+  (`Revision` mandatory on root/base, forbidden on child/sibling; `ParentID`'s three
+  boot-panics + its auto-projected read-only twin) · reserved `_` column namespace
+  (boot failure) + revision DDL line in migrations · SharedBase insert cross-guards
+  (handler two-way rejection, blind-insert guard) · one-validation-path rule
+  (`ValidateAggregateChild` vs inline, never both) · named Modes patterns (append-only /
+  freeze-once / full) as recommendation vocabulary · `IfDisplay`-is-inert caveat ·
+  custom `json.Marshaler` = the `json:"-"` Old()-ghost trap by another door · dual-409
+  pick rule (Conflict vs STATE-conflict) · authz sweep is boot-FATAL under the switch ·
+  the GraphQL-null corollary (a clearable facet + GraphQL demands the intent-mutation
+  idiom — otherwise the spec approves a contract one surface can't keep) ·
+  `ReadCriteria.Restrict` elicitation in spec §9 · hydration-free aggregate DSL beside
+  the `Exists` probe · empty-result name discipline.
+- **Routing rows for orphaned sections**: `lifecycle-map` (the SQL↔outbox↔Mongo↔audit
+  triage table; PUT/PATCH share audit verb `update`, `actionName` disambiguates) now
+  routed by `doctor`, `evolve-entity`, `scaffold-entity`; `logs` by `run` and `doctor`;
+  `authz-seams`/CDN-blank-`/docs` by `doctor`; ctx-bound Service probe row in
+  `scaffold-entity`; `implement`'s plan template gains the cache-slot and
+  receiver-idempotency ⚠️ OPEN elicitation slots; `scaffold-system` decides
+  depth-one splits at map time.
+
+### Fixed (verification pass)
+- **The audit-round `publicRoutes` fix itself carried a boot-aborting format error** —
+  caught by a line-by-line fact-check of the new sheets against docs AND code
+  (`parsePublicRoutes` requires `"METHOD /path"`; a bare `"/livez"` aborts boot; one of
+  the two proof runs generated the broken form, the other read the docs and got it
+  right). `scaffold-service` and `boot-contract.md` now mandate
+  `["GET /livez", "GET /readyz"]` explicitly. Every other claim in the three sheets
+  verified against the pinned docs/code; one softened (`startFrom` = platform
+  offset semantics, not doc-stated).
+
+### Added — the 14th skill: `/omnicore:qa`
+- **Contract QA suite generator+runner** — closes the loop the other skills open
+  (scaffold builds, run boots, **qa proves**): reads the project's entities, modes,
+  views/backings, surfaces and posture, derives the PIN's promised behaviors (verb set
+  per mode with 405 for absent verbs, notification-key 422s, the dual 409, archive
+  round-trip per regime, filter vocabulary, typed 400 on relational 1:N pushdown), and
+  generates `qa/<entity>.sh` + a fail-fast `qa/run.sh` that exercises them against the
+  real running service. Posture-aware read-backs (bounded poll for the NEWEST write on
+  Mongo backing; IMMEDIATE read-your-writes on relational — a needed poll is itself a
+  failure). Plan gate elicits data hygiene and auth; out-of-scope named plainly
+  (event consumption, load). Verify includes the mandatory break-one-case honesty
+  check (a suite that cannot fail proves nothing) and the reconcile contract.
+  `scaffold-entity`'s "functional e2e is a separate step" now routes here.
+
+### Added (second audit round — verify enforcement + the 6 under-audited skills)
+- **`shared/verify-contract.md`** — the reconcile rule every mutating skill's Final
+  Verify now opens with (generalized from `implement`'s "the plan's own verify step,
+  executed"): reopen the run's spec/plan, walk ITS promises item by item with real
+  command evidence; an unmet stated target is RED or an explicit dev-accepted
+  deviation, never a green summary; numbers measured the way the convention defines.
+  Wired as Level 0 into all 7 mutating skills. Teeth added locally: `scaffold-entity`
+  Level 3 (per-file <80% = RED; the per-file `go tool cover -func` lines are mandatory
+  in the report — the proof run shipped 70.6% on web/requests and sailed through);
+  `scaffold-service` gains a static prd sanity check (prd is never boot-tested — say
+  so; probe entries verbatim, pure-`${VAR}` endpoints, mandatory blocks).
+- **`remove-entity` yaml sweep** — the footprint/inventory/verify now cover
+  `microservice.*.yaml` (`integration:` pub/sub, `upstreamSubscriptions`): an orphan
+  subscribe after removal is a boot ABORT and event names rarely contain the entity
+  name, so the blocks are READ, not grepped.
+- **`evolve-entity`**: spec §8 gives the promised-but-processless flat→sharedbase
+  promotion a real path (base table + natural-key stakes, FK model, backfill
+  migration, bounded-context split — routed to `table-schema` + `sharedbase.md`);
+  §4 mirrors scaffold-entity's archive-regime elicitation when Archive is enabled
+  later; routing row to `shared/read-side.md`.
+- **`evolve-view`**: §3 warns that embedding views do NOT follow a rebuild (each
+  listed with its own `Version` verdict); §4 carries the role-set-in-rebuild-hash
+  bump rule.
+- **`run`**: full-bench handover checks the relay reached streaming — green probes
+  exclude the transport by design, so it says plainly when writes won't project.
+- **`help`**: posture/availability answers may use the shared owners for the
+  plugin-consistent framing; the pin's docs stay the factual authority.
+
+### Added
+- **`shared/read-side.md` — the read-side posture gets ONE owner.** New sibling of
+  `shared/dialects/` under the same contract (route there, never restate; the pinned docs
+  win on version-exact facts). It owns: the two postures and their honest trade-offs ·
+  the INVARIANT that the infra posture never constrains write-side modeling (SharedBase,
+  children, siblings, modes model identically on every engine — it restricts only which
+  view KINDS can be served) · kinds vs plain views (a plain view rooted at a shared-base
+  ROLE stays relational-eligible, base fields flattened — it is the `SharedBaseView` KIND
+  that needs Mongo, worth it at 2+ roles) · the capability rule (serves what a 1:1 load
+  reaches — root, sibling, shared-base; rejects 1:N pushdown as a typed 400) · mechanics
+  (loader reuse, `DeleteOnArchive()` is a Mongo-projection knob, the no-lock-in flip, the
+  real upgrade path: Mongo + CDC relay via `/omnicore:configure` — an engine swap alone
+  does not unlock the kinds) · an **elicitation contract**: what to ASK vs decide
+  (backing only when nothing on record; archive regime ALWAYS but gated on backing;
+  SharedBaseView offered when servable, pointed-at + upgrade-framed when not) — so the
+  agent asks exactly what needs asking, never what the posture already answered.
+  **Anti-drift boundary stated in the file:** the version-exact capability/parity table
+  is `relational-view` at the PIN — older pins genuinely differ; the plugin never
+  restates pin-dependent capability lists again.
+
+### Fixed
+- **From a real run: `scaffold-entity` offered a `SharedBaseView` on a zero-infra SQLite
+  service** (a Mongo projection, refused at boot with `RelationalSource`) **and asked the
+  archive question in Mongo-document vocabulary.** Root cause was the convention itself:
+  `conventions/sharedbase.md` said *"ALWAYS OFFER IT"*, unconditional and CDC-framed,
+  with no infra-posture branch — while `scaffold-view` already carried the correct
+  policy. Now the section is *"OFFER IT WHENEVER IT CAN BE SERVED"*, gated on posture via
+  `shared/read-side.md`; `SKILL.md` item 5 settles the view BACKING before the archive
+  regime and gates the `DeleteOnArchive()` half on it; Phase 0b carries the write-side
+  invariant trigger.
+- **Nine stale restatements of the relational-view capability list removed** — all
+  claimed "root-only reads / no child/sibling filter+sort", outdated since satellite
+  filter/projection (root-level siblings and shared-base fields DO filter/sort/project
+  via LEFT JOIN on current pins): `scaffold-entity/SKILL.md` item 5 + gotchas bullet,
+  `scaffold-entity/conventions/infra.md`, `.../spec-template.md`,
+  `shared/dialects/sqlite.md` §Read side, `scaffold-service/SKILL.md` item 8 + SQLite
+  block, `configure/SKILL.md` (full → MVP loss list), `evolve-view/SKILL.md` (flip
+  consequence). Each now routes to `shared/read-side.md` (structure) and
+  `relational-view` at the pin (version-exact table).
+
+### Changed
+- **Skills slimmed to trigger + route** (`scaffold-entity`, `scaffold-service`,
+  `scaffold-view`, `scaffold-system`, `configure`, `evolve-view`, `run`, `doctor`):
+  posture knowledge deduplicated from ~6 inline copies into the one owner; routing
+  tables point at `shared/read-side.md` first, `relational-view` only for version-exact
+  answers. `scaffold-service` item 8 and `scaffold-system`'s map-time reads no longer
+  force a full `relational-view.html` read on every run — the owner file covers the
+  common path, the pin is consulted on demand. No rule or tip was dropped: every inline
+  fact either moved into `shared/read-side.md` or stayed where it was skill-specific
+  (e.g. `scaffold-view`'s never-refuse upgrade script, `sharedbase.md`'s CREATE-vs-ADD
+  offer mechanics + `Version` bump, SQLite DSN/portability guidance).
+
 ## [0.13.0] — 2026-08-04
 
 ### Changed

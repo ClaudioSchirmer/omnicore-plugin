@@ -189,6 +189,13 @@ Self-configure by reading the project:
   → else INFER from existing per-entity views (do any carry `.RelationalSource()`?). It
   sets the DEFAULT for item 5's view-backing decision; only when NONE of these is on
   record does that item ASK. Never silently pick one when nothing is found.
+  **INVARIANT — the infra posture NEVER constrains WRITE-SIDE modeling; it restricts
+  only which view KINDS can be served.** Model what the domain IS and offer SharedBase
+  whenever it fits, never softened or skipped because Mongo is absent — and never offer
+  a view kind the posture cannot serve. The full statement, capability rule and
+  elicitation contract are OWNED by `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` — read
+  it whenever the posture is anything but full-Mongo, and route to it instead of
+  restating posture facts.
 - **`/docs` + `conventions/` are the ALWAYS-ON basis — read them every run, whether the
   project is empty OR already full of entities.** Existing code is never a substitute for
   the mandatory per-layer doc read (Core principles); "the project already has entities"
@@ -306,25 +313,24 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    dedicated endpoints (one edit home).** Don't frame A as temporary or as debt — "you can
    switch later without rework." See `aggregate-children.md`.
 5. **Modes — ASK, never assume all six.** Which of insert / update / delete / archive /
-   unarchive does this aggregate accept? Recommend a set from the entity's nature, but you
+   unarchive does this aggregate accept? Recommend a set from the entity's nature — the
+   named patterns give you the vocabulary: **append-only** (`Display,Insert` — a ledger,
+   immune to edit AND archive) · **freeze-once** (`Display,Insert,Archive,Unarchive`,
+   no Update — issued documents) · **full CRUD** (the default six-ish) — but you
    MUST confirm — do NOT silently emit all six. (Archive modes ⟺ the schema's
    archive/deleted-at column declaration — the pin's table-schema docs name the builder.)
-   **When Archive is in the set, settle the VIEW's regime in the same breath** — you
-   already know the modes, so don't leave the read side to a silent default: archived
-   rows kept-but-hidden in the entity's view (default; `?includeArchived` reveals) or
-   dropped from it (`DeleteOnArchive()` — the hot-tier choice)? One question, confirmed
-   with the dev; the pin's `views` section carries the contract.
-   **Settle the view BACKING in the same pass (independent of modes/archive).** The
-   project read-side posture (from `scaffold-service`/`scaffold-system`, if set) is the
-   DEFAULT; with none on record (a lone entity run), ASK once, neutrally. It applies ONLY
-   to this entity's OWN plain per-entity view — never a Composed/Shared/Embed view
-   (`scaffold-view`'s, relational-ineligible by construction): **Mongo** (`View(name)…`)
-   = O(1), eventual, full vocabulary, canonical; **Relational** (`… .RelationalSource(
-   repo.Loader)`) = read-your-writes from the SoR, no CDC wait, but ROOT-ONLY (no
-   embeds/links/search/child+sibling filter+sort) and read-time composition — pass the
-   aggregate's EXISTING `repo.Loader`, never a second loader (boot guard
-   `BoundTable()==schema.Table()`). Reversible by a flag later (drop marker + bump
-   `Version` → auto rebuild) — no lock-in framing. Read `relational-view` at the pin.
+   **Settle the view BACKING FIRST (independent of modes/archive) — the archive regime
+   below depends on it.** The project read-side posture (from `scaffold-service` /
+   `scaffold-system`, if set) is the DEFAULT; with none on record (a lone entity run),
+   ASK once, neutrally. It applies ONLY to this entity's OWN plain per-entity view —
+   never a view KIND (`scaffold-view`'s). Trade-offs, eligibility (a plain view rooted
+   at a shared-base ROLE stays relational-eligible), the loader-reuse rule and the
+   no-lock-in flip: `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` — the owner, do not
+   restate it. `relational-view` at the pin only for version-exact capability answers.
+   **Then, when Archive is in the set, settle the VIEW's archive regime** — never a
+   silent default, and GATED on the backing just settled (relational serves no
+   `DeleteOnArchive()`): the exact question shape is in `shared/read-side.md`'s
+   elicitation contract; the pin's `views` section carries the served contract.
 6. **Business rules, validations, restrictions — ASK; do not skip and do not invent.** What
    must `BuildRules` enforce? Required fields, formats (email, document/tax-id), numeric
    ranges (e.g. a grade 0–100), string lengths, cross-field invariants, immutability, state
@@ -334,7 +340,9 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    a run that asks nothing ends up with only "required + length" boilerplate. Elicit the
    real rules (propose sensible defaults per field type, then confirm), and map each to an
    `IfInsert/IfUpdate/IfInsertOrUpdate/IfArchive/IfUnarchive/IfDelete/IfDisplay`
-   closure with a specific notification.
+   closure with a specific notification. (**`IfDisplay` caveat**: no framework path
+   dispatches Display to `BuildRules` today — don't generate dead display rules;
+   confirm against the pin's `rules-dsl` before using it.)
 7. **Delete semantics — archive OR hard delete (rarely both).** An archive model
    (archive/unarchive + the schema's archive column) OR a hard-delete model. One simple
    question; **default archive**. Don't emit both a hard `DELETE` and archive/unarchive
@@ -500,6 +508,11 @@ You never hold all layers at once — each stage loads only its task + docs + co
 
 ## Final verify (the gate — non-negotiable)
 
+**Level 0 — the reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`):
+after the levels below pass, reopen `spec.md` and walk ITS promises item by item with
+real command evidence; an unmet stated target is RED or an explicit dev-accepted
+deviation — never a green summary.
+
 Four DISTINCT levels — do not conflate them:
 1. **Mechanical boot-trap checklist** — cheap checks; run ALL that apply, report each:
    - `grep -rn "CHAR(36)\|VARCHAR(36)\|VARCHAR2(36)" migrations/mysql/ migrations/sqlserver/ migrations/oracle/`
@@ -567,12 +580,17 @@ Four DISTINCT levels — do not conflate them:
    `ToCriteria`). **Measure per generated FILE from the cover profile** —
    `go test -coverprofile` then read the entity's own files (`go tool cover -func`); the
    bare package percentage mixes in pre-existing code and misstates the entity. See
-   `conventions/tests.md`.
+   `conventions/tests.md`. **A generated file under 80% is RED — add tests until it
+   meets the target, or surface the miss as an explicit deviation for the dev to
+   accept; the per-file `go tool cover -func` lines for every generated file MUST
+   appear in the verify report** (a bare package number, or no lines, = this level did
+   not run).
 4. **Existing QA suite** — REGRESSION ONLY (proves no breakage; has NO cases for the new
    endpoints, so it does NOT prove the entity works).
 
 Functional e2e of the new endpoints (create → wait for CDC → read back → CRUD round-trip →
-204s → OpenAPI/GraphQL) is a **separate** step. **Never edit a test to pass** — the test is
+204s → OpenAPI/GraphQL) is a **separate** step — its owner is `/omnicore:qa` (generates
+and runs the contract suite); offer it when this run goes green. **Never edit a test to pass** — the test is
 the oracle. **Leave `scaffold-entity/<entity>/` in place** (do not delete it) so the dev can
 review the plan against the generated code.
 
@@ -610,9 +628,11 @@ only a genuinely missing docs file does.
 | domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | custom-command-handler · service-to-service |
 | aggregate children / cascade | aggregate-persistence |
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |
+| what one write touches end-to-end (SQL ↔ outbox ↔ Mongo op ↔ audit verb; PUT/PATCH share verb `update` — `actionName` tells them apart) | lifecycle-map |
+| ctx-bound domain Service probe in rules | auto-handlers · custom-command-handler |
 | schema (Go↔column) | table-schema |
 | view: indexes / options / Version | auto-query-handlers · mongo-schema-evolution |
-| view backing: relational (SoR) vs Mongo | relational-view |
+| view backing: relational (SoR) vs Mongo — posture, elicitation, gating | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
 | SharedBaseView / ComposedView (read) | table-schema · query-side |
 | response projection (AutoFromDoc / FromDoc) | auto-query-handlers · custom-query-handler |
 | REST routes / OpenAPI | openapi · reference |
@@ -652,8 +672,8 @@ only a genuinely missing docs file does.
   jsonSchema/collation/capped/time-series); index-only does NOT; forgetting panics.
 - **A relational view (`.RelationalSource`) has NO Mongo collection** — SyncEngine,
   Mongo-spec and reconcile skip it by name; its reads are read-your-writes (provable
-  immediately, no CDC round-trip). Unsupported reads (search / child+sibling filter+sort)
-  return 400, not 500. Full contract: `relational-view`.
+  immediately, no CDC round-trip). What it serves vs rejects (typed 400, never 500):
+  `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`; version-exact contract: `relational-view`.
 - **Every `.up.sql` needs a `.down.sql`** (may be a no-op) or boot aborts.
 - **A ComposedView 1:N leg's FK must be indexed** or boot is fatal.
 - **`Modes()` ⟺ the schema's archive-column declaration** must agree.

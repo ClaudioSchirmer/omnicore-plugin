@@ -73,7 +73,12 @@ session." Never a gate: this run continues on the installed skills.
 - Prefer the project's start wrapper (`start.sh` / `start.cmd`); else
   `APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap` — SQLite:
   `CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite ./bootstrap`.
-- Run in BACKGROUND, log to a file; poll `/readyz` until 200 (bounded ~60s).
+- Run in BACKGROUND, log to a file (never through a pipe — a broken pipe can swallow the
+  drain/boot narration); poll `/readyz` until 200 (bounded ~60s) — **and READ the 503
+  body, don't just count**: `initializing: rebuilding view "X" (n/m)` means a background
+  boot-time rebuild — the service is UP (`/livez` 200), keep waiting/extend the bound;
+  a store-unreachable reason means stop and diagnose. The three ordered 503 reasons:
+  `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`.
 - Failure → show the FIRST error from the log verbatim and stop. This skill fixes
   nothing — point at `help` (understand) or the skill that generated the code.
 
@@ -86,6 +91,12 @@ Only surfaces the yaml actually enables:
 - GraphQL / gRPC when enabled (gRPC isn't clickable — report host:port + reflection
   state instead)
 - Probes: `/livez` · `/readyz`
+
+**Full-bench projects — check the relay before handing over the links.** `/readyz`
+excludes the transport BY DESIGN, so green probes can hide a dead CDC relay: check the
+relay container's log reached streaming. If it hasn't, hand the links over anyway but
+SAY IT PLAINLY — "the app is live, but writes will NOT project to views until the
+relay streams" — and route to `doctor`. N/A for SQLite (no relay).
 
 The app STAYS RUNNING — that is the point. Close with how to stop: the PID +
 `kill <pid>`, and `docker compose down` for the bench (volumes survive; `down -v`
@@ -101,10 +112,12 @@ section for the fact in doubt — never sweep the manual to boot an app.
 
 | When checking… | Read section(s) |
 |---|---|
+| probes/readyz reasons · publicRoutes · autoRun · env vars · drain | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) |
+| log anatomy / where the narration lives | logs |
 | yaml keys / ports / profiles / env overrides | yaml-reference |
 | boot order / probes semantics / surfaces enabled | bootstrap |
 | relay / broker / outbox expectations | transport |
-| SQLite / infra-free posture (no bench, tagless) | relational-view · yaml-reference |
+| SQLite / infra-free posture (no bench, tagless) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · yaml-reference |
 | OpenAPI UI path / rootRedirect | openapi |
 | GraphQL / gRPC endpoints | graphql · grpc |
 

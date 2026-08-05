@@ -157,22 +157,12 @@ full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
    rework — decline if the team is single-OS. Record the resolved set in the spec.
 8. **Read-side posture** — HOW entity read models are served, asked NEUTRALLY, NO
    default: an empty dir is equally likely an MVP or a seasoned team's solid service,
-   and we can't tell which. Read `relational-view` at the pin before wording it.
-   - **Full distributed CQRS** — entity views Mongo-projected through the CDC pipeline
-     (the canonical omnicore path): O(1) document reads, the full read-side vocabulary
-     (embeds, links, composed/shared views, free-text search, child/sibling filter+sort),
-     eventually consistent (CDC lag).
-   - **Reduced / MVP** — entity views served RELATIONAL, straight from the SoR
-     (`.RelationalSource(...)`): read-your-writes with NO CDC lag, the projection
-     apparatus can wait. The cost, stated plainly: root-only reads on a single aggregate
-     — no embeds/links/composed/shared views, no free-text search, no child/sibling
-     filter+sort — and read-time aggregate composition instead of an O(1) fetch.
-   Say the reassuring truth: **this is not a lock-in.** On a full engine the bench ships
-   FULL (Mongo + relay) either way, so moving a view to Mongo later is a per-view flag
-   (drop `.RelationalSource()` + bump `Version(N)`, one automatic online blue-green
-   rebuild, nothing re-scaffolded). **On SQLite the posture is forced relational** (no
-   Mongo exists) — gaining Mongo means the engine swap, which `/omnicore:configure` does;
-   still no code lost. Record the posture in the spec; it's handed to `scaffold-entity`
+   and we can't tell which. The two postures, their honest trade-offs, the capability
+   rule, the no-lock-in truth and the wording discipline are OWNED by
+   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` — read it BEFORE wording the question,
+   and route to it instead of restating (consult `relational-view` at the pin only for
+   version-exact capability answers). **On SQLite the posture is forced relational** —
+   nothing to ask. Record the posture in the spec; it's handed to `scaffold-entity`
    as the DEFAULT backing per entity view (still per-entity overridable there).
 
 **When the engine is SQLite — the zero-infra MVP posture (say all of this, calmly).**
@@ -189,8 +179,9 @@ default (it's not portable).
 Be honest AND reassuring:
 - **Great for an MVP / a demo / a single-node tool** — it stands up with zero moving parts.
 - **The framework is NOT optimized for this** — the canonical path is CDC + MongoDB; a
-  relational view re-composes the aggregate per read (root-only: no embeds/links/
-  composed/shared views, no free-text search, no child/sibling filter+sort).
+  relational view re-composes the aggregate per read, and only plain per-entity views
+  are servable (what they serve vs reject, and what the posture never constrains —
+  write-side modeling — per `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`, the owner).
 - **Integration events and Mongo projections don't exist here** (both ride the CDC relay,
   which needs a Debezium-tailable engine).
 - **Fully reversible, no code lost.** Every layer above infra is identical to a full
@@ -243,10 +234,10 @@ applies only when any high-risk slot would otherwise be filled by you.
    - `transport.html` — the broker contract + the CDC-relay reference (validates the
      `templates/` values: topic/subject naming, `simplestring` payload, headers).
    - `service-layout.html` — skeleton naming, when the pinned version ships it.
-   - **SQLite only:** `relational-view.html` (the zero-infra MVP posture — all views
-     relational) + `table-schema.html` (Go↔SQLite types, `:memory:`, ASCII case-fold,
-     decimal-as-TEXT, the forced correctness pragmas) + `yaml-reference.html` (the
-     `mongo`/`transport` opt-out-by-absence semantics).
+   - **SQLite only:** `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (the zero-infra MVP
+     posture — all views relational; the owner) + `table-schema.html` (Go↔SQLite types,
+     `:memory:`, ASCII case-fold, decimal-as-TEXT, the forced correctness pragmas) +
+     `yaml-reference.html` (the `mongo`/`transport` opt-out-by-absence semantics).
 3. **`bootstrap/main.go` + `bootstrap/wire.go`** — the empty shell: `bootstrap.Run`
    wired to an empty `Wiring`, with a comment pointing at `scaffold-entity` as the way
    to add the first entity. Derive the exact signatures from `bootstrap.html` — this
@@ -274,7 +265,14 @@ applies only when any high-risk slot would otherwise be filled by you.
    (or `:memory:` when the dev chose ephemeral) — no compose creds to match.
 5. **`microservice.prd.yaml`** — the honest template: same core, `auth.mode: jwt` with
    `${JWT_ISSUER}` / `${JWT_AUDIENCE}` / `${JWKS_URL}` placeholders (prd without an
-   `auth` block aborts boot — that's WHY the template ships), endpoints as pure
+   `auth` block aborts boot — that's WHY the template ships), **AND
+   `auth.publicRoutes: ["GET /livez", "GET /readyz"]` — the `METHOD /path` form is
+   MANDATORY** (a bare path without the method fails `parsePublicRoutes` and aborts
+   boot). Probes are framework-registered but NOT auto-public; under jwt a tokenless
+   kubelet gets 401 and the orchestrator kills a healthy pod. Entries are validated at
+   boot against the registered route set (exact-match: a typo / wrong method / trailing
+   slash ABORTS boot; path-param routes can't be listed — those use `Doc.Public` — see
+   `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`). Endpoints as pure
    `${VARS}` with no localhost defaults, no playground/introspection.
 6. **`migrations/<dialect>/.gitkeep`** — empty; the service's own sequence starts at
    `0001` when the first entity arrives (that is `scaffold-entity`'s job). Do NOT
@@ -309,8 +307,19 @@ applies only when any high-risk slot would otherwise be filled by you.
 
 ## Final verify (the gate — non-negotiable)
 
+**Level 0 — the reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`):
+after the items below pass, reopen the spec and walk ITS promises item by item with
+real evidence; an unmet stated target is RED or an explicit dev-accepted deviation.
+
 1. **Bench healthy** — every compose healthcheck green (when the bench was generated).
    N/A for SQLite (no bench).
+1b. **prd static sanity — the prd profile is NEVER boot-tested here (only dev boots),
+   so check it statically and say so plainly in the report:** `auth` block present with
+   `mode: jwt`; `auth.publicRoutes` contains the exact entries `GET /livez` and
+   `GET /readyz` (the `METHOD /path` form — a bare path aborts boot,
+   `shared/boot-contract.md`); every endpoint a pure `${VAR}` with no localhost
+   default; mandatory blocks for the chosen posture present. A prd that only fails at
+   the first real deploy is this skill's failure.
 2. **`gofmt -l`, `go vet`, `go build -o /dev/null -tags '<engine> <transport>' ./bootstrap`** — format
    (gofmt clean) + vet + compile. Both linters are first-party Go tools (no install).
    SQLite: `CGO_ENABLED=0 ... -tags sqlite` (engine only, transport tagless).
@@ -377,9 +386,10 @@ skill), the fallback for concepts this table doesn't list.
 
 | When generating… | Read section(s) |
 |---|---|
-| read-side posture (relational vs Mongo backing) | relational-view · views |
-| SQLite specifics · infra opt-out (no mongo/transport) · zero-infra MVP | table-schema · yaml-reference · relational-view |
+| read-side posture (relational vs Mongo backing) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
+| SQLite specifics · infra opt-out (no mongo/transport) · zero-infra MVP | table-schema · yaml-reference · `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` |
 | `microservice.*.yaml` keys / profiles / defaults | yaml-reference |
+| probes/publicRoutes · autoRun modes · interpolation strictness · dev-only gates | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) |
 | bootstrap shell / feature mounting / probes | bootstrap |
 | migrations skeleton / autoRun / dir layout | migrations |
 | outbox / relay / topic-subject naming / CDC | transport |

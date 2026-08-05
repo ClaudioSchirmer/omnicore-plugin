@@ -6,6 +6,13 @@ type choices, `ConstraintBinding` keys, active-only uniqueness, engine swaps) ro
 HERE instead of restating dialect facts inline — so the knowledge has ONE owner and the
 generating agent reads ONLY the dialect(s) it needs.
 
+> Engine-INDEPENDENT knowledge lives in the sibling sheets, same one-owner contract,
+> different axes: `../read-side.md` (posture, what a relational view serves, the
+> write-side invariant, elicitation) · `../boot-contract.md` (probes/publicRoutes,
+> autoRun, config strictness, env vars, drain) · `../capabilities.md` (availability
+> under posture, service-to-service choice, cache slots, already-automatic list) ·
+> `../verify-contract.md` (the reconcile rule every mutating skill's Final Verify obeys).
+
 ## The contract
 
 - **Read only what applies.** A service runs ONE dialect per build (occasionally a

@@ -108,7 +108,11 @@ defaulted. Sections (structural completeness — `N/A — <why>` instead of dele
    the down of a destructive step recreates STRUCTURE, not data — say so honestly.
 4. **View evolution** [high-risk]: does the projected shape change? Then every affected
    view bumps `Version(N)` (schema-evolution contract — the owning doc section rules).
-   Views of other entities embedding this one count.
+   Views of other entities embedding this one count. **Archive newly enabled ⇒ settle
+   the view's archive regime in this spec** — gated on the view's backing, per
+   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`'s elicitation contract (relational serves
+   no `DeleteOnArchive()`); never a silent default — the scaffold side asks this at
+   birth, adding the mode later doesn't get to skip it.
 5. **API impact** [high-risk]: wire-visible changes (json names, removed/renamed fields,
    validation tightening) are BREAKING for consumers — list them, flag them, let the dev
    decide; never smuggle a break in silently.
@@ -116,6 +120,18 @@ defaulted. Sections (structural completeness — `N/A — <why>` instead of dele
    real translations; removed keys leave no orphans.
 7. **Tests** — which existing tests change and why (rule changed ⇒ test changes with it,
    shown here, not discovered later), which new branches need coverage.
+8. **Kind promotion (flat → sharedbase)** [high-risk — only when the change IS this;
+   `N/A` otherwise]: the hardest migration in the catalog — never improvise it. The
+   pieces, each explicit in the spec: the new base table + the natural-key choice (the
+   base PK derives from it — UUIDv5; wrong key = merged/split identities, data
+   corruption not a bug) · the FK model (shared-PK vs separate-FK — re-enrollment
+   semantics, dev's call) · the data move as a real migration + backfill (up creates
+   base + backfills from the flat table, down recreates STRUCTURE only — say so) · the
+   role table slims to role-only fields · the identity becomes its OWN bounded context
+   (routes file, feature, `<identity>:read` permission — named after the BASE) · views
+   and translations follow. Mechanics: `table-schema` at the pin + scaffold-entity's
+   `conventions/sharedbase.md` (the write/read contracts are THE reference — this
+   skill adds only the migration path).
 
 ## Phase 2 — Execute the impact map
 
@@ -140,6 +156,8 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | rules / notifications / actionName | rules-dsl · old-state · status-mapping |
 | children / siblings / cascade | aggregate-persistence |
 | write handlers / in-TX hooks | auto-handlers · lifecycle-hooks |
+| full write-path ripple of a change (SQL ↔ outbox ↔ Mongo op ↔ audit verb) | lifecycle-map |
+| read-side impact of a write change (backing, kinds, archive regime) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) |
 | view shape / indexes / `Version` bump | auto-query-handlers · mongo-schema-evolution |
 | SharedBaseView / ComposedView impact | table-schema · query-side |
 | REST routes / OpenAPI surface | openapi · reference |
@@ -151,6 +169,9 @@ change at hand — never sweep the whole manual; the Documentation Map in
 
 ## Final verify (the gate)
 
+0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk the
+   plan's own promises item by item with evidence; an unmet target is RED or an explicit
+   dev-accepted deviation.
 1. **Mechanical checks** (pre-boot, all that apply): every changed `up` has its `down`
    twin · projected-shape change ⇒ `Version(N)` bumped on EVERY affected view · grep the
    OLD field/key name across the repo → no stale references (code, translations, docs,

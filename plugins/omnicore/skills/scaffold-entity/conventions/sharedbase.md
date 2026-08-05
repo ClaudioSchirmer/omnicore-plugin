@@ -47,6 +47,11 @@ engines bind the constraint NAME, SQLite binds the `<table>.<column>` column lis
 
 ## Insert — the 7th handler
 
+- **The marriage is two-way and enforced**: the plain `InsertCommandHandler` REJECTS a
+  SharedBase-backed repo with a directive error, and the SharedBase insert handler
+  rejects a plain repo — wiring the wrong pair is a boot-time directive, not a runtime
+  surprise. And the **blind-insert guard**: base already exists + `actionName` that is
+  not `GetUpsertable` → abort (`auto-handlers.html`).
 - The command declares **`ApplyTo` (not `ToEntity`)** and it must be a **pure, idempotent
   mapper** — the handler may run it twice (a throwaway call to read the natural key, then
   again on the loaded identity on the warm path). No side effects.
@@ -82,11 +87,19 @@ active role archives the base + its native children; deleting the last role conv
 `OrphanPolicy`. A POST for a document with an ACTIVE role → 409; an ARCHIVED role's
 remnant vetoes on the PK/unique index (same 409); `/unarchive` is the explicit way back.
 
-## Read — the SharedBaseView — ALWAYS OFFER IT
+## Read — the SharedBaseView — OFFER IT WHENEVER IT CAN BE SERVED
 
 The read counterpart of the shared write: one document per identity — base fields flat,
-base-children at the root, one sub-document per role. Elicit it whenever a SharedBase is
-in play (spec §1), two cases told apart in Phase 0b:
+base-children at the root, one sub-document per role. It earns its keep at 2+ roles.
+
+**Gate the offer on the project's INFRA POSTURE** — the SharedBase read does NOT depend
+on this view (the per-role plain view already carries the base's fields flattened), the
+kind needs Mongo, and the no-Mongo script (point at what exists, complement-later via
+`/omnicore:configure`) is all OWNED by `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` —
+follow its Kinds section and elicitation contract, do not restate them.
+
+With Mongo present, elicit whenever a SharedBase is in play (spec §1), two cases told apart
+in Phase 0b:
 - **No identity view exists** → offer to CREATE it (first role).
 - **One exists** (adding a NEW role to an existing base) → offer to ADD the role to it —
   **and BUMP its `Version(N)`**: the role set is in the rebuild hash; forgetting the bump
