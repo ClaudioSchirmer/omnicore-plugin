@@ -168,6 +168,9 @@ index for concepts this table doesn't list.
 
 ## Final verify (the gate)
 
+0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk the
+   spec's own promises item by item with evidence; an unmet target is RED or an explicit
+   dev-accepted deviation.
 1. **Mechanical, pre-boot:** every 1:N leg FK indexed · `Version` declared on the new
    view · ONE view per file (`service-layout`) · no write-side file touched.
 2. **`gofmt -l` + `go vet` + `go build`** (engine + transport tags) — clean.

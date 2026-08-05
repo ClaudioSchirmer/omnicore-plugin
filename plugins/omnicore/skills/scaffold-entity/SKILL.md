@@ -508,6 +508,11 @@ You never hold all layers at once — each stage loads only its task + docs + co
 
 ## Final verify (the gate — non-negotiable)
 
+**Level 0 — the reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`):
+after the levels below pass, reopen `spec.md` and walk ITS promises item by item with
+real command evidence; an unmet stated target is RED or an explicit dev-accepted
+deviation — never a green summary.
+
 Four DISTINCT levels — do not conflate them:
 1. **Mechanical boot-trap checklist** — cheap checks; run ALL that apply, report each:
    - `grep -rn "CHAR(36)\|VARCHAR(36)\|VARCHAR2(36)" migrations/mysql/ migrations/sqlserver/ migrations/oracle/`
@@ -575,12 +580,17 @@ Four DISTINCT levels — do not conflate them:
    `ToCriteria`). **Measure per generated FILE from the cover profile** —
    `go test -coverprofile` then read the entity's own files (`go tool cover -func`); the
    bare package percentage mixes in pre-existing code and misstates the entity. See
-   `conventions/tests.md`.
+   `conventions/tests.md`. **A generated file under 80% is RED — add tests until it
+   meets the target, or surface the miss as an explicit deviation for the dev to
+   accept; the per-file `go tool cover -func` lines for every generated file MUST
+   appear in the verify report** (a bare package number, or no lines, = this level did
+   not run).
 4. **Existing QA suite** — REGRESSION ONLY (proves no breakage; has NO cases for the new
    endpoints, so it does NOT prove the entity works).
 
 Functional e2e of the new endpoints (create → wait for CDC → read back → CRUD round-trip →
-204s → OpenAPI/GraphQL) is a **separate** step. **Never edit a test to pass** — the test is
+204s → OpenAPI/GraphQL) is a **separate** step — its owner is `/omnicore:qa` (generates
+and runs the contract suite); offer it when this run goes green. **Never edit a test to pass** — the test is
 the oracle. **Leave `scaffold-entity/<entity>/` in place** (do not delete it) so the dev can
 review the plan against the generated code.
 

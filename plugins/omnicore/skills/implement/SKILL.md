@@ -158,6 +158,9 @@ placeholders per the configuration reference, never literal.
 
 ## Final verify (the gate)
 
+0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — item 3
+   below IS this contract for capabilities; the contract adds: any other stated target
+   unmet is RED or an explicit dev-accepted deviation.
 1. **Build + vet** (with the transport/engine tags the project uses) — clean.
 2. **Tests** — the plan's new branches covered; never weaken an existing test to pass.
 3. **Capability proof — the plan's own verify step, executed.** Each capability states

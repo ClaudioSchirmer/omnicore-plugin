@@ -92,6 +92,12 @@ Only surfaces the yaml actually enables:
   state instead)
 - Probes: `/livez` · `/readyz`
 
+**Full-bench projects — check the relay before handing over the links.** `/readyz`
+excludes the transport BY DESIGN, so green probes can hide a dead CDC relay: check the
+relay container's log reached streaming. If it hasn't, hand the links over anyway but
+SAY IT PLAINLY — "the app is live, but writes will NOT project to views until the
+relay streams" — and route to `doctor`. N/A for SQLite (no relay).
+
 The app STAYS RUNNING — that is the point. Close with how to stop: the PID +
 `kill <pid>`, and `docker compose down` for the bench (volumes survive; `down -v`
 wipes data — say so).

@@ -39,8 +39,10 @@ SHORT list. State it both ways; never refuse what the posture doesn't gate:
   `integration-events` at the pin. Eliciting the idempotency strategy is part of the
   design question, not an afterthought.
 - **Consumer groups**: same group → ONE reaction total; distinct groups → one EACH;
-  replicas of one group SPLIT, never duplicate. `startFrom` applies ONLY at group
-  creation. "Fires twice / never fires" triage starts here.
+  replicas of one group SPLIT, never duplicate. `startFrom` (enum-validated) takes
+  effect when the group has no committed offset — an existing group keeps its position
+  (platform semantics; the pin's docs state the enum + defaults). "Fires twice / never
+  fires" triage starts here.
 - A declared subscribe with no registered receiver ABORTS boot — and the inverse too.
 
 ## Cache — two slots, one mandatory question

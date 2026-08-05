@@ -66,6 +66,58 @@ and ~20 targeted convention/routing additions.
   receiver-idempotency ⚠️ OPEN elicitation slots; `scaffold-system` decides
   depth-one splits at map time.
 
+### Fixed (verification pass)
+- **The audit-round `publicRoutes` fix itself carried a boot-aborting format error** —
+  caught by a line-by-line fact-check of the new sheets against docs AND code
+  (`parsePublicRoutes` requires `"METHOD /path"`; a bare `"/livez"` aborts boot; one of
+  the two proof runs generated the broken form, the other read the docs and got it
+  right). `scaffold-service` and `boot-contract.md` now mandate
+  `["GET /livez", "GET /readyz"]` explicitly. Every other claim in the three sheets
+  verified against the pinned docs/code; one softened (`startFrom` = platform
+  offset semantics, not doc-stated).
+
+### Added — the 14th skill: `/omnicore:qa`
+- **Contract QA suite generator+runner** — closes the loop the other skills open
+  (scaffold builds, run boots, **qa proves**): reads the project's entities, modes,
+  views/backings, surfaces and posture, derives the PIN's promised behaviors (verb set
+  per mode with 405 for absent verbs, notification-key 422s, the dual 409, archive
+  round-trip per regime, filter vocabulary, typed 400 on relational 1:N pushdown), and
+  generates `qa/<entity>.sh` + a fail-fast `qa/run.sh` that exercises them against the
+  real running service. Posture-aware read-backs (bounded poll for the NEWEST write on
+  Mongo backing; IMMEDIATE read-your-writes on relational — a needed poll is itself a
+  failure). Plan gate elicits data hygiene and auth; out-of-scope named plainly
+  (event consumption, load). Verify includes the mandatory break-one-case honesty
+  check (a suite that cannot fail proves nothing) and the reconcile contract.
+  `scaffold-entity`'s "functional e2e is a separate step" now routes here.
+
+### Added (second audit round — verify enforcement + the 6 under-audited skills)
+- **`shared/verify-contract.md`** — the reconcile rule every mutating skill's Final
+  Verify now opens with (generalized from `implement`'s "the plan's own verify step,
+  executed"): reopen the run's spec/plan, walk ITS promises item by item with real
+  command evidence; an unmet stated target is RED or an explicit dev-accepted
+  deviation, never a green summary; numbers measured the way the convention defines.
+  Wired as Level 0 into all 7 mutating skills. Teeth added locally: `scaffold-entity`
+  Level 3 (per-file <80% = RED; the per-file `go tool cover -func` lines are mandatory
+  in the report — the proof run shipped 70.6% on web/requests and sailed through);
+  `scaffold-service` gains a static prd sanity check (prd is never boot-tested — say
+  so; probe entries verbatim, pure-`${VAR}` endpoints, mandatory blocks).
+- **`remove-entity` yaml sweep** — the footprint/inventory/verify now cover
+  `microservice.*.yaml` (`integration:` pub/sub, `upstreamSubscriptions`): an orphan
+  subscribe after removal is a boot ABORT and event names rarely contain the entity
+  name, so the blocks are READ, not grepped.
+- **`evolve-entity`**: spec §8 gives the promised-but-processless flat→sharedbase
+  promotion a real path (base table + natural-key stakes, FK model, backfill
+  migration, bounded-context split — routed to `table-schema` + `sharedbase.md`);
+  §4 mirrors scaffold-entity's archive-regime elicitation when Archive is enabled
+  later; routing row to `shared/read-side.md`.
+- **`evolve-view`**: §3 warns that embedding views do NOT follow a rebuild (each
+  listed with its own `Version` verdict); §4 carries the role-set-in-rebuild-hash
+  bump rule.
+- **`run`**: full-bench handover checks the relay reached streaming — green probes
+  exclude the transport by design, so it says plainly when writes won't project.
+- **`help`**: posture/availability answers may use the shared owners for the
+  plugin-consistent framing; the pin's docs stay the factual authority.
+
 ### Added
 - **`shared/read-side.md` — the read-side posture gets ONE owner.** New sibling of
   `shared/dialects/` under the same contract (route there, never restate; the pinned docs

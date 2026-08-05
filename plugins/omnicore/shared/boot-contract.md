@@ -13,12 +13,14 @@ ever disagrees with the pinned docs, the docs win.
   every service. Under `auth.mode: jwt` they still require a token — a tokenless
   kubelet gets **401** and the orchestrator kills/never-readies a healthy pod. They
   must be LISTED in `auth.publicRoutes`.
+- **Entry format is `METHOD /path` — mandatory**: `"GET /livez"`, `"GET /readyz"`. A
+  bare path without the method (`"/livez"`) fails `parsePublicRoutes` and ABORTS boot.
 - **`auth.publicRoutes` is validated at boot against the registered route set,
   exact-match**: a typo, wrong method, or trailing slash (no matching route) ABORTS
   boot with the offender named; a path-param/wildcard entry can never match — mark
   that route `Doc.Public` instead. So the failure ladder is: missing entry → 401 on
-  probes in prd; hand-fixed with a typo → boot abort. Both have one fix: the exact
-  literal probe paths in `publicRoutes`.
+  probes in prd; hand-fixed loosely → boot abort. One fix: the exact
+  `METHOD /path` probe entries in `publicRoutes`.
 - **`/readyz` 503 carries a REASON — read it, never just count retries.** Three,
   ordered: (1) `draining` — shutdown in progress; (2) `initializing: rebuilding view
   "X" (n/m)` — a background boot-time view rebuild: the service IS up (`/livez` 200)

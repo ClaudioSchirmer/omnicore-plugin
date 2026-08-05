@@ -170,6 +170,9 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 
 ## Final verify (the gate)
 
+0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk the
+   conversion plan's own promises item by item with evidence; an unmet target is RED or
+   an explicit dev-accepted deviation.
 1. **Mechanical, pre-boot:** yaml coherent with the target (a Mongo-backed/composed view present
    ⇒ `mongo.uri` present, else the boot aborts by design); build tags match the engine+transport;
    `gofmt -l` + `go vet` + `go build` (target tags) clean.

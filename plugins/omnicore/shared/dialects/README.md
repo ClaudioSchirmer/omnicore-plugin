@@ -10,7 +10,8 @@ generating agent reads ONLY the dialect(s) it needs.
 > different axes: `../read-side.md` (posture, what a relational view serves, the
 > write-side invariant, elicitation) · `../boot-contract.md` (probes/publicRoutes,
 > autoRun, config strictness, env vars, drain) · `../capabilities.md` (availability
-> under posture, service-to-service choice, cache slots, already-automatic list).
+> under posture, service-to-service choice, cache slots, already-automatic list) ·
+> `../verify-contract.md` (the reconcile rule every mutating skill's Final Verify obeys).
 
 ## The contract
 

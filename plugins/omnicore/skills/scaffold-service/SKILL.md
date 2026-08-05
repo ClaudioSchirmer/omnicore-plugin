@@ -266,11 +266,12 @@ applies only when any high-risk slot would otherwise be filled by you.
 5. **`microservice.prd.yaml`** — the honest template: same core, `auth.mode: jwt` with
    `${JWT_ISSUER}` / `${JWT_AUDIENCE}` / `${JWKS_URL}` placeholders (prd without an
    `auth` block aborts boot — that's WHY the template ships), **AND
-   `auth.publicRoutes: ["/livez", "/readyz"]`** — probes are framework-registered but
-   NOT auto-public; under jwt a tokenless kubelet gets 401 and the orchestrator kills a
-   healthy pod. Entries are validated at boot against the registered route set
-   (exact-match: a typo / wrong method / trailing slash ABORTS boot; path-param routes
-   can't be listed — those use `Doc.Public` — see
+   `auth.publicRoutes: ["GET /livez", "GET /readyz"]` — the `METHOD /path` form is
+   MANDATORY** (a bare path without the method fails `parsePublicRoutes` and aborts
+   boot). Probes are framework-registered but NOT auto-public; under jwt a tokenless
+   kubelet gets 401 and the orchestrator kills a healthy pod. Entries are validated at
+   boot against the registered route set (exact-match: a typo / wrong method / trailing
+   slash ABORTS boot; path-param routes can't be listed — those use `Doc.Public` — see
    `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`). Endpoints as pure
    `${VARS}` with no localhost defaults, no playground/introspection.
 6. **`migrations/<dialect>/.gitkeep`** — empty; the service's own sequence starts at
@@ -306,8 +307,19 @@ applies only when any high-risk slot would otherwise be filled by you.
 
 ## Final verify (the gate — non-negotiable)
 
+**Level 0 — the reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`):
+after the items below pass, reopen the spec and walk ITS promises item by item with
+real evidence; an unmet stated target is RED or an explicit dev-accepted deviation.
+
 1. **Bench healthy** — every compose healthcheck green (when the bench was generated).
    N/A for SQLite (no bench).
+1b. **prd static sanity — the prd profile is NEVER boot-tested here (only dev boots),
+   so check it statically and say so plainly in the report:** `auth` block present with
+   `mode: jwt`; `auth.publicRoutes` contains the exact entries `GET /livez` and
+   `GET /readyz` (the `METHOD /path` form — a bare path aborts boot,
+   `shared/boot-contract.md`); every endpoint a pure `${VAR}` with no localhost
+   default; mandatory blocks for the chosen posture present. A prd that only fails at
+   the first real deploy is this skill's failure.
 2. **`gofmt -l`, `go vet`, `go build -o /dev/null -tags '<engine> <transport>' ./bootstrap`** — format
    (gofmt clean) + vet + compile. Both linters are first-party Go tools (no install).
    SQLite: `CGO_ENABLED=0 ... -tags sqlite` (engine only, transport tagless).
