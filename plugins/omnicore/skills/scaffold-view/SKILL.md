@@ -155,7 +155,8 @@ index for concepts this table doesn't list.
 | When deciding/generating… | Read section(s) |
 |---|---|
 | composition type (the catalog + contracts) | views |
-| relational backing — eligibility / limits | relational-view |
+| relational backing — eligibility / limits | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view |
+| cross-service data: subscription vs call vs event — the choice matrix | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) · service-to-service |
 | view declaration / options / indexes / aggregations | views · auto-query-handlers |
 | custom projection / response shaping | custom-query-handler |
 | `Version` / rebuild / evolution | mongo-schema-evolution |

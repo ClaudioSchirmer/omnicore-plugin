@@ -44,7 +44,10 @@ root; the domain-service implementation in its own file here.
      FindAll-and-filter workaround, which pays full aggregate hydration to answer yes/no.
      Confirm the pinned version's loader surface in `custom-command-handler.html`
      (Loading by criteria); a version without the probes falls back to a
-     FindOne/FindAll-based check;
+     FindOne/FindAll-based check. For scalar facts beyond existence (counts, totals,
+     extremes), the same hydration-free family has an aggregate DSL
+     (Count/Sum/Avg/Min/Max in one SELECT) — never FindAll-and-count; exact specs at
+     the pin;
   1. migration `UNIQUE` constraint (active-only variants per `table-schema.html` when
      archived remnants must not block);
   2. repo `Constraints` binding (violation KEY → notification + field) — the match is
@@ -65,6 +68,15 @@ root; the domain-service implementation in its own file here.
   bump; forgetting when the hash changed = boot abort (`mongo-schema-evolution.html`).
 - Index what the spec's filter/sort list names; `TextIndex` for `?search`.
 - Options (`DeleteOnArchive`, `MaxLimit`) — ask; default neither.
+- **The managed-slot contract (Revision + ParentID) — cross-layer agreement, like
+  `Modes()` ⟺ archive column.** `Revision(col)` is MANDATORY on entity schemas and
+  shared bases (omit → boot failure) and FORBIDDEN on children/siblings (declare →
+  construction panic). `ParentID` carries three boot-panics: `Field("ID",…)` /
+  `Field("ParentID",…)` are reserved names; the ParentID column doubling as a mapped
+  `Field` is the silent-overwrite the docs guard against; `ParentID(...)` +
+  `SharedBase(...)` together is invalid. And its capability half: ParentID
+  auto-projects as the read-only twin of `ID` — filterable/sortable/`?fields=`-able
+  with NO hand mapping; never map the FK column yourself. `table-schema.html`.
 - **View backing (relational vs Mongo).** Per the project read-side posture / the spec's
   §9 slot. Relational = `.RelationalSource(repo.Loader)` on the plain per-entity view —
   the aggregate's OWN loader (shared with the repo; boot guard `BoundTable()==schema.Table()`),

@@ -57,6 +57,9 @@ web.md.
   declaring its own child panics; model a separate aggregate instead.
 - **Every child-mutation method opens with the framework's ensure-initialized call** —
   else construction-time notifications are lost.
+- **One validation path per item, never both**: a child validated inline in the root
+  method AND again through the boundary `ValidateAggregateChild` pass reports every
+  notification twice. Pick the boundary pass (the default) OR inline — not both.
 - **The framework matches a child through its MANDATORY `IsSameBusinessIdentity`, never
   `reflect.DeepEqual`** — every AVO must declare it (an interface method: omit it → compile
   fail) and `GetID` comes from the embedded `domain.Managed`. It answers "is this the SAME

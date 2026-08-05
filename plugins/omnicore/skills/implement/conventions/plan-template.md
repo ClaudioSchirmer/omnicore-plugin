@@ -37,7 +37,13 @@ instead>**. A plan line with no §2 row behind it is a defect.
 - **Failure policy:** ⚠️ OPEN unless the dev already said it — external dependency
   down/slow ⇒ reject? degrade? queue? (timeouts/retries proposed from the docs'
   defaults)
-- **Idempotency / replay:** <what happens on retry, redelivery, double-fire>
+- **Idempotency / replay:** <what happens on retry, redelivery, double-fire> — for an
+  event RECEIVER this is ⚠️ OPEN by default: delivery is at-least-once, the strategy is
+  the dev's design duty (named patterns in `integration-events` at the pin;
+  `shared/capabilities.md`)
+- **Cache slots (caching only):** ⚠️ OPEN — private (`Deps.Cache`) or shared
+  (`Deps.SharedCache`)? which backend? (`shared.store: memory` is a boot reject;
+  `shared/capabilities.md`) — never silently pick
 - **Wire/API impact:** <new surface = new public contract; anything breaking for
   existing consumers is listed here, flagged, dev decides>
 

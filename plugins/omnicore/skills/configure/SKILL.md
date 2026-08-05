@@ -156,6 +156,8 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 | When changing… | Read section(s) |
 |---|---|
 | infra opt-out semantics (mongo/transport absent) · yaml blocks | yaml-reference |
+| strict-decoded blocks · publicRoutes validation · autoRun modes · env-var posture | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) |
+| what the posture gates vs what works everywhere · integration-style choice | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) |
 | read-side posture · MVP framing · what each backing serves | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact parity |
 | view flip / Version / rebuild | mongo-schema-evolution · evolve-view (skill) |
 | broker / CDC relay / transport swap / tagless | transport |

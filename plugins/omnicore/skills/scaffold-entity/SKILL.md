@@ -313,7 +313,10 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    dedicated endpoints (one edit home).** Don't frame A as temporary or as debt — "you can
    switch later without rework." See `aggregate-children.md`.
 5. **Modes — ASK, never assume all six.** Which of insert / update / delete / archive /
-   unarchive does this aggregate accept? Recommend a set from the entity's nature, but you
+   unarchive does this aggregate accept? Recommend a set from the entity's nature — the
+   named patterns give you the vocabulary: **append-only** (`Display,Insert` — a ledger,
+   immune to edit AND archive) · **freeze-once** (`Display,Insert,Archive,Unarchive`,
+   no Update — issued documents) · **full CRUD** (the default six-ish) — but you
    MUST confirm — do NOT silently emit all six. (Archive modes ⟺ the schema's
    archive/deleted-at column declaration — the pin's table-schema docs name the builder.)
    **Settle the view BACKING FIRST (independent of modes/archive) — the archive regime
@@ -337,7 +340,9 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    a run that asks nothing ends up with only "required + length" boilerplate. Elicit the
    real rules (propose sensible defaults per field type, then confirm), and map each to an
    `IfInsert/IfUpdate/IfInsertOrUpdate/IfArchive/IfUnarchive/IfDelete/IfDisplay`
-   closure with a specific notification.
+   closure with a specific notification. (**`IfDisplay` caveat**: no framework path
+   dispatches Display to `BuildRules` today — don't generate dead display rules;
+   confirm against the pin's `rules-dsl` before using it.)
 7. **Delete semantics — archive OR hard delete (rarely both).** An archive model
    (archive/unarchive + the schema's archive column) OR a hard-delete model. One simple
    question; **default archive**. Don't emit both a hard `DELETE` and archive/unarchive
@@ -613,6 +618,8 @@ only a genuinely missing docs file does.
 | domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | custom-command-handler · service-to-service |
 | aggregate children / cascade | aggregate-persistence |
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |
+| what one write touches end-to-end (SQL ↔ outbox ↔ Mongo op ↔ audit verb; PUT/PATCH share verb `update` — `actionName` tells them apart) | lifecycle-map |
+| ctx-bound domain Service probe in rules | auto-handlers · custom-command-handler |
 | schema (Go↔column) | table-schema |
 | view: indexes / options / Version | auto-query-handlers · mongo-schema-evolution |
 | view backing: relational (SoR) vs Mongo — posture, elicitation, gating | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |

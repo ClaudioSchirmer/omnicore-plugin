@@ -125,7 +125,15 @@ capability the pin lacks — that offer goes through the same skill, same rules.
    only continue on the new pin if accepted · **offered by the framework but the current
    posture lacks its infra** (broker/relay/Mongo absent, e.g. an infra-free / SQLite
    project) → offer `/omnicore:configure` to enable it, then continue · **not offered** →
-   honest no + closest legitimate path, and STOP unless the dev redirects. Examples of routings (examples
+   honest no + closest legitimate path, and STOP unless the dev redirects.
+   **Before any of that, consult `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (the
+   owner) for three gates:** (1) is it ALREADY AUTOMATIC (audit, domain events) — then
+   the answer is "already on", not a wiring plan; (2) the availability matrix BOTH ways
+   — most capabilities (httpclient, cache, gRPC/GraphQL, authz, tracing…) work on every
+   posture, SQLite included: never route to `configure` what isn't actually gated;
+   (3) for cross-service asks, the integration-style decision matrix — including the
+   doctrine that there is NO cross-service command (design the event + receiver, never
+   an imperative RPC between services). Examples of routings (examples
    only — the map at the pin is always the authority, sections may differ per version):
    another transport surface → the gRPC/GraphQL sections · outbound HTTP + resilience →
    the httpclient/middleware sections · cross-service events → the integration-events

@@ -39,7 +39,9 @@ translation catalogs are **registration sites** — existing files you APPEND to
   wire DTO, so the Go habit of stamping `json:"..."` on every field is WRONG here. Wire
   names live on the web-layer DTOs (`internal/web/dtos`); physical column names live only
   in the infra schema. Worse than redundant: a `json:"-"` silently drops the field from
-  the `Old()` snapshot the framework builds via a json round-trip. The canonical example's
+  the `Old()` snapshot the framework builds via a json round-trip — and a custom
+  `json.Marshaler` on the entity is the SAME trap by another door (it hijacks that
+  round-trip). The canonical example's
   domain structs carry `labelKey` only — match them.
 - A **flat** entity does NOT implement `domain.AggregateRootProvider` — that is the
   children delta.
@@ -176,7 +178,10 @@ helper called at the top of `BuildRules`.
 
 - Struct name IS the translation key; parameterized values via `tvar` tags interpolated as
   `{var}` in the catalog string; default semantic is Validation → 422, override
-  `Semantic()` per notification for conflict (409) / forbidden (403). Mechanics:
+  `Semantic()` per notification for conflict (409) / forbidden (403). **409 is TWO
+  semantics — pick the right one**: duplicate/already-exists → the Conflict semantic
+  (gRPC `ALREADY_EXISTS`); wrong-state ("cannot ship a cancelled order") → the
+  STATE-conflict semantic (gRPC `FAILED_PRECONDITION`). Mechanics + exact names:
   `status-mapping.html`.
 - Unique-field conflicts are custom `<Field>AlreadyExists…` notifications with the
   conflict semantic — `EntityAlreadyAddedNotification` is the framework's PK-collision

@@ -40,7 +40,8 @@ persister writes minted child ids back; confirm availability for the pinned vers
 **NEVER copy fields from the Command into the Result — read ONLY from the entity
 parameter**; an input-echo silently hides every domain transformation. Contract text:
 `auto-handlers.html` (projection contract). Bodyless verbs return the framework's empty
-result.
+result — take its NAME from `auto-handlers.html` at the pin, never invent a local empty
+struct for it.
 
 ## Wire → VO mapping — a CAST, not a constructor (avoid bloat)
 

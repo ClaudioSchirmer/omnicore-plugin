@@ -140,6 +140,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | rules / notifications / actionName | rules-dsl · old-state · status-mapping |
 | children / siblings / cascade | aggregate-persistence |
 | write handlers / in-TX hooks | auto-handlers · lifecycle-hooks |
+| full write-path ripple of a change (SQL ↔ outbox ↔ Mongo op ↔ audit verb) | lifecycle-map |
 | view shape / indexes / `Version` bump | auto-query-handlers · mongo-schema-evolution |
 | SharedBaseView / ComposedView impact | table-schema · query-side |
 | REST routes / OpenAPI surface | openapi · reference |

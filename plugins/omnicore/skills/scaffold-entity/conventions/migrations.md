@@ -75,5 +75,10 @@ entity emits (base, role, children, siblings). Column types still come only from
   is the source of truth for what the repo binds** (SQLite reports the `<table>.<column>`
   column list on a violation, not any index name, so naming the index is fine but does NOT
   drive the bind — the repo key is dotted there).
+- **Every entity/base table carries the revision column** (`revision BIGINT NOT NULL
+  DEFAULT 0` — exact shape per the pin's `table-schema.html`); child/sibling tables do
+  NOT (the schema forbids `Revision` there — `conventions/infra.md`, managed-slot
+  contract). **And no physical column may start with `_`** — the underscore namespace
+  is reserved; declaring one is a boot failure (`lifecycle-map.html`).
 - Children get an FK + covering index; siblings share the owner's PK with
   `ON DELETE CASCADE` and NO lifecycle columns — see the deltas.

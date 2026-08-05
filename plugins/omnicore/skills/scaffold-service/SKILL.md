@@ -265,7 +265,13 @@ applies only when any high-risk slot would otherwise be filled by you.
    (or `:memory:` when the dev chose ephemeral) — no compose creds to match.
 5. **`microservice.prd.yaml`** — the honest template: same core, `auth.mode: jwt` with
    `${JWT_ISSUER}` / `${JWT_AUDIENCE}` / `${JWKS_URL}` placeholders (prd without an
-   `auth` block aborts boot — that's WHY the template ships), endpoints as pure
+   `auth` block aborts boot — that's WHY the template ships), **AND
+   `auth.publicRoutes: ["/livez", "/readyz"]`** — probes are framework-registered but
+   NOT auto-public; under jwt a tokenless kubelet gets 401 and the orchestrator kills a
+   healthy pod. Entries are validated at boot against the registered route set
+   (exact-match: a typo / wrong method / trailing slash ABORTS boot; path-param routes
+   can't be listed — those use `Doc.Public` — see
+   `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`). Endpoints as pure
    `${VARS}` with no localhost defaults, no playground/introspection.
 6. **`migrations/<dialect>/.gitkeep`** — empty; the service's own sequence starts at
    `0001` when the first entity arrives (that is `scaffold-entity`'s job). Do NOT
@@ -371,6 +377,7 @@ skill), the fallback for concepts this table doesn't list.
 | read-side posture (relational vs Mongo backing) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
 | SQLite specifics · infra opt-out (no mongo/transport) · zero-infra MVP | table-schema · yaml-reference · `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` |
 | `microservice.*.yaml` keys / profiles / defaults | yaml-reference |
+| probes/publicRoutes · autoRun modes · interpolation strictness · dev-only gates | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) |
 | bootstrap shell / feature mounting / probes | bootstrap |
 | migrations skeleton / autoRun / dir layout | migrations |
 | outbox / relay / topic-subject naming / CDC | transport |

@@ -7,6 +7,65 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [0.14.0] — 2026-08-04
 
+Two workstreams in one release: the read-side one-owner refactor (below), and a
+five-layer framework-vs-skills audit (web · write side · domain · infra/read side ·
+bootstrap/ops) whose findings land here as two more owner sheets, two real bug fixes
+and ~20 targeted convention/routing additions.
+
+### Fixed (audit)
+- **`scaffold-service`'s prd template shipped unreachable probes.** `auth.mode: jwt`
+  with no `auth.publicRoutes` — probes are framework-registered but NOT auto-public, so
+  a tokenless kubelet gets 401 and the orchestrator kills a healthy pod; a hand-fix with
+  a typo then hits the exact-match boot validation and ABORTS boot. The template now
+  ships `auth.publicRoutes: ["/livez", "/readyz"]` with the exact-match warning, and
+  `doctor`/`run` know both signatures via `shared/boot-contract.md`.
+- **`scaffold-entity` pointed at a nonexistent "separate gRPC skill"**
+  (`conventions/web.md`, `spec-template.md`) — the gRPC surface is
+  `/omnicore:implement`'s job; both lines now say so.
+- **`run` polled `/readyz` blind.** It now reads the 503 reason — `initializing:
+  rebuilding view` means UP-and-rebuilding (wait), store-unreachable means diagnose —
+  instead of timing out a healthy first boot.
+
+### Added (audit)
+- **`shared/boot-contract.md`** — one owner for the operational contract: probes +
+  `publicRoutes` exact-match validation (+ `Doc.Public` for param routes), the three
+  ordered `/readyz` 503 reasons (transport excluded by design), dev-only gates
+  (`auth: disabled`, featureless shell), `autoRun`'s three profile-aware modes (prd
+  pending = designed abort), interpolation strictness (`${file:}`/`${vault:}` abort,
+  env silent), the closed four-env-var set (+ `OMNICORE_MONGO_FORCE_REBUILD` scope),
+  strict-decoded yaml blocks, the narrated drain contract, and a doctor quick-map.
+  Routed by `scaffold-service`, `run`, `doctor`, `configure`.
+- **`shared/capabilities.md`** — one owner for capability choice: availability under
+  the posture stated BOTH ways (events/Mongo-kinds/Upstream need Mongo+CDC; httpclient,
+  cache, gRPC/GraphQL, authz, audit, tracing, hooks work EVERYWHERE, SQLite included —
+  the mirror-image refusal is as wrong as the phantom offer), the service-to-service
+  decision matrix + the no-cross-service-command doctrine, integration-event contracts
+  (at-least-once ⇒ receiver idempotency is a design question; consumer-group fan-out;
+  subscribe⇄receiver boot aborts), the two cache slots (+ `shared.store: memory` boot
+  reject, nil degradation), and the already-automatic list (audit, domain events) that
+  `implement` now checks BEFORE planning any wiring.
+- **`scaffold-entity` conventions — the traps the audit found missing** (all
+  version-stable structure; pin stays the authority): the managed-slot contract
+  (`Revision` mandatory on root/base, forbidden on child/sibling; `ParentID`'s three
+  boot-panics + its auto-projected read-only twin) · reserved `_` column namespace
+  (boot failure) + revision DDL line in migrations · SharedBase insert cross-guards
+  (handler two-way rejection, blind-insert guard) · one-validation-path rule
+  (`ValidateAggregateChild` vs inline, never both) · named Modes patterns (append-only /
+  freeze-once / full) as recommendation vocabulary · `IfDisplay`-is-inert caveat ·
+  custom `json.Marshaler` = the `json:"-"` Old()-ghost trap by another door · dual-409
+  pick rule (Conflict vs STATE-conflict) · authz sweep is boot-FATAL under the switch ·
+  the GraphQL-null corollary (a clearable facet + GraphQL demands the intent-mutation
+  idiom — otherwise the spec approves a contract one surface can't keep) ·
+  `ReadCriteria.Restrict` elicitation in spec §9 · hydration-free aggregate DSL beside
+  the `Exists` probe · empty-result name discipline.
+- **Routing rows for orphaned sections**: `lifecycle-map` (the SQL↔outbox↔Mongo↔audit
+  triage table; PUT/PATCH share audit verb `update`, `actionName` disambiguates) now
+  routed by `doctor`, `evolve-entity`, `scaffold-entity`; `logs` by `run` and `doctor`;
+  `authz-seams`/CDN-blank-`/docs` by `doctor`; ctx-bound Service probe row in
+  `scaffold-entity`; `implement`'s plan template gains the cache-slot and
+  receiver-idempotency ⚠️ OPEN elicitation slots; `scaffold-system` decides
+  depth-one splits at map time.
+
 ### Added
 - **`shared/read-side.md` — the read-side posture gets ONE owner.** New sibling of
   `shared/dialects/` under the same contract (route there, never restate; the pinned docs
