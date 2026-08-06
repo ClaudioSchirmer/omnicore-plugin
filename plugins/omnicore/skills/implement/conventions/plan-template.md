@@ -26,7 +26,10 @@ Framework pin: <from `go.mod` — informative; that pin's docs are the authority
 | <piece> | `<name>.html` — <the contract it owns> | features/reference · changelog (newer pin) |
 
 Routing outcome: **offered at pin** · **offered at <newer version> only → upgrade
-offered (accepted/declined)** · **not offered → honest-no path: <what was recommended
+offered (accepted/declined)** · **offered but the current posture lacks its infra →
+`/omnicore:configure` offered (accepted/declined); the missing infra named
+(broker · relay/tailable engine · Mongo — per `shared/capabilities.md`'s three
+axes)** · **not offered → honest-no path: <what was recommended
 instead>**. A plan line with no §2 row behind it is a defect.
 
 ## §3 Integration semantics [high-risk — propose + CONFIRM]
@@ -43,7 +46,9 @@ instead>**. A plan line with no §2 row behind it is a defect.
   `shared/capabilities.md`)
 - **Cache slots (caching only):** ⚠️ OPEN — private (`Deps.Cache`) or shared
   (`Deps.SharedCache`)? which backend? (`shared.store: memory` is a boot reject;
-  `shared/capabilities.md`) — never silently pick
+  `shared/capabilities.md`) — never silently pick. Carve-out: the httpclient RESPONSE
+  cache has no slot to elicit (`Deps.Cache` unconditionally — declare the `cache:`
+  block or the layer bypasses); this bullet is then `N/A — httpclient response cache`
 - **Wire/API impact:** <new surface = new public contract; anything breaking for
   existing consumers is listed here, flagged, dev decides>
 
@@ -58,6 +63,8 @@ external system` otherwise.
 | Artifact | Change | Owning doc section |
 |---|---|---|
 | `microservice.*.yaml` (ALL boot profiles) | <keys added> | <section> |
+| infra prerequisite (when §2's outcome named one) | <what `configure` enables first — or `N/A`> | `shared/capabilities.md` |
+| build/run commands | <tag set after this change — e.g. a first consumer adds the transport tag; `N/A — unchanged`> | `shared/boot-contract.md` (Build tags) |
 | bootstrap/wiring | <…> | <section> |
 | <handlers/middleware/proto/views/…> | <…> | <section> |
 | tests | <new branches covered> | — |

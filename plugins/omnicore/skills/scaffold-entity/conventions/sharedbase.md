@@ -75,7 +75,9 @@ engines bind the constraint NAME, SQLite binds the `<table>.<column>` column lis
   archive-gated generated column on mysql, a function-based index on oracle; read
   the PINNED `table-schema.html`, Active-only uniqueness, for the target dialect's
   shape) to allow a remnant beside a new active row.
-- **⚠️ MySQL & SQL Server `BINARY(16)`, Oracle `RAW(16)`: every id/FK here** — base id, role id, the role→base FK, every
+- **⚠️ Native id columns on every id/FK here** (Postgres `UUID`, MySQL & SQL Server
+  `BINARY(16)`, Oracle `RAW(16)`, SQLite `TEXT` — the target's
+  `shared/dialects/<dialect>.md` is the authority, never this list) — base id, role id, the role→base FK, every
   base-child/role-child FK. These are all framework-MANAGED slots, native on EVERY pin —
   the pin-driven id-typing rule (SKILL.md boot-traps, "Id typing") governs only the
   non-managed reference fields (`migrations.md`).

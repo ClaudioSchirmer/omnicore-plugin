@@ -106,7 +106,7 @@ This skill **adds an entity to an existing omnicore service** — it does NOT cr
 project. And it adds a NEW entity: if the requested entity already exists in the
 service, changing it is `evolve-entity`'s job and deleting it is `remove-entity`'s —
 hand off, don't regenerate over a living entity. A read model BEYOND the entity's own
-view (composed across entities, shared-base identity, upstream/embed, aggregated) is
+view (composed across entities, shared-base identity, upstream/embed) is
 `scaffold-view`'s job. Before anything else, confirm the host exists:
 - **`go.mod` present AND it requires `github.com/ClaudioSchirmer/omnicore`** (check with
   `go list -m github.com/ClaudioSchirmer/omnicore` — it must resolve).
@@ -176,7 +176,9 @@ Self-configure by reading the project:
   whether this run was delegated by that skill or invoked directly in a project that has
   one; if it exists, reading it is MANDATORY, not optional. `Status: APPROVED` and it
   lists THIS entity → its §9 block is the dev's already-approved answers: Kind, base
-  create-vs-reuse, natural key, child-of-whom enter the spec as DECIDED (marked `per
+  create-vs-reuse, natural key, child-of-whom, the identity-view verdict
+  (create/add-role/skip — decided once at the map's §3, surfaced in §9) enter the spec
+  as DECIDED (marked `per
   domain-map §9`, not `(proposed)`, never re-asked); everything §9 doesn't answer stays
   this run's own, per the normal risk split. Your 0b discovery contradicts the map →
   STOP and surface; the dev amends the map first (never silently obey either side).
@@ -659,9 +661,11 @@ only a genuinely missing docs file does.
 | what one write touches end-to-end (SQL ↔ outbox ↔ Mongo op ↔ audit verb; PUT/PATCH share verb `update` — `actionName` tells them apart) | lifecycle-map |
 | ctx-bound domain Service probe in rules | auto-handlers · custom-command-handler |
 | schema (Go↔column) | table-schema |
-| view: indexes / options / Version | auto-query-handlers · mongo-schema-evolution |
+| view: the ViewDefinition surface itself (declaration, `Version`, SharedBaseView contract, DeleteOnArchive, archived rule) | views |
+| view: indexes / options / Version bump rules | auto-query-handlers · mongo-schema-evolution |
 | view backing: relational (SoR) vs Mongo — posture, elicitation, gating | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
-| SharedBaseView / ComposedView (read) | table-schema · query-side |
+| SharedBaseView / ComposedView (read) | views · query-side |
+| domain events (`RegisterEvent`, post-commit publish) | auto-handlers · command-handler |
 | response projection (AutoFromDoc / FromDoc) | auto-query-handlers · custom-query-handler |
 | REST routes / OpenAPI | openapi · reference |
 | GraphQL surface | graphql |

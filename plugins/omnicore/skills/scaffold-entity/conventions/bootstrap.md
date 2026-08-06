@@ -28,16 +28,21 @@ SyncEngine), and its `Mount` is a **ONE-LINE delegation** to the web layer's
 - **Service-backed entity:** build the infra Service impl in the feature constructor and
   pass it through `Mount<Entity>`'s `svc` param; a no-service entity OMITS the param
   entirely (no dead nil) — the pairing is enforced at runtime (application.md).
-- GraphQL/gRPC mounts are called explicitly by `Wire` on each feature into the single
-  shared registries (they are not `Feature` interface methods); `MountGRPC` belongs to the
-  gRPC skill.
+- **GraphQL/gRPC are FEATURE-DECLARED surfaces, never wired in `Wire`.** A feature
+  opts in by implementing the opt-in interfaces (`bootstrap.GraphQLFeature` /
+  `bootstrap.GRPCFeature` — `MountGraphQL` / `MountGRPC` methods), discovered by type
+  assertion exactly like `ReadableFeature`; **the framework builds the one registry
+  per surface** and hands it in. `wire.go` never constructs a registry and there is
+  no `Wiring` field for these surfaces — read `bootstrap.html` before touching this.
+  Wiring either surface for a new entity is `/omnicore:implement`'s job.
 
 ## wire.go — the single registration site
 
 Adding an entity means INSERTING (never creating a file): (1) instantiate the feature;
-(2) contribute its GraphQL fields to the one registry; (3) add it to the `Features` slice
-(declaration order = the Swagger sidebar order); (4) on a first entity, also wire the 7
-translation catalogs.
+(2) add it to the `Features` slice
+(declaration order = the Swagger sidebar order); (3) on a first entity, also wire the 7
+translation catalogs. (GraphQL/gRPC never appear here — they are feature-declared
+interfaces, previous section.)
 
 - **Catalogs and the Swagger language dropdown are ONE edit.** Wiring the catalogs is
   precisely what makes the dropdown renderable: `openapi.Config.LanguageSelector`

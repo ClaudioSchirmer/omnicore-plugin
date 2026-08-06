@@ -66,8 +66,9 @@ read. Never bump inline.
 
 ## Phase 0b — Discover the CURRENT view (read, don't ask)
 
-Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed | EmbedInChild |
-aggregated) · legs/roles and join keys · projected shape + current `Version` · indexes
+Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed |
+EmbedMany | EmbedInChild | Link | LinkMany | LinkInChild — the full set is the PIN's
+`views` catalog, never this list) · legs/roles and join keys · projected shape + current `Version` · indexes
 and options · collection name · **whether it currently carries `.RelationalSource()`**
 (SoR-served) · **is Mongo present in this project** (infra-free ⇒ a flip TO Mongo needs
 it enabled first) · surfaces exposing it (REST, GraphQL) · known consumers in-repo · the
@@ -88,12 +89,29 @@ structural (`N/A — <why>`):
 3. **Shape change** [high-risk]: fields in/out, the `Version` bump, and the REBUILD
    consequence (the collection re-projects — on large data, say what that costs and
    when it's safe to run, per `mongo-schema-evolution` at the pin). **Views that EMBED
-   this one do NOT follow automatically** — a rebuild here leaves them serving the
-   stale embedded shape until their OWN `Version` decision; list each embedding view
-   found in Phase 0b with its verdict (bump now / consciously later), per `views` +
-   `mongo-schema-evolution`.
-4. **New leg / role** [high-risk]: source, join key, the 1:N-leg FK index (boot-fatal
-   without it), and whether the source view/entity needs anything first (→ delegation).
+   this one via a `JoinView` leg are COUPLED by the rebuild hash** — the leg folds this
+   view's `Version(n)` into the embedder's identity, so bumping here makes the
+   forgot-to-bump guard fire ON THE EMBEDDER: an unconditional boot abort, not an
+   option. There is no "bump the embedder later": list each embedding view found in
+   Phase 0b, **bump it in the SAME change, deploy both together** (rebuilds
+   auto-order source-first). And note an ad-hoc `RebuildView` of this view does NOT
+   refresh its dependents — only the deploy-both path converges (`views` +
+   `mongo-schema-evolution`). **The bump rule is not "anything changed":** index-only
+   changes need NO bump (they sync as artifact-only drift), while options in the
+   rebuild hash ($jsonSchema, collation, capped/time-series, `DeleteOnArchive`) DO —
+   and collation is IMMUTABLE on an existing collection (divergence aborts boot,
+   never auto-drops; Capped ⊕ TimeSeries). Exact lists: `mongo-schema-evolution` ·
+   `auto-query-handlers`.
+4. **New leg / role** [high-risk]: source, join key, the leg's COVERING index declared
+   where the pin says it lives (boot-fatal when missing): `<childSegment>.<fk>` for a
+   1:N Embed/EmbedMany, the parent join column for a 1:1 Embed, `<childSegment>.<fk>`
+   multikey for EmbedInChild — and for an EmbedMany/LinkMany over a `JoinView` leg the
+   index belongs on the SOURCE view, not this one (`views` owns the per-kind law);
+   whether the source view/entity needs anything first (→ delegation); **and the
+   authorization consequence** — a new leg can expose, via join, data the caller's
+   identity could not query directly; gating it is the dev's responsibility in
+   `ToCriteria` / `crit.Restrict` (`query-side` · `authz-seams`) — raise it, never
+   assume the existing gate still covers the widened shape.
    Adding a ROLE to a SharedBaseView: the role set is in the rebuild hash — the
    `Version(N)` bump is MANDATORY, forgetting it aborts boot (scaffold-entity's
    `conventions/sharedbase.md`, Read).
@@ -107,20 +125,30 @@ structural (`N/A — <why>`):
    `.RelationalSource()` is a SHAPE change (it's in the rebuild hash), so it REQUIRES a
    `Version(N)` bump like any other. Teach the two transitions from `relational-view`
    at the pin: Mongo→relational = `DriftRelationalSync` (registry synced, NO rebuild;
-   reads move to the SoR, the old collection is left frozen, not dropped);
+   reads move to the SoR, and **the old Mongo collection is DROPPED** — a relational
+   view holds none; leaving it would strand alien data. There is no frozen copy to
+   fall back on: flipping BACK is a fresh `DriftRebuildRequired` backfill, cheap but
+   not a "resume");
    relational→Mongo = `DriftRebuildRequired` (full online blue-green rebuild from the
    CURRENT SoR — zero-downtime, captures every write made during the relational phase).
    Only a PLAIN single-aggregate view can flip — a Composed/Shared/Embed view is
    relational-ineligible (different type or boot fail), so this item is `N/A` for them.
-   State the read-side consequence (relational = read-your-writes, 1:1-reach filters
-   only; Mongo = full vocabulary, eventual — per `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`)
-   so the dev flips with open eyes. If the target is Mongo but
+   State the read-side consequence so the dev flips with open eyes (per
+   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` + `relational-view`): relational =
+   read-your-writes but 1:1-reach filters only, `?search=` and 1:N child filter/sort
+   become typed 400s, and pagination switches from stable keyset to a camouflaged
+   OFFSET that can skip/repeat rows under concurrent writes — wire-compatible, so no
+   grep will surface it; Mongo = full vocabulary, eventual. If the target is Mongo but
    the project is infra-free (no `mongo.uri`), flipping would abort the boot — don't
-   refuse: offer to enable Mongo via `/omnicore:configure` (delegate now, or point the
-   dev at it), then flip. Reversible, no code lost.
+   refuse: offer the enablement via `/omnicore:configure`, then flip. **On SQLite that
+   means the FULL conversion (Debezium-tailable engine + Mongo + broker + relay —
+   `configure` does it in one pass): adding `mongo.uri` alone gives a one-time
+   backfill that NOTHING ever updates again (no CDC source) — a silently stale view,
+   worse than the refusal.** Reversible, no code lost.
 5. **Consumer impact** [high-risk]: wire-visible removals/renames on read responses are
    BREAKING for consumers — list them, flag them, the dev decides; never silent.
-6. **Surfaces** — endpoints/GraphQL changes; filter operators per new field (low-risk).
+6. **Surfaces** — endpoints/GraphQL/gRPC changes; filter operators per new field
+   (low-risk; vocabulary + list-DTO allowlist: `query-side` · `auto-query-handlers`).
 
 ## Phase 2 — Execute the impact map
 
@@ -138,15 +166,17 @@ index for concepts this table doesn't list.
 
 | When changing… | Read section(s) |
 |---|---|
-| projected shape / `Version` / rebuild | mongo-schema-evolution · auto-query-handlers |
+| projected shape / `Version` / rebuild (the FULL rebuild-hash list — incl. embedded-view coupling — is in `views`) | views · mongo-schema-evolution · auto-query-handlers |
 | flipping backing: relational ⇄ Mongo (drift, rebuild) | relational-view · mongo-schema-evolution |
 | read-side posture / what each backing serves & asks | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) |
 | composition contracts / legs / roles | views |
 | custom projection / response shaping | custom-query-handler |
-| indexes / options / aggregations | auto-query-handlers |
+| indexes / options (index-only = no bump; hash-moving options = bump; collation immutable) | auto-query-handlers · mongo-schema-evolution |
+| read authorization (`ToCriteria` / `Restrict`) | query-side · authz-seams |
 | REST routes / OpenAPI | openapi · reference |
 | GraphQL exposure | graphql |
-| registration / wiring | bootstrap |
+| gRPC exposure | grpc |
+| registration / wiring (a ComposedView registers via `ComposingFeature.ComposedViews()` — in `views`, not `bootstrap`) | bootstrap · views |
 | file layout / naming | service-layout |
 
 ## Final verify (the gate)
@@ -154,11 +184,18 @@ index for concepts this table doesn't list.
 0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk the
    plan's own promises item by item with evidence; an unmet target is RED or an explicit
    dev-accepted deviation.
-1. **Mechanical, pre-boot:** shape changed ⇒ `Version` bumped · every new 1:N leg FK
-   indexed · grep the OLD projected-field names → no stale references (code, surfaces,
-   tests) · no write-side file touched.
+1. **Mechanical, pre-boot:** shape changed ⇒ `Version` bumped **and every `JoinView`
+   embedder of this view bumped in the same change** (spec item 3) · every new leg's
+   covering index declared per the per-kind law (incl. the SOURCE-view index for
+   EmbedMany/LinkMany over a JoinView leg) · grep the OLD projected-field names → no
+   stale references (code, surfaces, tests) · no write-side file touched.
 2. **`gofmt -l` + `go vet` + `go build`** (engine + transport tags) — clean.
-3. **Boot** — the evolved view registers; probes green.
+3. **Boot** — the evolved view registers; probes green. **Know what a healthy
+   post-bump boot looks like:** under any profile but dev `mongo.rebuild.autoRun`
+   defaults to `check`, where a pending rebuild ABORTS boot with a diagnostic on
+   purpose (run the rebuild per the pin — that is the design, not a bug you fix);
+   and during the rebuild `/livez` is 200 while `/readyz` stays 503 naming the
+   view — wait, not a failure (`mongo-schema-evolution`).
 4. **Functional honesty:** the re-projection proves itself only after CDC flows — state
    what was verified vs what needs a write-and-wait round-trip.
 5. **Regression** — the project's suite if it has one.

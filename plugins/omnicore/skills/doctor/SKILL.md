@@ -55,9 +55,11 @@ session." Never a gate: this run continues on the installed skills.
 ## Phase 0 — Intake (cheap facts before any theory)
 
 Collect, in one sweep: the pinned omnicore version (`go list -m`) · engine + transport
-from `relational.dialect` / `transport` in `microservice.*.yaml` (BOTH build tags are
-mandatory — a tagless build/boot is its own diagnosis, EXCEPT SQLite which is engine-only
-+ tagless by design) · the INFRA POSTURE — Mongo/broker/relay present, or an infra-free /
+from `relational.dialect` / `transport` in `microservice.*.yaml` (the ENGINE tag is
+always mandatory — SQLite included, `-tags sqlite`; the TRANSPORT tag follows the yaml,
+not the engine: mandatory iff a `transport:` block exists, and a transport-less config
+on ANY engine legally builds without it — `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`,
+Build tags) · the INFRA POSTURE — Mongo/broker/relay present, or an infra-free /
 SQLite project (no `devops/`, no `mongo`/`transport`) — many "failures" are that posture
 working as designed · effective ports and profile · bench state (`docker compose ps` when
 a `devops/` exists) · where the app log is. Ask the dev only what cannot be read: what
@@ -69,13 +71,25 @@ Walk the pipeline IN ORDER and stop at the first stage that fails, with evidence
 
 1. **Build** — compile with both tags; a red build ends the walk here.
 2. **Boot** — start (or read the crash log of) the app; a boot abort names its guard.
-3. **Serve** — liveness answers? readiness answers? (readiness failing = the relational
-   or document request path, not the HTTP layer).
+3. **Serve** — liveness answers? readiness answers? A `/readyz` 503 carries a REASON —
+   READ it before theorizing (`shared/boot-contract.md` owns the three, ordered):
+   `draining` = shutdown in progress; `initializing: rebuilding view "X" (n/m)` = the
+   service IS up and serving, wait — not a hang, not a store problem; only the third
+   (store unreachable) is the DB/document request path. The transport is EXCLUDED
+   from readiness by design — never diagnose a broker outage from a red `/readyz`.
 4. **Write path** — a write returns 2xx and lands in the outbox?
 5. **CDC relay** — is the relay streaming (its logs say so) or crash-looping?
 6. **Broker** — reachable, topics/subjects present, messages flowing?
 7. **Projection / read path** — does the view collection receive the document; does the
-   read endpoint return it?
+   read endpoint return it? **This stage has a floor the first six never show:** when
+   relay/broker/sync are ALL green and a document is still missing/stale, check the
+   framework's unified failure ledger — the relational table
+   `omnicore_projection_failures` (`kind='event'` = parked events, `kind='ripple'` =
+   failed embed ripples): one SELECT is the highest-signal evidence in the whole walk.
+   Its companions: the `mongo.parkedRetry` replay loop is ON by default (disabled ⇒
+   parked rows are dead letters forever), revision-parity `reconcile` is OFF by
+   default, and `ProjectionHealth()` exposes last-processed / last-sweep /
+   last-reconcile — the pin's `views` section owns the whole layer.
 
 The first failing stage is the diagnosis's home; everything downstream is a symptom, not
 a cause.
@@ -87,8 +101,10 @@ Bench-proven cause patterns to CHECK, not to assume:
 - **Boot abort with a migration version/dirty error after a bench "reset"** → the
   compose down kept the named volumes and the old DB is still there. Prescribe the full
   reset (volumes included) with a loud data-loss warning — the dev runs it.
-- **Build or boot refuses with no engine/transport registered** → missing build tag on
-  one of the two mandatory axes; the yaml names the pair.
+- **Boot abort "no relational engine registered"** → missing engine build tag; the
+  yaml's `relational.dialect` names which. (The transport twin of this failure is NOT
+  a boot abort — it surfaces at the point of use; see the dead-reactions signature
+  below.)
 - **Boot abort from the document-store registry guard** (foreign collections in the view
   database) → the service shares a view DB it shouldn't; prescribe isolating it in its
   own database, per the bootstrap section.
@@ -99,10 +115,30 @@ Bench-proven cause patterns to CHECK, not to assume:
   this is BY DESIGN, not a fault:** views are served relational (read-your-writes), there
   is no relay/broker/sync. If the dev wants projections/events, that's a
   `/omnicore:configure` conversion, not a bug.
+- **Relay/broker/sync all GREEN, one view or one document missing/stale** → the parked
+  layer, not timing: `SELECT … FROM omnicore_projection_failures` (Phase 1 stage 7).
+  A parked event with `parkedRetry` disabled in the yaml is the classic "everything
+  is green and nothing converges".
+- **Relay crash-looping AFTER first boot, same event each cycle** → a poison message:
+  with payload expansion on, Debezium infers a typed schema per event and a
+  mixed-type value (e.g. a numeric array `[3.7, 3]`) crashes the relay — which then
+  halts ALL read-model refresh and re-crashes on the same event at every restart.
+  The `transport` section's relay-config contract owns it; evidence = the same event
+  id in the relay's crash log across restarts.
+- **Reactions/subscriptions dead on a GREEN service** ("no transport linked" at the
+  point of use) → the yaml has a `transport:` block but the binary was built without
+  the transport tag — boot and probes never catch this by design
+  (`shared/boot-contract.md`, Build tags).
+- **Cache "never hits", no errors anywhere** → redis `failMode: open` (the default)
+  SWALLOWS transport errors and returns a miss, and the connection is LAZY — Redis
+  down does not fail boot. Grep the log for the `cache.redis.transport.error` anchor;
+  `cache-subsystem` owns the contract.
 - **Shutdown hangs / SIGTERM takes forever** → an exporter blocking on a dead collector
   (tracing endpoint down) is a classic; the tracing section owns the contract.
-- **Readiness red with liveness green** → the DB/document request paths; check both
-  connections with the yaml's effective endpoints.
+- **Readiness red with liveness green** → READ the 503's reason first (Phase 1 stage
+  3): `rebuilding view` = wait, it is healthy; `draining` = shutdown; only "store
+  unreachable" sends you to the DB/document connections with the yaml's effective
+  endpoints.
 
 Each entry is a HYPOTHESIS: confirm with the specific evidence before prescribing, and
 if the evidence disagrees, keep walking Phase 1 instead of forcing the match.
@@ -138,10 +174,17 @@ for concepts this table doesn't list.
 | outbox / relay / broker contract | transport |
 | infra-free / relational-view posture (views by design, no relay) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
+| parked events / failed ripples / `omnicore_projection_failures` / `ProjectionHealth` / `parkedRetry`·`reconcile` knobs | views · auto-query-handlers · yaml-reference |
+| declaration boot panics (undeclared field, reserved names, depth, `Modes()`⟺archive column, index guards — the write/read schema guard families) | table-schema · views |
+| 401/403 that are NOT probes (JWKS unreachable, expired vs invalid, revocation) | auth-middleware |
+| HTTP-layer statuses with no handler involved (413 body limit, 408 read timeout, 504 request deadline, idle-close) | app-context · yaml-reference |
+| outbound call hangs/failures (breaker open, retry budget, TLS/HMAC — httpclient AND grpcclient) | httpclient · grpc |
+| cache silently degraded (failMode, lazy connect, log anchors) | cache-subsystem |
 | probes / liveness / readiness semantics | bootstrap · reference |
 | tracing / shutdown behavior | tracing |
 | error envelopes / status codes seen by clients | status-mapping |
 | gRPC surface trouble | grpc |
+| GraphQL surface trouble | graphql |
 
 ## What this skill never does
 

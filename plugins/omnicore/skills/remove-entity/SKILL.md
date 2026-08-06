@@ -69,7 +69,13 @@ session." Never a gate: this run continues on the installed skills.
   `upstreamSubscriptions` entries) — event/topic names rarely contain the entity's Go
   name, so READ those blocks, don't just grep the names: a subscribe left behind with
   its receiver removed is a boot ABORT, and those blocks are strict-decoded
-  (`${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`).
+  (`${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`) · **`auth.publicRoutes` entries
+  naming this entity's routes** — the list is validated exact-match against the
+  registered route set at boot, so an entry pointing at a removed route PANICS naming
+  it (`shared/boot-contract.md`) · **is this the LAST feature?** — removing the only
+  remaining feature leaves a featureless wiring, accepted under dev ONLY; every other
+  profile REJECTS it at boot (flag it in the plan: the dev either accepts a dev-only
+  shell or this removal waits for its replacement).
 
 ## Phase 1 — The gate: `remove-entity/<entity>/plan.md`
 
@@ -84,10 +90,27 @@ never defaulted. Sections (structural — `N/A — <why>`, never deleted):
    other roles (the base STAYS; only this role's slice goes), composed/embedding views
    of other entities (they need their own edit + `Version` decision, listed here),
    integration events consumed elsewhere (consumers break — the dev decides the
-   sequencing). Each one `⚠️ OPEN` until decided.
+   sequencing). Each one `⚠️ OPEN` until decided. **Two shared-base cases need their
+   own verdict, never improvised:** removing the BASE itself is impossible while any
+   role lives (the role→base FK is RESTRICT and the roles' identity derives from the
+   base's natural key — remove/retire every role first, then the base); removing the
+   LAST role leaves an orphan base whose fate is the schema's declared `OrphanPolicy`
+   (KeepOrphan vs DeleteWhenUnreferenced — read it, state it) AND a SharedBaseView
+   with zero roles — the role set is in that view's rebuild hash, so it either gets
+   its `Version` bump with the role removed or is retired in the same plan.
 3. **Data strategy** [high-risk]: drop the tables (new migration, down recreates
-   structure only — data is GONE) vs retire code and keep the data. Same decision for
-   the Mongo view collections. Recommend, show the trade-off, confirm.
+   structure only — data is GONE) vs retire code and keep the data. **The Mongo view
+   collections are NOT the same decision:** once the view definition is deleted, a
+   kept collection is a FOREIGN collection to the DB-per-service boot guard — dev
+   profile logs a warning, **every other profile ABORTS boot naming it**. So "keep the
+   data" for a collection honestly means: export/dump it, or move it out of the
+   service's view database — never "leave it in place" (that option ships a service
+   that boots in dev and is unbootable in prd). Also name the registry hygiene: the
+   view's row in the framework's view-registry table (and its projection-state
+   entries) lingers after code removal; a later re-add of the same view name meets the
+   stale row as forgot-to-bump drift (boot abort) — the pin's `relational-view`
+   documents deleting the registry row as the safe operator move when no collection
+   remains; put it in the plan. Recommend, show the trade-off, confirm.
 4. **Translations** — every key of this entity leaves ALL SEVEN catalogs; keys shared
    with a surviving base/role STAY (say which).
 5. **Tests** — which test files go, which shared fixtures need editing.
@@ -102,6 +125,10 @@ mandatory-read rule as the scaffold skills.
 
 ## Final verify (the gate)
 
+0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk
+   the approved plan's own promises item by item with evidence; an unmet target is RED
+   or an explicit dev-accepted deviation. The most destructive skill does not get to
+   skip the discipline every mutating sibling carries.
 1. **No corpses:** sweep the repo for the entity's names (type, tables, views, keys,
    routes) → the only remaining hits are the ones the plan explicitly kept (shared
    base, kept data migration history — historical migration files are NEVER rewritten).
@@ -109,11 +136,17 @@ mandatory-read rule as the scaffold skills.
 3. **Boot** — the service comes up with the entity gone; probes green; surviving
    surfaces still answer. The boot itself proves no orphan yaml subscribe survived
    (a declared subscribe with no receiver aborts boot — that abort here means the
-   Phase 0 yaml sweep missed an entry).
+   Phase 0 yaml sweep missed an entry). **A dev-profile boot does NOT prove prd:** the
+   two non-dev-only gates this removal can trip — the foreign-collection guard (a kept
+   Mongo collection, plan item 3) and the featureless-wiring reject (last feature
+   removed, Phase 0) — WARN or pass under dev and ABORT everywhere else; check both
+   explicitly against the plan instead of trusting the green dev boot.
 4. **Regression** — the project's existing suite if it has one; report honestly if the
    suite itself referenced the removed entity (those tests were in the plan's inventory).
 5. **Report the leftovers the dev owns:** data kept (tables/collections) per the
-   approved strategy, broker topics/subjects that linger, consumers of removed events.
+   approved strategy, the view-registry row / projection-state entries (plan item 3 —
+   with the stale-row re-add trap named), broker topics/subjects that linger,
+   consumers of removed events.
 6. **Offer to run.** ONE question: boot the app to click through what remains? Yes →
    delegate to `/omnicore:run`. No → done.
 
@@ -137,7 +170,8 @@ index for concepts this table doesn't list.
 | When removing… | Read section(s) |
 |---|---|
 | feature unmounting / boot wiring | bootstrap |
-| tables / drop DDL / down twins | migrations · table-schema |
+| tables / drop DDL / down twins (the pair lands in EVERY target dialect's `migrations/<dialect>/`, same number) | migrations · table-schema |
+| view-registry row hygiene / stale-row re-add trap | relational-view |
 | shared base / role slices | table-schema · views |
 | views / surviving embeds / `Version` | views · mongo-schema-evolution · auto-query-handlers |
 | routes / OpenAPI cleanup | openapi · reference |

@@ -9,7 +9,9 @@ Load only when the model has a **child collection**. Spans every layer. First de
 **child-edit strategy** — it changes what you generate.
 
 Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.html`
-(primitives, cascade, child-id write-back) · `old-state.html` (audit op bucketing).
+(primitives, cascade, child-id write-back) · `old-state.html` (audit op bucketing) ·
+`status-mapping.html` (which notification maps to which status — the child not-found
+404 vs the framework's does-not-exist 422 below).
 
 ## The child-edit decision (per child — PROPOSE with a recommendation, never guess)
 
@@ -20,7 +22,9 @@ Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.htm
   - **UPDATE** (`PUT …/:id/<children>/:childId`) — updates an EXISTING child, never
     creates: YOU implement the by-id guard in a domain method (find among current
     children; found → apply via the framework's change primitive; absent → the canonical
-    not-found notification, 404 — never the framework's does-not-exist one, which is 422).
+    not-found notification, 404 (`RecordNotFoundNotification`) — never the framework's
+    does-not-exist one (`EntityDoesNotExistNotification`), which is 422; the mapping
+    table is `status-mapping.html`).
   - **ARCHIVE** (`PATCH …/:id/<children>/:childId/archive`) — soft removal; same guard.
   - **Wiring — all THREE ops are partial updates of the ROOT**: each rides the
     partial-update auto handler + `ApplyPartiallyTo` (load root → your domain method
@@ -86,8 +90,14 @@ web.md.
   history) — `aggregate-persistence.html`. Operate the change/remove primitives on the LOADED
   item, and REUSE this method as the root's duplicate rule instead of a second check.
 - **A child is a value type (struct, not pointer)** — an AGGREGATE value object, in
-  `internal/domain/aggregatevos/` (its own file + that package's `notifications.go`). It has
-  a string id field + its own scoped `BuildRules` (notifications surface as
+  `internal/domain/aggregatevos/` (its own file + that package's `notifications.go`). It
+  **embeds `domain.Managed` and declares NO id field of its own** — `GetID`/`SetID` come
+  from the carrier, ids are set via `domain.WithID(AVO{…}, id)` / `.SetID(id)`. A
+  hand-declared exported `ID` field is the silent-wrong trap: it compiles, is never
+  persisted, and the real id never round-trips (see `table-schema.html`, "Reading the
+  managed columns back" — the changelog's v0.40.0 entry and the example's
+  `aggregatevos/` are the truth if any doc sentence still shows an exported `ID`).
+  It carries its own scoped `BuildRules` (notifications surface as
   `children[i].field`); its VO-typed fields auto-validate exactly like a root's, so
   `BuildRules` carries ONLY the non-VO rules (`value-objects.html`).
 

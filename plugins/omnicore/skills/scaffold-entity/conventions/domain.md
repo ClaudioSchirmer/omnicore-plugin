@@ -37,7 +37,9 @@ translation catalogs are **registration sites** — existing files you APPEND to
 - **Struct tags: a persisted field carries `labelKey` and NOTHING ELSE — no `json:`
   tag, no `db:` tag, ever.** This is the reflex to resist: a domain aggregate is NOT a
   wire DTO, so the Go habit of stamping `json:"..."` on every field is WRONG here. Wire
-  names live on the web-layer DTOs (`internal/web/dtos`); physical column names live only
+  names live on the web-layer DTOs (`internal/web/requests/` — request+response
+  co-located per operation; `internal/application/dtos/` holds child-collection INPUT
+  DTOs only, never wire types); physical column names live only
   in the infra schema. Worse than redundant: a `json:"-"` silently drops the field from
   the `Old()` snapshot the framework builds via a json round-trip — and a custom
   `json.Marshaler` on the entity is the SAME trap by another door (it hijacks that
@@ -191,14 +193,28 @@ helper called at the top of `BuildRules`.
 
 Every key in all 7 catalogs (`ptbr,eng,esp,fra,deu,ita,nld`), each a REAL translation —
 never English copied seven times, never a subset, and **NEVER an elicitation question**.
-Three key kinds per entity:
+Four key kinds per entity:
 1. every custom notification name,
 2. every `labelKey`,
 3. **the ENTITY NAME itself** — it is the aggregate's `ContextName`, rendered as the
    `context` label of every error envelope; omit it and the label falls back to the raw
-   type name untranslated (`bootstrap.html`).
+   type name untranslated (`bootstrap.html`),
+4. **every enum VO's VALUE keys** — each member renders per-locale via
+   `EnumDescriptionKey(v)` (`"<Type>.<value>"`), registered in the catalogs like any
+   other key (`value-objects.html`); the fallback is the raw key leaking to the user,
+   so every enum this skill mandates brings its N value keys with it.
 Reuse a labelKey (and the entity-name entry) when the field lands on a shared base —
 don't duplicate translations across roles.
+
+## Domain events (optional — mention when a rule wants a reaction)
+
+An aggregate method may `RegisterEvent(...)` a domain event on the `BaseEntity`; the
+framework auto-publishes it POST-COMMIT on both the Auto and manual handler paths
+(Slog publisher by default — swap the publisher, don't re-plumb). In-process and
+per-aggregate — distinct from broker-carried integration events (`shared/capabilities.md`
+owns that split). Not scaffolded by default; when the spec's rules describe "and then
+notify/react", name this seam instead of inventing one (`auto-handlers.html` ·
+`command-handler.html`).
 
 ## Authorization inside the domain (Layer 2, optional)
 

@@ -48,10 +48,15 @@ commands beyond reading docs and code.
   X and what is merely a wrapper/variant of one; never re-classify, merge or
   promote categories the doc keeps distinct.
 - **Explain, don't act.** This skill answers questions. If the dev wants to ADD
-  an entity, point them at `scaffold-entity`; to CREATE a service, at
+  an entity, point them at `scaffold-entity`; a WHOLE system of entities at once, at
+  `scaffold-system`; to CREATE a service, at
   `scaffold-service`; to CHANGE or REMOVE an existing entity, at `evolve-entity` /
   `remove-entity`; to CREATE or CHANGE a read model/view, at `scaffold-view` /
-  `evolve-view`; to SEE the app running, at `run`; if something is BROKEN
+  `evolve-view`; **to WIRE a capability they just asked you to explain (gRPC, cache,
+  events, an external call — the most common follow-through of a help answer), at
+  `implement`; to CHANGE the infra posture (add/remove Mongo/broker, swap
+  engine/transport, MVP ⇄ full), at `configure`; to PROVE the service's contract
+  end-to-end, at `qa`;** to SEE the app running, at `run`; if something is BROKEN
   ("why doesn't it work?"), that's
   `doctor` — this skill explains how the framework works, not why a service
   misbehaves. You describe how those work; you don't run them from here.
@@ -76,8 +81,15 @@ recall it:
     <omnicore-dir> = go list -m -f '{{.Dir}}' github.com/ClaudioSchirmer/omnicore
     section file   = <omnicore-dir>/docs/content/sections/<name>.html
 
-If `go list` doesn't resolve (you're standing in the framework repo itself, not
-a consumer), the same tree is in-tree at `docs/content/sections/`. The full
+**Know which GROUND you're standing on — the detection is subtle.** In the framework
+repo itself `go list -m` still RESOLVES: it returns an EMPTY `{{.Version}}` with
+`{{.Dir}}` = the repo — that empty version (not a resolution failure) is the
+framework-repo signal; the same tree is then in-tree at `docs/content/sections/`.
+**Disclose that ground in the first answer** ("answering from the framework's WORKING
+TREE — this may include unreleased changes, not what any consumer's pin serves"),
+exactly as the other grounds disclose theirs. A consumer pin that resolves with a
+Version but an EMPTY `{{.Dir}}` just isn't downloaded yet — run
+`go mod download github.com/ClaudioSchirmer/omnicore` and read again. The full
 index — one row per concept → its section — is the **Documentation Map** in
 `<omnicore-dir>/CLAUDE.md`. Start there to route a question to the right
 section, then read that section for the contract.
@@ -151,7 +163,8 @@ turn must carry them. (The plugin self-check below does NOT depend on a project,
 so it runs even from an unrelated directory where the pin check below skips.)
 
 - **Current pin:** `go list -m -f '{{.Version}}' github.com/ClaudioSchirmer/omnicore`.
-  A LOCAL checkout (`replace`/`go.work` → `(devel)` or a path) → **skip silently**, you
+  A LOCAL checkout (`replace`/`go.work` → `(devel)` or a path, or the EMPTY version of
+  the framework repo itself) → **skip silently**, you
   can't bump a working copy. Offline/proxy unreachable → **skip silently** too.
 - **Newer published?** `go list -m -u -f '{{with .Update}}{{.Version}}{{end}}'
   github.com/ClaudioSchirmer/omnicore` (empty = already current → say nothing,

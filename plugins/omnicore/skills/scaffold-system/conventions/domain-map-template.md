@@ -70,11 +70,13 @@ none.
 
 ## §5 Read models beyond per-entity
 
-| View | Kind (composed · aggregated · upstream · embed) | Joins / covers | After rows |
+| View | Kind (composed · upstream · embed) | Joins / covers | After rows |
 |---|---|---|---|
 
 Delegated to `scaffold-view` in Phase 3. Identity views do NOT list here — they ride
-with their base's first role (§3).
+with their base's first role (§3). Report SCALARS (counts/sums/totals) are NOT a view
+kind — they are the relational `Aggregate`/`AggregateBy` DSL, available on every
+posture (`shared/read-side.md`); list them in §6 as an `implement` delegation instead.
 
 ## §6 Integration events / external systems
 
@@ -102,6 +104,8 @@ re-derive them; everything absent stays the run's own to decide or ask.
 
 - **Kind:** flat · role of `<base>` (create/reuse per §3)
 - **Natural key (if role):** <from §3>
+- **Identity view (if role):** <from §3 — create · add-role · skip · n/a; copied here so
+  the delegated run never re-asks what §3 already decided>
 - **Children (1:N):** <name → child of role/flat root vs child of base> — hint only;
   edit strategy, DTOs, endpoints are the run's
 - **Sibling hint (1:1 optional group):** <name it if the prose shows one — the run
