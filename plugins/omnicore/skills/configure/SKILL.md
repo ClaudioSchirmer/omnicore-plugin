@@ -22,8 +22,10 @@ direction — and tunes the surrounding configuration.
 The two anchor postures:
 - **Zero-infra / MVP** — SQLite (`-tags sqlite`, `CGO_ENABLED=0`, one binary + `app.db` or
   `:memory:`), **no Docker**, no Mongo, no broker, no CDC relay. All views served relational from
-  the SoR (read-your-writes). No Mongo projections; no integration events (publish and Mongo both
-  ride the CDC relay, which no relay tails on SQLite — `relational-view`, `transport`).
+  the SoR (read-your-writes). No Mongo projections; no integration-event PUBLISHING (publish and
+  Mongo both ride the CDC relay, which no relay tails on SQLite — `relational-view`,
+  `transport`). SUBSCRIBING needs only a broker + the transport build tag — absent on the pure
+  MVP too, but a broker alone (no Mongo, no relay) unlocks it (`shared/capabilities.md`).
 - **Full distributed CQRS** — a Debezium-tailable engine (Postgres / MySQL / SQL Server / Oracle)
   + Mongo + broker (kafka | nats) + the CDC relay + a docker bench. Mongo-projected views,
   integration events (publish + subscribe), the whole read-side vocabulary.
@@ -75,6 +77,10 @@ effect next session"). Never a gate.
 - **What is being asked** — a posture conversion (MVP ⇄ full, engine swap), a single-axis change
   (add broker, swap transport), or pure config tuning. All three are this skill's; scope the run
   to the axes named.
+- **Toolchain for the TARGET posture:** when the target gains a docker bench (MVP → full,
+  or adding any containerized piece), check `docker` + `docker compose` NOW — discovering
+  a Docker-less host at the verify gate wastes the whole run (`scaffold-service` checks
+  the same way).
 
 ## Phase 0v — Version check (delegate)
 
@@ -102,6 +108,9 @@ structural (`N/A — <why>`):
 
 1. **From → To** — the current posture and the target, in one paragraph each.
 2. **Impact map** — every artifact touched: yaml blocks (`mongo`/`transport`/`relational`/
+   `migrations` — **on an engine swap `migrations.dir` must repoint to the TARGET
+   dialect's folder in EVERY profile** (default `./migrations`; a stale dir silently
+   degrades to "empty service sequence": no boot error, no tables) /
    surfaces/tracing/cache/audit/shutdown), `devops/` (compose + Debezium relay), build tags +
    start wrappers, `migrations/<dialect>/`, each view to flip (→ delegated to `evolve-view`),
    `integration:` config. Phase 2 edits NOTHING outside it.
@@ -109,6 +118,13 @@ structural (`N/A — <why>`):
    - **Add Mongo** — requires a Debezium-tailable engine (so on SQLite this implies an engine
      swap) + the broker + the CDC relay; each view flipped relational→Mongo triggers an online
      blue-green rebuild (`mongo-schema-evolution`, `Version` bump — delegated to `evolve-view`).
+     **And say WHAT it unlocks** — usually the actual reason for the conversion: the view KINDS
+     that were unavailable (identity / `SharedBaseView`, `ComposedView`, the Embed/Link family,
+     Upstream) and integration events. Name the ones THIS project was told it could not have —
+     they are on record as `n/a — needs Mongo` in `scaffold-system/domain-map.md` (§3/§5) and in
+     the entity specs. Availability in BOTH directions:
+     `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` + `shared/read-side.md` (owners) — route to
+     them, don't restate.
    - **Add broker** — enables integration events. Publish rides the CDC relay (same tailable-engine
      requirement); subscribe works once a broker exists. (`transport`, `integration-events`.)
    - **Engine swap** — new `migrations/<target>/` in the TARGET dialect's SQL (types/constraints
@@ -136,9 +152,14 @@ One pass in dependency order — read the owning `/docs` section BEFORE each art
    target dialect × transport (or delete `devops/` entirely when converting to zero-infra SQLite —
    no Docker); validate framework-facing values against `transport.html`.
 3. Build tags + start wrappers — engine + transport tags (or `-tags sqlite` tagless,
-   `CGO_ENABLED=0`, no compose, from `templates/sqlite-mvp.md`).
+   `CGO_ENABLED=0`, no compose, from `templates/sqlite-mvp.md`). **A tag change pulls
+   tag-gated deps `go mod tidy` cannot see** (`//go:build kafka|nats` files): follow
+   with `GOFLAGS=-mod=mod go build …` so go.sum gains the entries — go.mod and go.sum
+   move together, and a missing-entry build failure at the verify means THIS step was
+   skipped (`scaffold-service` step 10 owns the same trap).
 4. `migrations/<target>/` — on an engine swap, generate the ported DDL (docs-first per dialect);
-   flag it for dev review.
+   flag it for dev review — and repoint `migrations.dir` in every profile (impact-map
+   item 2).
 5. **View backings** — delegate each flip to `/omnicore:evolve-view` (it owns the `Version` bump
    + rebuild discipline); this skill never rewrites a view declaration itself. When a flip
    lands a relational view, its feature must reuse the aggregate's EXISTING `repo.Loader` —
@@ -174,14 +195,34 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
    conversion plan's own promises item by item with evidence; an unmet target is RED or
    an explicit dev-accepted deviation.
 1. **Mechanical, pre-boot:** yaml coherent with the target (a Mongo-backed/composed view present
-   ⇒ `mongo.uri` present, else the boot aborts by design); build tags match the engine+transport;
+   ⇒ `mongo.uri` present, else the boot aborts by design; `migrations.dir` points at the
+   target dialect's folder in every profile); build tags match the engine+transport;
    `gofmt -l` + `go vet` + `go build` (target tags) clean.
+1b. **prd static sanity** — when the conversion added/removed `mongo`/`transport`/
+   `relational` blocks, the prd profile moved too: the new blocks present there as pure
+   `${VARS}` (no localhost defaults), the removed ones gone, `auth` intact. The prd is
+   never boot-tested here — check it statically and say so (`scaffold-service`'s 1b, same
+   discipline).
 2. **Boot — posture-appropriate.** Zero-infra: `CGO_ENABLED=0 -tags sqlite`, no compose,
-   `/livez`+`/readyz` 200. Full: bench healthy, relay reaches streaming, probes 200.
+   `/livez`+`/readyz` 200 — **and probes are NOT proof on SQLite**: `/readyz` is a
+   `SELECT 1` that passes over an EMPTY database, so a full→MVP conversion must also
+   prove the schema landed where the runtime reads — boot via the wrapper (absolute
+   `SQLITE_PATH`) and inspect the schema (`sqlite3 app.db ".tables"` → the framework
+   control-plane tables + the service's entity tables present), exactly like
+   `scaffold-service`'s level 3. Full: bench healthy, relay reaches streaming, probes 200.
 3. **Functional honesty:** a full CDC round-trip / a view rebuild proves itself only after writes
    flow — state what was verified (boot, registration) vs what needs a write-and-wait.
 4. **Regression** — the project's suite if it has one.
-5. **Offer to run.** ONE question: boot to click through? Yes → delegate `/omnicore:run` (it follows
+5. **Honor what the conversion unlocked.** On a run that GAINS Mongo/relay, close the loop the
+   earlier skills opened: the map and the specs PROMISED these kinds would arrive "later via
+   `/omnicore:configure`" — this is later. Name what is now servible (the `n/a — needs Mongo`
+   slots collected in Phase 1) and OFFER the route: a NEW kind is `/omnicore:scaffold-view`; an
+   existing view merely changing backing was already Phase 2 step 5's `evolve-view`. **Offer,
+   never auto-create** — this skill writes no view declaration. Nothing on record ⇒ state that
+   the kinds are available now and move on. On a run that REMOVES infra, the mirror: name what
+   stops being servible (it is in the plan's honest loss list). No silent capability change in
+   either direction.
+6. **Offer to run.** ONE question: boot to click through? Yes → delegate `/omnicore:run` (it follows
    the chosen infra). No → done.
 
 Leave `configure/plan.md` in place for review.

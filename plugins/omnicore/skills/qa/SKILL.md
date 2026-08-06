@@ -48,8 +48,15 @@ service — then runs it and reports GREEN/RED honestly.
 
 ## Plugin self-check (once, non-blocking)
 
-As in the sibling skills: confirm the plugin cache is current; on mismatch mention
-`/plugin` update once and continue.
+Once per run, during preflight: compare THIS plugin's installed version — the
+`version` field of `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` — with the
+published one — the same field at
+`https://raw.githubusercontent.com/ClaudioSchirmer/omnicore-plugin/main/plugins/omnicore/.claude-plugin/plugin.json`.
+Offline, or either side unreadable → skip silently. Newer published → ONE
+non-blocking line riding along with the next reply — "omnicore plugin vX → vY
+available — update with `claude plugin update omnicore@omnicore` (marketplace
+stale? `/plugin marketplace update omnicore` first); it takes effect next
+session." Never a gate: this run continues on the installed skills.
 
 ## Phase 0a — Preflight
 
@@ -64,8 +71,16 @@ As in the sibling skills: confirm the plugin cache is current; on mismatch menti
 Map what the service declares — this inventory IS the test surface:
 - **Entities**: schemas (fields, VOs, uniqueness incl. active-only, children,
   siblings, SharedBase roles), `Modes()` per aggregate (the verb set each entity
-  actually serves — an absent mode means the VERB IS ABSENT and its case asserts 405,
-  never skips), constraint bindings (which duplicate → which 409 key).
+  actually serves — an absent verb still gets a case, never a skip, but ASSERT THE
+  RIGHT CODE, three distinct shapes per `status-mapping`: mode missing from `Modes()`
+  with the route mounted → the mode's `…NotAllowedNotification`, **403**; no route
+  matches the path at all → **404**; the same path registered under another method
+  only → **405**), constraint bindings (which duplicate → which 409 key).
+  **Cross-check the derived verb inventory against `GET /openapi.json`** — the
+  framework auto-registers it whenever `Wiring.OpenAPI` is set and it enumerates the
+  routes actually wired (probes included): the cheapest, most reliable oracle for
+  "which verbs does this entity really serve"; a source-vs-openapi disagreement is a
+  finding, not a guess to resolve silently.
 - **Views**: per view its backing (`.RelationalSource` or Mongo) → the read-back
   expectation per the posture rule above; archive regime (kept-but-hidden vs
   `DeleteOnArchive`); filter/sort/search vocabulary per field; `?fields=` opt-in.
@@ -88,16 +103,35 @@ Map what the service declares — this inventory IS the test surface:
    409 (duplicate vs wrong-state — only where the entity declares each) · archive
    round-trip (`archive → hidden → ?includeArchived reveals → unarchive → visible`;
    with `DeleteOnArchive`, absence instead) · read vocabulary (one filter/sort per
-   declared operator family, `?fields=` when opted in, pagination) · rejected reads
-   (the typed 400 on a relational view's 1:N pushdown; unknown field) · absent verbs
-   → 405 · not-found → 404. Route: `auto-handlers` + `status-mapping` +
-   `auto-query-handlers` at the pin for the exact contracts.
+   declared operator family, `?fields=` when opted in, `?search=` where a text index
+   serves it, `?onlyTotal=true` count-only, and the PAGINATION ENVELOPE as a contract:
+   `pagination.has_next`/`next_cursor` truthfulness, page-2 disjointness, cursor
+   advance) · **golden-record round-trip** (one record exercising EVERY declared
+   field — VO fields included — written then read back field-by-field on each enabled
+   surface: the family that catches a field silently dropped from a DTO/projection,
+   which every other family passes over) · rejected reads — the WHOLE typed-400 guard
+   family, not one: the relational 1:N pushdown · unknown field · operator outside a
+   field's allowlist · `?limit` above the view's ceiling · malformed
+   `?after=`/`?before=` · `after`+`before` together · cursor↔sort mismatch ·
+   cursor↔`includeArchived` mismatch · `?search=` on a relational view · segment
+   `?sort=` on a composed leg (derive the exact set from `status-mapping`'s
+   SemanticSchema rows + `auto-query-handlers` at the pin — the enumeration here is
+   the FAMILIES, the pin owns the members) · absent verbs
+   → the 403/404/405 split above · not-found → 404. Route: `auto-handlers` +
+   `status-mapping` + `auto-query-handlers` at the pin for the exact contracts.
 2. **Data hygiene** [high-risk — ⚠️ OPEN, the dev decides]: where the suite's records
    live. Options, stated honestly: run against the DEV profile bench with
    uniquely-suffixed records the suite archives at the end (residue: archived rows) ·
-   a dedicated throwaway database/profile (clean, more setup) · SQLite `:memory:`
+   a dedicated throwaway database selected by a SUITE-OWNED config file (generated
+   under `qa/`, picked via `OMNICORE_CONFIG_PATH` — that is how a "dedicated profile"
+   respects this skill's never-touch-the-project-yaml rule) · SQLite `:memory:`
    (only if the service already runs so). Never silently write into a database the
-   dev cares about.
+   dev cares about. **And state HOW state resets between runs/cases** — exact-count
+   assertions demand it: on a Mongo-projected backing, wiping the relational rows
+   does NOT clear the projection (a separate store — clear the view collections too),
+   and a wipe racing in-flight CDC re-materializes documents, so reset = relational
+   delete + view clear + a short DRAIN before seeding (the canonical suites treat the
+   clean baseline as a precondition, not a hope).
 3. **Auth** [⚠️ OPEN when enabled]: dev profile usually ships `auth.mode: disabled` —
    the suite runs tokenless and SAYS the auth layer is untested. If the dev wants
    auth-enabled QA: where does a test token come from (their IdP — never invented)?
@@ -107,9 +141,16 @@ Map what the service declares — this inventory IS the test surface:
    an HTTP contract), load/performance, UI. An `⚠️ OPEN` only if the dev asks for it.
 5. **Runner contract**: `qa/run.sh` executes suites **fail-fast by default** (first
    RED stops the run; an explicit flag for the exhaustive sweep), prints per-suite
-   GREEN/RED counts and a final matrix line; every temp file is namespaced per run
-   (PID/timestamp — parallel lanes must never share a hardcoded `/tmp` path); cleanup
-   runs on exit; the service is stopped with SIGTERM, **never** `kill -9`.
+   GREEN/RED counts and a final matrix line, and each suite EXITS NON-ZERO when any
+   of its cases failed (without that, fail-fast can never trip); every temp file is
+   namespaced per run
+   (PID/timestamp — parallel lanes must never share a hardcoded `/tmp` path), **and
+   so is every other shared artifact of a lane: the HTTP/gRPC ports, the compiled
+   server binary, its log file** (two lanes sharing any of them corrupt each other);
+   cleanup
+   runs on exit; the service is stopped with SIGTERM, **never** `kill -9` — and the
+   runner WAITS on the server PID until the drain completes (default budget ~30s)
+   before the next suite binds the same port.
 
 ## Phase 2 — Generate + execute
 
@@ -117,12 +158,26 @@ Map what the service declares — this inventory IS the test surface:
    plain POSIX-friendly bash + `curl` (+ the project's own tooling for GraphQL/gRPC
    when enabled — `grpcurl` only if available, else mark those cases SKIPPED loudly);
    each case prints its name, expectation and verdict; a failed assertion shows the
-   REAL response body, not a summary.
-2. **Boot the service the way `run` does** (background, log to a file, poll `/readyz`
-   READING the 503 reason — `shared/boot-contract.md`); full-bench: confirm the relay
+   REAL response body, not a summary; **every request pins `Accept-Language`** (one
+   fixed locale — envelope assertions must be deterministic, not hostage to the
+   machine's locale).
+2. **Bench first, on the Mongo/full posture**: `docker compose -f
+   devops/docker-compose.yml ps` → missing/unhealthy services `up -d` and wait
+   healthy — the read side depends on containers this skill never assumes are up.
+3. **Build + boot the service under test — with the right tags and the right config,
+   explicitly** (`shared/boot-contract.md`, Build tags, owns the law): build
+   `-tags '<engine> <transport>'` from the yaml's `relational.dialect` + `transport:`
+   block (no `transport:` block → no transport tag; SQLite → `CGO_ENABLED=0 -tags
+   sqlite`); boot in background with `APP_PROFILE` and — when the plan's hygiene
+   picked a suite-owned config — `OMNICORE_CONFIG_PATH`, log to a per-lane file, poll
+   `/readyz` READING the 503 reason. **Resolve the effective port from the yaml's
+   `${VAR:default}` interpolation and probe it FIRST**: something already listening
+   there means you may be about to test a binary you didn't build — kill/free the
+   port (SIGTERM) before booting, never assume the listener is yours. Full-bench:
+   confirm the relay
    reached streaming BEFORE any CDC-dependent case, else those cases report a bench
    problem, not a service failure.
-3. Execute `qa/run.sh`. Report the real counts.
+4. Execute `qa/run.sh`. Report the real counts.
 
 ## Final verify (the gate)
 

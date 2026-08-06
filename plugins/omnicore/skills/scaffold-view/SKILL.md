@@ -3,8 +3,8 @@ name: scaffold-view
 description: >-
   omnicore: create a NEW read model (view) on an omnicore-based service — a ComposedView
   joining entities, a SharedBaseView identity view, an Upstream composition, an external
-  Embed, enriching a child array (EmbedInChild), or an aggregated view — projected to Mongo
-  and exposed on REST/GraphQL. Use when
+  Embed, or enriching a child array (EmbedInChild) — projected to Mongo
+  and exposed on REST/GraphQL/gRPC. Use when
   the user wants a new view, read model, listing, report-style query, or cross-entity /
   cross-service composition. The plain per-entity view ships with scaffold-entity; this
   skill is for read models beyond it. Only for projects that import
@@ -14,9 +14,12 @@ description: >-
 # scaffold-view
 
 Create a read model that no single entity owns: composed across entities, identity
-across roles, fed from upstream services, or aggregated. The write side is NOT touched —
+across roles, or fed from upstream services. The write side is NOT touched —
 a view is a projection of what already exists; if the model needs data the sources don't
-carry yet, that is `evolve-entity`'s job first.
+carry yet, that is `evolve-entity`'s job first. (Totals/counts/report SCALARS are not a
+view kind at all — they are the relational `Aggregate`/`AggregateBy` DSL, available on
+every posture; `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` owns that split — route such
+a request to `/omnicore:implement`, never refuse it.)
 
 ## Core principles — read FIRST
 
@@ -67,7 +70,12 @@ session." Never a gate: this run continues on the installed skills.
   STOP (that's `scaffold-service`).
 - **Sources exist?** Every entity/view this model reads from is present and projecting.
   A missing source FIELD (the model needs data no source carries) → STOP and hand that
-  part to `evolve-entity` first; a missing source ENTITY → `scaffold-entity`.
+  part to `evolve-entity` first; a missing source ENTITY → `scaffold-entity`. An
+  EXTERNAL leg (`JoinUpstream`) has two extra preconditions of its own, both boot-fatal:
+  a matching `UpstreamSubscription` with a linked transport must exist (a mirror that is
+  declared but not subscribed does not count as "present"), and the subscription's
+  `fields:` allowlist must cover every column the external schema declares —
+  `DeletedAt` included (`views` at the pin).
 - **Is it really new?** Changing an EXISTING view is `evolve-view`'s job — hand off.
 
 ## Phase 0v — Version check (delegate)
@@ -93,13 +101,17 @@ sections structural (`N/A — <why>`, never deleted):
 1. **Composition type** [high-risk — THE decision, taught before asked]: read the FULL
    view catalog + composition contracts in `views` at the pin (the type set is the PIN's, not
    this skill's — e.g. a local cross-entity join like ComposedView vs the external
-   family sourcing another service's data vs a shared-base identity view vs an
-   aggregated view). For EVERY type that could plausibly serve the request, give the
+   family sourcing another service's data vs a shared-base identity view). For EVERY
+   type that could plausibly serve the request, give the
    dev a short plain-language explanation + its trade-offs on the axes that decide:
    **where the truth lives** (local entities vs another service) · **how it refreshes**
    (CDC join vs subscription/mirror vs fetched on request) · **coupling + failure mode**
    (what the reader sees when a source is down or lagging) · **cost** (storage,
-   rebuild, latency). Then recommend ONE with the why, name the runner-up, and CONFIRM.
+   rebuild, latency) · **read capability** — on a MATERIALIZED embed a segment filter
+   SELECTS rows and a 1:1 segment field is a first-class sort key; on a ComposedView a
+   leg filter only shapes the segment and a segment `?sort=` is a 400 — the docs name
+   "consumers need to filter/sort BY the joined data" as the trigger to materialize
+   (`views`). Then recommend ONE with the why, name the runner-up, and CONFIRM.
    Never self-answer; never ask without the explanation.
    **Relational backing is NOT on this menu.** Every type this skill creates is a view
    KIND, relational-INELIGIBLE by construction — the rule, the plain-view exception and
@@ -111,31 +123,60 @@ sections structural (`N/A — <why>`, never deleted):
    read-side posture) — note a plain view rooted at a shared-base ROLE qualifies (base
    fields flattened; `shared/read-side.md`, Kinds), so a "SharedBase view" ask may
    already be served today without Mongo.
-   **In an infra-free / SQLite project (no Mongo) — never refuse, offer the upgrade.**
-   Do NOT say "can't": say the kind runs on Mongo + the CDC relay, and offer to enable
-   it — *"want me to stand up Mongo + CDC + Docker now? I'll delegate
-   `/omnicore:configure` (it swaps to a Debezium-tailable engine and re-asks the
-   infra questions), then come back and build the view — or you can run
+   **In an infra-free / SQLite project (no Mongo) — never refuse, and never present a
+   Mongo kind as available now.** Do NOT say "can't": say the kind runs on Mongo + the
+   CDC relay, and offer to enable it — *"want me to stand up Mongo + CDC + Docker now?
+   I'll delegate `/omnicore:configure` (it swaps to a Debezium-tailable engine and
+   re-asks the infra questions), then come back and build the view — or you can run
    `/omnicore:configure` yourself first."* All reversible, no code lost. A plain
    single-aggregate listing still works today as a relational per-entity view
-   (`scaffold-entity`).
+   (`scaffold-entity`). **EXCEPTION — a SharedBase identity ask follows
+   `shared/read-side.md`'s elicitation contract instead of this bullet:** point FIRST
+   at the per-role plain view the dev already gets (base fields flattened), frame
+   SharedBaseView as a complement switched on later, and offer the
+   `/omnicore:configure` route only when the dev actually wants the multi-role
+   identity document.
 2. **Sources + join keys** [high-risk]: which entity/view/service feeds each leg, joined
-   by which key. Every 1:N leg's FK is INDEXED (boot-fatal otherwise — verify item).
-3. **Projected shape** — every projected field, its source, `Version(1)`; the evolution
-   rule stated (shape change later ⇒ `Version` bump ⇒ rebuild — `mongo-schema-evolution`).
+   by which key. Every leg's COVERING INDEX is declared where the pin says it lives
+   (boot-fatal when missing — verify item): `<childSegment>.<fk>` for a 1:N
+   Embed/EmbedMany, the parent join column for a **1:1 Embed**, `<childSegment>.<fk>`
+   (multikey) for an **EmbedInChild**, and for an **EmbedMany/LinkMany over a JoinView
+   leg the index belongs on the SOURCE view, not the new one** (`views` at the pin owns
+   the per-kind law — read it, don't infer).
+3. **Projected shape** — every projected field, its source. For a MATERIALIZED
+   (Mongo-projected) kind: `Version(1)` + the evolution rule stated (shape change later
+   ⇒ `Version` bump ⇒ rebuild — `mongo-schema-evolution`). **A ComposedView is never
+   materialized — it has NO `Version(n)`, no collection, no rebuild, no
+   schema-evolution entry** (`views`); its evolution lever is the leg/schema
+   declaration itself, so mark the Version slot `N/A — composed`.
 4. **Consistency contract** [high-risk]: eventual via CDC; expected lag tolerance; what
    the consumer must NOT assume. For Upstream/Embed: what happens when the remote is
    down (per the pinned contract in `views`). **AND the ARCHIVE regime — decide it
    explicitly, never by silent default** [high-risk]: (a) per embedded/linked SEGMENT:
    when the source row archives, does the segment FOLLOW it (hidden on default reads,
    `?includeArchived` reveals) or RETAIN its data regardless (e.g. a sale keeping the
-   archived customer's name forever, renames still flowing in)? (b) the view's OWN root:
-   archived rows kept-but-hidden (default) or dropped (`DeleteOnArchive()` — hot tier)?
+   archived customer's name forever, renames still flowing in)? **The RETAIN lever does
+   not exist on every source kind**: `Fields()` retention is JoinView-only (a
+   `Fields`-bearing `Link*` leg is a fatal boot), and a `JoinUpstream` leg's lever is
+   the external schema's `DeletedAt(col)` + the subscription's `fields:` allowlist —
+   offer per leg only the choices its kind actually has. (b) the view's OWN root:
+   archived rows kept-but-hidden (default) or dropped (`DeleteOnArchive()` — hot tier;
+   materialized kinds only — a ComposedView root has no `DeleteOnArchive`)?
    The pin's `views` section (the archived rule / the segment cut) names the exact
    lever for each source kind — read it there, then CONFIRM per leg with the dev.
-5. **Surfaces** — REST endpoints, GraphQL exposure, filter operators per field
-   (operators are low-risk — decide well), pagination/options.
-6. **Naming** — collection, view type, routes; owner-prefixed and consistent with the
+5. **Surfaces** — REST endpoints, GraphQL exposure, gRPC exposure, filter operators per
+   field (operators are low-risk — decide well; the 16-operator vocabulary and the
+   list-DTO allowlist incl. nested embed groups are `query-side` ·
+   `auto-query-handlers`), pagination/options, indexes beyond the join law (`?search=`
+   needs a declared text index; **every index key names the PHYSICAL column** — a Go
+   field name or a typo aborts boot instead of creating a dead index).
+6. **Read authorization** [high-risk]: who may query this model? A composed view can
+   reach, VIA JOIN, data the caller's identity could not query directly — gating a
+   leg's data is fully the dev's responsibility in `ToCriteria` / `crit.Restrict`
+   (`query-side` · `authz-seams`), and a SharedBaseView gets its own route group with
+   its OWN permission, never folded into a role's. `N/A — service runs authz-less`
+   only when that is the project's actual posture.
+7. **Naming** — collection, view type, routes; owner-prefixed and consistent with the
    project's flavor.
 
 ## Phase 2 — Execute
@@ -161,9 +202,12 @@ index for concepts this table doesn't list.
 | custom projection / response shaping | custom-query-handler |
 | `Version` / rebuild / evolution | mongo-schema-evolution |
 | SharedBaseView / ComposedView shapes | views |
+| filter operators / list-DTO allowlist / nested embed groups | query-side · auto-query-handlers |
+| read authorization (`ToCriteria` / `Restrict` / route permissions) | query-side · authz-seams |
 | REST routes / OpenAPI | openapi · reference |
 | GraphQL exposure | graphql |
-| registration / wiring | bootstrap |
+| gRPC exposure | grpc |
+| registration / wiring (NOTE: a ComposedView registers via `ComposingFeature.ComposedViews()` — documented in `views`, NOT `bootstrap`) | bootstrap · views |
 | file layout / naming | service-layout |
 
 ## Final verify (the gate)
@@ -171,10 +215,19 @@ index for concepts this table doesn't list.
 0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk the
    spec's own promises item by item with evidence; an unmet target is RED or an explicit
    dev-accepted deviation.
-1. **Mechanical, pre-boot:** every 1:N leg FK indexed · `Version` declared on the new
-   view · ONE view per file (`service-layout`) · no write-side file touched.
+1. **Mechanical, pre-boot:** every leg's covering index declared per the per-kind law
+   (spec item 2 — including the SOURCE-view index for EmbedMany/LinkMany over a
+   JoinView leg) · `Version` declared on the new view (materialized kinds — a
+   ComposedView has none) · ONE view per file (`service-layout`) · no write-side file
+   touched.
 2. **`gofmt -l` + `go vet` + `go build`** (engine + transport tags) — clean.
-3. **Boot** — the view registers; probes green.
+3. **Boot** — the view registers; probes green. **Know what a healthy first boot looks
+   like:** a new Mongo view over an aggregate that already holds rows is
+   `DriftFreshBackfill` → a REBUILD, not a plain registration; under any profile but
+   dev `mongo.rebuild.autoRun` defaults to `check`, where that boot ABORTS with a
+   diagnostic on purpose (run the rebuild per the pin, don't "fix" the service); and
+   during the rebuild `/livez` is 200 while `/readyz` stays 503 naming the view —
+   wait, that is not a failure (`mongo-schema-evolution`).
 4. **Functional honesty:** the projection only proves itself after source writes flow
    through CDC — say plainly what was verified (registration, boot) vs what needs a
    write-and-wait round-trip.

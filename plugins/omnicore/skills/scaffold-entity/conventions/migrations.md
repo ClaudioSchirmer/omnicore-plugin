@@ -60,9 +60,11 @@ entity emits (base, role, children, siblings). Column types still come only from
   rule: SKILL.md boot-traps, "Id typing").** Managed slots (entity id, every FK) are
   always native: Postgres `UUID`, MySQL and SQL Server `BINARY(16)` (never
   `UNIQUEIDENTIFIER` — its GUID sort order destroys the v7 time locality; per the
-  pinned `table-schema.html`), Oracle `RAW(16)`. On a TYPED-IDENTITY pin, a
+  pinned `table-schema.html`), Oracle `RAW(16)`, SQLite `TEXT` (ids are text there —
+  the dialect sheet owns it; this five-engine list is NOT complete-by-copy, the
+  target's `shared/dialects/<dialect>.md` always wins). On a TYPED-IDENTITY pin, a
   reference column follows the field type — `domain.ID`/`*domain.ID` ⇒
-  `UUID`/`BINARY(16)`/`RAW(16)` (NULL-able for the pointer), `string`/`*string` ⇒
+  `UUID`/`BINARY(16)`/`RAW(16)`/`TEXT` (NULL-able for the pointer), `string`/`*string` ⇒
   `CHAR(36)`/`VARCHAR(36)` (`VARCHAR2(36)` on oracle); a
   mismatched pair throws `Error 1366/1406` at the FIRST INSERT — a runtime 500 `go build`
   cannot catch. On older pins (≤ v0.29.0): required reference ⇒ `BINARY(16)`, nullable
@@ -82,3 +84,13 @@ entity emits (base, role, children, siblings). Column types still come only from
   is reserved; declaring one is a boot failure (`lifecycle-map.html`).
 - Children get an FK + covering index; siblings share the owner's PK with
   `ON DELETE CASCADE` and NO lifecycle columns — see the deltas.
+- **A CROSS-AGGREGATE reference column (`course_id`, `buyer_id` — a `domain.ID` field
+  pointing at ANOTHER aggregate's table) is a BARE column, no DB foreign key, by
+  default.** DB-level FKs live INSIDE the aggregate boundary (child → root, sibling →
+  owner, role → base — the shapes above); across aggregates the referenced row
+  archives rather than deletes, so referential existence is a DOMAIN rule (the
+  ctx-bound Service probe — SKILL.md's "rules needing existence" row), never an
+  `ON DELETE` action bridging two consistency boundaries. That is the canonical
+  example's shape (`featured_item_id`/`item_id`: plain nullable columns). Add a plain
+  INDEX on the column when reads filter/join by it; a real FK (`ON DELETE RESTRICT`
+  only, never CASCADE) is a dev-signed exception, not the default.

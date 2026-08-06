@@ -63,7 +63,9 @@ drift.
   which files you READ, and nothing else: it carries ZERO weight in the flat-vs-SharedBase
   recommendation, which comes only from item 1's cost asymmetry. (You don't need the full
   delta at question time either — item 1's role-cardinality digest is the authority for
-  the option text.)
+  the option text. **Same for siblings: item 2 carries the option text, so a sibling is
+  OFFERED without `siblings.md` loaded** — you load it once the dev says yes. Never let
+  "I haven't loaded the delta" become "I won't raise the option".)
 - **Balance judgement against RISK — this is why this is a skill, not a template.** Your
   intelligence is here to help the dev SHAPE the entity from what the framework can do — not
   to guess everything, and not to interrogate them about everything. Split every decision by
@@ -104,7 +106,7 @@ This skill **adds an entity to an existing omnicore service** — it does NOT cr
 project. And it adds a NEW entity: if the requested entity already exists in the
 service, changing it is `evolve-entity`'s job and deleting it is `remove-entity`'s —
 hand off, don't regenerate over a living entity. A read model BEYOND the entity's own
-view (composed across entities, shared-base identity, upstream/embed, aggregated) is
+view (composed across entities, shared-base identity, upstream/embed) is
 `scaffold-view`'s job. Before anything else, confirm the host exists:
 - **`go.mod` present AND it requires `github.com/ClaudioSchirmer/omnicore`** (check with
   `go list -m github.com/ClaudioSchirmer/omnicore` — it must resolve).
@@ -174,7 +176,9 @@ Self-configure by reading the project:
   whether this run was delegated by that skill or invoked directly in a project that has
   one; if it exists, reading it is MANDATORY, not optional. `Status: APPROVED` and it
   lists THIS entity → its §9 block is the dev's already-approved answers: Kind, base
-  create-vs-reuse, natural key, child-of-whom enter the spec as DECIDED (marked `per
+  create-vs-reuse, natural key, child-of-whom, the identity-view verdict
+  (create/add-role/skip — decided once at the map's §3, surfaced in §9) enter the spec
+  as DECIDED (marked `per
   domain-map §9`, not `(proposed)`, never re-asked); everything §9 doesn't answer stays
   this run's own, per the normal risk split. Your 0b discovery contradicts the map →
   STOP and surface; the dev amends the map first (never silently obey either side).
@@ -275,11 +279,20 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      field means identities wrongly merged or split (data corruption, not a patchable bug).
      Propose the field (a document/tax-id is the usual pick), say why, and CONFIRM it
      explicitly — never infer it silently.
-   - **If SharedBase → ALWAYS offer the all-in-one identity read (the `SharedBaseView` /
-     identity view — the READ counterpart of the shared write, unique to SharedBase; always
-     surface the option).** Explain WHAT it is: one document per identity, base fields +
-     base-children flat, a sub-document per role, roles added one at a time. Two cases,
-     detected in Phase 0b: (a) **no identity view exists yet** → offer to CREATE it
+   - **If SharedBase → SETTLE the all-in-one identity read (the `SharedBaseView` / identity
+     view — the READ counterpart of the shared write, unique to SharedBase) — but the offer
+     is GATED ON ONE QUESTION: does the project HAVE Mongo?** The KIND needs Mongo; the
+     SharedBase read does not depend on it. Mind the axis — **a full engine whose entity
+     views are relational-backed still HAS Mongo: offer it there**; only a Mongo-less infra
+     (SQLite / zero-infra MVP) closes the door. **No Mongo → do NOT offer it as available
+     and do NOT go silent**: point at the per-role plain view the dev already gets (base
+     fields FLATTENED — with one role it matches what a Mongo view would carry), and raise
+     the complement-later route (`/omnicore:configure`) ONLY if the dev actually wants the
+     multi-role identity document. The script is owned by
+     `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (Kinds + elicitation contract) — follow it,
+     don't restate it. **Mongo present → offer it**, explaining WHAT it is: one document per
+     identity, base fields + base-children flat, a sub-document per role, roles added one at
+     a time. Two cases, detected in Phase 0b: (a) **no identity view exists yet** → offer to CREATE it
      (`SharedBaseView("<identity-collection>").Schema(<base>).Role(<thisRole>)…`); (b) **an identity view already
      exists** (you're adding a NEW role to an existing base) → offer to ADD this role: append
      `.Role(<thisRole>Schema())` **and BUMP its `Version(N)`** (the role set is in the rebuild
@@ -292,13 +305,26 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      debt. The offer INCLUDES its read surface: the standard by-id + by-params pair with
      filters (`sharedbase.md`) — never a lone by-id. See `sharedbase.md` (Read).
 2. **Siblings (1:1).** Any optional/sparse/bulky field group better split into a 1:1
-   satellite than left as nullable columns? Name it, recommend, ask. **A sibling attaches
+   satellite than left as nullable columns? Name it, recommend, ask.
+   **The moment the model has ANY optional/nullable field, this question is answered IN THE
+   OPEN — never resolved in your head.** Name the candidate group, give the recommendation
+   WITH its one reason, and let the dev pick: bulky / rarely-read / PII / genuinely sparse
+   facets earn a satellite; two optional scalars usually do NOT — but "keep them as nullable
+   columns on the root" is a RECOMMENDATION TO SHOW, not a call to bury. **Deciding NOT to
+   split is the same modeling decision, of the same risk class** — it lands in the spec's
+   `Lives on` column either way, and "I considered a sibling and dropped it" reaching the dev
+   as silence IS the buried trade-off the high-risk rule forbids. Silence is allowed ONLY
+   when the model has no optional field at all. **A sibling attaches
    ONLY to a single-owner node — a flat root, a ROLE, or a role-child — NEVER to a SharedBase
    (the base) or a base-child (the framework panics).** So in a SharedBase model, split the
    ask: a BASE-level 1:1 facet (shared across roles) → nullable columns ON the base, NOT a
    sibling; a ROLE-specific 1:1 facet → a sibling on the role table. (`siblings.md`)
 3. **Children (1:N).** Which collections? For each: **child of whom** (base vs role/flat)?
-   Independently-managed child → its OWN aggregate (FK), not nested. (`aggregate-children.md`)
+   Independently-managed child → its OWN aggregate (FK), not nested — **and that call is
+   SHOWN, never applied in silence**: name the collection, say which way you'd model it and
+   the one reason (is it edited/listed on its own, or only ever through the root?), and let
+   the dev decide. Nested vs own aggregate is a regenerate-everything mistake.
+   (`aggregate-children.md`)
 4. **CRUD shape + child-edit strategy** (high-risk — never silently default to a wholesale
    replace-all). **Recommended default: a complete insert of the whole aggregate +
    a root-only update + per-child operations (**add** / **update** (404 if the child isn't
@@ -366,6 +392,10 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
     (CSV/XLSX)** — yes/no? These shape the whole web layer → **high-risk, ASK; never emit an
     endpoint or an export unasked.** Filterable/sortable/searchable fields + their operators
     are low-risk → infer + show. by-id / by-params reads are expected defaults.
+    **Never cut a surface because the project is an MVP** — GraphQL, gRPC and exports work on
+    EVERY posture, SQLite included (`${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md`, the owner,
+    states availability BOTH ways). Refusing an available capability is the mirror image of
+    offering an unavailable one, and just as wrong.
 11. **Authorization — TWO distinct questions, both asked (don't invent silently):**
     - **Permission gate (Layer 1):** the `resource:action` taxonomy per operation (generic vs
       per-op). Propose one, confirm — never fabricate a permission string unasked.
@@ -631,9 +661,11 @@ only a genuinely missing docs file does.
 | what one write touches end-to-end (SQL ↔ outbox ↔ Mongo op ↔ audit verb; PUT/PATCH share verb `update` — `actionName` tells them apart) | lifecycle-map |
 | ctx-bound domain Service probe in rules | auto-handlers · custom-command-handler |
 | schema (Go↔column) | table-schema |
-| view: indexes / options / Version | auto-query-handlers · mongo-schema-evolution |
+| view: the ViewDefinition surface itself (declaration, `Version`, SharedBaseView contract, DeleteOnArchive, archived rule) | views |
+| view: indexes / options / Version bump rules | auto-query-handlers · mongo-schema-evolution |
 | view backing: relational (SoR) vs Mongo — posture, elicitation, gating | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
-| SharedBaseView / ComposedView (read) | table-schema · query-side |
+| SharedBaseView / ComposedView (read) | views · query-side |
+| domain events (`RegisterEvent`, post-commit publish) | auto-handlers · command-handler |
 | response projection (AutoFromDoc / FromDoc) | auto-query-handlers · custom-query-handler |
 | REST routes / OpenAPI | openapi · reference |
 | GraphQL surface | graphql |
@@ -677,8 +709,11 @@ only a genuinely missing docs file does.
 - **Every `.up.sql` needs a `.down.sql`** (may be a no-op) or boot aborts.
 - **A ComposedView 1:N leg's FK must be indexed** or boot is fatal.
 - **`Modes()` ⟺ the schema's archive-column declaration** must agree.
-- **Aggregate child-mutation methods open with `domain.EnsureInitialized(root)`** — else
-  construction notifications are lost.
+- **A child-mutation method that EMITS a notification before delegating opens with
+  `domain.EnsureInitialized(root)`** — else that notification is silently dropped
+  (`AddNotification` is a no-op while the context is nil). **A method that only delegates
+  does NOT need it**: `Add/Change/RemoveAggregateChild` already call `ensureRootInit`
+  themselves — emitting it there is noise, not safety.
 - **`ApplyTo` on a SharedBase upsert may run twice** → pure/idempotent.
 - **`domain.Old(e)` is nil on Insert** → guard.
 - **Authorization is not surface-specific** — the same handler + `RequirePermission` at each

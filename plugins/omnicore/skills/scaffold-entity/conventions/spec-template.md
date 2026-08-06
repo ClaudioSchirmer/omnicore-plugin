@@ -40,7 +40,14 @@ Language: <x>            <!-- working language for human-facing text (descriptio
     PK (UUIDv5) and IS the dedup key; wrong = identities wrongly merged/split. Confirm
     explicitly, never infer.
   - Link model: shared-PK | separate-FK
+  - Orphan policy (what happens to the base when its LAST role is deleted):
+    KeepOrphan (framework default) | DeleteWhenUnreferenced — a declared schema choice
+    (`.OrphanPolicy(p)`, `table-schema.html`), never left implicit; the canonical
+    example picks the non-default.
   - Identity view (SharedBaseView): create | add-role (bump Version) | skip
+    — only where the project HAS Mongo (a full engine with relational-backed views still
+    does). A Mongo-less infra (SQLite / zero-infra MVP) ⇒ the slot reads
+    `n/a — no Mongo; the per-role view serves the base's fields flattened`, never a choice.
 
 ## 2. Fields                                 [one row per field — none may be missing]
 | Field | Go type | VO? (reuse/new-raw/new-enum/plain) | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
@@ -49,6 +56,9 @@ Language: <x>            <!-- working language for human-facing text (descriptio
   (float64 rounds); `float64` is fine for non-money numerics. Column types per dialect:
   the "Go ↔ …" tables in `table-schema.html` — the authority, never from memory.
   `example:` always filled (low-risk).
+- **`Lives on = root` for an OPTIONAL field is a DECISION, not a default** — it must have
+  been shown at the model gate (SKILL.md Phase 1 item 2) with its alternative (a sibling).
+  A spec where no optional field ever had that trade-off surfaced is incomplete.
 - **The `VO?` column is MANDATORY per field (`value-objects.html`) — a blank cell = an
   incomplete spec.** Classify each field against the Phase 0b `vos/` inventory: `plain` (only
   a presence rule, or none — NEVER a field whose values are a fixed set: that is ALWAYS an
@@ -106,12 +116,17 @@ can't assign null; the ROOT's PUT with the facet all-null is what clears the sib
 a sibling NEVER gets its own endpoint; `siblings.md`).
 
 ## 9. Surfaces & reads                       [required — never an endpoint unasked]
-- REST: yes/no · GraphQL: yes/no · gRPC: via `/omnicore:implement` (after this run) · Exports (CSV/XLSX): yes/no
+- REST: yes/no · GraphQL: yes/no · gRPC: via `/omnicore:implement` (after this run) ·
+  Exports (CSV/XLSX): yes/no · Integration events (this entity publishes facts /
+  reacts to another service's): via `/omnicore:implement` (after this run — note the
+  ask here so it isn't lost)
 - Reads: by-id + by-params (expected defaults).
 - Field-level read authz: any field only SOME callers may see? (`ReadCriteria.Restrict`
   — passive omission vs active 403, prunes `?fields=`/GraphQL selection/exports alike;
   `authz-seams.html`.) Ask — invisible at modeling time, loved when offered.
-- View backing: relational (SoR, read-your-writes) | Mongo (canonical) — default = project posture (`shared/read-side.md`).
+- View backing: relational (SoR, read-your-writes) | Mongo (canonical) — default =
+  project posture; on SQLite there is nothing to ask, the posture is FORCED relational
+  (`shared/read-side.md`).
 - Filter/sort/search operators per field (low-risk — filled, shown):
 
 ## 10. Authorization                          [required — BOTH slots, a blank is invalid]

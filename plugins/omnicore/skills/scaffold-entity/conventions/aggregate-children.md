@@ -9,7 +9,9 @@ Load only when the model has a **child collection**. Spans every layer. First de
 **child-edit strategy** — it changes what you generate.
 
 Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.html`
-(primitives, cascade, child-id write-back) · `old-state.html` (audit op bucketing).
+(primitives, cascade, child-id write-back) · `old-state.html` (audit op bucketing) ·
+`status-mapping.html` (which notification maps to which status — the child not-found
+404 vs the framework's does-not-exist 422 below).
 
 ## The child-edit decision (per child — PROPOSE with a recommendation, never guess)
 
@@ -20,11 +22,20 @@ Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.htm
   - **UPDATE** (`PUT …/:id/<children>/:childId`) — updates an EXISTING child, never
     creates: YOU implement the by-id guard in a domain method (find among current
     children; found → apply via the framework's change primitive; absent → the canonical
-    not-found notification, 404 — never the framework's does-not-exist one, which is 422).
+    not-found notification, 404 (`RecordNotFoundNotification`) — never the framework's
+    does-not-exist one (`EntityDoesNotExistNotification`), which is 422; the mapping
+    table is `status-mapping.html`).
   - **ARCHIVE** (`PATCH …/:id/<children>/:childId/archive`) — soft removal; same guard.
   - **Wiring — all THREE ops are partial updates of the ROOT**: each rides the
     partial-update auto handler + `ApplyPartiallyTo` (load root → your domain method
-    mutates the one child → the framework persists the diff). Child ops are NOT in
+    mutates the one child → the framework persists the diff).
+    **The lookup + not-found lives in the DOMAIN method (`<Verb><Child>ByID`), never as a
+    loop inside `ApplyPartiallyTo`** — the command is a one-liner that calls it. Two ops
+    scanning the collection themselves is the same invariant written twice, in the layer
+    that does not own it; and the domain method is then also where the change-time duplicate
+    guard belongs (the framework guards ADD via `IsSameBusinessIdentity`, but CHANGE only
+    swaps — a payload can edit one child into another's identity unchallenged).
+    Child ops are NOT in
     `auto-handlers.html`'s six-verb table — that table is root-only. In the docs this
     is `aggregate-persistence.html`'s "Update(root) with items StatusRemoved →
     Archive of those specific items".
@@ -55,8 +66,17 @@ web.md.
 - **Boundary agreement boot check:** the `AggregateChildren()` type set and the schema's
   `.Child(...)` set must match, or schema binding panics. **Depth = 1** — a child
   declaring its own child panics; model a separate aggregate instead.
-- **Every child-mutation method opens with the framework's ensure-initialized call** —
-  else construction-time notifications are lost.
+- **A child-mutation method that EMITS a notification before delegating opens with the
+  framework's ensure-initialized call** — else that notification is silently dropped. **A
+  method that only delegates does NOT need it**: the add/change/remove primitives already
+  ensure-init the root themselves; emitting it there is noise, not safety.
+- **A child-mutation method must EARN its existence.** It exists to carry what the primitive
+  cannot: an aggregate-spanning invariant (duplicate detection is the canonical one — reuse
+  `IsSameBusinessIdentity`), strategy B's by-id guard, or a genuine domain verb. **A method
+  whose body is nothing but the primitive call adds no safety and no vocabulary the command
+  lacks** — treat it as a smell and ask which of the three it was supposed to carry. On
+  strategy B, a change/archive method taking the AVO instead of a childId is the by-id guard
+  MISSING, not a style choice: the per-child routes then have no not-found path.
 - **One validation path per item, never both**: a child validated inline in the root
   method AND again through the boundary `ValidateAggregateChild` pass reports every
   notification twice. Pick the boundary pass (the default) OR inline — not both.
@@ -70,8 +90,14 @@ web.md.
   history) — `aggregate-persistence.html`. Operate the change/remove primitives on the LOADED
   item, and REUSE this method as the root's duplicate rule instead of a second check.
 - **A child is a value type (struct, not pointer)** — an AGGREGATE value object, in
-  `internal/domain/aggregatevos/` (its own file + that package's `notifications.go`). It has
-  a string id field + its own scoped `BuildRules` (notifications surface as
+  `internal/domain/aggregatevos/` (its own file + that package's `notifications.go`). It
+  **embeds `domain.Managed` and declares NO id field of its own** — `GetID`/`SetID` come
+  from the carrier, ids are set via `domain.WithID(AVO{…}, id)` / `.SetID(id)`. A
+  hand-declared exported `ID` field is the silent-wrong trap: it compiles, is never
+  persisted, and the real id never round-trips (see `table-schema.html`, "Reading the
+  managed columns back" — the changelog's v0.40.0 entry and the example's
+  `aggregatevos/` are the truth if any doc sentence still shows an exported `ID`).
+  It carries its own scoped `BuildRules` (notifications surface as
   `children[i].field`); its VO-typed fields auto-validate exactly like a root's, so
   `BuildRules` carries ONLY the non-VO rules (`value-objects.html`).
 

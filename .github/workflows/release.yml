@@ -1,0 +1,174 @@
+name: release
+
+# Auto-publish a GitHub Release whenever a `vMAJOR.MINOR.PATCH` tag lands —
+# either via `git push origin vX.Y.Z` from the CLI OR via the
+# "Draft a new release" flow from the web UI. The release notes body is
+# extracted from the matching `## [X.Y.Z]` section of CHANGELOG.md, so the
+# maintainer can pick whichever path is convenient on the day and the
+# Release page stops drifting behind the tag list.
+#
+# Both triggers are wired so the workflow stays maintainer-friendly:
+#   - `push: tags:`             fires when the tag is pushed via CLI;
+#                                creates the release if absent.
+#   - `release: [published]`    fires when the release is created via UI;
+#                                edits the existing release in place so the
+#                                body reflects the CHANGELOG section. Any
+#                                notes the maintainer typed into the UI
+#                                are intentionally replaced — CHANGELOG.md
+#                                is the single source of truth.
+#
+# Safety net: when the CHANGELOG has no `## [X.Y.Z]` entry for the tag
+# (forgot to update before tagging), the workflow does NOT overwrite an
+# existing release's body with empty content. The release survives intact
+# and the workflow logs a warning so the gap is visible.
+#
+# Plugin-specific gate: `plugins/omnicore/.claude-plugin/plugin.json`'s
+# `version` is what actually reaches installed clients — a tag disagreeing
+# with it means the Release page advertises a version nobody can install.
+# The manifest check below fails the run BEFORE any release is created or
+# edited, so the fix is `git tag -d` + re-tag, never a published mismatch.
+#
+# Prerelease tags (`v0.4.0-rc1`, `v1.0.0-beta`) get `--prerelease` from the
+# CLI path so they don't displace the "Latest" badge. From the UI path,
+# whatever prerelease flag the maintainer chose in the form is preserved.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'         # v1.2.3
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'       # v1.2.3-rc1, v1.2.3-beta.1
+  release:
+    types: [published]
+
+permissions:
+  contents: write  # required by `gh release create`
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (at the tag's commit)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ github.ref }}
+
+      - name: Verify plugin.json matches the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          MANIFEST="plugins/omnicore/.claude-plugin/plugin.json"
+
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::$MANIFEST not found at the tagged commit"
+            exit 1
+          fi
+
+          MANIFEST_VERSION="$(jq -r '.version' "$MANIFEST")"
+          if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
+            echo "::error::Tag $TAG says $VERSION but $MANIFEST says $MANIFEST_VERSION — clients install what the manifest declares. Delete the tag, bump the manifest, re-tag."
+            exit 1
+          fi
+          echo "Manifest version $MANIFEST_VERSION matches tag $TAG."
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"               # e.g. "v0.14.2" or "v0.14.2-rc1"
+          VERSION="${TAG#v}"                     # strip the leading "v"
+
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::error::CHANGELOG.md not found at the repo root"
+            exit 1
+          fi
+
+          # Pull the body of "## [VERSION]" up to (but not including) the next
+          # "## [" heading. The awk script:
+          #   - starts capturing the line AFTER the matching heading
+          #   - stops on the next "## [" (older version)
+          #   - also stops on the link-reference section "[X.Y.Z]:" at the
+          #     bottom so trailing footer lines don't leak into the notes
+          NOTES_FILE="$RUNNER_TEMP/notes.md"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { active = 1; next }
+            active && /^## \[/        { exit }
+            active && /^\[[^]]+\]:/   { exit }
+            active                    { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+
+          # Trim leading + trailing blank lines so the rendered notes are tidy.
+          # `awk NF` keeps lines containing any field, but loses blank lines
+          # inside the body. We want internal blanks preserved — strip only the
+          # outer blanks with a small sed.
+          sed -i -e '/./,$!d' "$NOTES_FILE"          # leading blanks
+          sed -i -e ':a;/^$/{$d;N;ba}' "$NOTES_FILE" # trailing blanks
+
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "::warning::No CHANGELOG entry found for [$VERSION] — release will be created with an empty body"
+          fi
+
+          echo "Release notes preview:"
+          echo "----------------------------------------"
+          cat "$NOTES_FILE"
+          echo "----------------------------------------"
+
+          # Detect prerelease: anything after a hyphen in the version is a SemVer
+          # pre-release tag (`-rc1`, `-beta.2`, etc.) per https://semver.org §9.
+          PRERELEASE_FLAG=""
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          # Pass outputs to the next step via $GITHUB_OUTPUT.
+          {
+            echo "notes_file=$NOTES_FILE"
+            echo "prerelease_flag=$PRERELEASE_FLAG"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or sync GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          TITLE: ${{ github.ref_name }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes_file }}
+          PRERELEASE_FLAG: ${{ steps.notes.outputs.prerelease_flag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Detect whether a release already exists for this tag. Two paths
+          # reach here:
+          #   1. push:tags fires → release usually absent → we create it.
+          #   2. release:published fires → release just created via UI → we
+          #      edit it in place to sync the body with CHANGELOG.
+          # `gh release create` is also called repeatedly idempotent when the
+          # workflow re-runs after a transient failure thanks to the same
+          # exists-check.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ -s "$NOTES_FILE" ]; then
+              echo "Release $TAG exists — syncing notes from CHANGELOG."
+              gh release edit "$TAG" \
+                --title "$TITLE" \
+                --notes-file "$NOTES_FILE" \
+                $PRERELEASE_FLAG
+            else
+              # CHANGELOG has no body for this version. The release exists
+              # (maintainer probably typed notes into the UI), so we leave
+              # it alone instead of clobbering the body with an empty
+              # string. The warning surfaces the CHANGELOG drift without
+              # blocking the workflow.
+              echo "::warning::No CHANGELOG section for [$TAG] — leaving release notes untouched"
+            fi
+          else
+            echo "Creating release $TAG."
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --verify-tag \
+              $PRERELEASE_FLAG
+          fi

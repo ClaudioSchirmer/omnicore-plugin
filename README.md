@@ -16,7 +16,7 @@ Invoked as `/omnicore:<skill>` once installed:
 | `/omnicore:scaffold-entity` | Scaffold a complete CRUD entity across every layer (domain → application → web → infra → migrations → bootstrap) of an existing omnicore service. |
 | `/omnicore:evolve-entity` | Change an EXISTING entity — add/remove/rename fields, uniqueness, children, modes — with schema evolution done right: migration, TableSchema, DTOs, translations, view `Version` bump and OpenAPI move together, via an approved impact-map spec. |
 | `/omnicore:remove-entity` | Surgically remove an entity from every layer via an inventory-first removal plan you approve before anything is deleted; shared bases, composed views and integration-event consumers are detected and block until you decide. |
-| `/omnicore:scaffold-view` | Create a NEW read model beyond an entity's own view — ComposedView across entities, SharedBaseView identity, Upstream/Embed composition, or an aggregated view — projected to Mongo and exposed on REST/GraphQL, via an approved spec. |
+| `/omnicore:scaffold-view` | Create a NEW read model beyond an entity's own view — ComposedView across entities, SharedBaseView identity, Upstream/Embed composition — projected to Mongo and exposed on REST/GraphQL/gRPC, via an approved spec. |
 | `/omnicore:evolve-view` | Change an EXISTING view — projected fields, legs/roles, indexes, operators, surfaces — with the `Version` bump and rebuild discipline done right, write side untouched. |
 | `/omnicore:implement` | Wire a framework capability into an existing service — another surface (gRPC, GraphQL), an external API call from a handler (httpclient + middleware), cache, integration events, lifecycle hooks, authz, tracing — anything the pinned framework offers that no dedicated skill owns. Routes the request against the pin's docs (the capability catalog); if the framework doesn't offer it, it says so honestly. |
 | `/omnicore:run` | Boot the service locally (bench up, background boot, readiness) and hand you clickable links — OpenAPI UI, GraphQL, probes. The app stays running. |
@@ -77,9 +77,18 @@ Clients pin to a released **version**, so a code change reaches them only when y
 2. **Bump `version`** in `plugins/omnicore/.claude-plugin/plugin.json` (semver). Pushing
    commits *without* bumping does not deliver the change — installed clients stay on the
    cached version.
-3. Record the release in [`CHANGELOG.md`](CHANGELOG.md) (same PR as the bump).
+3. Record the release in [`CHANGELOG.md`](CHANGELOG.md) (same PR as the bump), under a
+   `## [<version>]` heading — that section IS the release notes (see step 4).
 4. Commit → open a PR → merge to `main` → push, then tag the bump commit `v<version>`.
    `main` is the source of truth; there is no Anthropic-hosted copy.
+   Pushing the tag (or drafting the release in the web UI) fires
+   [`.github/workflows/release.yml`](.github/workflows/release.yml), which publishes the
+   GitHub Release with the matching `## [<version>]` CHANGELOG section as its body —
+   creating the release from a CLI tag, or syncing the body in place when the release came
+   from the UI. Two guards: the run fails BEFORE touching any release if the tag disagrees
+   with `plugin.json`'s `version` (clients install what the manifest declares), and a
+   missing CHANGELOG section never clobbers an existing release body — it warns instead.
+   Nothing to do by hand; the Release page stops drifting behind the tag list.
 5. Clients pick it up with:
    ```
    claude plugin marketplace update omnicore     # re-pull the catalog

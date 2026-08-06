@@ -52,7 +52,8 @@ skill can already plan it.
   an existing entity's write side → `evolve-entity` · new/changed read model →
   `scaffold-view`/`evolve-view` · removal → `remove-entity` · no service yet →
   `scaffold-service` · version bump → `upgrade` · infra/posture change (add Mongo/broker,
-  swap engine, enable the infra a capability needs) → `configure` · "it should already
+  swap engine, enable the infra a capability needs) → `configure` · "prove the service
+  works" / contract tests / e2e suite → `qa` · "it should already
   work but doesn't" →
   `doctor` (diagnose before implementing — a missing capability and a broken one look
   alike) · "how does it work?" → `help`. This skill takes what none of them claims. A
@@ -135,10 +136,12 @@ capability the pin lacks — that offer goes through the same skill, same rules.
    doctrine that there is NO cross-service command (design the event + receiver, never
    an imperative RPC between services). Examples of routings (examples
    only — the map at the pin is always the authority, sections may differ per version):
-   another transport surface → the gRPC/GraphQL sections · outbound HTTP + resilience →
-   the httpclient/middleware sections · cross-service events → the integration-events
-   section · in-flow custom logic → lifecycle-hooks · read-side caching → the cache
-   section · permissions/tenancy → authz · observability → tracing/audit.
+   another transport surface → `grpc` / `graphql` · outbound HTTP + resilience →
+   `httpclient` (its middleware chain is a heading INSIDE it, not a separate section) ·
+   cross-service events → `integration-events` · in-flow custom logic →
+   `lifecycle-hooks` · read-side caching → `cache-subsystem` · permissions/tenancy →
+   `authz-seams` (there is no section named `authz`) · observability →
+   `tracing`/`audit` — exact names, never derived from the concept's wording.
 2. **Read the owning section(s) BEFORE planning.** The plan cites them; a plan line
    with no section behind it is a defect.
 3. **Fill the plan.** Copy `conventions/plan-template.md` VERBATIM to
@@ -154,14 +157,23 @@ capability the pin lacks — that offer goes through the same skill, same rules.
 Dependency order (config → wiring/bootstrap → the capability's artifacts → tests),
 re-reading the owning section before each artifact it governs. Edit ONLY what the
 plan's impact map lists. Config lands in every boot profile; secrets via env
-placeholders per the configuration reference, never literal.
+placeholders per the configuration reference, never literal. **New yaml blocks and
+routes land on the boot contract's failure surface** — several blocks are
+strict-decoded (unknown key = boot abort) and `auth.publicRoutes` is validated
+exact-match (`${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` — read it when the plan
+touches either). **And enabling messaging changes the BUILD:** a new integration
+consumer / upstream subscription needs the transport build tag or it dies at the
+point of use on a green service — the impact map's build/run-commands row (plan §5)
+is executed here like any other artifact, never assumed.
 
 ## Final verify (the gate)
 
 0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — item 3
    below IS this contract for capabilities; the contract adds: any other stated target
    unmet is RED or an explicit dev-accepted deviation.
-1. **Build + vet** (with the transport/engine tags the project uses) — clean.
+1. **Build + vet** — clean, with the plan's TARGET tag set: when the capability
+   changed the required tags (a first consumer on a previously transport-less build),
+   verifying with the OLD tags proves nothing — the §5 build/run row names the set.
 2. **Tests** — the plan's new branches covered; never weaken an existing test to pass.
 3. **Capability proof — the plan's own verify step, executed.** Each capability states
    in the plan how it will be PROVEN, not assumed: a surface answers a real call, a

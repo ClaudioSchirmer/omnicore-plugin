@@ -7,6 +7,23 @@ drift. No code, by design. The version-exact key/default tables are `yaml-refere
 `bootstrap` / `migrations` at the PIN — this file orients and names the traps; if it
 ever disagrees with the pinned docs, the docs win.
 
+## Build tags — the boot's precondition
+
+- Every build must link exactly ONE relational engine tag —
+  `postgres | mysql | sqlserver | oracle | sqlite`. A build with no engine tag
+  COMPILES clean and then **aborts at boot** ("no relational engine registered …
+  build with the engine's build tag?") — the classic green-build/dead-boot trap.
+- The transport tag (`kafka | nats`) follows the **yaml, not the engine**: a config
+  with a `transport:` block needs the matching tag; without it the build compiles,
+  boots and probes GREEN, and every consumer / upstream subscription / Mongo-projected
+  refresh fails later **at the point of use** ("no transport linked — build with
+  -tags kafka or -tags nats"). No `transport:` block (opt-out by absence — legal on
+  ANY engine, not just SQLite) → build with no transport tag, no messaging.
+- The zero-infra SQLite MVP is engine-tag-only and pure Go:
+  `CGO_ENABLED=0 go build -tags sqlite`. SQLite still NEEDS its engine tag — "SQLite
+  is tagless" is a misreading; only the transport tag is absent, and only because the
+  posture has no `transport:` block.
+
 ## Probes — registered for free, public NOT for free
 
 - `/livez` (process up) and `/readyz` (fit for traffic) are framework-registered on
@@ -78,6 +95,9 @@ keep the ports.)
 
 ## Diagnosis quick-map (doctor)
 
+Boot abort "no relational engine registered" → missing engine build tag · reactions/
+subscriptions dead on a green service, "no transport linked" at the point of use →
+`transport:` block present but built without the transport tag ·
 401 on probes under jwt → `publicRoutes` missing the probe paths · boot abort naming a
 publicRoutes entry → exact-match validation, fix the literal · boot abort on pending
 migrations under prd → `autoRun: check` working as designed · `/readyz` 503 with

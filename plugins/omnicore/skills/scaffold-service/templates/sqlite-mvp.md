@@ -25,6 +25,15 @@ pragmas, build tags) is validated against the pinned `yaml-reference.html` + `ta
   `no such table`. **That is why the dev-loop wrappers below pin an ABSOLUTE `SQLITE_PATH` next to
   the script** (recomputed each run, so the `.db` still travels with the project — portability kept)
   instead of trusting the relative fallback. Parent dir auto-created.
+  **⚠️ Anti-drift exception — this paragraph OUTRANKS the routed doc on this one
+  point.** Pinned docs exist that claim the dev loop is safe ("under go run/test it
+  falls back to the working dir, so the dev loop persists in the project") — that
+  carve-out is true of the ENGINE's DSN resolution only; the MIGRATION RUNNER
+  resolves against the executable's dir unconditionally, so the split above is real
+  under `go run`. Do NOT apply the skills' usual "the doc wins" precedence here and
+  delete the `SQLITE_PATH` pin from the wrappers — that reintroduces the exact
+  regression this template exists to prevent. (If a future release fixes the runner
+  and its changelog says so, the pin becomes harmless belt-and-suspenders — keep it.)
 - **absolute `file:/var/lib/app/app.db`** — used verbatim; a fixed external location (also the form
   the wrappers compute for the local `app.db`). Only a hand-typed external path is non-portable.
 - **`:memory:`** — RAM-only, ephemeral (gone on exit); demos/tests. An explicit `SQLITE_PATH` (this,

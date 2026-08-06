@@ -59,10 +59,14 @@ interface is what lets this layer compile before infra exists.
 
 - `ToCommand()` is body-only — NO ctx (identity enters at the Command layer); request ≡
   command shape (required → value, optional → pointer), 1:1, no normalization.
-- Wire DTOs carry the VO's UNDERLYING scalar (`string`/`int`/pointer), NEVER the VO type —
-  a request field for a `vos.Email`/`vos.Ethnicity` is a plain `string` (int enum → plain
+- Wire DTOs carry the VO's UNDERLYING scalar (`string`/`int`/pointer) — a request field
+  for a `vos.Email`/`vos.Ethnicity` is a plain `string` (int enum → plain
   `int`). The wire→VO cast is the Command's job (`application.md`); keep `ToCommand`/
-  `FromResult` raw 1:1 and don't import `vos` into `web/`.
+  `FromResult` raw 1:1 and don't import `vos` into `web/`. This is THIS SKILL's
+  convention (layering hygiene), not the framework's limit: the framework also accepts
+  a RESPONSE DTO field typed as the VO itself (both render natively on every surface;
+  OpenAPI/SDL describe it by the underlying type) — so never flag VO-typed response
+  fields in existing consumer code as misuse; just don't generate them.
 - Write responses project via `FromResult`; reads via the framework's doc projector keyed
   by Go field name; bodyless verbs use the no-body responder (204).
 - Filter operators are AI-chosen per field type (strings: eq/ne/in/startswith/contains +
@@ -82,7 +86,9 @@ route registered outside Mount/MountRaw while OpenAPI is on (`authz-seams.html`)
 
 ## GraphQL
 
-One cumulative registry for the whole service (created in bootstrap; each entity's
-`Mount<Entity>GraphQL` contributes fields). Reuses the exact same handlers as REST — never
-a second implementation; each field carries the same permission as its REST twin.
+One cumulative registry for the whole service — **built by the framework**, handed to
+each feature that opts in by implementing `bootstrap.GraphQLFeature`
+(`MountGraphQL(reg, deps)`); the registry is never created in `bootstrap/` and there is
+no `Wiring` field for it (`bootstrap.html`). Reuses the exact same handlers as REST —
+never a second implementation; each field carries the same permission as its REST twin.
 Constructors/Relay semantics: `graphql.html`.

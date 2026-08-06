@@ -63,7 +63,8 @@ root; the domain-service implementation in its own file here.
 
 ## View — decisions + traps
 
-- **`Version(N)` bump rule:** bump on any rebuild-relevant change (root, embeds,
+- **A fresh view declares `Version(1)`** (the docs' canonical starting point — never 0,
+  never omitted). **Bump rule thereafter:** bump on any rebuild-relevant change (root, embeds,
   DeleteOnArchive, jsonSchema, collation, capped, time-series); index-only changes do NOT
   bump; forgetting when the hash changed = boot abort (`mongo-schema-evolution.html`).
 - Index what the spec's filter/sort list names; `TextIndex` for `?search`.

@@ -24,6 +24,13 @@ Top of file: a comment stating what the bench is (this service's exclusive local
 bench: relational + Mongo + broker + CDC relay), and how to run it (`./start.sh` on
 Unix/WSL; `start.cmd` or `pwsh -File .\start.ps1` on Windows).
 
+The file's REQUIRED top-level keys — the fragments below are `services:` members and
+do not repeat them: `name: <svc>-dev`, `services:` (the chosen blocks), and a
+**top-level `volumes:` declaring EVERY named volume the fragments reference**
+(`db_data`, `mongo_data`, `nats_data`/`kafka_data`, `debezium_data`) — compose
+hard-fails `up` with "service … refers to undefined volume" when one is missing;
+the naming bullet above lists them, this key DECLARES them.
+
 ### Relational — mysql variant
 
 ```yaml
@@ -81,6 +88,15 @@ load-bearing: the CDC relay cannot stream without the Agent. And unlike
 `MYSQL_DATABASE` / `POSTGRES_DB`, the image has NO auto-create-database env —
 the start wrappers must create `<svc>_db` themselves (see the sqlserver-only
 notes below) or the first app boot dies with `Cannot open database "<svc>_db"`.
+
+**The sqlserver DSN grammar — two parts the docs' example understates, both
+mandatory for this bench:** the YAML's DSN default MUST select the database
+(`database=<svc>_db` — without it the app connects to `master` and migrates THERE)
+and MUST carry the TLS pair `encrypt=true;TrustServerCertificate=true` (the
+container's certificate is self-signed; without the pair go-mssqldb fails the login
+handshake). The proven full shape:
+
+    server=localhost;port=<hostport>;user id=sa;password=<strong-password>;database=<svc>_db;encrypt=true;TrustServerCertificate=true
 
 ```yaml
   sqlserver:

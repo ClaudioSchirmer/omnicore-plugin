@@ -66,19 +66,36 @@ tooling; say so if the dev conflates them).
   effect until the overlay is removed. (In THIS workspace that's always the case — the
   skill targets real consumer projects.)
 - **Build tags:** discover engine + transport from `relational.dialect` / `transport`
-  in `microservice.*.yaml` — the value IS the build tag (today's latest release:
-  `postgres|mysql|sqlserver|oracle` and `kafka|nats`; the pinned docs say what the pin
-  supports). Every verify below needs both tags or it aborts at boot.
+  in `microservice.*.yaml` — the value IS the build tag (engines
+  `postgres|mysql|sqlserver|oracle|sqlite`, transports `kafka|nats`; the pinned docs
+  say what the pin supports). The engine tag is always required; the transport tag
+  only when a `transport:` block exists (a transport-less config builds without one,
+  on any engine); SQLite is `CGO_ENABLED=0 -tags sqlite`, no transport tag
+  (`${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`, Build tags, owns the law). Every
+  verify below uses THIS discovered tag set — and a multi-dialect project verifies
+  every target set, not one.
+- **Vendored?** A `vendor/` dir means the build is `-mod=vendor`: the bump is not
+  observable until `go mod vendor` re-runs, and the go.mod+go.sum snapshot alone is
+  then an incomplete restore point — say so and include the vendor refresh in both
+  directions. A target whose `go`/`toolchain` directive exceeds the local toolchain
+  fails the bump for a toolchain reason, not a code one — report it as such.
 
 ## Phase 1 — Check + bring the release
 1. **Current pin:** `go list -m -f '{{.Version}}' …/omnicore`.
 2. **Target:** default latest — `go list -m -u -f '{{with .Update}}{{.Version}}{{end}}'
    …/omnicore` (empty = already current → report "nothing to upgrade", stop). Honor an
    explicit target the dev names; `go list -m -versions …/omnicore` lists what's available.
-   Offline/proxy down → say the check couldn't run and stop (don't guess).
+   Offline/proxy down → say the check couldn't run and stop (don't guess). **Direction
+   guard:** an explicit target BELOW the current pin is a downgrade — legitimate after
+   a bad landing, but the delta must then be read from the HIGHER version's changelog
+   (the lower one predates the entries); say plainly it's a downgrade and which
+   changes are being walked BACK.
 3. **Bring the changelog (read-only, no go.mod change):** `go mod download …/omnicore@<target>`,
    then read `<dir>/docs/content/sections/changelog.html` at `go list -m -f '{{.Dir}}'
-   …/omnicore@<target>`. Summarize every release BETWEEN current and target, BREAKING first.
+   …/omnicore@<target>` — always at the HIGHER of the two pins. Summarize every
+   release BETWEEN current and target, BREAKING first. (The module root also ships
+   `CHANGELOG.md` — the exhaustive per-symbol list; the HTML digest is for this
+   summary, the per-symbol file is Phase 2b's map from a compile error to its rename.)
 4. **Offer — one message:** "you're on vX; upgrading to vY. What changes: <summary +
    breaking>." No breaking items → "Go ahead? (yes/no)". WITH breaking items, offer three
    paths: **(a) upgrade only** (dev reconciles the code), **(b) upgrade + migrate** — after
@@ -86,20 +103,38 @@ tooling; say so if the dev conflates them).
    before anything is edited, **(c) don't upgrade**. No → stop, nothing changed.
 
 ## Phase 2 — Upgrade (only on yes)
-1. **Snapshot for rollback FIRST** — copy the current `go.mod` + `go.sum` to the scratch
-   dir and record the previous version string. This is the exact restore point. If the
-   project is git-tracked, `git checkout go.mod go.sum` is an equivalent restore — but take
+1. **Snapshot for rollback FIRST** — copy the current `go.mod` + `go.sum` verbatim to
+   `upgrade/rollback/` (beside the migration plan, visible — never a temp dir that
+   evaporates) and record the previous version string. This is the exact restore
+   point. If the
+   project is git-tracked, `git checkout go.mod go.sum` is an equivalent restore —
+   but check `git status -- go.mod go.sum` FIRST (uncommitted edits there would be
+   silently destroyed by the git path), and take
    the snapshot anyway so rollback works with or without git.
 2. **Bump:** `GOFLAGS=-mod=mod go get github.com/ClaudioSchirmer/omnicore@<target>`, then
    `go mod tidy` (go.mod AND go.sum move together — never one without the other).
-3. **Verify:** `go vet` + `go build -tags '<engine> <transport>' ./...`. If the project has
+3. **Verify:** `go vet -tags '<engine> <transport>' ./...` + `go build -tags '<engine>
+   <transport>' ./...` — vet carries the SAME tags as build (untagged vet skips
+   exactly the engine/transport-gated files a bump is most likely to break). If the
+   project has
    a fast unit suite, offer to run it too as a stronger check.
 
 ## Phase 2b — Migration gate (only when the dev chose "upgrade + migrate", or picks "fix forward WITH the skill" in Phase 3)
 
 1. **Diagnose.** Run the Phase 2 verify; collect every compile/vet error verbatim. Map
-   each error to its changelog breaking item. Also list the changelog's breaking items
-   that DON'T produce a compile error (behavioral shifts) — those are report-only.
+   each error to its changelog breaking item (the module-root `CHANGELOG.md` has the
+   per-symbol detail). **Then scan the version range for the OPERATIONAL fallout no
+   compiler ever surfaces — four named classes, each a plan entry when present:**
+   (a) **required DDL on the service's own tables** (e.g. a release mandating a new
+   column on every entity table) → the plan names the migration the dev owns (or
+   routes to `/omnicore:evolve-entity`); (b) **a demanded view rebuild** after the
+   upgrade → the plan names the rebuild step; (c) **the framework's EMBEDDED
+   migration sequence grew** → the first non-dev boot after the bump ABORTS on
+   pending migrations under `autoRun: check` BY DESIGN — the plan says to expect it
+   and what to run; (d) **yaml key renames/moves** (e.g. a block renamed) — no
+   compile error, boot abort on the old key (strict-decoded blocks): these are
+   MECHANICAL and auto-fixable, and the approved plan MAY touch `microservice.*.yaml`
+   for exactly this class. Everything else behavioral stays report-only.
 2. **Understand old vs new — docs-first, both pins.** Both versions sit in the module
    cache. For each item, read the owning section at the OLD pin (how it worked) AND at
    the NEW pin (how it works now) — `go list -m -f '{{.Dir}}' …/omnicore@<ver>` +
@@ -109,7 +144,10 @@ tooling; say so if the dev conflates them).
    One section per item: the error (verbatim) or changelog entry · how it worked at vX ·
    how it works at vY (both with section names) · the proposed edit (each file + what
    changes and why) · anything needing the dev's judgment marked `⚠️ OPEN: <question>`.
-   Behavioral (no-compile-error) items go in a final "needs your attention — not
+   Operational items (step 1's four classes) each get their own section — the yaml
+   renames as proposed edits, the DDL/rebuild/embedded-migration items as explicit
+   steps with their owner named. Remaining behavioral (no-compile-error) items go in
+   a final "needs your attention — not
    auto-fixable" list. **Hard STOP:** nothing is edited while `Status: DRAFT` or any
    `⚠️ OPEN` remains. A plain "ok" approves the proposed edits; OPEN slots must be
    answered, never defaulted.
@@ -141,14 +179,20 @@ owning section per item, at each pin — never sweep either manual.
 - **Green →** report success: the new version, the headline changes, and — from the
   changelog — any BREAKING items the dev still must reconcile in their own code (a green
   build doesn't prove those are handled — several framework guards are BOOT panics that
-  no compile surfaces). Point at `help` (understand a new API) or
+  no compile surfaces, and the DDL/rebuild/embedded-migration classes of Phase 2b
+  step 1 apply even on a clean compile: scan for them here too, don't wait for the
+  gate). Point at `help` (understand a new API) or
   `scaffold-entity` (regenerate a layer against the new docs) as next steps. Then offer
   to run: boot the upgraded service — with boot-panic guards this IS the verify, not
-  just a click-through. Yes → delegate to `/omnicore:run`.
+  just a click-through. Yes → delegate to `/omnicore:run`. And offer `/omnicore:qa` —
+  the sibling that acts on this skill's own doctrine ("build green ≠ behavior
+  unchanged") by re-proving the wire contract on the new pin.
 - **Broken (vet/build/test fails) → OFFER ROLLBACK, don't force it:**
   - Show the failure verbatim (the first compile errors are usually the breaking surface).
-  - **Roll back?** yes → restore the snapshotted `go.mod` + `go.sum`, `go build` to confirm
-    the project is green again on the previous version, and hand the dev the changelog's
+  - **Roll back?** yes → restore the snapshotted `go.mod` + `go.sum`, then
+    `go build -tags '<engine> <transport>' ./...` — the SAME tag set as Phase 2's
+    verify (an untagged build can be green while the tagged one is not, which would
+    "confirm" a rollback that isn't) — and hand the dev the changelog's
     breaking section to plan the migration. Report it's back exactly on vX.
   - **Or fix forward** — the dev keeps vY and fixes the code (offer to point
     `help`/`scaffold-entity` at the specific breakage). The snapshot stays until they decide.
@@ -157,6 +201,8 @@ owning section per item, at each pin — never sweep either manual.
 
 ## What this skill never does
 No service-code edits outside an APPROVED `upgrade/migration-plan.md`, no scaffolding,
-no DB migrations, no git commits. It bumps the framework pin, verifies, and either lands
+no git commits. It never RUNS DB migrations or rebuilds — but naming the ones the
+version range demands is part of its job (Phase 2b step 1), never omitted as out of
+scope. It bumps the framework pin, verifies, and either lands
 it or restores the exact prior state. Breaking changes are surfaced and either fixed
 through the approved plan or handed to the dev — never worked around silently.

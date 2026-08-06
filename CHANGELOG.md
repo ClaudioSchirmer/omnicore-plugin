@@ -5,6 +5,283 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.15.0] — 2026-08-05
+
+The full-plugin audit release: every skill, owner sheet, convention and template was
+reviewed against the framework docs at v0.44.1, the reference consumer and the
+framework source — ~85 findings (15 of them capable of producing a broken or
+unbootable result) fixed across 29 files. Highlights below, grouped by what an
+executing agent would have gotten wrong.
+
+### Fixed — factual corrections (the skill said the opposite of the framework)
+
+- **`evolve-view`: flipping a view Mongo→relational DROPS the old collection** — the
+  skill claimed it was "left frozen, not dropped", teaching a false rollback story
+  (flipping back is a fresh backfill, not a resume). And the **embedder-`Version`
+  coupling was inverted**: a `JoinView` leg folds the source view's `Version` into
+  the embedder's rebuild hash, so "bump the embedder consciously later" is not an
+  option — it is an unconditional forgot-to-bump boot abort; the skill now orders
+  bump-both-deploy-once and notes ad-hoc rebuilds don't refresh dependents.
+- **`scaffold-view` ran ComposedView through a template it cannot satisfy** —
+  `Version(1)`, rebuild discipline and `DeleteOnArchive()` do not exist on a
+  ComposedView (never materialized), and it registers via
+  `ComposingFeature.ComposedViews()`, not `ReadableFeature.Views()`; both facts now
+  stated and routed.
+- **The covering-index law was wrong in both view skills**: only the 1:N-leg FK was
+  gated, missing the boot-fatal indexes of the 1:1 `Embed` (parent join column),
+  `EmbedInChild` (multikey) and `EmbedMany`/`LinkMany` over a `JoinView` leg —
+  where the index lives on the SOURCE view, not the new one.
+- **`scaffold-entity` conventions taught the pre-v0.40 surface model**:
+  `bootstrap.md`/`web.md` still had `Wire` building GraphQL/gRPC registries via
+  removed `Wiring` fields — replaced with the feature-declared opt-in interfaces
+  (`bootstrap.GraphQLFeature`/`GRPCFeature`, framework-built registries). And
+  `aggregate-children.md` told the agent an AVO "has a string id field" — an AVO
+  embeds `domain.Managed` and declares NO id field (a hand-declared `ID` compiles
+  and silently never persists).
+- **Integration events: the SUBSCRIBE half does not ride the CDC relay.**
+  `capabilities.md` (and `read-side.md`'s mirror) gated publish AND subscribe behind
+  Mongo+relay — consuming needs only a broker + the transport build tag, so an
+  infra-free service asking to react to another service's events was getting a wrong
+  refusal. The availability sheet now models the three independent posture axes
+  (Mongo · broker+tag · relay/tailable engine).
+- **"Aggregated view" is not a view kind** — removed from every kind list
+  (descriptions, catalogs, the owner sheet, README): counts/totals are the
+  relational `Aggregate`/`AggregateBy` DSL, available on EVERY posture — the
+  opposite of the "needs Mongo" gate the owner sheet declared.
+- **`qa` asserted 405 for every absent verb** — the framework's contract is a
+  three-way split (mode missing but route mounted → 403; no route → 404; same path
+  under another method → 405); generated suites would have asserted the wrong code.
+- **`doctor` contradicted its own owner sheet on readiness** (a `/readyz` 503 carries
+  a reason — `rebuilding view` means UP-and-serving, not a store failure) and
+  attached the transport-tag exception to SQLite instead of to the absence of a
+  `transport:` block (legal on any engine).
+- **`run` handed out dead links and green-but-empty boots**: the GraphQL/gRPC enable
+  switch is the feature interface, not the yaml block; the bare SQLite fallback
+  (`go run` without the wrapper) boots green over an empty schema — it now pins an
+  absolute `SQLITE_PATH` like the wrapper does; `docker compose` calls carry
+  `-f devops/docker-compose.yml`; stopping names the LISTENER, not `go run`'s parent.
+- **`upgrade` omitted `sqlite` from the engine list** and verified the rollback (and
+  `go vet`) untagged — an untagged build can be green while the tagged one is broken.
+- Smaller factual fixes: `audit.destinations` key shape (a bare sequence under
+  `audit:` is a decode failure); "mandatory `mongo`/`transport` blocks" → opt-out by
+  absence; `internal/web/dtos` → `internal/web/requests/`; VO-typed response DTO
+  fields are framework-legal (the raw-scalar rule is this plugin's convention, not a
+  misuse flag); `help`'s framework-repo ground detection (in the framework repo
+  `go list -m` RESOLVES with an empty Version — the old condition never fired) plus
+  its missing disclosure.
+
+### Added — information an executing agent had to guess
+
+- **`shared/boot-contract.md` — a Build-tags section** (its biggest hole): one engine
+  tag always (`sqlite` included), missing engine = boot abort; the transport tag
+  follows the `transport:` block and its absence fails at the POINT OF USE on a green
+  service; SQLite = `CGO_ENABLED=0 -tags sqlite`. Quick-map rows for both failures.
+- **`doctor` — the projection failure-ledger layer**: `omnicore_projection_failures`
+  (parked events + failed ripples), the `parkedRetry` replay loop (on by default),
+  `reconcile` (off by default) and `ProjectionHealth()` — the missing floor under its
+  own headline symptom ("writes accepted, views never arrive" with relay/broker/sync
+  all green). Plus new signatures (poison relay message after first boot; dead
+  reactions on a green service; cache `failMode: open` swallowing errors) and routing
+  rows for declaration boot panics, auth-middleware 401s, HTTP-layer statuses
+  (413/408/504), outbound httpclient/grpcclient, cache degradation and GraphQL.
+- **`qa` — the boot-and-bench contract it lacked**: build with the yaml-derived tag
+  set, bench up first on the Mongo posture, resolve the effective port and probe it
+  (something already listening = you may be testing the wrong binary), suite-owned
+  throwaway config via `OMNICORE_CONFIG_PATH` (reconciling the "dedicated profile"
+  option with never-touch-yaml), state-reset discipline (relational wipe does NOT
+  clear the projection; drain before seeding), per-lane namespacing of ports/binary/
+  log (not just temp files) + drain-wait before rebinding, `Accept-Language` pinned,
+  suites exit non-zero. Coverage matrix grew the golden-record field-round-trip
+  family, the FULL typed-400 guard family, `?onlyTotal=`/`?search=`/pagination-
+  envelope cases, and `GET /openapi.json` as the wired-verb oracle.
+- **`upgrade` — the operational fallout no compiler surfaces**, scanned per version
+  range and planned explicitly: required DDL on the service's own tables, demanded
+  view rebuilds, the framework's embedded migration sequence growing (non-dev
+  `autoRun: check` aborts on purpose), and mechanical yaml key renames (the approved
+  plan may now touch `microservice.*.yaml` for exactly that class). Plus a downgrade
+  direction guard (read the HIGHER pin's changelog), the module-root `CHANGELOG.md`
+  as the per-symbol map, a named snapshot home (`upgrade/rollback/`) with a
+  `git status` check before the git-restore path, vendor/`GOTOOLCHAIN` notes, and a
+  `/omnicore:qa` offer on the green path.
+- **`evolve-entity` — a verification BOOT in the final gate** (every characteristic
+  evolution failure is boot-time, not compile-time), the scaffold-side boot-trap
+  checklist (sparse-render `omitempty` panic, `Modes()`⟺archive-column lockstep,
+  value-typed query param turning required, new-table shape rules), gRPC/proto and
+  yaml/wiring as impact-map classes, the multi-dialect migration law (same pair,
+  every target folder), the full rebuild-hash routing (root columns move it — routed
+  to `views`, whose list is complete), per-kind embedder consequences, the generated
+  QA suite as a plannable artifact, and sharedbase→flat demotion routed instead of
+  unhandled.
+- **`remove-entity`** — the Level-0 reconcile walk (the one mutating skill without
+  it), `auth.publicRoutes` and last-feature in the sweep (both non-dev boot
+  breakers a dev-profile verify can't catch — now called out explicitly), the
+  foreign-collection consequence of "keep the Mongo collections" (non-dev boot
+  abort; honest keep = export/move), base-removal and last-role verdicts
+  (`OrphanPolicy`, zero-role SharedBaseView), view-registry row hygiene with the
+  stale-row re-add trap.
+- **Read-side skills** — a read-AUTHORIZATION spec item in both (a composed view
+  reaches via join what the caller couldn't query; `ToCriteria`/`crit.Restrict`
+  routed), the read-capability axis (segment filter selects on materialized, 400s on
+  composed — the docs' trigger to materialize), per-source-kind archive levers
+  (`Fields()` is JoinView-only; upstream = external `DeletedAt` + subscription
+  `fields:`), external-leg preflight (subscription + linked transport + covering
+  `fields:`), index-vs-options bump rules (index-only = no bump; collation immutable),
+  healthy post-rebuild boot shapes (`autoRun: check` aborts on purpose; `/readyz` 503
+  while rebuilding is not a failure), and gRPC routing rows.
+- **`scaffold-entity`/`scaffold-system`** — enum VALUE translation keys as the fourth
+  mandatory catalog kind, the cross-aggregate reference rule (bare column + index,
+  no DB FK across aggregate boundaries — the canonical example's shape), an
+  `OrphanPolicy` spec slot, the identity-view verdict carried into §9 so delegated
+  runs stop re-asking, a domain-events (`RegisterEvent`) seam note + routing,
+  `views` routing rows (previously unrouted despite owning the ViewDefinition
+  surface), integration-events exit route in §9, and SQLite `TEXT` in the id-column
+  enumerations.
+- **`implement`** — the fourth routing outcome (offered but posture lacks infra →
+  `configure`) in the plan template, an infra-prerequisite row and a
+  build/run-commands row in the impact map (a first consumer changes the required
+  tag set — wiring passes every gate and dies at runtime otherwise), verify against
+  the plan's TARGET tags, boot-contract routing for new yaml/routes, exact section
+  names in the router examples, and `qa` in the fallback router.
+- **`scaffold-service` + templates** — the sqlserver DSN grammar the routed docs
+  understate (`database=<svc>_db` + `encrypt=true;TrustServerCertificate=true`,
+  full proven shape in `docker-bench.md`), the compose file's required top-level
+  keys (undeclared named volumes hard-fail `up`), the Go version floor in preflight,
+  `relational.pool` for the unlimited-pool engines in the prd template, Windows
+  `NUL` for build sinks, and the strict-decoded block list completed
+  (`reconcile`/`parkedRetry`).
+- **`configure`** — inherits the scaffold-side traps it lacked: `migrations.dir`
+  repoint on an engine swap (silent empty-sequence degradation), tag-gated go.sum
+  refresh (`GOFLAGS=-mod=mod`), the SQLite schema-persistence proof (probes pass
+  over an empty DB), a docker preflight for the target posture, and a prd
+  static-sanity level.
+- **`shared/capabilities.md`** — an "Owning docs sections — exact names" block
+  (`authz-seams` not `authz`; the middleware chain is a heading inside `httpclient`),
+  logs/probes/request-correlation added to already-automatic, the httpclient
+  response-cache elicitation carve-out, and the inbound-surface vs outbound-toolbox
+  gRPC split.
+
+### Changed
+
+- **`scaffold-view`'s infra-free bullet now carries the SharedBase exception
+  inline** — the same "later bolded imperative overrides the owner-sheet gate"
+  pattern 0.14.2 fixed for scaffold-entity had one remaining instance: the
+  never-refuse/offer-the-upgrade script now defers to `read-side.md`'s elicitation
+  contract for SharedBase asks (per-role plain view first, kind framed as a
+  complement, `configure` offered only on real multi-role intent).
+- **`sqlite-mvp.md` carries an explicit anti-drift exception**: pinned docs exist
+  claiming the `go run` dev loop is safe on a relative DSN — true of the engine's
+  resolution only; the migration runner resolved against the executable dir
+  (framework ≤ v0.44.1), so the template's `SQLITE_PATH` pin OUTRANKS the routed doc
+  on this one point and must never be removed by "the doc wins" (framework v0.44.2
+  fixes the runner; the pin stays as harmless belt-and-suspenders on fixed pins).
+- **`evolve-view`'s SQLite flip guidance** now says the honest thing: enabling Mongo
+  alone on SQLite yields a one-time backfill nothing ever updates (no CDC source) —
+  the offer is the FULL `configure` conversion, and a silently-stale view is worse
+  than a refusal.
+- `qa`'s plugin self-check now uses the canonical block (path + published URL + the
+  `claude plugin update omnicore@omnicore` remediation) like the other 13 skills.
+
+## [0.14.2] — 2026-08-05
+
+### Added
+- **Release notes are now published automatically** (`.github/workflows/release.yml`,
+  ported from the framework repo). A `vX.Y.Z` tag — pushed from the CLI or drafted in the
+  web UI — publishes the GitHub Release with this file's matching `## [X.Y.Z]` section as
+  the body: created from a CLI tag, synced in place when the release came from the UI.
+  CHANGELOG.md is the single source of truth, so notes typed into the UI form are
+  replaced. Two guards: the run fails before touching any release when the tag disagrees
+  with `plugin.json`'s `version` (clients install what the manifest declares, so a
+  mismatch would advertise a version nobody can install), and a missing CHANGELOG section
+  warns instead of clobbering an existing body. Prerelease tags (`-rc1`, `-beta.2`) keep
+  the "Latest" badge off.
+
+### Fixed
+- **`SharedBaseView` was offered on Mongo-less (SQLite / zero-infra) projects — again.**
+  The gate was already correct in its owner (`shared/read-side.md`, Kinds + elicitation)
+  and in `scaffold-entity`'s `sharedbase.md`, and `scaffold-entity`'s own posture invariant
+  says "never offer a view kind the posture cannot serve" — but 80 lines later, at the exact
+  moment of the question, Phase 1 item 1 ordered the opposite in bold: "ALWAYS offer the
+  all-in-one identity read … always surface the option", with no gate and no route to the
+  owner. A local, imperative, bolded instruction beats a general invariant stated earlier,
+  which is why this recurred. That bullet is now gated on the one question that decides it —
+  **does the project HAVE Mongo?** — with the axis spelled out (a full engine whose entity
+  views are relational-backed still has Mongo: keep offering there; only a Mongo-less infra
+  closes the door) and the no-Mongo script routed to the owner instead of restated. Same
+  gate added to the two templates that presented the slot unconditionally: `scaffold-entity`'s
+  `spec-template.md` and `scaffold-system`'s `domain-map-template.md` (§3 — where the choice
+  is made ONCE at map time, before delegation). Nothing changes on a CDC/Mongo project: the
+  offer, both cases (create / add-role + `Version` bump), the tone rule and the by-id +
+  by-params pair are untouched.
+- **The sibling (1:1) trade-off could be decided silently and never reach the dev.**
+  `scaffold-entity` classes siblings as high-risk modeling — "never guess these, PROPOSE
+  with a recommended pick and CONFIRM", and explicitly forbids burying them as "defaults
+  I'll apply, veto later". But Phase 1 item 2 was phrased as a self-question ("any
+  optional/sparse/bulky field group better split…? Name it, recommend, ask"), so an
+  internal "no" produced NO output at all: the run considered a satellite for a couple of
+  optional fields, dropped it, and moved on. The rule that says to surface the choice lived
+  in `conventions/siblings.md`, which by policy is loaded only once the model HAS a sibling —
+  circular: you had to have decided in order to read the instruction to offer. Item 2 now
+  states that ANY optional/nullable field makes the question one answered in the open —
+  deciding NOT to split is the same decision, of the same risk class — with the honest
+  threshold (two optional scalars usually stay nullable columns on the root; that is a
+  recommendation to SHOW, not a call to bury). The context-load rule now says a sibling is
+  offered WITHOUT `siblings.md` loaded, that file marks itself post-decision, and the spec
+  template marks `Lives on = root` on an optional field as a decision that must have been
+  surfaced.
+- **Generated child-mutation methods carried a redundant ensure-initialized call, and
+  empty wrappers passed unchallenged.** Two lines (`SKILL.md` traps and
+  `conventions/aggregate-children.md`) stated flatly that EVERY child-mutation method opens
+  with `domain.EnsureInitialized(root)`. The framework's own contract is narrower: it matters
+  only when the method emits a notification BEFORE delegating (`AddNotification` is a no-op
+  while the context is nil) — and `Add/Change/RemoveAggregateChild` already ensure-init the
+  root themselves, so on a method that only delegates the call is noise. Both lines now say
+  when it is needed and when it is not. Separately, nothing pushed back on a wrapper that
+  adds nothing at all: a child-mutation method must carry an aggregate-spanning invariant,
+  strategy B's by-id guard, or a real domain verb — and a change/archive method taking the
+  AVO instead of a childId is now called what it is, the by-id guard MISSING (per-child
+  routes with no not-found path), not a style choice. And the guard's HOME is now explicit:
+  a `<Verb><Child>ByID` domain method the command calls in one line — not a collection scan
+  inside `ApplyPartiallyTo`, which writes the same invariant once per child op in the layer
+  that does not own it. That method is also where the change-time duplicate guard belongs:
+  the framework rejects a same-identity duplicate on ADD but CHANGE only swaps, so a payload
+  can edit one child into another's identity unchallenged.
+- **`/omnicore:configure` never honored the promise the other skills make in its name.**
+  Three places now tell the dev that a Mongo-only view kind "arrives later via
+  `/omnicore:configure`" — `shared/read-side.md`, the generated domain map and the entity
+  specs. But `configure` mentioned view KINDS nowhere: it converted the infra, delegated
+  backing flips to `evolve-view`, and finished, leaving the dev to work out on their own that
+  the identity view they were promised had just become possible. The plan gate now states what
+  adding Mongo UNLOCKS (naming the slots this project has on record as `n/a — needs Mongo`),
+  and the final verify closes the loop — naming what became servible and routing to
+  `scaffold-view` (new kind) or `evolve-view` (backing flip), offering and never auto-creating,
+  since this skill writes no view declaration. The removal direction gets the mirror, so no
+  conversion changes capabilities silently either way. Not covered by the blind run: proving
+  it needs a full SQLite→Postgres+Mongo conversion.
+- **Two more decision points that could resolve in silence** — found by sweeping all 11
+  high-risk elicitation slots of `scaffold-entity` Phase 1 for the pattern behind the three
+  fixes above (a rule stated correctly in an owner sheet, absent or contradicted at the
+  moment of the question). Item 3: "independently-managed child → its OWN aggregate, not
+  nested" read as a rule the run APPLIES — now a call it must SHOW (nested vs own aggregate
+  is a regenerate-everything mistake). Item 10: the surface question never routed to
+  `shared/capabilities.md`, whose whole point is stating availability BOTH ways — GraphQL,
+  gRPC and exports work on every posture, SQLite included, and refusing an available
+  capability "because it's an MVP" is the mirror image of offering an unavailable one. The
+  other nine slots hold; item 11 (authorization) is the pattern to copy — it already spells
+  out that even the "anyone with the permission" answer must be said out loud.
+- **Scaffolded services shipped an OpenAPI spec with no description.**
+  `openapi.Config.Description` is what the framework renders as the paragraph under the
+  title on `/docs` (omitted from `info` entirely when empty), and no skill owned it:
+  `scaffold-service` named only `Title`/`Version`/`LanguageSelector` when writing
+  `Wiring.OpenAPI`, and — as that same rule states — no skill downstream ever revisits
+  this config, so a service born without a description kept none. Same shape as the
+  `LanguageSelector` gap fixed in 0.14.1, one field over. `scaffold-service` now carries
+  the description as a low-risk filled slot: ONE sentence taken from the dev's own words
+  in the invocation (fallback `<Service Name> service.`), recorded in `spec.md` so it is
+  correctable at the gate, and wired into `Wiring.OpenAPI`. Unlike the selector this one
+  has no automatic retrofit — it is service intent, which no entity-level skill can
+  infer; for a service generated before this fix, add `Description:` to the existing
+  `&openapi.Config{...}` in `bootstrap/wire.go`.
+
 ## [0.14.1] — 2026-08-05
 
 ### Fixed

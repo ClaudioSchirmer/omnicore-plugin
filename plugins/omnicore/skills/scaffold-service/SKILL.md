@@ -60,7 +60,7 @@ no Docker at all. Both boot to green; both are reversible via `/omnicore:configu
   their own words: the invocation arguments count, even a single word. No signal yet →
   the first user message sets it; switch the moment it becomes clear, even mid-run.
   Everything human-facing is BUILT in that language, not just the replies — the PAUSED
-  line, the Phase 1 questions, `spec.md` values, README prose, YAML/compose comments.
+  line, the Phase 1 questions, `spec.md` values, report prose, YAML/compose comments.
   Identifiers and config keys follow the framework contract and the dev's naming
   choices — never an imposed language.
 
@@ -84,7 +84,10 @@ session." Never a gate: this run continues on the installed skills.
   `/scaffold-entity` to add entities to it.
 - **Non-empty directory with an unrelated `go.mod` or source tree?** STOP and ask —
   never scaffold on top of somebody else's project.
-- **Toolchain:** `go` available; `docker` + `docker compose` available (only required
+- **Toolchain:** `go` available AND at least the framework's floor — the pin's
+  `go.mod` `go` directive (the docs' overview states it); a lower local toolchain
+  fails step 1's `go get` with a toolchain error, so check the version, not just the
+  binary. `docker` + `docker compose` available (only required
   when the docker bench is wanted — see Phase 1; a SQLite MVP needs NO Docker at all —
   no bench, no compose).
 - **Host OS:** `go env GOOS` (`darwin`/`linux`/`windows`) — picks the guaranteed-native
@@ -142,8 +145,11 @@ full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
    rootRedirect)`; GraphQL `(proposed: no)`; gRPC `(proposed: no)`. All additive
    later without rework — say so, no manufactured urgency.
 6. **Docker bench** — `(proposed: yes)` generate `devops/` (DB + Mongo + broker +
-   CDC relay, one compose). Alternative: point at EXISTING infra — then ask only for
-   the endpoints (relational DSN, Mongo URI, broker endpoints), skip `devops/`
+   CDC relay, one compose). Alternative: point at EXISTING infra — then ask WHICH of
+   the pieces exist and their endpoints (relational DSN always; Mongo URI and broker
+   endpoints only if present — `mongo` and `transport` are each opt-out by absence,
+   so a full engine with no Mongo or no broker is a legal, supported target posture,
+   not an incomplete answer), skip `devops/`
    entirely, and warn plainly: without a CDC relay tailing the outbox, the read side
    never projects — `templates/cdc-relay.md` is the reference for wiring their own. For
    **SQLite there is NO bench (zero Docker)** — skip this entirely and instead ask the
@@ -201,6 +207,14 @@ database/group/container names from the service name, `migrations.dir
 ./migrations/<dialect>`, dev-profile autoRun defaults, audit `slog` in dev, shutdown
 defaults, the prd template's JWT `${VARS}` placeholders.
 
+Also low-risk, and easy to lose: **the service description** — ONE sentence saying what
+the service is for, taken from the dev's OWN words in the invocation ("scaffold a service
+for managing orders" ⇒ `Manages orders.`); with nothing to go on, the neutral
+`<Service Name> service.`. Record it in the spec like every other filled slot, so the dev
+can correct it at the gate. It becomes `openapi.Config.Description` — the paragraph under
+the title on the `/docs` page. Free to set here, permanent if skipped: NO skill downstream
+revisits this config.
+
 Write the resolved answers to **`scaffold-service/spec.md`** (project root, visible,
 one small file — no per-layer task files; generation is one pass): every slot filled,
 `Status: DRAFT`. **Hard STOP** until the dev answers; a plain "ok" accepts every
@@ -243,7 +257,8 @@ applies only when any high-risk slot would otherwise be filled by you.
    to add the first entity. Derive the exact signatures from `bootstrap.html` — this
    skill carries no Go by design. Two wiring rules:
    - **OpenAPI surface chosen ⇒ set `Wiring.OpenAPI`** (Title from the service name,
-     an initial Version, AND `LanguageSelector: true`) — the yaml `openapi:` block only
+     an initial Version, the one-line Description recorded in the spec, AND
+     `LanguageSelector: true`) — the yaml `openapi:` block only
      tunes HOW the UI is served and is ignored unless `Wiring.OpenAPI` is set; without
      it the `/docs` check in the final verify can never pass. Derive the config
      type/fields from `bootstrap.html` / `openapi.html`. **`LanguageSelector` costs
@@ -256,10 +271,18 @@ applies only when any high-risk slot would otherwise be filled by you.
      accepts the fully empty shell (features + translations arrive with the first
      entity — they are `scaffold-entity`'s job; translations on a shell with zero
      features are dead weight the entity run would have to reconcile).
-4. **`microservice.dev.yaml`** — MINIMAL, not a reference dump: `service`, `http`, the
-   mandatory `relational` / `mongo` / `transport` blocks, `migrations`, the chosen
-   surfaces (`openapi` / `graphql`), `auth: {mode: disabled}` (dev-only), `audit:
-   [slog]`, `shutdown`. Every endpoint `${VAR:default}` — and the DEFAULT half MUST
+4. **`microservice.dev.yaml`** — MINIMAL, not a reference dump: `service`, `http`,
+   `relational` (the one truly mandatory infra block), plus `mongo` / `transport` per
+   the CHOSEN posture — each is opt-out by absence, independently (only `relational`
+   is required by validation; a full engine may legally omit either), `migrations`,
+   the chosen
+   surfaces (`openapi` / `graphql` / `grpc` — write the block for each approved
+   surface, all three; and say plainly that `graphql:`/`grpc:` are INERT until a
+   feature implements the opt-in interface — on the empty shell only OpenAPI is
+   observable, the others activate with the first entity that mounts them),
+   `auth: {mode: disabled}` (dev-only), `audit:
+   {destinations: [slog]}` (the key is `audit.destinations` — a bare sequence under
+   `audit:` is a decode failure at boot), `shutdown`. Every endpoint `${VAR:default}` — and the DEFAULT half MUST
    match the compose bench EXACTLY, never a generic placeholder: relational DSN with
    user/pass `omnicore:omnicore` on db `<svc>_db` at `localhost:<published port>`, the
    mongo URI and broker endpoints likewise. A `user:password`-style default boots the
@@ -278,7 +301,10 @@ applies only when any high-risk slot would otherwise be filled by you.
    boot against the registered route set (exact-match: a typo / wrong method / trailing
    slash ABORTS boot; path-param routes can't be listed — those use `Doc.Public` — see
    `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`). Endpoints as pure
-   `${VARS}` with no localhost defaults, no playground/introspection.
+   `${VARS}` with no localhost defaults, no playground/introspection. On
+   mysql/sqlserver/oracle add a `relational.pool` block (the `database/sql` pool is
+   otherwise UNLIMITED there — the honest template caps it; and Mongo rebuilds need
+   `pool ≥ rebuild workers + 1` — `yaml-reference` at the pin has the keys).
 6. **`migrations/<dialect>/.gitkeep`** — empty; the service's own sequence starts at
    `0001` when the first entity arrives (that is `scaffold-entity`'s job). Do NOT
    invent a placeholder `0001_init` no-op pair — the framework treats an empty
@@ -304,7 +330,8 @@ applies only when any high-risk slot would otherwise be filled by you.
    `CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite ./bootstrap`.
 10. **Resolve deps:** `go mod tidy` **then** `GOFLAGS=-mod=mod go build -o /dev/null
     -tags '<engine> <transport>' ./bootstrap` (`-o` is required: the default output
-    name `bootstrap` collides with the directory) — tidy alone
+    name `bootstrap` collides with the directory; on a Windows host the null sink is
+    `NUL`, not `/dev/null` — everywhere this skill builds) — tidy alone
     CANNOT see the tag-gated transport dependency behind `//go:build kafka|nats`, so
     the build must be allowed to add its go.sum entries. Both `go.mod` AND `go.sum`
     ship — never one without the other. **SQLite:** `CGO_ENABLED=0 GOFLAGS=-mod=mod go
@@ -349,6 +376,9 @@ real evidence; an unmet stated target is RED or an explicit dev-accepted deviati
    yaml and observable**: OpenAPI UI approved ⇒ `openapi:` block present AND its uiPath
    answers 200; `rootRedirect` approved ⇒ `GET /` answers 302 (the framework default is
    false — omitting the block silently drops the approved behavior into a `GET /` 404).
+   For approved `graphql:`/`grpc:` the shell check is PRESENCE-only — those surfaces
+   are feature-declared and inert until the first entity mounts them (step 4): say so
+   in the report instead of failing an observability check the shell cannot pass.
    The framework's dev profile boots the empty shell by design (a loud warn is
    expected in the log — it is the confirmation, not a problem). **Degradation:**
    if the boot instead aborts with "nothing to serve", the pinned omnicore predates
@@ -409,9 +439,13 @@ skill), the fallback for concepts this table doesn't list.
   on either axis, a tagless build aborts at boot — **except SQLite, which is engine-only
   (`-tags sqlite`) + tagless transport (valid: a no-op adapter, no broker, no messaging).**
 - **SQLite = zero-infra, no Docker.** `CGO_ENABLED=0` (pure-Go, no cgo). DSN is a file path
-  (default `file:app.db`, created next to the binary — portable; under `go run` falls back to
-  the project dir) or `:memory:` (ephemeral). An absolute path is honored verbatim (fixed
-  external location, not portable). The factory FORCES the correctness
+  (default `file:app.db`, created next to the binary — portable) or `:memory:`
+  (ephemeral). An absolute path is honored verbatim (fixed
+  external location, not portable). **Relative-path caveat — `templates/sqlite-mvp.md`
+  owns it and the wrappers exist because of it:** under `go run` the migration step
+  and the runtime can resolve a relative `file:app.db` to DIFFERENT files (green boot,
+  empty schema), so the wrappers pin an absolute `SQLITE_PATH`; trust the template
+  here even where a pinned doc sentence claims the dev loop handles it. The factory FORCES the correctness
   pragmas (`foreign_keys`, `case_sensitive_like`); no `mongo:`/`transport:` blocks, no
   `devops/`. SQLite is MVP-not-production (ASCII-only case folding, decimal stored TEXT —
   `table-schema.html`). Integration events + Mongo projections require a Debezium-tailable
@@ -449,12 +483,18 @@ skill), the fallback for concepts this table doesn't list.
   cannot decode native-JSON redo — pinned `table-schema.html`, Oracle column
   shapes). Concrete shape in `templates/cdc-relay.md` / `templates/docker-bench.md`,
   validated against the pinned `transport.html` — the doc wins on any drift.
-- **Mongo database is per-service** (`<svc>_views`); the `rebuild:` block is
-  strict-decoded — unknown keys abort boot.
+- **Mongo database is per-service** (`<svc>_views`); the `rebuild:`, `reconcile:` and
+  `parkedRetry:` blocks are strict-decoded — unknown keys abort boot (the exact block
+  list is the pin's `yaml-reference`).
 - **DSN defaults must equal the bench, not placeholders** — the compose creds are
   `omnicore:omnicore` on `<svc>_db` (docker-bench template; exception: the sqlserver
   bench logs in as `sa` with a strong password — the image enforces password
-  complexity, so `omnicore:omnicore` cannot exist there; second exception: the
+  complexity, so `omnicore:omnicore` cannot exist there — **and the sqlserver DSN has
+  a mandatory grammar the docs' example understates**: it MUST carry
+  `database=<svc>_db` (without it the app migrates into `master`) and the TLS pair
+  `encrypt=true;TrustServerCertificate=true` (the container's cert is self-signed;
+  without the pair the login handshake fails) — full shape:
+  `server=localhost;port=<hostport>;user id=sa;password=<pwd>;database=<svc>_db;encrypt=true;TrustServerCertificate=true`; second exception: the
   oracle bench KEEPS `omnicore:omnicore` — the image's APP_USER — but has NO
   `<svc>_db`: the app connects to the `FREEPDB1` PDB, where the schema IS the app
   user, so the DSN default is

@@ -15,8 +15,10 @@ by design: knowledge and elicitation policy only.
   O(1) fetch. Capability limits below.
 
 **SQLite forces the relational posture.** SQLite has NO CDC source (Debezium cannot tail
-a SQLite file), so there is NO Mongo projection and NO integration events — both ride the
-CDC relay. The "filter it on the Mongo view instead" fallback that applies on the full
+a SQLite file), so there is NO Mongo projection and NO integration-event PUBLISHING —
+both ride the CDC relay. (SUBSCRIBING to another service's events does NOT ride the
+relay — it needs only a broker + the transport build tag; `capabilities.md` owns that
+split.) The "filter it on the Mongo view instead" fallback that applies on the full
 engines does NOT apply here.
 
 ## INVARIANT — the posture NEVER constrains write-side modeling
@@ -30,9 +32,14 @@ Never let a read-side limit leak backwards into the domain model.
 ## Kinds vs plain views
 
 - A multi-source / read-time-join view KIND (SharedBaseView, ComposedView, the
-  Embed/Link family, Upstream, aggregated) is **relational-INELIGIBLE by construction**
+  Embed/Link family, Upstream) is **relational-INELIGIBLE by construction**
   — boot fail, a 400, or no `.RelationalSource()` to carry at all. The exact kind set
   and failure mode per kind are the PIN's (parity table in `relational-view`).
+- **"Aggregated view" is NOT a view kind.** Counts/sums/report scalars are the
+  `Aggregate`/`AggregateBy` DSL on the write-side RELATIONAL loader
+  (`custom-query-handler` at the pin) — computed on the SoR, never a Mongo view, and
+  therefore available on EVERY posture, SQLite included. Refusing "give me totals"
+  on an infra-free project (or pushing a Mongo conversion for it) is a wrong refusal.
 - A **plain single-aggregate view is relational-ELIGIBLE — whatever its aggregate's
   write-side shape**. In particular, a plain view rooted at a shared-base ROLE stays
   eligible: its served document carries the full aggregate — the role's fields, the

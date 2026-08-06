@@ -51,7 +51,11 @@ session." Never a gate: this run continues on the installed skills.
   the authority on what the pin supports). Both mandatory — a tagless build aborts
   at boot — **except SQLite: engine-only `-tags sqlite` (transport tagless) + `CGO_ENABLED=0`;
   no transport tag.**
-- **Profile + ports:** `APP_PROFILE=dev` unless the dev says otherwise; resolve the
+- **Profile + ports:** `APP_PROFILE=dev` unless the dev says otherwise; a project with
+  several dev profiles boots the one the dev names (`OMNICORE_CONFIG_PATH` selects a
+  non-canonical file — the reference dev loop does exactly that), and the tags follow
+  THAT profile's `relational.dialect` (itself a `${VAR:default}` — resolve the
+  interpolation, don't read the raw string); resolve the
   EFFECTIVE host port from the yaml (`${VAR:default}` — apply the env override rule).
 - **Already up?** Probe `/livez` on the resolved port first — answering ⇒ skip boot,
   jump to Phase 3 saying it was already running.
@@ -60,7 +64,11 @@ session." Never a gate: this run continues on the installed skills.
 
 - **SQLite / infra-free project** (no `devops/`, no `mongo`/`transport` in the yaml) → NO
   bench, boot directly. Do NOT report "unreachable" for infra that's absent by design.
-- `devops/` compose exists → `docker compose ps`; anything down → `up -d`, wait
+- `devops/` compose exists → `docker compose -f devops/docker-compose.yml ps` (the
+  file lives under `devops/`, and the bench sets its own project `name:` — a bare
+  `docker compose ps` from the project root finds nothing or the wrong project;
+  mirror the project's own wrappers, which pass `-f`); anything down → `up -d` with
+  the same `-f`, wait
   healthy. Trap: stopping Docker / `compose down` KEEPS named volumes — a
   migration-version-mismatch abort at boot usually means a stale volume; surface
   `down -v` as the fix but the DEV decides (it destroys data).
@@ -70,9 +78,15 @@ session." Never a gate: this run continues on the installed skills.
 
 ## Phase 2 — Boot
 
-- Prefer the project's start wrapper (`start.sh` / `start.cmd`); else
-  `APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap` — SQLite:
-  `CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite ./bootstrap`.
+- Prefer the project's start wrapper (`start.sh` / `start.cmd` — on SQLite the
+  wrapper exists precisely to pin the DB path; use it); else
+  `APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap` — SQLite bare
+  fallback: **NEVER a bare `go run`** — under `go run` a relative `file:app.db` can
+  resolve differently for the migration step and the runtime, so the service boots
+  GREEN over an empty schema and every entity request 500s `no such table`. Pin the
+  yaml's DSN interpolation var to an ABSOLUTE path first, exactly like the wrapper:
+  `SQLITE_PATH="file:$(pwd)/app.db" CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite
+  ./bootstrap` (the var name is the yaml's `${…}` default — read it, don't assume).
 - Run in BACKGROUND, log to a file (never through a pipe — a broken pipe can swallow the
   drain/boot narration); poll `/readyz` until 200 (bounded ~60s) — **and READ the 503
   body, don't just count**: `initializing: rebuilding view "X" (n/m)` means a background
@@ -84,23 +98,36 @@ session." Never a gate: this run continues on the installed skills.
 
 ## Phase 3 — The links (the deliverable)
 
-Only surfaces the yaml actually enables:
+Only surfaces the service actually serves:
 
 - App root: `http://localhost:<port>/` (302 when rootRedirect)
 - OpenAPI UI: `http://localhost:<port><uiPath>`
-- GraphQL / gRPC when enabled (gRPC isn't clickable — report host:port + reflection
-  state instead)
+- GraphQL / gRPC when enabled — **the enable switch is a FEATURE implementing the
+  surface's opt-in interface (`GraphQLFeature`/`GRPCFeature`), NOT the yaml block**: a
+  config carrying `graphql:`/`grpc:` with no feature opting in serves nothing there
+  (the block is ignored). Probe before linking — a dead `/graphql` link is worse than
+  none; gRPC isn't clickable — report host:port + reflection
+  state instead
 - Probes: `/livez` · `/readyz`
 
 **Full-bench projects — check the relay before handing over the links.** `/readyz`
 excludes the transport BY DESIGN, so green probes can hide a dead CDC relay: check the
-relay container's log reached streaming. If it hasn't, hand the links over anyway but
+relay container's log reached streaming — **with the cold-start carve-out**: right
+after a fresh bench/first boot the relay legitimately takes a while (it crash-loops
+until the app's first boot creates the outbox, `restart` cycles it back, and on
+sqlserver/oracle it cannot stream until the wrappers' background CDC-enable /
+supplemental-logging arms land — the reference waits up to ~2-3 min on those). So
+give it a BOUNDED wait proportional to the dialect before declaring it dead. If it
+still hasn't streamed, hand the links over anyway but
 SAY IT PLAINLY — "the app is live, but writes will NOT project to views until the
 relay streams" — and route to `doctor`. N/A for SQLite (no relay).
 
-The app STAYS RUNNING — that is the point. Close with how to stop: the PID +
-`kill <pid>`, and `docker compose down` for the bench (volumes survive; `down -v`
-wipes data — say so).
+The app STAYS RUNNING — that is the point. Close with how to stop — naming the RIGHT
+process: a background `go run` is a parent that exec'd a child holding the port, so
+`kill <parent-pid>` can orphan the actual listener (which then breaks the next run's
+"already up?" probe); report the LISTENER's PID (by port) or say to signal the
+process group, SIGTERM always. And `docker compose -f devops/docker-compose.yml down`
+for the bench (volumes survive; `down -v` wipes data — say so).
 
 ## Knowledge routing — question → `/docs` section
 
