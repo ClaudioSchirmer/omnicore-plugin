@@ -89,9 +89,11 @@ an accepted upgrade changes which version's docs are authoritative. Never bump i
 Map what exists: the source entities' schemas and views (shapes, `Version`s,
 collections) · existing composed/shared views and their conventions · enabled surfaces
 (REST, GraphQL, gRPC) · the project's INFRA POSTURE — is Mongo present, or is this an
-infra-free / SQLite project? (decides whether a Mongo-only view type can be served here
-now) · local naming flavor. Mirror local convention; validate framework usage against
-the docs.
+infra-free / SQLite project? (decides whether a Mongo-only view type can be SERVED here
+now — and "present" means `mongo:` AND `transport:` both: a `mongo:` block without
+`transport:` boots collections that never receive a row; fine print in
+`${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`) · local naming flavor. Mirror local
+convention; validate framework usage against the docs.
 
 ## Phase 1 — Spec gate: `scaffold-view/<view>/spec.md`
 

@@ -18,7 +18,12 @@ ever disagrees with the pinned docs, the docs win.
   boots and probes GREEN, and every consumer / upstream subscription / Mongo-projected
   refresh fails later **at the point of use** ("no transport linked — build with
   -tags kafka or -tags nats"). No `transport:` block (opt-out by absence — legal on
-  ANY engine, not just SQLite) → build with no transport tag, no messaging.
+  ANY engine, not just SQLite) → build with no transport tag, no messaging — and the
+  projection sync consumer is SKIPPED at boot with an INFO line ("projection consumer
+  not started: no transport configured"); view registry, spec application and drift
+  detection still run, so a `mongo:` block WITHOUT `transport:` boots green with
+  collections that exist but never receive a row (useful only to let Mongo-declared
+  views boot — a bench/QA shape, not a serving posture).
 - The zero-infra SQLite MVP is engine-tag-only and pure Go:
   `CGO_ENABLED=0 go build -tags sqlite`. SQLite still NEEDS its engine tag — "SQLite
   is tagless" is a misreading; only the transport tag is absent, and only because the
@@ -97,7 +102,9 @@ keep the ports.)
 
 Boot abort "no relational engine registered" → missing engine build tag · reactions/
 subscriptions dead on a green service, "no transport linked" at the point of use →
-`transport:` block present but built without the transport tag ·
+`transport:` block present but built without the transport tag · Mongo-backed views
+never materialize, boot INFO "projection consumer not started" → no `transport:`
+block at all (posture by design, not a fault) ·
 401 on probes under jwt → `publicRoutes` missing the probe paths · boot abort naming a
 publicRoutes entry → exact-match validation, fix the literal · boot abort on pending
 migrations under prd → `autoRun: check` working as designed · `/readyz` 503 with
