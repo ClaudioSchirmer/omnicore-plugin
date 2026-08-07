@@ -30,8 +30,13 @@ The two anchor postures:
   + Mongo + broker (kafka | nats) + the CDC relay + a docker bench. Mongo-projected views,
   integration events (publish + subscribe), the whole read-side vocabulary.
 
-…and every point between them: Mongo without changing engine is impossible on SQLite but every
-other axis (broker on/off, transport kafka⇄nats, per-view backing) is independent.
+…and every point between them: Mongo PROJECTIONS without changing engine are impossible on
+SQLite (no relay tails it), but a `mongo:` BLOCK is legal on any posture: without a `transport:`
+block the sync consumer is skipped at boot (INFO line "projection consumer not started: no
+transport configured") while registry/specs/drift still run — Mongo-declared views BOOT over
+collections that never receive a row (the shape a bench/QA profile uses, e.g. to let a
+SharedBaseView exist). Every other axis (broker on/off, transport kafka⇄nats, per-view
+backing) is independent.
 
 ## Core principles — read FIRST
 
@@ -93,7 +98,9 @@ Map what exists before proposing — this is the whole safety of the run:
 - **Engine + DSN** — `relational.dialect` and the DSN across every `microservice.*.yaml`
   (resolve `${VAR:default}`); the `migrations/<dialect>/` folders present; the build tags in the
   start wrappers.
-- **Mongo** — is a `mongo:` block / `mongo.uri` present? (absent ⇒ relational-only posture.)
+- **Mongo** — is a `mongo:` block / `mongo.uri` present? (absent ⇒ relational-only posture;
+  present WITHOUT `transport:` ⇒ collections boot but the sync consumer is skipped — see the
+  anchor-postures note above.)
 - **Transport** — a `transport:` block + which build tag (`kafka`/`nats`/tagless)?
 - **Views** — which carry `.RelationalSource()` (SoR-served) vs Mongo-projected; the
   composed/shared/embed ones (Mongo-only by construction).

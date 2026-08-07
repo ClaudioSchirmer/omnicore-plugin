@@ -5,6 +5,45 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.16.0] — 2026-08-06
+
+Alignment with framework v0.45.0 (gRPC pagination mirroring the REST envelope; the
+projection consumer skipped when no `transport:` block is configured). The gRPC
+envelope rename itself needs no skill text — no skill ever named the proto messages,
+and docs-first routing absorbs it per pin; the new surface facts (`search` opt-in,
+`only_total` conflict matrix, `has_next`/`has_prev`, enum request seats, 64-bit DTO
+seats) are documented in the pin's `grpc` section, which executing agents already
+read.
+
+### Added
+
+- **`upgrade` — fifth Phase 2b fallout class: the shared gRPC proto contract
+  changed.** `go build` does catch it (the service's generated `.pb.go` loses the
+  framework symbol), but the fix is a toolchain step, not a Go edit: re-spell the
+  service's hand-written `.proto` against the new pin's shared proto and re-run
+  `protoc`/`buf` — never patch a generated `.pb.go` by hand. When the changelog
+  preserves field numbers, deployed binary clients keep decoding — the break is
+  source-level only, and the plan says so (it changes the rollout conversation).
+- **`doctor` — direct boot-log evidence for "writes 2xx, views never arrive".** The
+  ladder now starts at the INFO anchor `projection consumer not started: no
+  transport configured` (consumer skipped by design; registry/specs/drift still
+  run; Mongo-backed views never materialize, relational views unaffected) and
+  explicitly separates its twin — `transport:` block present but built without the
+  transport tag (no INFO line, "no transport linked" at the point of use). The
+  relay → broker → sync walk applies only with block AND tag present. Same anchor
+  added to `shared/boot-contract.md`'s Build-tags section and diagnosis quick-map.
+
+### Changed
+
+- **The no-transport posture nuance, stated wherever posture is read** (`configure`
+  anchor postures + posture mapping, `scaffold-view` Phase 0, `shared/read-side.md`
+  SharedBaseView offer): a `mongo:` block WITHOUT a `transport:` block boots green
+  with collections that exist but never receive a row — a bench/QA shape useful
+  only to let Mongo-declared views boot, which does NOT count as "Mongo present"
+  when offering Mongo-only view kinds. `configure` also stops implying a `mongo:`
+  block is illegal on SQLite — impossible there are Mongo PROJECTIONS (no relay
+  tails SQLite); the block itself is legal on any posture.
+
 ## [0.15.0] — 2026-08-05
 
 The full-plugin audit release: every skill, owner sheet, convention and template was

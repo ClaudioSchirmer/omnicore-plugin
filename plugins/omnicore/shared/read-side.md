@@ -92,7 +92,11 @@ is recent). Read it only when you must answer a precise capability question, exp
   offered; Mongo → kept-but-hidden (default) OR dropped (`DeleteOnArchive()` — the
   hot-tier choice). The pin's `views` section carries the contract.
 - **SharedBaseView (whenever a SharedBase is in play).** Mongo present → OFFER it
-  (mechanics in `scaffold-entity`'s `sharedbase.md`). No Mongo → do NOT offer it as
+  (mechanics in `scaffold-entity`'s `sharedbase.md`) — where "present" means `mongo:`
+  AND `transport:` both configured: a `mongo:` block WITHOUT `transport:` boots the
+  declared collections but the sync consumer is skipped (boot INFO line), so they
+  never receive a row — a bench/QA shape that does NOT count for this offer. No
+  Mongo → do NOT offer it as
   available and do NOT refuse or go silent: point at the per-role plain view the dev
   already gets (base fields flattened — see Kinds above), frame the kind as a complement
   switched on later via `/omnicore:configure`, and offer that route only when the dev

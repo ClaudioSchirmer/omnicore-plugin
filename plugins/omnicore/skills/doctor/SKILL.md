@@ -108,13 +108,21 @@ Bench-proven cause patterns to CHECK, not to assume:
 - **Boot abort from the document-store registry guard** (foreign collections in the view
   database) → the service shares a view DB it shouldn't; prescribe isolating it in its
   own database, per the bootstrap section.
-- **Writes 2xx forever, views never arrive** → walk relay → broker → sync in that
-  order: a relay that never reaches "streaming", an unreachable broker, or a sync group
-  that isn't consuming. A relay crash-looping BEFORE the app's first boot is expected
-  (the outbox doesn't exist yet) — not a failure. **BUT in an infra-free / SQLite project
-  this is BY DESIGN, not a fault:** views are served relational (read-your-writes), there
-  is no relay/broker/sync. If the dev wants projections/events, that's a
-  `/omnicore:configure` conversion, not a bug.
+- **Writes 2xx forever, views never arrive** → read the BOOT LOG first: the INFO
+  anchor `projection consumer not started: no transport configured` is direct
+  evidence — with no `transport:` block the sync consumer is skipped BY DESIGN
+  (registry, spec application and drift detection still run, so collections exist
+  and boot is green) and a Mongo-backed view will NEVER materialize on this posture;
+  relational views are unaffected, and the answer is a `/omnicore:configure`
+  conversion, not a fix. Do not fuse it with its twin: a `transport:` block PRESENT
+  but the binary built WITHOUT the transport tag logs no such line and fails at the
+  point of use ("no transport linked" — the dead-reactions signature below). Only
+  with the block present AND the tag linked, walk relay → broker → sync in that
+  order: a relay that never reaches "streaming", an unreachable broker, or a sync
+  group that isn't consuming. A relay crash-looping BEFORE the app's first boot is
+  expected (the outbox doesn't exist yet) — not a failure. In an infra-free / SQLite
+  project none of the three exists and views are served relational
+  (read-your-writes) — same INFO anchor, same `/omnicore:configure` answer.
 - **Relay/broker/sync all GREEN, one view or one document missing/stale** → the parked
   layer, not timing: `SELECT … FROM omnicore_projection_failures` (Phase 1 stage 7).
   A parked event with `parkedRetry` disabled in the yaml is the classic "everything

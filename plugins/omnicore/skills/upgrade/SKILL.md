@@ -123,8 +123,9 @@ tooling; say so if the dev conflates them).
 
 1. **Diagnose.** Run the Phase 2 verify; collect every compile/vet error verbatim. Map
    each error to its changelog breaking item (the module-root `CHANGELOG.md` has the
-   per-symbol detail). **Then scan the version range for the OPERATIONAL fallout no
-   compiler ever surfaces — four named classes, each a plan entry when present:**
+   per-symbol detail). **Then scan the version range for the OPERATIONAL fallout — five named
+   classes, each a plan entry when present (a–d invisible to the compiler; e
+   compiler-visible but its fix lives outside Go):**
    (a) **required DDL on the service's own tables** (e.g. a release mandating a new
    column on every entity table) → the plan names the migration the dev owns (or
    routes to `/omnicore:evolve-entity`); (b) **a demanded view rebuild** after the
@@ -134,7 +135,16 @@ tooling; say so if the dev conflates them).
    and what to run; (d) **yaml key renames/moves** (e.g. a block renamed) — no
    compile error, boot abort on the old key (strict-decoded blocks): these are
    MECHANICAL and auto-fixable, and the approved plan MAY touch `microservice.*.yaml`
-   for exactly this class. Everything else behavioral stays report-only.
+   for exactly this class; (e) **the framework's shared gRPC proto contract changed**
+   (a message in `omnicore/v1` renamed or reshaped) — `go build` DOES catch it (the
+   service's generated `.pb.go` references a framework symbol the new pin no longer
+   exports), but the fix is a TOOLCHAIN step, not a Go edit: re-spell the service's
+   hand-written `.proto` files against the new pin's shared proto and re-run the
+   generator (`protoc`/`buf`) — never patch a generated `.pb.go` by hand. When the
+   changelog states field NUMBERS are preserved, already-deployed binary clients
+   keep decoding — the break is source-level only, and the plan SAYS so (regenerate
+   and redeploy at leisure, no wire migration). Everything else behavioral stays
+   report-only.
 2. **Understand old vs new — docs-first, both pins.** Both versions sit in the module
    cache. For each item, read the owning section at the OLD pin (how it worked) AND at
    the NEW pin (how it works now) — `go list -m -f '{{.Dir}}' …/omnicore@<ver>` +
