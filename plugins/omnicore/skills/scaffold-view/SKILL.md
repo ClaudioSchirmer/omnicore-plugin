@@ -110,8 +110,8 @@ sections structural (`N/A — <why>`, never deleted):
    (CDC join vs subscription/mirror vs fetched on request) · **coupling + failure mode**
    (what the reader sees when a source is down or lagging) · **cost** (storage,
    rebuild, latency) · **read capability** — on a MATERIALIZED embed a segment filter
-   SELECTS rows and a 1:1 segment field is a first-class sort key; on a ComposedView a
-   leg filter only shapes the segment and a segment `?sort=` is a 400 — the docs name
+   SELECTS rows and a 1:1 segment field is a first-class `orderBy` key; on a ComposedView a
+   leg filter only shapes the segment and a segment `?orderBy=` is a 400 — the docs name
    "consumers need to filter/sort BY the joined data" as the trigger to materialize
    (`views`). Then recommend ONE with the why, name the runner-up, and CONFIRM.
    Never self-answer; never ask without the explanation.
