@@ -83,7 +83,9 @@ Map what the service declares — this inventory IS the test surface:
   finding, not a guess to resolve silently.
 - **Views**: per view its backing (`.RelationalSource` or Mongo) → the read-back
   expectation per the posture rule above; archive regime (kept-but-hidden vs
-  `DeleteOnArchive`); filter/sort/search vocabulary per field; `?fields=` opt-in.
+  `DeleteOnArchive`); filter/sort/search vocabulary per field; which RESERVED controls
+  the list Request DTO declares (`query:"…"` — the DTO opt-in gate: declared = served,
+  undeclared = typed 400 on presence; `?fields=`/`?onlyTotal`/`?search` included).
 - **Surfaces**: REST always; GraphQL/gRPC/exports only when wired — a case per
   enabled surface (handler invariance: the SAME operation answers identically), none
   for absent ones.
@@ -102,19 +104,30 @@ Map what the service declares — this inventory IS the test surface:
    VO/rule failure per shape, asserting the notification KEY, not prose) · the dual
    409 (duplicate vs wrong-state — only where the entity declares each) · archive
    round-trip (`archive → hidden → ?includeArchived reveals → unarchive → visible`;
-   with `DeleteOnArchive`, absence instead) · read vocabulary (one filter/sort per
-   declared operator family, `?fields=` when opted in, `?search=` where a text index
-   serves it, `?onlyTotal=true` count-only, and the PAGINATION ENVELOPE as a contract:
-   `pagination.has_next`/`next_cursor` truthfulness, page-2 disjointness, cursor
+   with `DeleteOnArchive`, absence instead) · read vocabulary (one filter/`?orderBy=`
+   per declared operator family, `?fields=` when opted in, `?search=` where a text index
+   serves it, `?onlyTotal=true` only-total, `?last=` alone serving the TAIL window, and
+   the PAGINATION ENVELOPE as a contract: `pagination.totalCount`/`hasNextPage`/
+   `hasPreviousPage`/`startCursor`/`endCursor` truthfulness (cursors are WINDOW EDGES —
+   walk by echoing them into `?after=`/`?before=`), page-2 disjointness, cursor
    advance) · **golden-record round-trip** (one record exercising EVERY declared
    field — VO fields included — written then read back field-by-field on each enabled
    surface: the family that catches a field silently dropped from a DTO/projection,
    which every other family passes over) · rejected reads — the WHOLE typed-400 guard
    family, not one: the relational 1:N pushdown · unknown field · operator outside a
-   field's allowlist · `?limit` above the view's ceiling · malformed
-   `?after=`/`?before=` · `after`+`before` together · cursor↔sort mismatch ·
+   field's allowlist · a RESERVED control the Request DTO does not declare (the DTO
+   opt-in gate — PRESENCE trips it, so an undeclared `?onlyTotal=false` rejects too;
+   surface idiom differs BY DESIGN: REST 400, GraphQL unknown argument — and `fields`/
+   `onlyTotal` are selection-natural there, never gated — gRPC INVALID_ARGUMENT; the
+   pin's `graphql`/`grpc` sections own the per-surface rendering, don't assert the
+   REST envelope cross-surface) ·
+   `?first=`/`?last=` above the view's ceiling · mixed directions (`first`+`last`,
+   `first`+`before`, `after`+`before` — backward is `last`+`before`) · `?onlyTotal=true`
+   beside a page-shaping control (the only-total conflict matrix; filters/`?search=`/
+   `?includeArchived` stay valid — counting a filtered subset is the point) · malformed
+   `?after=`/`?before=` · cursor↔`orderBy` mismatch ·
    cursor↔`includeArchived` mismatch · `?search=` on a relational view · segment
-   `?sort=` on a composed leg (derive the exact set from `status-mapping`'s
+   `?orderBy=` on a composed leg (derive the exact set from `status-mapping`'s
    SemanticSchema rows + `auto-query-handlers` at the pin — the enumeration here is
    the FAMILIES, the pin owns the members) · absent verbs
    → the 403/404/405 split above · not-found → 404. Route: `auto-handlers` +

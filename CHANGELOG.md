@@ -5,6 +5,40 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.17.0] — 2026-08-07
+
+Alignment with framework v0.46.0 (DTO-governed read controls): universal Relay read
+vocabulary (`?orderBy=`, the directional `?first=`/`?last=`
+pair, envelope `totalCount`/`hasNextPage`/`hasPreviousPage`/`startCursor`/`endCursor`),
+the reserved-control opt-in gate on every surface, and the closed control vocabulary
+enforced at boot. The Go/proto renames (`OrderByField`, `PaginationRequest.first`/`last`,
+builder `OrderBy()`/`FieldMask()`) need no skill text — no skill names those symbols;
+docs-first routing absorbs them per pin.
+
+### Changed
+
+- **`qa` — read-side contract families speak the Relay wire.** Phase 1's coverage
+  matrix now names `?orderBy=`, the Relay pagination envelope as the asserted contract
+  (window-edge cursors walked via `?after=`/`?before=`), `?last=` alone as the TAIL
+  window, and only-total (the "count-only" spelling is retired). The rejected-reads
+  family gains the DTO opt-in gate (an undeclared reserved control rejects on PRESENCE
+  — `?onlyTotal=false` included), the directional 400s (`first`+`last`,
+  `first`+`before`, `after`+`before`; backward navigation is `last`+`before`) and the
+  only-total conflict matrix (`?onlyTotal=true` beside a page-shaping control), and
+  retires `?limit`/`?sort=` spellings. Phase 0's view inventory now reads WHICH
+  reserved controls each list Request DTO declares — declared = served, undeclared =
+  typed 400.
+- **`scaffold-entity` — the web layer teaches the gate.** New `conventions/web.md`
+  trap: read controls are DTO-governed (undeclared reserved control = typed 400 on
+  presence; GraphQL SDL-cut; gRPC INVALID_ARGUMENT) and the control vocabulary is
+  CLOSED at boot — a top-level `query:`-tagged scalar with no `filter:` tag outside
+  the canonical set panics at wrapper construction (a `query:"limit"`/`query:"orderby"`
+  typo fails loud instead of advertising a dead OpenAPI parameter). The spec template's
+  §9 now records which reserved controls the listing serves, as an explicit low-risk
+  spec decision.
+- **`scaffold-view` — composed-leg limitation re-spelled**: a segment order on a
+  ComposedView leg is named `?orderBy=` (the retired `?sort=` spelling is gone).
+
 ## [0.16.0] — 2026-08-06
 
 Alignment with framework v0.45.0 (gRPC pagination mirroring the REST envelope; the

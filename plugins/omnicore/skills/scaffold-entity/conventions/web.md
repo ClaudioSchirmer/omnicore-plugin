@@ -43,6 +43,16 @@ interface is what lets this layer compile before infra exists.
   lenient handler, on child ADD exactly as on UPDATE (a strict add 400s an omitted
   optional); all-required (especially numeric — a missing number defaults to 0 and can
   slip range rules) ⇒ strict.
+- **Read controls are DTO-GOVERNED and the control vocabulary is CLOSED.** A reserved
+  read control is served ONLY when the list Request DTO declares it (`query:"onlyTotal"`,
+  `query:"includeArchived"`, …): undeclared, its mere PRESENCE on the wire is a typed
+  400 (GraphQL omits it from the SDL; gRPC answers INVALID_ARGUMENT) — so declare
+  exactly the controls the spec wants served, nothing silently. And the set is closed
+  at BOOT: a top-level `query:`-tagged scalar with no `filter:` tag whose key is not
+  one of the canonical controls (`auto-query-handlers.html` owns the list) panics at
+  wrapper construction — a typo (`query:"orderby"`) or a stale spelling
+  (`query:"limit"`) fails loud instead of advertising a dead parameter in OpenAPI.
+  Invisible to `go build`, like every boot guard.
 - **Read-request query params default to OPTIONAL — pointer fields.** Every scalar
   `query:`-tagged field on a read request (filters, pagination keys, the reserved
   archived-visibility flag included) is optional by default: declare it a pointer and

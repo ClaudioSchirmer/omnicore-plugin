@@ -121,6 +121,10 @@ a sibling NEVER gets its own endpoint; `siblings.md`).
   reacts to another service's): via `/omnicore:implement` (after this run — note the
   ask here so it isn't lost)
 - Reads: by-id + by-params (expected defaults).
+- Reserved read controls SERVED by the listing (the Request DTO governs — declared =
+  served, undeclared = typed 400): pagination/`orderBy` expected defaults; `?fields=` /
+  `?search=` / `?onlyTotal` / `?includeArchived` each yes/no (low-risk — filled, shown;
+  `?search=` only where a text index will serve it).
 - Field-level read authz: any field only SOME callers may see? (`ReadCriteria.Restrict`
   — passive omission vs active 403, prunes `?fields=`/GraphQL selection/exports alike;
   `authz-seams.html`.) Ask — invisible at modeling time, loved when offered.
