@@ -10,7 +10,9 @@ rarely-read facets off a hot row with **no new domain type**.
 
 ## Where a sibling can attach
 
-A **single-owner node only**: a flat root, a ROLE, or a role-child. Width unlimited.
+A **single-owner node only**: any root (flat or ROLE) or any of its own aggregate
+children. Width unlimited. The only exclusions are the SharedBase side (below) and a
+sibling of a sibling.
 
 > **⚠️ A sibling CANNOT attach to a SharedBase (the base) nor to a base-child — boot
 > PANIC.** A base has many roles, so the 1:1 doesn't apply. In a SharedBase model the

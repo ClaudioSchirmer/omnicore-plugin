@@ -40,11 +40,11 @@ translation catalogs are **registration sites** — existing files you APPEND to
   names live on the web-layer DTOs (`internal/web/requests/` — request+response
   co-located per operation; `internal/application/dtos/` holds child-collection INPUT
   DTOs only, never wire types); physical column names live only
-  in the infra schema. Worse than redundant: a `json:"-"` silently drops the field from
-  the `Old()` snapshot the framework builds via a json round-trip — and a custom
+  in the infra schema. Worse than redundant: a `json:"-"` on a persisted field would
+  break the `Old()` snapshot the framework builds via a json round-trip — and a custom
   `json.Marshaler` on the entity is the SAME trap by another door (it hijacks that
-  round-trip). The canonical example's
-  domain structs carry `labelKey` only — match them.
+  round-trip). Both are caught LOUDLY: boot panic at `WithSchema` naming the offender
+  (`old-state.html`). Domain structs carry `labelKey` only.
 - A **flat** entity does NOT implement `domain.AggregateRootProvider` — that is the
   children delta.
 
@@ -102,9 +102,9 @@ own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
 
 ## Modes() + BuildRules — traps the docs route you past
 
-- **`Modes()` ⟺ the schema's archive-column declaration must agree** — `ModeArchive`
-  without the declared column
-  panics at repo construction (and vice-versa; keep them in lockstep).
+- **`Modes()` → the schema's archive-column declaration must exist** — `ModeArchive`
+  without the declared column panics at repo construction. (The reverse is legal:
+  `DeletedAt(col)` with no archive verb boots fine.)
 - **Archive/unarchive have their OWN clauses — `IfArchive`/`IfUnarchive`** (gate on
   ModeArchive/ModeUnarchive). `IfUpdate` is PUT/PATCH exclusively; a rule left in `IfUpdate`
   will NOT fire on an archive transition. `actionName` is a free-form label, never a verb
@@ -199,10 +199,11 @@ Four key kinds per entity:
 3. **the ENTITY NAME itself** — it is the aggregate's `ContextName`, rendered as the
    `context` label of every error envelope; omit it and the label falls back to the raw
    type name untranslated (`bootstrap.html`),
-4. **every enum VO's VALUE keys** — each member renders per-locale via
+4. **(optional) enum VALUE keys** — each member CAN render per-locale via
    `EnumDescriptionKey(v)` (`"<Type>.<value>"`), registered in the catalogs like any
-   other key (`value-objects.html`); the fallback is the raw key leaking to the user,
-   so every enum this skill mandates brings its N value keys with it.
+   other key (`value-objects.html`). Nothing on the scaffolded path calls it — the wire
+   DTOs carry the raw scalar — so register the N value keys only when the spec asks for
+   human-readable enum labels, not as a blanket rule.
 Reuse a labelKey (and the entity-name entry) when the field lands on a shared base —
 don't duplicate translations across roles.
 

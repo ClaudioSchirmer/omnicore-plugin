@@ -9,31 +9,30 @@ pragmas, build tags) is validated against the pinned `yaml-reference.html` + `ta
 ## Build & run shape
 
 - Build: `CGO_ENABLED=0 go build -tags sqlite ./bootstrap` — pure-Go, no cgo, one static binary.
-- Transport is **tagless** (no `kafka`/`nats` tag): a no-op adapter, no messaging.
+- Transport is tagless in the ZERO-INFRA DEFAULT because the yaml declares no
+  `transport:` block (a no-op adapter, no messaging) — the tag follows the yaml, not the
+  engine: a SQLite service that later declares `transport:` to SUBSCRIBE to another
+  service's events builds with that transport's tag.
 - Run: always the dev profile — `APP_PROFILE=dev CGO_ENABLED=0 go run -tags sqlite ./bootstrap`.
-- No `mongo:` and no `transport:` block in `microservice.dev.yaml` (both opt-out by absence).
+- No `mongo:` and no `transport:` block in `microservice.dev.yaml` — the zero-infra
+  DEFAULTS (both opt-out by absence, both reversible later via `/omnicore:configure`;
+  a SharedBaseView would require re-adding `mongo:` — it boots and serves empty, no CDC
+  feed).
 
 ## DSN — where the database lives
 
 `relational.dsn` default `${SQLITE_PATH:file:app.db}`:
 - **relative `file:app.db` (the yaml DEFAULT)** — the portable single-file story: the `.db` lives
-  NEXT TO THE BINARY (a pendrive carries binary + `.db` together). Reliable for a BUILT binary
-  launched from its own dir (one process, one stable CWD). **NOT reliable under `go run`** — the
-  throwaway temp binary makes the migration step and the runtime resolve a relative `file:app.db` to
-  DIFFERENT files (the temp exe dir vs the project dir), so migrations persist to one and the server
-  reads an empty other: the boot log says `migrations applied` and every request then fails with
-  `no such table`. **That is why the dev-loop wrappers below pin an ABSOLUTE `SQLITE_PATH` next to
-  the script** (recomputed each run, so the `.db` still travels with the project — portability kept)
-  instead of trusting the relative fallback. Parent dir auto-created.
-  **⚠️ Anti-drift exception — this paragraph OUTRANKS the routed doc on this one
-  point.** Pinned docs exist that claim the dev loop is safe ("under go run/test it
-  falls back to the working dir, so the dev loop persists in the project") — that
-  carve-out is true of the ENGINE's DSN resolution only; the MIGRATION RUNNER
-  resolves against the executable's dir unconditionally, so the split above is real
-  under `go run`. Do NOT apply the skills' usual "the doc wins" precedence here and
-  delete the `SQLITE_PATH` pin from the wrappers — that reintroduces the exact
-  regression this template exists to prevent. (If a future release fixes the runner
-  and its changelog says so, the pin becomes harmless belt-and-suspenders — keep it.)
+  NEXT TO THE BINARY (a pendrive carries binary + `.db` together). Under `go run` the
+  ephemeral-binary carve-out applies on BOTH sides — engine AND migration runner resolve
+  against the working dir (the project), mirrored deliberately since v0.44.2 — so the dev
+  loop migrates the database it serves. The wrappers below still pin an ABSOLUTE
+  `SQLITE_PATH` next to the script (recomputed each run, so the `.db` travels with the
+  project): harmless belt-and-suspenders, plus one unambiguous path across
+  build-vs-`go run` and OS shells. On a pin OLDER than v0.44.2 the runner resolved
+  against the exe dir and the dev loop really did split (green boot, empty schema,
+  `no such table`) — the pin's changelog decides which world you are in. Parent dir
+  auto-created.
 - **absolute `file:/var/lib/app/app.db`** — used verbatim; a fixed external location (also the form
   the wrappers compute for the local `app.db`). Only a hand-typed external path is non-portable.
 - **`:memory:`** — RAM-only, ephemeral (gone on exit); demos/tests. An explicit `SQLITE_PATH` (this,

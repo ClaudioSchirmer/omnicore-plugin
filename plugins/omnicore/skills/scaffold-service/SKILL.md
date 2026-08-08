@@ -113,8 +113,12 @@ on the table.
 - **Round 2 — branch on the dialect answer:**
   - **SQLite →** ask ONLY the slots that still exist: the SQLite DSN (#6-SQLite),
     surfaces (#5), cross-platform wrappers (#7). Do NOT ask transport, docker bench, or
-    read-side posture — SQLite forces them (tagless / no bench / relational). No
-    "ignored if sqlite" parentheticals, no answering-to-discard.
+    read-side posture — the zero-infra DEFAULT resolves them (no `transport:` block ⇒ no
+    transport tag / no bench / relational views) and the spec RECORDS them as defaults,
+    not laws: a SQLite service may later declare `transport:` + the tag to SUBSCRIBE to
+    another service's events, or add `mongo:` for a SharedBaseView (boots, serves empty —
+    no CDC feed) — both via `/omnicore:configure`, no re-scaffold. No "ignored if sqlite"
+    parentheticals, no answering-to-discard.
   - **Full engine (postgres|mysql|sqlserver|oracle) →** ask transport (#4), surfaces
     (#5), docker bench (#6), cross-platform wrappers (#7), read-side posture (#8) — all
     in this one round.
@@ -137,10 +141,12 @@ full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
    match what production will run. **`sqlite` is decisive**: it is the zero-infra MVP
    engine and collapses the transport / bench / read-side questions (see the SQLite block
    below); the others take the full-infra path.
-4. **Transport: `kafka` | `nats`** — asked ONLY when the engine is not SQLite (SQLite is
-   tagless: no broker). Same advice: match production; NATS is the lighter local bench
-   when there's no constraint yet. No broker ⇒ no integration events (they ride the CDC
-   relay — the canonical path).
+4. **Transport: `kafka` | `nats`** — asked ONLY when the engine is not SQLite (the
+   zero-infra default declares no `transport:` block, hence no transport tag — the tag
+   follows the YAML, never the engine). Same advice: match production; NATS is the
+   lighter local bench when there's no constraint yet. No broker ⇒ no integration-event
+   PUBLISHING (it rides the CDC relay — the canonical path); consuming another service's
+   events needs only a broker + the transport tag, on any engine.
 5. **Surfaces** — one question, three parts: OpenAPI UI `(proposed: yes, /docs +
    rootRedirect)`; GraphQL `(proposed: no)`; gRPC `(proposed: no)`. All additive
    later without rework — say so, no manufactured urgency.
@@ -172,8 +178,9 @@ full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
    as the DEFAULT backing per entity view (still per-entity overridable there).
 
 **When the engine is SQLite — the zero-infra MVP posture (say all of this, calmly).**
-Picking SQLite auto-resolves the infra questions and the spec records them: no `mongo`,
-no `transport` (tagless), no `devops/`, no Docker — one pure-Go binary
+Picking SQLite auto-resolves the infra questions and the spec records them AS THE
+ZERO-INFRA DEFAULTS (reversible opt-ins, not engine laws): no `mongo`, no `transport`
+(hence tagless), no `devops/`, no Docker — one pure-Go binary
 (`CGO_ENABLED=0 -tags sqlite`) against a `file:app.db` or a `:memory:` database (RAM-only,
 data ephemeral). All entity views are served relational from the SoR (read-your-writes).
 DSN: ship the relative default `${SQLITE_PATH:file:app.db}` — the `.db` is created next to
@@ -188,8 +195,10 @@ Be honest AND reassuring:
   relational view re-composes the aggregate per read, and only plain per-entity views
   are servable (what they serve vs reject, and what the posture never constrains —
   write-side modeling — per `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`, the owner).
-- **Integration events and Mongo projections don't exist here** (both ride the CDC relay,
-  which needs a Debezium-tailable engine).
+- **Integration-event PUBLISHING and Mongo-projected views don't exist here** (both ride
+  the CDC relay, which needs a Debezium-tailable engine). CONSUMING another service's
+  integration events stays available — it needs only a broker + the transport build tag
+  (`shared/capabilities.md`), added later via `/omnicore:configure`.
 - **Fully reversible, no code lost.** Every layer above infra is identical to a full
   service — switching to Postgres/MySQL/SQL Server/Oracle (then gaining Mongo, composed/
   shared views and integration events) is a `/omnicore:configure` run: it stands up the
@@ -280,30 +289,35 @@ applies only when any high-risk slot would otherwise be filled by you.
    surface, all three; and say plainly that `graphql:`/`grpc:` are INERT until a
    feature implements the opt-in interface — on the empty shell only OpenAPI is
    observable, the others activate with the first entity that mounts them),
-   `auth: {mode: disabled}` (dev-only), `audit:
-   {destinations: [slog]}` (the key is `audit.destinations` — a bare sequence under
-   `audit:` is a decode failure at boot), `shutdown`. Every endpoint `${VAR:default}` — and the DEFAULT half MUST
+   `auth: {mode: disabled}` (dev-only), NO `audit:` block (absent ⇒ the framework
+   default `[slog, database]`, which is right — declaring `[slog]` alone silently drops
+   the in-TX database audit; if the dev wants a block, the key is `audit.destinations` —
+   a bare sequence under `audit:` is a decode failure at boot), `shutdown`. Every endpoint `${VAR:default}` — and the DEFAULT half MUST
    match the compose bench EXACTLY, never a generic placeholder: relational DSN with
    user/pass `omnicore:omnicore` on db `<svc>_db` at `localhost:<published port>`, the
    mongo URI and broker endpoints likewise. A `user:password`-style default boots the
    shell against creds the container never created and `readyz` fails auth. Omit optional
    blocks whose framework defaults already do the right thing — the yaml-reference is the
-   manual; the profile file is not. **SQLite ⇒ OMIT the `mongo` and `transport` blocks
-   entirely** (opt-out by absence); `relational.dsn` default `${SQLITE_PATH:file:app.db}`
+   manual; the profile file is not. **SQLite zero-infra default ⇒ no `mongo:` and no
+   `transport:` block** (opt-out by absence — a DEFAULT, not an engine law: `mongo:`
+   comes back if the service ever declares a SharedBaseView, `transport:` + its build
+   tag if it subscribes to another service's events, both via `/omnicore:configure`);
+   `relational.dsn` default `${SQLITE_PATH:file:app.db}`
    (or `:memory:` when the dev chose ephemeral) — no compose creds to match.
 5. **`microservice.prd.yaml`** — the honest template: same core, `auth.mode: jwt` with
    `${JWT_ISSUER}` / `${JWT_AUDIENCE}` / `${JWKS_URL}` placeholders (prd without an
    `auth` block aborts boot — that's WHY the template ships), **AND
    `auth.publicRoutes: ["GET /livez", "GET /readyz"]` — the `METHOD /path` form is
-   MANDATORY** (a bare path without the method fails `parsePublicRoutes` and aborts
-   boot). Probes are framework-registered but NOT auto-public; under jwt a tokenless
+   MANDATORY** (a bare path without the method fails the boot-time public-routes
+   validation and aborts — `must be "METHOD /path"`). Probes are framework-registered but NOT auto-public; under jwt a tokenless
    kubelet gets 401 and the orchestrator kills a healthy pod. Entries are validated at
    boot against the registered route set (exact-match: a typo / wrong method / trailing
    slash ABORTS boot; path-param routes can't be listed — those use `Doc.Public` — see
    `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`). Endpoints as pure
    `${VARS}` with no localhost defaults, no playground/introspection. On
-   mysql/sqlserver/oracle add a `relational.pool` block (the `database/sql` pool is
-   otherwise UNLIMITED there — the honest template caps it; and Mongo rebuilds need
+   mysql/sqlserver/oracle a `relational.pool` block is a TUNING opt-in, not a safety
+   need — unset, the framework applies its own ceiling (`max(4, NumCPU)`; an explicit
+   `0` is what means unlimited); Mongo rebuilds need
    `pool ≥ rebuild workers + 1` — `yaml-reference` at the pin has the keys).
 6. **`migrations/<dialect>/.gitkeep`** — empty; the service's own sequence starts at
    `0001` when the first entity arrives (that is `scaffold-entity`'s job). Do NOT
@@ -354,7 +368,8 @@ real evidence; an unmet stated target is RED or an explicit dev-accepted deviati
    the first real deploy is this skill's failure.
 2. **`gofmt -l`, `go vet`, `go build -o /dev/null -tags '<engine> <transport>' ./bootstrap`** — format
    (gofmt clean) + vet + compile. Both linters are first-party Go tools (no install).
-   SQLite: `CGO_ENABLED=0 ... -tags sqlite` (engine only, transport tagless).
+   SQLite zero-infra default: `CGO_ENABLED=0 ... -tags sqlite` (no `transport:` block ⇒
+   no transport tag; if the yaml declares one, add its tag here too).
 3. **Boot** with `APP_PROFILE=dev`: `/livez` 200 AND `/readyz` 200 (readyz proves the
    relational + Mongo request paths answer — on SQLite the Mongo path is absent, readyz
    proves the relational path only). **SQLite with a file DSN — boot the REAL DSN, not
@@ -362,14 +377,16 @@ real evidence; an unmet stated target is RED or an explicit dev-accepted deviati
    start wrapper (which pins an absolute `SQLITE_PATH` next to the project), then CONFIRM
    THE MIGRATIONS ACTUALLY PERSISTED to the DB the runtime reads — not merely that a file
    appeared. **`ls app.db` is NOT enough**: a 4096-byte empty `app.db` "appears" yet holds
-   ZERO tables when the relative-DSN split bit (the log says `migrations applied` but they
-   were written to a DIFFERENT file, and every request then fails `no such table`). Inspect
+   ZERO tables if anything diverged between the migration step and the runtime (e.g. an
+   inconsistent path override; on pins < v0.44.2 a relative DSN under `go run` did this
+   natively). Inspect
    the SCHEMA — `sqlite3 app.db ".tables"` (or `SELECT count(*) FROM sqlite_master WHERE
-   type='table'`) — and confirm the framework control-plane tables are present
-   (`omnicore_migrations`, `outbox`, …; on an empty shell there are no entity tables yet,
-   the framework ones are the proof). Empty schema WITH `migrations applied` in the log IS
-   the relative-`file:app.db`-under-`go run` regression — the fix is the wrapper handing an
-   absolute `SQLITE_PATH` (`templates/sqlite-mvp.md`), never a relative fallback. It is
+   type='table'`) — and confirm the FRAMEWORK-stage control-plane tables are present
+   (`omnicore_framework_migrations`, `outbox`, …; on an empty shell there are no entity
+   tables yet and the SERVICE tracking table `omnicore_migrations` does not exist either —
+   the service sequence is empty and never runs — so the framework tables are the proof).
+   Empty schema WITH `migrations applied` in the log = the runtime is reading a DIFFERENT
+   file than the runner wrote — compare the resolved paths before anything else. It is
    already in `.gitignore`; leave it (or remove it after the check and say so — never claim
    persistence you did not observe). Only use `:memory:` when the dev chose
    ephemeral. **Every approved surface knob must be IN the
@@ -434,18 +451,21 @@ skill), the fallback for concepts this table doesn't list.
 
 ## Traps (bench-proven; re-verify framework-facing ones against the pinned docs)
 
-- **Both build tags are mandatory** — an engine AND a transport (the pinned release's
-  sets; today's latest: `postgres`|`mysql`|`sqlserver`|`oracle` and `kafka`|`nats`); no default
-  on either axis, a tagless build aborts at boot — **except SQLite, which is engine-only
-  (`-tags sqlite`) + tagless transport (valid: a no-op adapter, no broker, no messaging).**
+- **The engine tag is mandatory; the transport tag follows the YAML** (the pinned
+  release's sets; today's latest: `postgres`|`mysql`|`sqlserver`|`oracle`|`sqlite` and
+  `kafka`|`nats`). No engine tag ⇒ boot abort. No transport tag ⇒ a valid NO-OP
+  transport on ANY engine (the zero-broker posture; a consumer that needs messaging
+  fails at the point of use, not at boot) — so build with the transport tag exactly
+  when the yaml declares `transport:`.
 - **SQLite = zero-infra, no Docker.** `CGO_ENABLED=0` (pure-Go, no cgo). DSN is a file path
   (default `file:app.db`, created next to the binary — portable) or `:memory:`
   (ephemeral). An absolute path is honored verbatim (fixed
-  external location, not portable). **Relative-path caveat — `templates/sqlite-mvp.md`
-  owns it and the wrappers exist because of it:** under `go run` the migration step
-  and the runtime can resolve a relative `file:app.db` to DIFFERENT files (green boot,
-  empty schema), so the wrappers pin an absolute `SQLITE_PATH`; trust the template
-  here even where a pinned doc sentence claims the dev loop handles it. The factory FORCES the correctness
+  external location, not portable). **Relative-path note:** the migration runner
+  resolves a relative `file:` DSN against the SAME base as the engine (`go run`
+  included) on any pin ≥ v0.44.2; the wrappers still pin an absolute `SQLITE_PATH` as
+  harmless belt-and-suspenders and for cross-platform ergonomics. On an OLDER pin the
+  two could split (green boot, empty schema) — the pin's changelog decides, never
+  memory. The factory FORCES the correctness
   pragmas (`foreign_keys`, `case_sensitive_like`); no `mongo:`/`transport:` blocks, no
   `devops/`. SQLite is MVP-not-production (ASCII-only case folding, decimal stored TEXT —
   `table-schema.html`). Integration events + Mongo projections require a Debezium-tailable
@@ -458,8 +478,10 @@ skill), the fallback for concepts this table doesn't list.
   only in dev, `check` elsewhere.
 - **Boot order, CDC side:** the outbox table exists only after the first app boot; on
   NATS the JetStream stream is framework-owned (relay `create-stream=false`), so a
-  relay started earlier crash-loops until then — `restart: unless-stopped` on the
-  relay container is load-bearing, not cosmetic.
+  relay started earlier crash-loops until then — cover the window with `restart:
+  unless-stopped` on the relay container OR an explicit recreate of the relay after
+  the first app boot (the `register-connector.sh` arm); without one of the two the
+  relay stays dead.
 - **Topic/subject naming is transport-specific** — read `transport.html`; the
   templates carry the reference shapes but the doc wins on drift.
 - **MySQL relay:** unique `server.id` per binlog client;

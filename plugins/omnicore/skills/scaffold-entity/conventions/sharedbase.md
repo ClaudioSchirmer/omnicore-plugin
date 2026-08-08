@@ -49,8 +49,9 @@ engines bind the constraint NAME, SQLite binds the `<table>.<column>` column lis
 
 - **The marriage is two-way and enforced**: the plain `InsertCommandHandler` REJECTS a
   SharedBase-backed repo with a directive error, and the SharedBase insert handler
-  rejects a plain repo — wiring the wrong pair is a boot-time directive, not a runtime
-  surprise. And the **blind-insert guard**: base already exists + `actionName` that is
+  rejects a plain repo — wiring the wrong pair is a directive error on the FIRST REQUEST
+  (the guard lives in `Handle`, not at boot), so smoke the insert once instead of
+  trusting a green boot. And the **blind-insert guard**: base already exists + `actionName` that is
   not `GetUpsertable` → abort (`auto-handlers.html`).
 - The command declares **`ApplyTo` (not `ToEntity`)** and it must be a **pure, idempotent
   mapper** — the handler may run it twice (a throwaway call to read the natural key, then

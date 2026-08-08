@@ -5,6 +5,80 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [0.17.1] — 2026-08-07
+
+Full-plugin audit purging **invented conventions** — prescriptive claims with no backing
+in the framework's docs or source (every fix was verified against both at v0.46.1).
+Trigger: a scaffolded service omitted child collections from `GET` listings, citing an
+"idiomatic list shape" that contradicts the framework (the server already holds the full
+aggregate when serving a list; omitting children saves nothing and forces N+1 by-id
+calls). Grounding rule reaffirmed: skills cite the framework's docs and source ONLY —
+never the example repo, which is a test bench invisible to plugin users.
+
+### Fixed
+
+- **`scaffold-entity` — list responses mirror the aggregate.** The "root scalars only"
+  convention is gone from `conventions/web.md`: child collections nest in the LIST
+  response exactly as in by-id; the recursive `?fields=` guard is met with
+  pointer/slice + `omitempty` on nested types, never by amputating the shape. A
+  child-less listing is a spec decision, not a default. (`service-layout.html` was
+  fixed upstream in the same round — framework `docs/stale-doc-claims`.)
+- **SQLite posture is a set of reversible DEFAULTS, not engine laws** (`scaffold-service`
+  + templates, `spec-template`, `qa`, `run`, `upgrade`): no `mongo:`/`transport:` block
+  is the zero-infra default — but `mongo:` returns if the service declares a
+  SharedBaseView (boots, serves empty — no CDC source), and `transport:` + its build
+  tag return to SUBSCRIBE to another service's events; both via `/omnicore:configure`.
+  The transport tag follows the YAML on every engine, never the engine itself.
+- **Stale "tagless build aborts at boot" claims** (`scaffold-service`, `run`): since
+  framework v0.40.0 a transport-tagless build boots with a valid no-op transport;
+  consumers fail at the point of use with the REAL error string
+  (`transport: no transport registered for %q …`) — the fabricated
+  "no transport linked" match string and the nonexistent `parsePublicRoutes` symbol
+  were replaced everywhere (`shared/boot-contract.md`, `doctor`).
+- **Stale pre-v0.44.2 SQLite `go run` bug taught as current** (`sqlite-mvp` template,
+  `scaffold-service`, `run`): the migration runner mirrors the engine's DSN resolution
+  since v0.44.2 — the dev loop is safe; wrappers' absolute `SQLITE_PATH` stays as
+  belt-and-suspenders. The "anti-drift exception" instructing agents to override the
+  pinned doc was removed (the doc is right).
+- **Invented covering-index law for `EmbedMany`** (`scaffold-view`, `evolve-view`, incl.
+  the verify gates): an EmbedMany needs NO index on the declaring view; the per-kind
+  truth (1:1 Embed parent join column, EmbedInChild multikey, JoinView leg on the
+  SOURCE view) is now stated and routed to `views` at the pin. Index keys documented as
+  PATHS (Go segment names + physical leaf), not "physical columns".
+- **`shared/read-side.md` + `scaffold-view` + `domain-map-template` — totals routed
+  right:** a filtered total over a listing is the `?onlyTotal` DTO opt-in; the
+  `Aggregate`/`AggregateBy` DSL lives in `custom-command-handler` (the AggregateLoader
+  section), not `custom-query-handler` (dead route).
+- **`shared/dialects/sqlite.md` — partial indexes exist on SQLite** (same statement as
+  Postgres; the framework's own embedded SQLite migrations use them). The old text
+  denied the mechanism and routed to a doc passage that doesn't exist.
+- **`shared/boot-contract.md` — the 4th `/readyz` 503 reason**
+  (`initializing: view rebuild in progress`) added; `doctor`/`run` aligned.
+- **`scaffold-entity` truths restored:** enum VOs are first-class persistable fields
+  (only NON-VO named types boot-fail) and have no `IsValid` (membership is
+  framework-validated — `tests.md` fixed); the root-archive handler gate is per
+  SURFACE, not per aggregate; child ops pick their handler by the operation's field
+  contract; separate-FK row multiplicity is the DDL uniqueness choice; `DeletedAt`
+  without archive verbs is legal (no vice-versa panic); `Modes()`-column agreement is
+  one-directional; enum translation VALUE keys are opt-in, not mandated; the
+  self-documenting-DDL "COMMENT ON law" replaced by plain `-- ` comments (dialect
+  COMMENT DDL only on request); `example:` tags scoped to scalar fields (composite =
+  boot reject); `CHAR(36)` and `path:"id"` verify greps scoped to their real rules.
+- **`remove-entity` honesty:** a zero-role SharedBaseView cannot boot — retire it, no
+  "bump it empty" option; the role→base RESTRICT FK exists only if the dev's
+  migrations declared it (check, don't assert); featureless wiring outside dev is
+  rejected only with no `BeforeServe` (third option surfaced).
+- **`qa`:** integration events are IN scope (in-TX row always provable; consume side
+  when the bench has a live relay — `⚠️ OPEN` otherwise, never silently dropped);
+  SQLite read-back expectations split per view backing (a kept SharedBaseView asserts
+  "boots, serves empty", not read-your-writes).
+- **`doctor`:** the document-store registry guard is profile-split (dev = WARN + boot
+  continues + foreign docs leak into reads; elsewhere = abort) — diagnosis updated.
+- **Bench templates:** `platform: linux/amd64` on the sqlserver service (Apple-Silicon
+  manifest match); relay recovery documented as restart-policy OR post-boot recreate;
+  compose `name:` optional; provenance caveat on the unproven sqlserver
+  Debezium-Server block (the proven shape is Connect).
+
 ## [0.17.0] — 2026-08-07
 
 Alignment with framework v0.46.0 (DTO-governed read controls): universal Relay read

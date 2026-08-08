@@ -266,8 +266,11 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
      Never describe SharedBase mechanics from memory when formulating the question; use
      these lines, or quote the shared-base section of `table-schema.html`: the framework
      invariant is **at most ONE ACTIVE role row per identity per role table** (409 on
-     `POST` and on `/unarchive`); **separate-FK** permits 0..N archived remnants plus one
-     new active row — sequential re-role over time fits natively; **shared-PK** caps the
+     `POST` and on `/unarchive`); **separate-FK** leaves row multiplicity to a SECOND
+     choice, the DDL uniqueness shape (`table-schema.html`): full `UNIQUE(fk)` = 0..1 rows
+     period (an archived remnant blocks a new `POST`; `/unarchive` is the only way back),
+     active-only uniqueness = 0..N archived remnants plus one new active row — sequential
+     re-role over time fits natively; **shared-PK** caps the
      role at one row per identity forever. Writing "1:1 per role" without the word
      ACTIVE is the canonical mis-summary — it conflates the two link models and wrongly
      disqualifies sequential over-time cases.
@@ -369,10 +372,11 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    closure with a specific notification. (**`IfDisplay` caveat**: no framework path
    dispatches Display to `BuildRules` today — don't generate dead display rules;
    confirm against the pin's `rules-dsl` before using it.)
-7. **Delete semantics — archive OR hard delete (rarely both).** An archive model
-   (archive/unarchive + the schema's archive column) OR a hard-delete model. One simple
-   question; **default archive**. Don't emit both a hard `DELETE` and archive/unarchive
-   unless the user says so.
+7. **Delete semantics — archive, hard delete, or BOTH.** The two are complementary verbs,
+   not rivals (`DELETE` = irreversible purge, `PATCH …/archive` = reversible removal; the
+   framework serves all six modes side by side). One simple question; **default archive**;
+   record the answer in §6 and emit exactly what it says — never silently add or drop
+   either verb.
    - **The HTTP verb MUST match the truth (DDD/REST naming, not implicit surprises):** `DELETE`
      is EXCLUSIVELY a hard purge; a soft removal is `PATCH …/archive` (+ its `…/unarchive`
      undo). Never wire a soft/archive operation behind `DELETE` — it lies to the caller. This
@@ -546,11 +550,16 @@ deviation — never a green summary.
 Four DISTINCT levels — do not conflate them:
 1. **Mechanical boot-trap checklist** — cheap checks; run ALL that apply, report each:
    - `grep -rn "CHAR(36)\|VARCHAR(36)\|VARCHAR2(36)" migrations/mysql/ migrations/sqlserver/ migrations/oracle/`
-     → must hit NOTHING for the generated tables (every entity id/FK is `BINARY(16)`
-     on mysql/sqlserver and `RAW(16)` on oracle; skip a directory the service
-     doesn't have).
+     → must hit NOTHING for the generated tables' MANAGED id/FK columns (every entity
+     id/FK is `BINARY(16)` on mysql/sqlserver and `RAW(16)` on oracle; skip a directory
+     the service doesn't have). A column backing a deliberate `string`-typed field is
+     EXEMPT — uuid-valued text columns are first-class for `string` (`table-schema.html`);
+     only pair the native id types with `domain.ID` fields.
    - every generated `NNNN_*.up.sql` has its `NNNN_*.down.sql` twin.
-   - `grep -rn 'path:"id"' internal/web/requests/` → nothing (boot panic).
+   - `grep -rn 'path:"id"' internal/web/requests/` → every hit must be a request bound by
+     a no-`:id` wrapper (`QueryWithParams`/`CommandWithBody` on a compound route — legal,
+     `custom-query-handler.html`); on a by-id request (`QueryByID`/`CommandWithBodyID`)
+     it is a boot panic.
    - `grep -rn 'json:"' internal/domain/` → must hit NOTHING (also sweep `db:`): a domain
      field carries `labelKey` and nothing else. A stray `json:` tag is the #1 reflex slip
      (a domain aggregate is not a wire DTO); a `json:"-"` also corrupts the `Old()`
@@ -575,10 +584,13 @@ Four DISTINCT levels — do not conflate them:
    - `Modes()` lists Archive ⟺ the schema declares its archive (deleted-at) column ⟺ the
      migration carries that column.
    - model has children (model B): in each `*_routes.go`, the ROOT-archive auto handler
-     (name per `auto-handlers.html`) is instantiated AT MOST once per aggregate — its own
-     archive route. A child-op route instantiating it is the whole-aggregate-archive trap
-     (`aggregate-children.md`): it compiles and answers 200 while archiving the entire
-     root. Child ops ride the partial-update handler, all three (add/update/archive).
+     (name per `auto-handlers.html`) is instantiated AT MOST once per SURFACE (its own
+     archive route on REST, its own mutation on GraphQL — multi-surface entities
+     legitimately instantiate it once each). A child-op route instantiating it is the
+     whole-aggregate-archive trap (`aggregate-children.md`): it compiles and answers 200
+     while archiving the entire root. Child ops mount their own commands; the handler
+     follows the operation's field contract like any other (strict full-body vs lenient —
+     `auto-handlers.html`), never the root-archive handler.
    - every SCALAR `query:`-tagged field in `internal/web/requests/` is a pointer/slice
      UNLESS the spec explicitly declares that filter required (`grep -rn 'query:"'
      internal/web/requests/` → each value-typed hit must trace to a spec'd required
@@ -684,8 +696,9 @@ only a genuinely missing docs file does.
   ⇄ SQL NULL); a **`string` field is text, ALWAYS** (nothing is guessed from a value's
   shape). Both are first-class — but pair the field type with the DDL column or the FIRST
   INSERT fails (runtime 500 the build won't catch). The persistable field-type set is
-  CLOSED — an unknown Go type (incl. `uuid.UUID` and named enums) is a BOOT FAIL at
-  `Field(...)` with the fix in the message. Wire DTOs/requests stay `string` and convert at
+  CLOSED — an unknown Go type (incl. `uuid.UUID` and any NON-VO named type) is a BOOT FAIL
+  at `Field(...)` with the fix in the message; a value object over a base type — raw
+  (`type Email string`) or enum (`type Status int`) — is unwrapped and first-class. Wire DTOs/requests stay `string` and convert at
   the mappers (`domain.NewID(s)` / `.Value()`). On an older pin (≤ v0.29.0) ids are plain
   `string` and `domain.ID` is never a field type — that divergence, and the exact native id
   column per engine, live in the dialect sheet.

@@ -24,8 +24,10 @@ Top of file: a comment stating what the bench is (this service's exclusive local
 bench: relational + Mongo + broker + CDC relay), and how to run it (`./start.sh` on
 Unix/WSL; `start.cmd` or `pwsh -File .\start.ps1` on Windows).
 
-The file's REQUIRED top-level keys — the fragments below are `services:` members and
-do not repeat them: `name: <svc>-dev`, `services:` (the chosen blocks), and a
+The file's top-level keys — the fragments below are `services:` members and
+do not repeat them: `name: <svc>-dev` (recommended for stable container prefixes;
+compose defaults the project name to the directory when omitted), `services:` (the
+chosen blocks), and a
 **top-level `volumes:` declaring EVERY named volume the fragments reference**
 (`db_data`, `mongo_data`, `nats_data`/`kafka_data`, `debezium_data`) — compose
 hard-fails `up` with "service … refers to undefined volume" when one is missing;
@@ -101,6 +103,9 @@ handshake). The proven full shape:
 ```yaml
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64               # image is amd64-only; explicit platform lets an
+                                        # Apple-Silicon docker pull & run it via Rosetta
+                                        # instead of failing the manifest match
     container_name: <svc>-dev-sqlserver
     ports: ["<hostport>:1433"]
     environment:

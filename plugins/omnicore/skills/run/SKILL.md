@@ -48,9 +48,10 @@ session." Never a gate: this run continues on the installed skills.
 - **Tags:** engine + transport from `relational.dialect` / `transport` in
   `microservice.*.yaml` — the value IS the build tag (today's latest release:
   `postgres`|`mysql`|`sqlserver`|`oracle`|`sqlite` and `kafka`|`nats`; the pinned docs are
-  the authority on what the pin supports). Both mandatory — a tagless build aborts
-  at boot — **except SQLite: engine-only `-tags sqlite` (transport tagless) + `CGO_ENABLED=0`;
-  no transport tag.**
+  the authority on what the pin supports). The ENGINE tag is mandatory (no tag ⇒ boot
+  abort); the TRANSPORT tag follows the YAML, not the engine — build with it exactly
+  when the config declares `transport:` (a transport-less config builds tagless on any
+  engine and boots with a no-op transport). SQLite adds `CGO_ENABLED=0`.
 - **Profile + ports:** `APP_PROFILE=dev` unless the dev says otherwise; a project with
   several dev profiles boots the one the dev names (`OMNICORE_CONFIG_PATH` selects a
   non-canonical file — the reference dev loop does exactly that), and the tags follow
@@ -80,18 +81,19 @@ session." Never a gate: this run continues on the installed skills.
 
 - Prefer the project's start wrapper (`start.sh` / `start.cmd` — on SQLite the
   wrapper exists precisely to pin the DB path; use it); else
-  `APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap` — SQLite bare
-  fallback: **NEVER a bare `go run`** — under `go run` a relative `file:app.db` can
-  resolve differently for the migration step and the runtime, so the service boots
-  GREEN over an empty schema and every entity request 500s `no such table`. Pin the
-  yaml's DSN interpolation var to an ABSOLUTE path first, exactly like the wrapper:
-  `SQLITE_PATH="file:$(pwd)/app.db" CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite
-  ./bootstrap` (the var name is the yaml's `${…}` default — read it, don't assume).
+  `APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap` — SQLite: a bare
+  `go run` is fine on any pin ≥ v0.44.2 (engine and migration runner resolve a relative
+  `file:app.db` against the same base — the project dir — under `go run`). Prefer the
+  project's start wrapper when one exists; pinning the yaml's DSN var to an absolute
+  path (`SQLITE_PATH="file:$(pwd)/app.db" …` — the var name is the yaml's `${…}`
+  default, read it, don't assume) is harmless belt-and-suspenders, and MANDATORY only
+  on a pin < v0.44.2, where the migration step and the runtime really could resolve to
+  different files (green boot, empty schema, `no such table`).
 - Run in BACKGROUND, log to a file (never through a pipe — a broken pipe can swallow the
   drain/boot narration); poll `/readyz` until 200 (bounded ~60s) — **and READ the 503
   body, don't just count**: `initializing: rebuilding view "X" (n/m)` means a background
   boot-time rebuild — the service is UP (`/livez` 200), keep waiting/extend the bound;
-  a store-unreachable reason means stop and diagnose. The three ordered 503 reasons:
+  a store-unreachable reason means stop and diagnose. The four ordered 503 reasons:
   `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`.
 - Failure → show the FIRST error from the log verbatim and stop. This skill fixes
   nothing — point at `help` (understand) or the skill that generated the code.

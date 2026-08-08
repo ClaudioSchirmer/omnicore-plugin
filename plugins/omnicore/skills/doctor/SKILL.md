@@ -72,9 +72,10 @@ Walk the pipeline IN ORDER and stop at the first stage that fails, with evidence
 1. **Build** — compile with both tags; a red build ends the walk here.
 2. **Boot** — start (or read the crash log of) the app; a boot abort names its guard.
 3. **Serve** — liveness answers? readiness answers? A `/readyz` 503 carries a REASON —
-   READ it before theorizing (`shared/boot-contract.md` owns the three, ordered):
-   `draining` = shutdown in progress; `initializing: rebuilding view "X" (n/m)` = the
-   service IS up and serving, wait — not a hang, not a store problem; only the third
+   READ it before theorizing (`shared/boot-contract.md` owns the four, ordered):
+   `draining` = shutdown in progress; `initializing: rebuilding view "X" (n/m)` — and
+   its no-progress-yet sibling `initializing: view rebuild in progress` — = the
+   service IS up and serving, wait — not a hang, not a store problem; only the last
    (store unreachable) is the DB/document request path. The transport is EXCLUDED
    from readiness by design — never diagnose a broker outage from a red `/readyz`.
 4. **Write path** — a write returns 2xx and lands in the outbox?
@@ -105,9 +106,12 @@ Bench-proven cause patterns to CHECK, not to assume:
   yaml's `relational.dialect` names which. (The transport twin of this failure is NOT
   a boot abort — it surfaces at the point of use; see the dead-reactions signature
   below.)
-- **Boot abort from the document-store registry guard** (foreign collections in the view
-  database) → the service shares a view DB it shouldn't; prescribe isolating it in its
-  own database, per the bootstrap section.
+- **Document-store registry guard** (foreign collections in the view database) — the
+  presentation is PROFILE-SPLIT: under `dev` it is a `slog.Warn` naming each foreign
+  collection and boot CONTINUES (foreign docs can then leak into reads — grep the boot
+  log for the warning when reads return strangers); under every other profile it is a
+  boot abort. Either way → the service shares a view DB it shouldn't; prescribe
+  isolating it in its own database, per the bootstrap section.
 - **Writes 2xx forever, views never arrive** → read the BOOT LOG first: the INFO
   anchor `projection consumer not started: no transport configured` is direct
   evidence — with no `transport:` block the sync consumer is skipped BY DESIGN
@@ -116,7 +120,7 @@ Bench-proven cause patterns to CHECK, not to assume:
   relational views are unaffected, and the answer is a `/omnicore:configure`
   conversion, not a fix. Do not fuse it with its twin: a `transport:` block PRESENT
   but the binary built WITHOUT the transport tag logs no such line and fails at the
-  point of use ("no transport linked" — the dead-reactions signature below). Only
+  point of use (`no transport registered` — the dead-reactions signature below). Only
   with the block present AND the tag linked, walk relay → broker → sync in that
   order: a relay that never reaches "streaming", an unreachable broker, or a sync
   group that isn't consuming. A relay crash-looping BEFORE the app's first boot is
@@ -133,7 +137,8 @@ Bench-proven cause patterns to CHECK, not to assume:
   halts ALL read-model refresh and re-crashes on the same event at every restart.
   The `transport` section's relay-config contract owns it; evidence = the same event
   id in the relay's crash log across restarts.
-- **Reactions/subscriptions dead on a GREEN service** ("no transport linked" at the
+- **Reactions/subscriptions dead on a GREEN service** (`transport: no transport
+  registered for "<name>" (build with the transport's build tag?)` at the
   point of use) → the yaml has a `transport:` block but the binary was built without
   the transport tag — boot and probes never catch this by design
   (`shared/boot-contract.md`, Build tags).

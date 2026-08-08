@@ -31,8 +31,9 @@ root; the domain-service implementation in its own file here.
 
 ## Repository — decisions
 
-- The engine parameter is the neutral relational engine (`Deps.DB`) — the dialect is a
-  YAML change, never an edit here.
+- The engine parameter is the neutral relational engine (`Deps.DB`) — swapping dialect
+  never edits this file (it is a YAML change PLUS the target engine's build tag linked
+  into the binary; an unregistered dialect aborts boot, `yaml-reference.html`).
 - **The unique-field chain (5 points — miss one and the violation is an ugly 500 or a
   lonely 409):**
   0. **(recommended primary) a domain Service pre-check in `BuildRules`** — exclude-self
@@ -84,8 +85,10 @@ root; the domain-service implementation in its own file here.
   never a second one; no collection. Mongo = the plain `View(name).Schema(...)`.
   Only the plain per-entity view is eligible — never a view KIND. What it serves:
   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`; version-exact: `relational-view.html`.
-- **Never `Embed` internal data** — children/siblings auto-project from the schema;
-  embedding local data is a fatal boot error. Embeds are for EXTERNAL/upstream data only.
+- **Never `Embed` the aggregate's OWN data** — its children/siblings/shared base
+  auto-project from the schema, and a write-anchored embed source is a fatal boot error.
+  Embed legs are `JoinUpstream(...)` (an external/upstream mirror) or `JoinView(...)`
+  (ANOTHER registered local view — first-class, `views.html` "Embedding a local view").
 
 ## Service implementation
 

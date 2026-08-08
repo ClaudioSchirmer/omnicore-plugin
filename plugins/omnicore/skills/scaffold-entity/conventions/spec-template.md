@@ -45,9 +45,12 @@ Language: <x>            <!-- working language for human-facing text (descriptio
     (`.OrphanPolicy(p)`, `table-schema.html`), never left implicit; the canonical
     example picks the non-default.
   - Identity view (SharedBaseView): create | add-role (bump Version) | skip
-    — only where the project HAS Mongo (a full engine with relational-backed views still
-    does). A Mongo-less infra (SQLite / zero-infra MVP) ⇒ the slot reads
-    `n/a — no Mongo; the per-role view serves the base's fields flattened`, never a choice.
+    — only where the project HAS a `mongo:` block (a full engine with relational-backed
+    views still does). On SQLite it is STILL a choice, stated honestly: declarable, but
+    it requires adding `mongo:` (the collections must exist to boot) and it serves EMPTY
+    until the posture flips to a CDC-capable engine (`/omnicore:configure`) — meanwhile
+    the per-role view serves the base's fields flattened. Default on zero-infra = skip;
+    record the decision, never silently `n/a` it.
 
 ## 2. Fields                                 [one row per field — none may be missing]
 | Field | Go type | VO? (reuse/new-raw/new-enum/plain) | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
@@ -129,8 +132,9 @@ a sibling NEVER gets its own endpoint; `siblings.md`).
   — passive omission vs active 403, prunes `?fields=`/GraphQL selection/exports alike;
   `authz-seams.html`.) Ask — invisible at modeling time, loved when offered.
 - View backing: relational (SoR, read-your-writes) | Mongo (canonical) — default =
-  project posture; on SQLite there is nothing to ask, the posture is FORCED relational
-  (`shared/read-side.md`).
+  project posture; on SQLite the plain per-entity view is FORCED relational (no CDC
+  source ⇒ a Mongo projection never materializes; `shared/read-side.md`). Shapes
+  RelationalSource cannot serve (SharedBaseView) follow the §1 identity-view rule.
 - Filter/sort/search operators per field (low-risk — filled, shown):
 
 ## 10. Authorization                          [required — BOTH slots, a blank is invalid]

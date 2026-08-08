@@ -16,9 +16,12 @@ description: >-
 Create a read model that no single entity owns: composed across entities, identity
 across roles, or fed from upstream services. The write side is NOT touched —
 a view is a projection of what already exists; if the model needs data the sources don't
-carry yet, that is `evolve-entity`'s job first. (Totals/counts/report SCALARS are not a
-view kind at all — they are the relational `Aggregate`/`AggregateBy` DSL, available on
-every posture; `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` owns that split — route such
+carry yet, that is `evolve-entity`'s job first. (A filtered TOTAL over an existing
+listing needs no new anything — `?onlyTotal` is a one-tag DTO opt-in on the list
+request, both backings, `auto-query-handlers` at the pin. Richer totals/counts/report
+SCALARS are not a view kind either — they are the `Aggregate`/`AggregateBy` DSL on the
+write-side aggregate loader, available on every posture;
+`${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` owns that split — route such
 a request to `/omnicore:implement`, never refuse it.)
 
 ## Core principles — read FIRST
@@ -71,11 +74,14 @@ session." Never a gate: this run continues on the installed skills.
 - **Sources exist?** Every entity/view this model reads from is present and projecting.
   A missing source FIELD (the model needs data no source carries) → STOP and hand that
   part to `evolve-entity` first; a missing source ENTITY → `scaffold-entity`. An
-  EXTERNAL leg (`JoinUpstream`) has two extra preconditions of its own, both boot-fatal:
-  a matching `UpstreamSubscription` with a linked transport must exist (a mirror that is
-  declared but not subscribed does not count as "present"), and the subscription's
+  EXTERNAL leg (`JoinUpstream`) has two extra preconditions of its own: a matching
+  `UpstreamSubscription` must exist (boot-fatal when missing — a mirror that is declared
+  but not subscribed does not count as "present"), and the subscription's
   `fields:` allowlist must cover every column the external schema declares —
-  `DeletedAt` included (`views` at the pin).
+  `DeletedAt` included (boot-fatal; `views` at the pin). A subscription with NO linked
+  transport is a different failure: it boots and silently never receives data (point-of-
+  use error, `yaml-reference`) — check the transport block + build tag as a verify item,
+  not as a boot symptom.
 - **Is it really new?** Changing an EXISTING view is `evolve-view`'s job — hand off.
 
 ## Phase 0v — Version check (delegate)
@@ -139,12 +145,13 @@ sections structural (`N/A — <why>`, never deleted):
    `/omnicore:configure` route only when the dev actually wants the multi-role
    identity document.
 2. **Sources + join keys** [high-risk]: which entity/view/service feeds each leg, joined
-   by which key. Every leg's COVERING INDEX is declared where the pin says it lives
-   (boot-fatal when missing — verify item): `<childSegment>.<fk>` for a 1:N
-   Embed/EmbedMany, the parent join column for a **1:1 Embed**, `<childSegment>.<fk>`
-   (multikey) for an **EmbedInChild**, and for an **EmbedMany/LinkMany over a JoinView
-   leg the index belongs on the SOURCE view, not the new one** (`views` at the pin owns
-   the per-kind law — read it, don't infer).
+   by which key. COVERING INDEXES are per-kind and `views` at the pin owns the law —
+   read it, don't infer. The shape at the current release: a **1:1 Embed** needs the
+   parent join column indexed on the embedding view (boot-fatal when missing — verify
+   item); an **EmbedMany needs NO index on the declaring view** (its ripple resolves the
+   parent by the child's own FK value → the parent `_id`); an **EmbedInChild** needs the
+   multikey `<childSegment>.<fk>` index; a **JoinView leg** needs the covering index on
+   the SOURCE view's join column, not the new one.
 3. **Projected shape** — every projected field, its source. For a MATERIALIZED
    (Mongo-projected) kind: `Version(1)` + the evolution rule stated (shape change later
    ⇒ `Version` bump ⇒ rebuild — `mongo-schema-evolution`). **A ComposedView is never
@@ -170,8 +177,10 @@ sections structural (`N/A — <why>`, never deleted):
    field (operators are low-risk — decide well; the 16-operator vocabulary and the
    list-DTO allowlist incl. nested embed groups are `query-side` ·
    `auto-query-handlers`), pagination/options, indexes beyond the join law (`?search=`
-   needs a declared text index; **every index key names the PHYSICAL column** — a Go
-   field name or a typo aborts boot instead of creating a dead index).
+   needs a declared text index; **an index key is a PATH: segment prefixes are the Go
+   segment names, the LEAF is the physical column** (`ChildSegment.physical_col` — e.g.
+   a child segment uses the pluralized type name, `views` at the pin) — a wrong leaf or
+   a snake_cased segment aborts boot instead of creating a dead index).
 6. **Read authorization** [high-risk]: who may query this model? A composed view can
    reach, VIA JOIN, data the caller's identity could not query directly — gating a
    leg's data is fully the dev's responsibility in `ToCriteria` / `crit.Restrict`

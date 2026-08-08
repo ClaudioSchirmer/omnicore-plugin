@@ -44,9 +44,9 @@ binary UUID codec here — SQLite stores the id as text.
 
 ## Active-only uniqueness (archived remnants must not block)
 
-SQLite has no partial index in the Postgres sense; the "unique among active rows only"
-mechanism is the one `table-schema.html` prescribes for SQLite — route there for the exact
-shape.
+SQLite supports Postgres-style partial indexes (since 3.8.0; the framework's own embedded
+SQLite migrations use them): `CREATE UNIQUE INDEX ... ON <role>(<fk>) WHERE deleted_at IS
+NULL` — the same statement as Postgres. `table-schema.html` owns the per-dialect shapes.
 
 ## Read side — no Mongo, so no CDC-projected views
 

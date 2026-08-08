@@ -26,9 +26,11 @@ Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.htm
     does-not-exist one (`EntityDoesNotExistNotification`), which is 422; the mapping
     table is `status-mapping.html`).
   - **ARCHIVE** (`PATCH …/:id/<children>/:childId/archive`) — soft removal; same guard.
-  - **Wiring — all THREE ops are partial updates of the ROOT**: each rides the
-    partial-update auto handler + `ApplyPartiallyTo` (load root → your domain method
-    mutates the one child → the framework persists the diff).
+  - **Wiring — all THREE ops are commands ON THE ROOT** (load root → your domain method
+    mutates the one child → the framework persists the diff). The handler follows the
+    operation's field contract like any root op (`auto-handlers.html`): a full-replace
+    child `PUT` is the strict full-body handler + `ApplyTo`; an op with optional fields
+    rides the partial-update handler + `ApplyPartiallyTo`.
     **The lookup + not-found lives in the DOMAIN method (`<Verb><Child>ByID`), never as a
     loop inside `ApplyPartiallyTo`** — the command is a one-liner that calls it. Two ops
     scanning the collection themselves is the same invariant written twice, in the layer
@@ -118,7 +120,8 @@ opting out of the archive column is hard-deleted (then `DELETE` is honest).
 ## Application / Web
 
 Child inputs are `dtos.<Child>Input` files (ctx-free, no wire tags, a `To<Child>()`
-builder; model B: an optional id — empty on add, set on update). The insert command
+builder; the input carries FIELD values only — the child id never rides inside it, it
+travels beside it on the command, bound from the path). The insert command
 carries the slice; per-child ADD/UPDATE carry one input; archive carries just the id.
 The child id arrives via an extra path segment (`path:"childId"` — never `path:"id"`).
 Write responses mirror the post-write aggregate WITH the minted child ids
@@ -126,9 +129,9 @@ Write responses mirror the post-write aggregate WITH the minted child ids
 
 ## Base-children (SharedBase) — the hazard + the routing sub-question
 
-A child declared on the BASE is shared by every role — **a role's replace-all would
-delete rows other roles depend on**: model B is a correctness requirement there, not a
-preference. When per-child endpoints are wanted for a base-child, offer a light follow-up
+A child declared on the BASE is shared by every role — **a role's replace-all replaces
+the IDENTITY-WIDE set, visible to every other role**: legal, but say it to the dev —
+model B keeps edits per-child and is the safer default here. When per-child endpoints are wanted for a base-child, offer a light follow-up
 (two legitimate options, no manufactured debt): **A)** mount them under the role (simple,
 valid permanently; a future role would expose its own edit routes over the same shared
 rows — a consequence, not a problem); **B)** promote the child to its own aggregate with

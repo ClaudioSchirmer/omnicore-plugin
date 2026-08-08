@@ -73,9 +73,11 @@ session." Never a gate: this run continues on the installed skills.
   naming this entity's routes** — the list is validated exact-match against the
   registered route set at boot, so an entry pointing at a removed route PANICS naming
   it (`shared/boot-contract.md`) · **is this the LAST feature?** — removing the only
-  remaining feature leaves a featureless wiring, accepted under dev ONLY; every other
-  profile REJECTS it at boot (flag it in the plan: the dev either accepts a dev-only
-  shell or this removal waits for its replacement).
+  remaining feature leaves a featureless wiring; outside dev it is REJECTED at boot
+  UNLESS the wiring keeps a `BeforeServe` hook (the reject fires only on zero features
+  AND no `BeforeServe` — `bootstrap` at the pin). Flag it in the plan with the three
+  honest options: accept a dev-only shell, keep/add a `BeforeServe`, or wait for the
+  replacement feature.
 
 ## Phase 1 — The gate: `remove-entity/<entity>/plan.md`
 
@@ -91,13 +93,15 @@ never defaulted. Sections (structural — `N/A — <why>`, never deleted):
    of other entities (they need their own edit + `Version` decision, listed here),
    integration events consumed elsewhere (consumers break — the dev decides the
    sequencing). Each one `⚠️ OPEN` until decided. **Two shared-base cases need their
-   own verdict, never improvised:** removing the BASE itself is impossible while any
-   role lives (the role→base FK is RESTRICT and the roles' identity derives from the
-   base's natural key — remove/retire every role first, then the base); removing the
+   own verdict, never improvised:** removing the BASE itself while any role lives is
+   forbidden by design — but the PHYSICAL guard exists only if the dev's migrations
+   declared the role→base FKs `ON DELETE RESTRICT` (the framework asks for it, never
+   creates it — `table-schema` at the pin; CHECK the migrations and say which world
+   this project is in) — remove/retire every role first, then the base; removing the
    LAST role leaves an orphan base whose fate is the schema's declared `OrphanPolicy`
    (KeepOrphan vs DeleteWhenUnreferenced — read it, state it) AND a SharedBaseView
-   with zero roles — the role set is in that view's rebuild hash, so it either gets
-   its `Version` bump with the role removed or is retired in the same plan.
+   with zero roles — which CANNOT boot (a role-less SharedBaseView is a boot reject),
+   so the view is RETIRED in the same plan; there is no bump-it-empty option.
 3. **Data strategy** [high-risk]: drop the tables (new migration, down recreates
    structure only — data is GONE) vs retire code and keep the data. **The Mongo view
    collections are NOT the same decision:** once the view definition is deleted, a

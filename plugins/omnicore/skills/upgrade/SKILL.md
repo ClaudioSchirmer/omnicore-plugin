@@ -70,8 +70,9 @@ tooling; say so if the dev conflates them).
   `postgres|mysql|sqlserver|oracle|sqlite`, transports `kafka|nats`; the pinned docs
   say what the pin supports). The engine tag is always required; the transport tag
   only when a `transport:` block exists (a transport-less config builds without one,
-  on any engine); SQLite is `CGO_ENABLED=0 -tags sqlite`, no transport tag
-  (`${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`, Build tags, owns the law). Every
+  on any engine — SQLite included: `CGO_ENABLED=0 -tags sqlite`, PLUS the transport
+  tag when its yaml declares `transport:` — the tag follows the yaml, never the engine;
+  `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`, Build tags, owns the law). Every
   verify below uses THIS discovered tag set — and a multi-dialect project verifies
   every target set, not one.
 - **Vendored?** A `vendor/` dir means the build is `-mod=vendor`: the bump is not
