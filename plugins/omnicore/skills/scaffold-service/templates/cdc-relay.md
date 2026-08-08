@@ -110,6 +110,14 @@ Predicate pattern: `debezium.predicates.isOutbox.pattern=.*\\.public\\.outbox`
 
 ## Source — sqlserver
 
+> **Provenance caveat — the only source block here NOT proven by a reference bench.**
+> The proven sqlserver relay shape is Debezium **Connect** (REST-registered connector,
+> Kafka-backed schema history) on a dedicated Kafka. This Debezium-Server adaptation
+> (file-backed `FileSchemaHistory`) is the simple-bench transcription of that config;
+> after bringing it up, PROVE it streaming (the "Starting streaming" log gate + a
+> sentinel write reaching the broker) before trusting it — and on any trouble, prefer
+> the Connect shape.
+
 PREREQUISITE — CDC must be ENABLED before the connector can stream: the SQL Server
 Agent on the container (`MSSQL_AGENT_ENABLED=true` in the bench) plus
 `sp_cdc_enable_db` / `sp_cdc_enable_table` on the outbox — only possible AFTER the

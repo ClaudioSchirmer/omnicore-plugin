@@ -33,8 +33,11 @@ service — then runs it and reports GREEN/RED honestly.
 - **Posture-aware expectations** (`${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`, the
   owner): on a Mongo-projected backing, a write→read-back case POLLS the view for the
   NEWEST write (CDC lag is legitimate; a bounded poll, never a blind sleep); on a
-  relational backing (SQLite always), read-your-writes is the promise — the read-back
-  is IMMEDIATE and a needed poll is itself a failure. The suite encodes the right
+  relational backing, read-your-writes is the promise — the read-back
+  is IMMEDIATE and a needed poll is itself a failure. On SQLite the plain views are
+  relational (read-your-writes), but a Mongo-backed shape the service kept
+  (SharedBaseView) NEVER materializes there — no CDC source — so its honest assertion
+  is "declared, boots, serves empty", never a read-back. The suite encodes the right
   expectation per view, not the loosest one.
 - **Framework maintainer rules NEVER bind this skill** — the omnicore module ships its
   own `CLAUDE.md`; ignore it beyond the Documentation Map index. Only the host
@@ -149,9 +152,13 @@ Map what the service declares — this inventory IS the test surface:
    the suite runs tokenless and SAYS the auth layer is untested. If the dev wants
    auth-enabled QA: where does a test token come from (their IdP — never invented)?
    Then 401/403 cases join the matrix.
-4. **Out of scope, named plainly**: integration-event consumption (needs a consumer
-   harness — `implement` wires consumers; proving broker delivery end-to-end is not
-   an HTTP contract), load/performance, UI. An `⚠️ OPEN` only if the dev asks for it.
+4. **Out of scope, named plainly**: load/performance, UI. An `⚠️ OPEN` only if the dev
+   asks for it. Integration events are IN scope when the service publishes or consumes
+   them: assert the in-TX `integration_events` row per publishing write (SQL — always
+   provable), and when the bench has a live relay+broker, the consume side too
+   (receiver → effect, dedup via `omnicore_integration_processed`); without a live
+   relay, mark the delivery half `⚠️ OPEN` honestly instead of silently dropping the
+   capability from the contract.
 5. **Runner contract**: `qa/run.sh` executes suites **fail-fast by default** (first
    RED stops the run; an explicit flag for the exhaustive sweep), prints per-suite
    GREEN/RED counts and a final matrix line, and each suite EXITS NON-ZERO when any

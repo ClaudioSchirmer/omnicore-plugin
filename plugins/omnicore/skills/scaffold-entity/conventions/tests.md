@@ -16,11 +16,14 @@ code and misstates the entity (only in a brand-new package do they coincide).
 
 ## What to cover
 
-- **Value objects (`internal/domain/vos/`):** test each VO DIRECTLY (its `IsValid` /
-  membership is a plain method — no framework entry point needed): a raw VO's valid /
-  malformed / empty cases (table-driven), an enum's members accepted + the zero/Unknown and
-  an out-of-set value rejected. Format/length/range/closed-set coverage lives HERE now —
-  NOT in the entity's `BuildRules`.
+- **Value objects (`internal/domain/vos/`):** test each VO DIRECTLY. A raw VO's
+  `IsValid(fieldName, ctx)` takes a `*domain.NotificationContext` — construct one in the
+  test and assert valid / malformed / empty cases (table-driven). An enum VO has NO
+  `IsValid` at all (`EnumValueObject` declares members; the FRAMEWORK validates
+  membership — `value-objects.html`): assert its `Values()` set and
+  `UnknownNotification()`, and prove out-of-set rejection through the entity's
+  validation path. Format/length/range/closed-set coverage lives HERE now — NOT in the
+  entity's `BuildRules`.
 - **Domain (the coverage driver):** the happy path + EVERY `BuildRules` branch — each
   required plain field, cross-field invariants, optional fields passing as nil, transition
   rules via the update path with an apply-mutation (and their no-op on Insert — `Old` is nil

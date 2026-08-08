@@ -102,9 +102,10 @@ structural (`N/A — <why>`):
    and collation is IMMUTABLE on an existing collection (divergence aborts boot,
    never auto-drops; Capped ⊕ TimeSeries). Exact lists: `mongo-schema-evolution` ·
    `auto-query-handlers`.
-4. **New leg / role** [high-risk]: source, join key, the leg's COVERING index declared
-   where the pin says it lives (boot-fatal when missing): `<childSegment>.<fk>` for a
-   1:N Embed/EmbedMany, the parent join column for a 1:1 Embed, `<childSegment>.<fk>`
+4. **New leg / role** [high-risk]: source, join key, the leg's COVERING index per the
+   pin's per-kind law (`views` — read it, don't infer): the parent join column for a
+   1:1 Embed (boot-fatal when missing), NO index on the declaring view for an EmbedMany
+   (its ripple resolves by the child's own FK), `<childSegment>.<fk>`
    multikey for EmbedInChild — and for an EmbedMany/LinkMany over a `JoinView` leg the
    index belongs on the SOURCE view, not this one (`views` owns the per-kind law);
    whether the source view/entity needs anything first (→ delegation); **and the
@@ -127,8 +128,9 @@ structural (`N/A — <why>`):
    at the pin: Mongo→relational = `DriftRelationalSync` (registry synced, NO rebuild;
    reads move to the SoR, and **the old Mongo collection is DROPPED** — a relational
    view holds none; leaving it would strand alien data. There is no frozen copy to
-   fall back on: flipping BACK is a fresh `DriftRebuildRequired` backfill, cheap but
-   not a "resume");
+   fall back on: flipping BACK is a fresh `DriftRebuildRequired` backfill — the FULL
+   online blue-green rebuild, costed like any other on a large collection, not a
+   "resume");
    relational→Mongo = `DriftRebuildRequired` (full online blue-green rebuild from the
    CURRENT SoR — zero-downtime, captures every write made during the relational phase).
    Only a PLAIN single-aggregate view can flip — a Composed/Shared/Embed view is
@@ -186,7 +188,8 @@ index for concepts this table doesn't list.
    dev-accepted deviation.
 1. **Mechanical, pre-boot:** shape changed ⇒ `Version` bumped **and every `JoinView`
    embedder of this view bumped in the same change** (spec item 3) · every new leg's
-   covering index declared per the per-kind law (incl. the SOURCE-view index for
+   covering index declared per the per-kind law (1:1 Embed yes, EmbedMany none on the
+   declaring view, EmbedInChild multikey; incl. the SOURCE-view index for
    EmbedMany/LinkMany over a JoinView leg) · grep the OLD projected-field names → no
    stale references (code, surfaces, tests) · no write-side file touched.
 2. **`gofmt -l` + `go vet` + `go build`** (engine + transport tags) — clean.

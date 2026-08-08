@@ -16,8 +16,8 @@ ever disagrees with the pinned docs, the docs win.
 - The transport tag (`kafka | nats`) follows the **yaml, not the engine**: a config
   with a `transport:` block needs the matching tag; without it the build compiles,
   boots and probes GREEN, and every consumer / upstream subscription / Mongo-projected
-  refresh fails later **at the point of use** ("no transport linked — build with
-  -tags kafka or -tags nats"). No `transport:` block (opt-out by absence — legal on
+  refresh fails later **at the point of use** (`transport: no transport registered for
+  "<name>" (build with the transport's build tag?)`). No `transport:` block (opt-out by absence — legal on
   ANY engine, not just SQLite) → build with no transport tag, no messaging — and the
   projection sync consumer is SKIPPED at boot with an INFO line ("projection consumer
   not started: no transport configured"); view registry, spec application and drift
@@ -36,18 +36,21 @@ ever disagrees with the pinned docs, the docs win.
   kubelet gets **401** and the orchestrator kills/never-readies a healthy pod. They
   must be LISTED in `auth.publicRoutes`.
 - **Entry format is `METHOD /path` — mandatory**: `"GET /livez"`, `"GET /readyz"`. A
-  bare path without the method (`"/livez"`) fails `parsePublicRoutes` and ABORTS boot.
+  bare path without the method (`"/livez"`) fails the boot-time public-routes scan and
+  ABORTS boot (`must be "METHOD /path"`).
 - **`auth.publicRoutes` is validated at boot against the registered route set,
   exact-match**: a typo, wrong method, or trailing slash (no matching route) ABORTS
   boot with the offender named; a path-param/wildcard entry can never match — mark
   that route `Doc.Public` instead. So the failure ladder is: missing entry → 401 on
   probes in prd; hand-fixed loosely → boot abort. One fix: the exact
   `METHOD /path` probe entries in `publicRoutes`.
-- **`/readyz` 503 carries a REASON — read it, never just count retries.** Three,
+- **`/readyz` 503 carries a REASON — read it, never just count retries.** Four,
   ordered: (1) `draining` — shutdown in progress; (2) `initializing: rebuilding view
   "X" (n/m)` — a background boot-time view rebuild: the service IS up (`/livez` 200)
   and serving, a follower pod adopting another pod's rebuild lock is normal, wait —
-  this is not a hang; (3) store unreachable — a real dependency failure, stop and
+  this is not a hang; (3) `initializing: view rebuild in progress` — same class as
+  (2), the window before the first progress record (drift reconcile) exists; (4)
+  store unreachable — a real dependency failure, stop and
   diagnose. **The transport is EXCLUDED from readiness by design** — a broker outage
   never flips `/readyz`.
 
@@ -101,7 +104,7 @@ keep the ports.)
 ## Diagnosis quick-map (doctor)
 
 Boot abort "no relational engine registered" → missing engine build tag · reactions/
-subscriptions dead on a green service, "no transport linked" at the point of use →
+subscriptions dead on a green service, `no transport registered` at the point of use →
 `transport:` block present but built without the transport tag · Mongo-backed views
 never materialize, boot INFO "projection consumer not started" → no `transport:`
 block at all (posture by design, not a fault) ·

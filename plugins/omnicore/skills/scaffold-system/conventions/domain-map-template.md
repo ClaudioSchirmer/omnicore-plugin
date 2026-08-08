@@ -75,8 +75,10 @@ none.
 
 Delegated to `scaffold-view` in Phase 3. Identity views do NOT list here — they ride
 with their base's first role (§3). Report SCALARS (counts/sums/totals) are NOT a view
-kind — they are the relational `Aggregate`/`AggregateBy` DSL, available on every
-posture (`shared/read-side.md`); list them in §6 as an `implement` delegation instead.
+kind — a filtered total over a listing is the `?onlyTotal` DTO opt-in; richer scalars
+are the `Aggregate`/`AggregateBy` DSL on the write-side aggregate loader, available on
+every posture (`shared/read-side.md`); list them in §6 as an `implement` delegation
+instead.
 
 ## §6 Integration events / external systems
 

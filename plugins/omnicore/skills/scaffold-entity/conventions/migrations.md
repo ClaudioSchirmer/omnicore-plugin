@@ -41,17 +41,14 @@ lockstep.
 
 ## Self-documenting DDL — table & column descriptions
 
-Every generated table and column carries its description as a SQL COMMENT, sourced from
-the spec (§2 `Description` per column; the §1 one-liner per table) — the schema documents
-itself. The mechanism is standard DDL, per dialect: **Postgres & Oracle** = `COMMENT ON
-TABLE …` / `COMMENT ON COLUMN <table>.<col> IS '…'` statements after the `CREATE TABLE`
-(single statements — compatible with the Oracle runner's plain-SQL split); **MySQL** =
-inline `COMMENT '…'` on each column + a trailing `COMMENT='…'` table option. For any other
-dialect the pinned docs define the mechanism — and when the pin documents NONE (today:
-SQL Server), emit no comment DDL rather than inventing one; the descriptions live in the
-spec regardless. The `.down` needs nothing extra — dropping the table drops its comments. Applies to EVERY table the
-entity emits (base, role, children, siblings). Column types still come only from
-`table-schema.html`; a description never changes a type.
+Every generated table and column carries its description, sourced from the spec (§2
+`Description` per column; the §1 one-liner per table) — as plain `-- ` SQL line comments
+in the migration file. That is the whole rule: it is valid on every dialect (SQLite
+included), survives the runners' statement splitting, and keeps the DDL readable in one
+place. Dialect COMMENT-metadata DDL (`COMMENT ON …`, MySQL inline `COMMENT '…'`) is NOT
+emitted by default — only when the dev explicitly asks for catalog-visible comments.
+Applies to EVERY table the entity emits (base, role, children, siblings). Column types
+still come only from `table-schema.html`; a description never changes a type.
 
 ## Traps
 
@@ -90,7 +87,7 @@ entity emits (base, role, children, siblings). Column types still come only from
   owner, role → base — the shapes above); across aggregates the referenced row
   archives rather than deletes, so referential existence is a DOMAIN rule (the
   ctx-bound Service probe — SKILL.md's "rules needing existence" row), never an
-  `ON DELETE` action bridging two consistency boundaries. That is the canonical
-  example's shape (`featured_item_id`/`item_id`: plain nullable columns). Add a plain
+  `ON DELETE` action bridging two consistency boundaries. The shape is a plain nullable
+  column, no DB-level FK constraint. Add a plain
   INDEX on the column when reads filter/join by it; a real FK (`ON DELETE RESTRICT`
   only, never CASCADE) is a dev-signed exception, not the default.

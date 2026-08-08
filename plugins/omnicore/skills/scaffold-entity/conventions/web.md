@@ -34,11 +34,20 @@ interface is what lets this layer compile before infra exists.
 - **The `?fields=` guard is RECURSIVE**: a list request declaring `Fields` forces EVERY
   response field — including every field of every NESTED response type — to be
   pointer/slice + `omitempty`, or boot panics (invisible to `go build`).
-- **Idiomatic list shape**: list responses carry ROOT scalars only; child collections nest
-  in the by-id response (which has no `?fields` contract) — that is what keeps the
-  recursive guard from biting.
-- **Every request/response field carries an `example:` tag** — omit it and Swagger's
-  "try it out" renders garbage placeholders. Low-risk: decide plausible values yourself.
+- **Children BELONG in the list response — dropping them buys NOTHING.** On both backings
+  the full aggregate is already in hand when the list is served (a Mongo view returns the
+  whole projected document; a relational view loads the whole aggregate through the same
+  loader) — omitting children discards fetched data, saves zero IO, and forces the client
+  into N+1 by-id calls. Mirror the child collections as nested slices, exactly like the
+  by-id response (`auto-query-handlers.html`'s `?fields=` example is a LIST response with
+  a nested child array); the recursive `?fields=` guard is satisfied by making every
+  nested response type pointer/slice + `omitempty` (previous trap), never by amputating
+  the shape. A child-less listing exists only if the dev explicitly asked for one in the
+  spec.
+- **Every SCALAR request/response field carries an `example:` tag** — omit it and Swagger's
+  "try it out" renders garbage placeholders. Composite fields (struct/slice/map) must NOT
+  carry one — that is a boot reject; whole-body samples go through `Doc.RequestExamples`/
+  `Doc.ResponseExamples` (`openapi.html`). Low-risk: decide plausible values yourself.
 - **Strict vs lenient is decided per operation by its FIELDS** — any optional field ⇒ the
   lenient handler, on child ADD exactly as on UPDATE (a strict add 400s an omitted
   optional); all-required (especially numeric — a missing number defaults to 0 and can

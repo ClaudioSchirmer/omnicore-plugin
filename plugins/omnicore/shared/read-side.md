@@ -35,9 +35,11 @@ Never let a read-side limit leak backwards into the domain model.
   Embed/Link family, Upstream) is **relational-INELIGIBLE by construction**
   — boot fail, a 400, or no `.RelationalSource()` to carry at all. The exact kind set
   and failure mode per kind are the PIN's (parity table in `relational-view`).
-- **"Aggregated view" is NOT a view kind.** Counts/sums/report scalars are the
-  `Aggregate`/`AggregateBy` DSL on the write-side RELATIONAL loader
-  (`custom-query-handler` at the pin) — computed on the SoR, never a Mongo view, and
+- **"Aggregated view" is NOT a view kind.** A filtered TOTAL over an existing listing is
+  the `?onlyTotal` DTO opt-in on the list request (`auto-query-handlers` at the pin,
+  both backings). Richer counts/sums/report scalars are the
+  `Aggregate`/`AggregateBy` DSL on the write-side RELATIONAL aggregate loader
+  (`custom-command-handler` at the pin — the AggregateLoader section) — computed on the SoR, never a Mongo view, and
   therefore available on EVERY posture, SQLite included. Refusing "give me totals"
   on an infra-free project (or pushing a Mongo conversion for it) is a wrong refusal.
 - A **plain single-aggregate view is relational-ELIGIBLE — whatever its aggregate's
@@ -53,8 +55,9 @@ Never let a read-side limit leak backwards into the domain model.
 
 A relational view serves filter/sort on any field the aggregate reaches with a **1:1
 load** — a root column, a sibling, or a shared-base field (the last two joined in) — and
-rejects only what would need a **1:N pushdown**: `?search=`, and filter/sort on a 1:N
-child field (a dotted child path, or a child-level sibling). Rejections are a typed 400
+rejects what would need a **1:N pushdown** — `?search=`, and filter/sort on a 1:N
+child field (a dotted child path, or a child-level sibling) — plus an unknown field.
+Rejections are a typed 400
 (`RelationalCapabilityNotification`, field named), never a 500.
 
 **Anti-drift boundary: the authoritative, version-exact capability/parity table is
