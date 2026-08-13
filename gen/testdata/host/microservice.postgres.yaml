@@ -1,0 +1,9 @@
+service: omnicore-gen-golden-host
+relational:
+  dialect: postgres
+  dsn: "${DATABASE_URL:}"
+migrations:
+  dir: ./migrations/postgres
+  autoRun: check
+auth:
+  mode: disabled

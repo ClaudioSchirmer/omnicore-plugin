@@ -1,0 +1,9 @@
+service: omnicore-gen-golden-host
+relational:
+  dialect: mysql
+  dsn: "${DATABASE_URL:}"
+migrations:
+  dir: ./migrations/mysql
+  autoRun: check
+auth:
+  mode: disabled
