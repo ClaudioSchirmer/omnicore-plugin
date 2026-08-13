@@ -69,10 +69,7 @@ func main() {
 	case "doctor":
 		runDoctor(args)
 	case "init":
-		fmt.Fprint(os.Stderr,
-			"init is not available yet — write the spec by hand for now.\n"+
-				"`omnicore-gen explain vocabulary` lists every key and its allowed values.\n")
-		os.Exit(2)
+		runInit(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage)
 		os.Exit(2)
@@ -197,15 +194,36 @@ func runGenerate(args []string) {
 	}
 }
 
+func runInit(args []string) {
+	positional, flags := splitPositional(args)
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	project := fs.String("project", ".", "the service root")
+	out := fs.String("out", "", "where to write (default: specs/<entity>.omnicore.yaml)")
+	force := fs.Bool("force", false, "overwrite an existing spec")
+	_ = fs.Parse(flags)
+	if len(positional) < 1 {
+		fmt.Fprintln(os.Stderr, "init needs the entity name, e.g. omnicore-gen init Student")
+		os.Exit(2)
+	}
+	fsArg0 := positional[0]
+	if err := cli.Init(os.Stdout, cli.InitOptions{
+		Entity: fsArg0, ProjectDir: *project, Out: *out, Force: *force,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
 func runAdopt(args []string) {
+	positional, flags := splitPositional(args)
 	fs := flag.NewFlagSet("adopt", flag.ExitOnError)
 	project := fs.String("project", ".", "the service root")
-	_ = fs.Parse(args)
-	if fs.NArg() < 1 {
+	_ = fs.Parse(flags)
+	if len(positional) < 1 {
 		fmt.Fprintln(os.Stderr, "adopt needs the path of the generated file to accept")
 		os.Exit(2)
 	}
-	if err := cli.Adopt(os.Stdout, *project, fs.Arg(0)); err != nil {
+	if err := cli.Adopt(os.Stdout, *project, positional[0]); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -219,6 +237,40 @@ func runDoctor(args []string) {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
+}
+
+// splitPositional separates the bare arguments from the flags.
+//
+// Go's flag package stops parsing at the first non-flag token, so
+// `init Student -project X` silently drops -project and writes to the wrong
+// place. Separating first makes both orders work, which is the only behaviour
+// anyone expects.
+func splitPositional(args []string) (positional, flags []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			flags = append(flags, a)
+			// A flag written as two tokens takes the next one with it.
+			if !strings.Contains(a, "=") && i+1 < len(args) &&
+				!strings.HasPrefix(args[i+1], "-") && takesValue(a) {
+				i++
+				flags = append(flags, args[i])
+			}
+			continue
+		}
+		positional = append(positional, a)
+	}
+	return positional, flags
+}
+
+// takesValue reports whether a flag consumes the token after it. Booleans do
+// not, and treating one as if it did would swallow the entity name.
+func takesValue(flag string) bool {
+	switch strings.TrimLeft(flag, "-") {
+	case "project", "out", "spec", "force-paths", "migrations":
+		return true
+	}
+	return false
 }
 
 func runExplain(args []string) {
