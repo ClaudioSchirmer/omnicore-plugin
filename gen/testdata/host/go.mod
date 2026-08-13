@@ -8,7 +8,7 @@ module github.com/omnicore/gen-golden-host
 
 go 1.26.3
 
-require github.com/ClaudioSchirmer/omnicore v0.47.2
+require github.com/ClaudioSchirmer/omnicore v0.48.0
 
 require (
 	connectrpc.com/connect v1.20.0 // indirect
