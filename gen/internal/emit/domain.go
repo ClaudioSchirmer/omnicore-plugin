@@ -348,6 +348,15 @@ func comparisonGuard(f ir.Field, recv string) string {
 func comparisonExpr(left, right ir.Field, op, recv string) string {
 	l, r := deref(left, recv), deref(right, recv)
 	if left.SpecType == "time" {
+		// A pointer receiver calls the method directly. Dereferencing first
+		// parses as *(x.Before(y)) — indirection binds looser than the call —
+		// which is a type error rather than the comparison that was meant.
+		l = recv + "." + left.Name
+		if right.Nullable {
+			r = "*" + recv + "." + right.Name
+		} else {
+			r = recv + "." + right.Name
+		}
 		switch op {
 		case "gte":
 			return fmt.Sprintf("%s.Before(%s)", l, r)

@@ -490,6 +490,7 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 		r.Indexes = append(r.Indexes, ri)
 	}
 	for _, fr := range s.Read.FieldRestrict {
+		// The Go field path, not the column: the criteria is addressed by field.
 		r.FieldRestrict = append(r.FieldRestrict, FieldRestrict{
 			Field: fr.Field, Column: readColumn(s, m, fr.Field), Permission: fr.Permission,
 		})

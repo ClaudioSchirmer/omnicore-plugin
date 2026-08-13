@@ -108,7 +108,7 @@ func emitBodyCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 	}
 	s.L("type %s struct {", op.CommandType)
 	s.L("\t%s", op.CommandBase)
-	for _, f := range writableFields(m) {
+	for _, f := range commandFields(m, partial) {
 		s.L("\t%s %s", f.Name, commandFieldType(f, partial))
 	}
 	if op.InputMethod == "ToEntity" || op.InputMethod == "ApplyTo" {
@@ -136,6 +136,19 @@ func emitBodyCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 func writableFields(m *ir.Model) []ir.Field {
 	// A sibling facet is not a separate input: its fields are more fields of the
 	// owner, and the row is materialised only when at least one carries a value.
+	return m.AllOwnerFields()
+}
+
+// commandFields are the fields a given verb accepts.
+//
+// A partial update drops what the spec put off-limits, so the excluded field is
+// ABSENT from the type rather than merely ignored: a reader of the DTO sees the
+// truth, and a caller who sends it gets told, instead of having it quietly
+// dropped or quietly applied.
+func commandFields(m *ir.Model, partial bool) []ir.Field {
+	if partial {
+		return m.PatchableFields()
+	}
 	return m.AllOwnerFields()
 }
 
@@ -192,7 +205,7 @@ func emitApplyPartiallyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 			"Note the consequence: this verb can never set a value back to null, because "+
 			"an absent field and an explicit null are indistinguishable here.")
 	s.L("func (c *%s) ApplyPartiallyTo(ctx *configuration.AppContext, e *%s) error {", op.CommandType, entity)
-	for _, f := range writableFields(m) {
+	for _, f := range m.PatchableFields() {
 		s.L("\tif c.%s != nil {", f.Name)
 		if f.Nullable {
 			s.L("\t\te.%s = %s", f.Name, entityValue(f, "c."+f.Name))
@@ -432,19 +445,23 @@ func emitFieldRestrictions(s *src, m *ir.Model, target string) {
 		}
 		return
 	}
-	s.L("\t// Callers without the permission simply do not receive these fields.")
+	s.L("\t// A caller without the permission does not receive these fields.")
+	s.L("\t//")
+	s.L("\t// The error is PROPAGATED, not discarded: the framework answers 403 when a")
+	s.L("\t// caller actively named a field it may not see, and silently omits it when")
+	s.L("\t// it merely did not ask. Swallowing the error would collapse the two and")
+	s.L("\t// reopen the inference leak that distinction exists to close.")
+	s.L("\tallowed := func(string) bool { return false }")
 	s.L("\tif id := ctx.Identity(); id != nil {")
-	for _, fr := range m.Read.FieldRestrict {
-		s.L("\t\tif !id.HasPermission(%s) {", quote(fr.Permission))
-		s.L("\t\t\t%s.Restrict(%s)", target, quote(fr.Column))
-		s.L("\t\t}")
-	}
-	s.L("\t} else {")
-	s.L("\t\t// No identity at all: restrict everything rather than assume permission.")
-	for _, fr := range m.Read.FieldRestrict {
-		s.L("\t\t%s.Restrict(%s)", target, quote(fr.Column))
-	}
+	s.L("\t\tallowed = id.HasPermission")
 	s.L("\t}")
+	for _, fr := range m.Read.FieldRestrict {
+		s.L("\tif !allowed(%s) {", quote(fr.Permission))
+		s.L("\t\tif err := %s.Restrict(%s); err != nil {", target, quote(fr.Field))
+		s.L("\t\t\treturn %s, err", target)
+		s.L("\t\t}")
+		s.L("\t}")
+	}
 }
 
 // emitRowScoping narrows a read to the rows the caller may see.
@@ -458,23 +475,32 @@ func emitRowScoping(s *src, m *ir.Model, target string) {
 		if m.Authz.OwnerColumn == "" {
 			return
 		}
-		s.L("\t// Callers see only their own rows.")
+		s.L("\t// Callers see only their own rows. Filter is a map keyed by the Go")
+		s.L("\t// field path, and the scope is FORCED: a value the caller sent for this")
+		s.L("\t// field is overwritten, never merged.")
+		s.L("\tif %s.Filter == nil {", target)
+		s.L("\t\t%s.Filter = map[string]any{}", target)
+		s.L("\t}")
 		s.L("\tif id := ctx.Identity(); id != nil {")
-		s.L("\t\t%s.Filter(%s, id.Subject)", target, quote(m.Authz.OwnerColumn))
+		s.L("\t\t%s.Filter[%s] = id.Subject", target, quote(m.Authz.OwnerField.Name))
 		s.L("\t} else {")
-		s.L("\t\t// No identity: no rows. Failing open here would expose everything.")
-		s.L("\t\t%s.Filter(%s, %s)", target, quote(m.Authz.OwnerColumn), quote(""))
+		s.L("\t\t// No identity: no rows. Failing open here would expose every row.")
+		s.L("\t\t%s.Filter[%s] = \"\"", target, quote(m.Authz.OwnerField.Name))
 		s.L("\t}")
 	case "tenant":
 		if m.Authz.TenantColumn == "" {
 			return
 		}
-		s.L("\t// Callers see only their tenant's rows.")
+		s.L("\t// Callers see only their tenant's rows. The scope is FORCED: a value")
+		s.L("\t// the caller sent for this field is overwritten, never merged.")
+		s.L("\tif %s.Filter == nil {", target)
+		s.L("\t\t%s.Filter = map[string]any{}", target)
+		s.L("\t}")
 		s.L("\tif id := ctx.Identity(); id != nil {")
-		s.L("\t\t%s.Filter(%s, id.TenantID())", target, quote(m.Authz.TenantColumn))
+		s.L("\t\t%s.Filter[%s] = id.TenantID()", target, quote(m.Authz.TenantField.Name))
 		s.L("\t} else {")
 		s.L("\t\t// No tenant claim: no rows, rather than every tenant's.")
-		s.L("\t\t%s.Filter(%s, %s)", target, quote(m.Authz.TenantColumn), quote(""))
+		s.L("\t\t%s.Filter[%s] = \"\"", target, quote(m.Authz.TenantField.Name))
 		s.L("\t}")
 	}
 }

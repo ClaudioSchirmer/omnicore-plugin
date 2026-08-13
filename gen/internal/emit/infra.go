@@ -73,8 +73,12 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 		s.L("\t\t// DISAGREE about it abort the boot.")
 		s.L("\t\tSharedBase(%s(), %s).", m.Base.FuncName, quote(baseLinkColumn(m)))
 	}
+	// The chain is built as a list so the LAST call carries no trailing dot.
+	// Emitting a filler call to absorb it was a guess at a method that does not
+	// exist — and it only ever showed up on an entity with no managed columns.
+	var chain []string
 	for _, f := range roleColumns(m) {
-		s.L("\t\tField(%s, %s).", quote(f.Name), quote(f.Column))
+		chain = append(chain, fmt.Sprintf("Field(%s, %s)", quote(f.Name), quote(f.Column)))
 	}
 	for _, sib := range m.Siblings {
 		s.L("\t\t// The %s facet: its own table, sharing this row's key. Every column is", sib.Name)
@@ -91,26 +95,21 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 	for _, c := range m.Children {
 		s.L("\t\tChild(%sSchema()).", c.Name)
 	}
-	tail := []string{}
 	if m.Managed.ArchivedAt != "" {
-		tail = append(tail, fmt.Sprintf("DeletedAt(%s)", quote(m.Managed.ArchivedAt)))
+		chain = append(chain, fmt.Sprintf("DeletedAt(%s)", quote(m.Managed.ArchivedAt)))
 	}
 	if m.Managed.CreatedAt != "" {
-		tail = append(tail, fmt.Sprintf("CreatedAt(%s)", quote(m.Managed.CreatedAt)))
+		chain = append(chain, fmt.Sprintf("CreatedAt(%s)", quote(m.Managed.CreatedAt)))
 	}
 	if m.Managed.UpdatedAt != "" {
-		tail = append(tail, fmt.Sprintf("UpdatedAt(%s)", quote(m.Managed.UpdatedAt)))
+		chain = append(chain, fmt.Sprintf("UpdatedAt(%s)", quote(m.Managed.UpdatedAt)))
 	}
-	for i, call := range tail {
-		if i == len(tail)-1 {
+	for i, call := range chain {
+		if i == len(chain)-1 {
 			s.L("\t\t%s", call)
 		} else {
 			s.L("\t\t%s.", call)
 		}
-	}
-	if len(tail) == 0 {
-		// Trim the trailing dot left by the last Field call.
-		s.L("\t\tName()")
 	}
 	s.L("}")
 

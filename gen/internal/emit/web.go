@@ -78,7 +78,7 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 		s.Doc("", "Every field is optional: omitting one leaves the stored value untouched.")
 	}
 	s.L("type %s struct {", op.RequestType)
-	for _, f := range m.AllOwnerFields() {
+	for _, f := range commandFields(m, partial) {
 		s.L("\t%s %s `json:%s example:%s`", f.Name,
 			commandFieldType(f, partial), quote(jsonTag(f, partial)), quote(f.Example))
 	}
@@ -94,7 +94,7 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 		"No normalisation happens here: the domain is what decides a value's final form.")
 	s.L("func (r %s) ToCommand() *commands.%s {", op.RequestType, op.CommandType)
 	s.L("\tcmd := &commands.%s{", op.CommandType)
-	for _, f := range m.AllOwnerFields() {
+	for _, f := range commandFields(m, partial) {
 		s.L("\t\t%s: r.%s,", f.Name, f.Name)
 	}
 	s.L("\t}")

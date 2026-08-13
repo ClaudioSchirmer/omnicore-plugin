@@ -269,7 +269,6 @@ func Doctor(w io.Writer, projectDir string) error {
 	return nil
 }
 
-
 // decideMigrations answers "does this run write DDL?".
 //
 // The default is the only inference the generator makes, and it is about

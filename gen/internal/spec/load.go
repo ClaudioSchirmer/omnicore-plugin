@@ -46,7 +46,10 @@ func Parse(raw []byte, path string) (*Spec, error) {
 
 // unknownFieldRe matches yaml.v3's KnownFields complaint so it can be restated
 // in the language of the spec instead of the language of Go structs.
-var unknownFieldRe = regexp.MustCompile(`line (\d+): field (\S+) not found in type (\S+)`)
+// The key is captured lazily rather than as a run of non-spaces: the case that
+// most needs a good message is precisely the one where the "key" CONTAINS
+// spaces, because it is really a fragment of a sentence.
+var unknownFieldRe = regexp.MustCompile(`line (\d+): field (.+?) not found in type (\S+)`)
 
 func translateDecodeError(err error, path string) error {
 	msg := err.Error()
@@ -61,6 +64,16 @@ func translateDecodeError(err error, path string) error {
 			hint := ""
 			if sugg := suggestKey(goType, key); sugg != "" {
 				hint = fmt.Sprintf(" — did you mean %q?", sugg)
+			}
+			// A "key" that reads like prose is almost never a typo: it is the tail
+			// of a sentence that got split by an unquoted comma inside a one-line
+			// {a: b, c: d} mapping. Saying "unknown key" there sends the reader
+			// hunting through the vocabulary for a word that was never a key.
+			if looksLikeProse(key) {
+				hint = " — this reads like part of a sentence rather than a key, which " +
+					"happens when an inline {a: b, c: d} value contains an unquoted " +
+					"comma: everything after the comma is parsed as another key. " +
+					"Quote the value"
 			}
 			out = append(out, fmt.Sprintf(
 				"%s:%s: unknown key %q in %s%s", path, lineNo, key, specSectionName(goType), hint))
@@ -206,4 +219,12 @@ var specTypes = map[string]reflect.Type{
 	"CSVExport":     reflect.TypeOf(CSVExport{}),
 	"XLSXExport":    reflect.TypeOf(XLSXExport{}),
 	"Authz":         reflect.TypeOf(Authz{}),
+}
+
+// looksLikeProse reports whether a rejected key is more likely a fragment of
+// text than a mistyped key.
+func looksLikeProse(key string) bool {
+	return strings.ContainsAny(key, " ") ||
+		strings.HasSuffix(key, ".") ||
+		len([]rune(key)) > 40
 }

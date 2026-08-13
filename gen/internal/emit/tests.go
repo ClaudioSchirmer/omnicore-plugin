@@ -294,7 +294,7 @@ func emitRuleCase(s *src, m *ir.Model, gate string, rule ir.Rule) {
 		s.Doc(fmt.Sprintf("%s must stay %s %s.", f.Name, rule.Operator, rule.Other.Name))
 		s.L("func Test%s_%s_Comparison(t *testing.T) {", m.Entity.Pascal, f.Name)
 		s.L("\te := valid%s()", m.Entity.Pascal)
-		s.L("\te.%s = %s", f.Name, violatingComparison(f, *rule.Other, rule.Operator))
+		s.L("\te.%s = %s", f.Name, pointerize(f, violatingComparison(f, *rule.Other, rule.Operator)))
 		s.L("\t_, err := domain.GetInsertable(e, %s, %s)", serviceArg(m), quote(insertAction(m)))
 		s.L("\tif err == nil {")
 		s.L("\t\tt.Fatal(\"the comparison between %s and %s was not enforced\")", f.Name, rule.Other.Name)
@@ -578,3 +578,15 @@ func invalidSample(vo ir.ValueObject) string {
 }
 
 var _ = naming.Snake
+
+// pointerize wraps a literal for a nullable field.
+//
+// Assigning a value to a pointer field does not compile, and the case that
+// exposes it is the one a test is most likely to touch: an optional field is
+// exactly where a boundary rule lives.
+func pointerize(f ir.Field, literal string) string {
+	if !f.Nullable {
+		return literal
+	}
+	return "func() " + f.EntityType + " { v := " + f.BaseEntityType + "(" + literal + "); return &v }()"
+}
