@@ -254,7 +254,11 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 	} else {
 		s.L("\tID string `json:\"id\" example:\"7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51\"`")
 	}
-	for _, f := range m.Fields {
+	// The facet's fields and the collections belong here, not only on the by-id
+	// read. The whole aggregate is already in hand when the listing is served,
+	// so leaving them out discards data that was fetched anyway and pushes the
+	// caller into one extra request per row to get it back.
+	for _, f := range m.AllOwnerFields() {
 		typ, tag := f.GoType, quote(f.JSONName)
 		if pointered {
 			typ = "*" + f.BaseGoType
@@ -262,7 +266,34 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 		}
 		s.L("\t%s %s `json:%s example:%s`", f.Name, typ, tag, quote(f.Example))
 	}
+	for _, c := range m.Children {
+		s.L("\t%s []%sRow `json:%s`", c.Plural, c.Name, quote(c.Segment+",omitempty"))
+	}
 	s.L("}")
+	s.Blank()
+	// A nested row of a listing that serves ?fields= must be pointer-and-omitempty
+	// throughout, RECURSIVELY — the framework refuses to build the endpoint
+	// otherwise, and the refusal happens at boot rather than at compile time.
+	for _, c := range m.Children {
+		s.Doc(fmt.Sprintf("%sRow is one entry of the %s collection as the listing returns it.",
+			c.Name, c.Segment))
+		s.L("type %sRow struct {", c.Name)
+		if pointered {
+			s.L("\tID *string `json:\"id,omitempty\"`")
+		} else {
+			s.L("\tID string `json:\"id\"`")
+		}
+		for _, f := range c.Fields {
+			typ, tag := f.GoType, quote(f.JSONName)
+			if pointered {
+				typ = "*" + f.BaseGoType
+				tag = quote(f.JSONName + ",omitempty")
+			}
+			s.L("\t%s %s `json:%s example:%s`", f.Name, typ, tag, quote(f.Example))
+		}
+		s.L("}")
+		s.Blank()
+	}
 	s.Blank()
 	s.L("var _ = time.Time{}")
 

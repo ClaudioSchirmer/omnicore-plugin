@@ -231,9 +231,9 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 	case "immutable":
 		emitImmutable(s, rule, recv)
 	case "range":
-		emitRange(s, rule, recv)
+		emitRange(s, rule, recv, m)
 	case "length":
-		emitLength(s, rule, recv)
+		emitLength(s, rule, recv, m)
 	case "comparison":
 		emitComparison(s, rule, recv)
 	case "ownerCheck":
@@ -269,7 +269,7 @@ func emitImmutable(s *src, rule ir.Rule, recv string) {
 	s.L("\t\t}")
 }
 
-func emitRange(s *src, rule ir.Rule, recv string) {
+func emitRange(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	for _, f := range rule.Fields {
 		var conds []string
 		val := deref(f, recv)
@@ -286,12 +286,12 @@ func emitRange(s *src, rule ir.Rule, recv string) {
 			s.L("\t\tif %s {", body)
 		}
 		s.L("\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifLiteral(rule.Notification), echoArgOn(rule, f, recv))
+			quote(f.Name), notifLiteralFor(rule, m), echoArgOn(rule, f, recv))
 		s.L("\t\t}")
 	}
 }
 
-func emitLength(s *src, rule ir.Rule, recv string) {
+func emitLength(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	for _, f := range rule.Fields {
 		val := deref(f, recv)
 		var conds []string
@@ -308,7 +308,7 @@ func emitLength(s *src, rule ir.Rule, recv string) {
 			s.L("\t\tif %s {", body)
 		}
 		s.L("\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifLiteral(rule.Notification), echoArgOn(rule, f, recv))
+			quote(f.Name), notifLiteralFor(rule, m), echoArgOn(rule, f, recv))
 		s.L("\t\t}")
 	}
 }
@@ -618,4 +618,48 @@ func emitChildMethods(s *src, m *ir.Model) {
 		s.L("}")
 		s.Blank()
 	}
+}
+
+
+// notifLiteralFor builds the notification value, filling the interpolation
+// variables the rule can supply.
+//
+// Declaring a variable and never setting it is worse than not declaring it: the
+// catalog keeps its {min}, the renderer substitutes nothing, and the end user
+// reads "between  and ." — a message that looks written rather than broken.
+func notifLiteralFor(rule ir.Rule, m *ir.Model) string {
+	name := rule.Notification
+	if name == "" || frameworkNotifications[name] || m == nil {
+		return notifLiteral(name)
+	}
+	var parts []string
+	for _, v := range tvarsOf(m, name) {
+		switch v {
+		case "min":
+			if rule.Min != nil {
+				parts = append(parts, fmt.Sprintf("Min: %q", trimNumber(*rule.Min)))
+			}
+		case "max":
+			if rule.Max != nil {
+				parts = append(parts, fmt.Sprintf("Max: %q", trimNumber(*rule.Max)))
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return name + "{}"
+	}
+	return name + "{" + strings.Join(parts, ", ") + "}"
+}
+
+func tvarsOf(m *ir.Model, name string) []string {
+	for _, n := range m.Notifications {
+		if n.Name == name {
+			return n.TVars
+		}
+	}
+	return nil
+}
+
+func trimNumber(v float64) string {
+	return strings.TrimSuffix(fmt.Sprintf("%g", v), ".0")
 }
