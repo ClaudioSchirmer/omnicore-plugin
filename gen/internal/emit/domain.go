@@ -620,7 +620,6 @@ func emitChildMethods(s *src, m *ir.Model) {
 	}
 }
 
-
 // notifLiteralFor builds the notification value, filling the interpolation
 // variables the rule can supply.
 //

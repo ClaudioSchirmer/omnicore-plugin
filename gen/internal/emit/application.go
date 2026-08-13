@@ -113,7 +113,7 @@ func emitBodyCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 	}
 	if op.InputMethod == "ToEntity" || op.InputMethod == "ApplyTo" {
 		for _, c := range m.Children {
-			s.L("\t%s []dtos.%s", c.Plural, c.InputType)
+			s.L("\t%s []dtos.%s", c.GoPlural, c.InputType)
 		}
 	}
 	s.L("}")
@@ -251,7 +251,7 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\t%s %s", f.Name, f.GoType)
 	}
 	for _, c := range m.Children {
-		s.L("\t%s []%sResult", c.Plural, c.Name)
+		s.L("\t%s []%sResult", c.GoPlural, c.Name)
 	}
 	s.L("}")
 
@@ -270,7 +270,7 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\t\t%s: %s,", f.Name, wireValue(f, "e"))
 	}
 	for _, c := range m.Children {
-		s.L("\t\t%s: %s,", c.Plural, "project"+c.Plural+"(e)")
+		s.L("\t\t%s: %s,", c.GoPlural, "project"+c.GoPlural+"(e)")
 	}
 	s.L("\t}, nil")
 	s.L("}")
@@ -283,7 +283,7 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 // duplicate is judged, and bypassing it would skip that judgement.
 func emitChildAdds(s *src, m *ir.Model) {
 	for _, c := range m.Children {
-		s.L("\tfor _, item := range c.%s {", c.Plural)
+		s.L("\tfor _, item := range c.%s {", c.GoPlural)
 		s.L("\t\te.%s(item.To%s())", c.AddMethod, c.Name)
 		s.L("\t}")
 	}
@@ -296,7 +296,7 @@ func emitChildAdds(s *src, m *ir.Model) {
 // persister has just written the minted ids back.
 func emitChildProjectors(s *src, m *ir.Model, entity string) {
 	for _, c := range m.Children {
-		s.L("func project%s(e *%s) []%sResult {", c.Plural, entity, c.Name)
+		s.L("func project%s(e *%s) []%sResult {", c.GoPlural, entity, c.Name)
 		s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](&e.AggregateRoot)", c.Name)
 		s.L("\tout := make([]%sResult, 0, len(items))", c.Name)
 		s.L("\tfor _, item := range items {")

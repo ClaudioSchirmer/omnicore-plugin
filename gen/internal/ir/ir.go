@@ -920,8 +920,15 @@ func factFor(m *Model, field string) *Fact {
 // it — the framework keeps children in its own collection, and a slice field
 // would stay empty on read and be ignored on write.
 type Child struct {
-	Name        string
-	Plural      string
+	Name string
+	// Plural is the WIRE name: what the collection is called in JSON.
+	Plural string
+	// GoPlural is the Go field name, and it is NOT the same thing. The framework
+	// derives the document segment from the child's TYPE name, so a projected
+	// read looks for that key — a field named after a hand-written plural would
+	// map to a key the document does not have and come back empty. The override
+	// belongs to the wire, never to the field.
+	GoPlural    string
 	Table       string
 	Description string
 	OwnedBy     string
@@ -933,7 +940,8 @@ type Child struct {
 	InputType   string
 	AddMethod   string
 	Clauses     []Clause
-	Segment     string // the key this child projects under in the read document
+	Segment     string // the WIRE name of the collection
+	DocSegment  string // the key the projection actually stores it under
 }
 
 // Sibling is a 1:1 facet stored in its own table, sharing the owner's key.
@@ -955,11 +963,12 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			plural = c.Plural
 		}
 		ch := Child{
-			Name: c.Name, Plural: plural, Table: c.Table,
+			Name: c.Name, Plural: plural, GoPlural: naming.Plural(c.Name), Table: c.Table,
 			Description: c.Description, OwnedBy: c.OwnedBy, Strategy: c.EditStrategy,
 			SoftRemove: c.SoftRemove, ArchivedAt: c.ArchivedAt,
 			InputType: c.Name + "Input", AddMethod: "Add" + c.Name,
-			Segment: naming.Camel(plural),
+			Segment:    naming.Camel(plural),
+			DocSegment: naming.Plural(c.Name),
 		}
 		for _, f := range c.Fields {
 			ch.Fields = append(ch.Fields, resolveField(c.Name, f))
@@ -1134,7 +1143,9 @@ func readColumn(sp *spec.Spec, m *Model, name string) string {
 			}
 			for _, f := range c.Fields {
 				if f.Name == name[i+1:] {
-					return c.Segment + "." + f.Column
+					// The DOCUMENT key, not the wire name: an index or filter addressed by
+					// the wire name would match nothing in the projection.
+					return c.DocSegment + "." + f.Column
 				}
 			}
 		}

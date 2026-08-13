@@ -2,7 +2,9 @@ package emit
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
@@ -478,6 +480,12 @@ func entityAsWire(f ir.Field, recv string) string {
 	return recv + "." + f.Name
 }
 
+// literalFor prefers the spec's own example.
+//
+// The example is the author saying what a plausible value looks like, so using
+// it is what makes the "valid" fixture actually valid — a hardcoded 1 fails
+// every field whose declared range starts above it, and the failure looks like
+// a broken rule rather than a broken sample.
 func literalFor(f ir.Field) string {
 	switch f.SpecType {
 	case "string":
@@ -486,10 +494,25 @@ func literalFor(f ir.Field) string {
 		}
 		return quote(strings.ToLower(f.Name))
 	case "time":
+		if t, err := time.Parse(time.RFC3339, f.Example); err == nil {
+			return fmt.Sprintf("time.Date(%d, %d, %d, %d, %d, %d, 0, time.UTC)",
+				t.Year(), int(t.Month()), t.Day(), t.Hour(), t.Minute(), t.Second())
+		}
 		return "time.Date(2026, 2, 1, 9, 0, 0, 0, time.UTC)"
 	case "bool":
+		if f.Example == "false" {
+			return "false"
+		}
 		return "true"
+	case "int", "int64":
+		if n, err := strconv.ParseInt(strings.TrimSpace(f.Example), 10, 64); err == nil {
+			return strconv.FormatInt(n, 10)
+		}
+		return "1"
 	case "float64":
+		if v, err := strconv.ParseFloat(strings.TrimSpace(f.Example), 64); err == nil {
+			return strings.TrimSuffix(fmt.Sprintf("%g", v), ".0")
+		}
 		return "1"
 	case "id":
 		return "domain.ID{}"

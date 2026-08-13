@@ -84,7 +84,7 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	}
 	if !partial {
 		for _, c := range m.Children {
-			s.L("\t%s []%sRequest `json:%s`", c.Plural, c.Name, quote(c.Segment))
+			s.L("\t%s []%sRequest `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
 		}
 	}
 	s.L("}")
@@ -100,8 +100,8 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	s.L("\t}")
 	if !partial {
 		for _, c := range m.Children {
-			s.L("\tfor _, item := range r.%s {", c.Plural)
-			s.L("\t\tcmd.%s = append(cmd.%s, item.ToInput())", c.Plural, c.Plural)
+			s.L("\tfor _, item := range r.%s {", c.GoPlural)
+			s.L("\t\tcmd.%s = append(cmd.%s, item.ToInput())", c.GoPlural, c.GoPlural)
 			s.L("\t}")
 		}
 	}
@@ -117,7 +117,7 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType, quote(jsonTag(f, false)), quote(f.Example))
 	}
 	for _, c := range m.Children {
-		s.L("\t%s []%sResponse `json:%s`", c.Plural, c.Name, quote(c.Segment))
+		s.L("\t%s []%sResponse `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
 	}
 	s.L("}")
 	s.Blank()
@@ -129,8 +129,8 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	}
 	s.L("\t}")
 	for _, c := range m.Children {
-		s.L("\tfor _, item := range r.%s {", c.Plural)
-		s.L("\t\tout.%s = append(out.%s, %sResponse{", c.Plural, c.Plural, c.Name)
+		s.L("\tfor _, item := range r.%s {", c.GoPlural)
+		s.L("\t\tout.%s = append(out.%s, %sResponse{", c.GoPlural, c.GoPlural, c.Name)
 		s.L("\t\t\tID: item.ID,")
 		for _, f := range c.Fields {
 			s.L("\t\t\t%s: item.%s,", f.Name, f.Name)
@@ -267,7 +267,7 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 		s.L("\t%s %s `json:%s example:%s`", f.Name, typ, tag, quote(f.Example))
 	}
 	for _, c := range m.Children {
-		s.L("\t%s []%sRow `json:%s`", c.Plural, c.Name, quote(c.Segment+",omitempty"))
+		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment+",omitempty"))
 	}
 	s.L("}")
 	s.Blank()
