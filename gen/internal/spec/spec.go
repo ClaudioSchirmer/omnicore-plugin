@@ -12,9 +12,10 @@ package spec
 type Spec struct {
 	SpecVersion int    `yaml:"specVersion"`
 	Entity      string `yaml:"entity"`
-	// Plural overrides the pluralisation of the entity name. The generator can
-	// only guess in English, and the guess reaches the route path — so a service
-	// written in any other language needs to be able to say it.
+	// Plural is REQUIRED. It reaches the route path, the feature name and the
+	// listing types, and no rule can spell it: an English heuristic writes
+	// "Animals" for Animal and "Pessoas" is not something it could ever reach.
+	// The generator does not invent names — this one is declared.
 	Plural   string `yaml:"plural"`
 	Language string `yaml:"language"`
 
@@ -53,6 +54,14 @@ type Base struct {
 	Reuse         bool   `yaml:"reuse"`
 	NaturalKey    string `yaml:"naturalKey"`
 	Link          string `yaml:"link"`          // shared-pk | separate-fk
+	// LinkColumn is the role's foreign key to the identity, REQUIRED for a
+	// separate-fk link. A shared-pk link has none to declare: the role's own
+	// primary key IS the identity's, which is the framework's contract rather
+	// than a name anyone chooses.
+	LinkColumn string `yaml:"linkColumn"`
+	// SchemaFunc names the Go function that declares the base schema. Declared
+	// because the generator has no way to singularise a table name.
+	SchemaFunc string `yaml:"schemaFunc"`
 	RowUniqueness string `yaml:"rowUniqueness"` // unique-fk | active-only
 	OrphanPolicy  string `yaml:"orphanPolicy"`  // keep | delete-when-unreferenced
 }
@@ -130,10 +139,19 @@ type EnumMember struct {
 
 type Child struct {
 	Name string `yaml:"name"`
-	// Plural overrides the pluralisation of the child's name. It is not
-	// cosmetic: this is the JSON key the collection travels under and the
-	// segment it projects into, so a wrong guess is a wrong wire contract.
-	Plural                string   `yaml:"plural"`
+	// Plural is REQUIRED and is the child's COLLECTION NAME — the single name
+	// the framework uses for this collection: the document segment the
+	// projection nests it under, the Go field the read DTO declares for it, and
+	// (lower-camelled) the notification wire path. It is a persisted key, so a
+	// guess here is a wrong document, not a cosmetic slip.
+	//
+	// Declare it as the domain says it, in the domain's own language, valid as
+	// an exported Go field name: "Addresses", "OrderLines", "Enderecos".
+	Plural string `yaml:"plural"`
+	// ParentColumn is REQUIRED: the foreign key back to the owner. It is a
+	// column name, so deriving it would be inventing a name that outlives the
+	// decision — renaming it later is a migration.
+	ParentColumn string `yaml:"parentColumn"`
 	Table                 string   `yaml:"table"`
 	Description           string   `yaml:"description"`
 	OwnedBy               string   `yaml:"ownedBy"`      // root | base | role

@@ -389,7 +389,7 @@ func writeSiblingTable(b *strings.Builder, m *ir.Model, sib ir.Sibling, d dialec
 // The foreign key is indexed because every read of the aggregate loads the
 // children by it; without the index that is a full scan per parent.
 func writeChildTable(b *strings.Builder, m *ir.Model, c ir.Child, d dialect) {
-	fk := parentColumn(m)
+	fk := parentColumn(c)
 	fmt.Fprintf(b, "%s %s — the %s collection of %s.\n", d.Comment, c.Table, c.Segment, m.Table)
 	if c.Description != "" {
 		fmt.Fprintf(b, "%s %s\n", d.Comment, firstLine(c.Description))

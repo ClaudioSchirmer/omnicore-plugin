@@ -69,11 +69,30 @@ func emitAVO(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("}")
 	s.Blank()
 
+	emitCollectionName(s, c)
 	emitBusinessIdentity(s, c)
 	emitChildRules(s, c)
 
 	return goFile("internal/domain/aggregatevos/"+naming.Snake(c.Name)+".go", fsplan.Owned,
 		fmt.Sprintf("the %s child value object", c.Name), s)
+}
+
+// emitCollectionName declares the ONE name of this collection.
+//
+// The framework requires it and derives nothing: it is the document segment the
+// projection nests the collection under, the Go field the read DTO declares for
+// it, and — lower-camelled — the path a notification reaches the wire under. A
+// rule could not spell it in the domain's own language, so the domain says it.
+func emitCollectionName(s *src, c ir.Child) {
+	s.Doc(
+		fmt.Sprintf("CollectionName is the name of the %s collection.", c.Segment),
+		"",
+		"It is a constant of the TYPE, resolved once from a zero value, and it is "+
+			"the single source for the document segment, the read DTO's field and the "+
+			"notification path — so the three can never drift apart.",
+	)
+	s.L("func (%s) CollectionName() string { return %s }", c.Name, quote(c.Plural))
+	s.Blank()
 }
 
 // emitBusinessIdentity answers "is this the SAME entry?" from the business
@@ -168,7 +187,7 @@ func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("func %sSchema() *core.TableSchema {", c.Name)
 	s.L("\treturn core.NewTableSchema[aggregatevos.%s](%s).", c.Name, quote(c.Table))
 	s.L("\t\tID(%s).", quote("id"))
-	s.L("\t\tParentID(%s).", quote(parentColumn(m)))
+	s.L("\t\tParentID(%s).", quote(parentColumn(c)))
 	for _, f := range c.Fields {
 		s.L("\t\tField(%s, %s).", quote(f.Name), quote(f.Column))
 	}
@@ -248,8 +267,7 @@ func emitChildInput(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		fmt.Sprintf("the %s input DTO", c.Name), s)
 }
 
-// parentColumn is the foreign key a child points back through. It is derived
-// from the owner's table so the name reads the same in the schema and in the DDL.
-func parentColumn(m *ir.Model) string {
-	return naming.Singular(m.Table) + "_id"
-}
+// parentColumn is the foreign key a child points back through, as the spec
+// declares it. Nothing here derives it: a column name outlives the decision
+// that produced it, and renaming one later is a migration.
+func parentColumn(c ir.Child) string { return c.ParentColumn }

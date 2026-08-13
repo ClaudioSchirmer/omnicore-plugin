@@ -313,10 +313,13 @@ func qualifyNotification(literal string) string {
 // With a shared primary key the role's id IS the identity's id; with a separate
 // key the role keeps its own id and carries a foreign key beside it.
 func baseLinkColumn(m *ir.Model) string {
+	// A shared-pk role has no column to name: its own primary key IS the
+	// identity's, which is the framework's contract rather than a choice. Any
+	// other link says its column in the spec.
 	if m.Base.Link == "shared-pk" {
 		return "id"
 	}
-	return naming.Singular(m.Base.Table) + "_id"
+	return m.Base.LinkColumn
 }
 
 // emitBaseSchema writes the shared identity.
@@ -374,7 +377,7 @@ func emitBaseSchema(m *ir.Model) (fsplan.File, error) {
 	}
 	s.L("}")
 
-	return goFile("internal/infra/schemas/"+naming.Snake(naming.Singular(m.Base.Table))+"_base_schema.go",
+	return goFile("internal/infra/schemas/"+m.Base.Table+"_base_schema.go",
 		fsplan.Owned, fmt.Sprintf("the %s shared identity schema", m.Base.Table), s)
 }
 

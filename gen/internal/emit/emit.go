@@ -76,7 +76,7 @@ func TargetShape(m *ir.Model) []TargetTable {
 		cols := columnsOf(c.Fields, m, false)
 		// After the primary key, not before it: the table reads the way it is created.
 		cols = append(cols[:1], append([]TargetColumn{{
-			Name: parentColumn(m), Type: "id", Note: "foreign key to " + m.Table,
+			Name: parentColumn(c), Type: "id", Note: "foreign key to " + m.Table,
 		}}, cols[1:]...)...)
 		out = append(out, TargetTable{
 			Name: c.Table, Purpose: "the " + c.Segment + " collection (1:N)",

@@ -92,8 +92,11 @@ func backingFor(p *discover.Project) string {
 
 func renderTemplate(entity string, p *discover.Project) string {
 	var b strings.Builder
-	table := naming.Snake(naming.Plural(entity))
-	plural := naming.Plural(entity)
+	// The table is suggested from the entity in singular — a case change of a
+	// name the author already gave. The PLURAL is left blank: inventing it is
+	// exactly what this generator does not do, and a template that quietly
+	// guessed it would put the guess in a route path.
+	table := naming.Snake(entity)
 	resource := strings.ToLower(entity)
 	backing := backingFor(p)
 
@@ -111,9 +114,10 @@ func renderTemplate(entity string, p *discover.Project) string {
 	}
 	b.WriteString("\nspecVersion: 1\n")
 	fmt.Fprintf(&b, "entity: %s\n", entity)
-	fmt.Fprintf(&b, "# The plural reaches the route path and the JSON key of a collection, and\n")
-	fmt.Fprintf(&b, "# the generator can only guess it in English. Correct it if it is wrong.\n")
-	fmt.Fprintf(&b, "plural: %s\n", plural)
+	b.WriteString("# REQUIRED. It reaches the route path, the feature name and the listing\n")
+	b.WriteString("# types. No rule can spell it — an English heuristic writes neither\n")
+	b.WriteString("# \"Matriculas\" nor \"Analyses\" — so you declare it.\n")
+	b.WriteString("plural:\n")
 	b.WriteString("language: pt-BR\n\n")
 
 	b.WriteString("storage:\n")
@@ -122,6 +126,8 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("  # Starting flat and extracting a shared identity afterwards is a real\n")
 	b.WriteString("  # migration, so it is worth a minute now.\n")
 	b.WriteString("  kind: flat\n")
+	b.WriteString("  # Suggested from the entity name, in singular. Change it to whatever the\n")
+	b.WriteString("  # table is really called.\n")
 	fmt.Fprintf(&b, "  table: %s\n", table)
 	fmt.Fprintf(&b, "  description: TODO — one line; it becomes the table comment.\n")
 	b.WriteString("  managed:\n")
@@ -201,6 +207,18 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("      orderBy: true\n")
 	b.WriteString("      includeArchived: true\n\n")
 
+	b.WriteString("# children:\n")
+	b.WriteString("#   - name: Item\n")
+	b.WriteString("#     # REQUIRED, and it is a PERSISTED key: the document segment, the read\n")
+	b.WriteString("#     # DTO field and the notification path, all from this one name.\n")
+	b.WriteString("#     plural: Itens\n")
+	b.WriteString("#     table: TODO_itens\n")
+	b.WriteString("#     # REQUIRED. A column name outlives the decision that made it.\n")
+	b.WriteString("#     parentColumn: TODO_id\n")
+	b.WriteString("#     ownedBy: root\n")
+	b.WriteString("#     editStrategy: atomic-replace\n")
+	b.WriteString("#     businessIdentity: [TODO]\n")
+	b.WriteString("#     fields: []\n\n")
 	b.WriteString("surfaces:\n")
 	b.WriteString("  rest: true\n")
 	b.WriteString("  # graphql: {enabled: true, connection: true, mutations: [insert, update, archive, unarchive]}\n")

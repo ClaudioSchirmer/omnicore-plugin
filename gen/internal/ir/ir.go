@@ -279,11 +279,7 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	return m, nil
 }
 
-func resolveNames(entity, override string) Names {
-	plural := naming.Plural(entity)
-	if override != "" {
-		plural = override
-	}
+func resolveNames(entity, plural string) Names {
 	return Names{
 		Pascal:       entity,
 		Camel:        naming.Camel(entity),
@@ -921,13 +917,17 @@ func factFor(m *Model, field string) *Fact {
 // would stay empty on read and be ignored on write.
 type Child struct {
 	Name string
-	// Plural is the WIRE name: what the collection is called in JSON.
+	// ParentColumn is the foreign key back to the owner, as declared.
+	ParentColumn string
+	// Plural is the declared COLLECTION NAME — what the AVO returns from
+	// CollectionName(). It is one name with three consumers, and they are
+	// spelled differently: the document stores it verbatim (DocSegment), the
+	// wire lower-camels it (Segment), and the Go field IS it (GoPlural).
 	Plural string
-	// GoPlural is the Go field name, and it is NOT the same thing. The framework
-	// derives the document segment from the child's TYPE name, so a projected
-	// read looks for that key — a field named after a hand-written plural would
-	// map to a key the document does not have and come back empty. The override
-	// belongs to the wire, never to the field.
+	// GoPlural is the Go field name of the collection on the read DTO. It must
+	// equal the declared name exactly: the framework resolves the document
+	// segment from CollectionName and matches it against this field, so a field
+	// named anything else maps to a key the document does not have.
 	GoPlural    string
 	Table       string
 	Description string
@@ -958,17 +958,17 @@ type Sibling struct {
 func resolveChildren(s *spec.Spec, m *Model) []Child {
 	var out []Child
 	for _, c := range s.Children {
-		plural := naming.Plural(c.Name)
-		if c.Plural != "" {
-			plural = c.Plural
-		}
 		ch := Child{
-			Name: c.Name, Plural: plural, GoPlural: naming.Plural(c.Name), Table: c.Table,
+			Name: c.Name, Plural: c.Plural, GoPlural: c.Plural, Table: c.Table,
+			ParentColumn: c.ParentColumn,
 			Description: c.Description, OwnedBy: c.OwnedBy, Strategy: c.EditStrategy,
 			SoftRemove: c.SoftRemove, ArchivedAt: c.ArchivedAt,
 			InputType: c.Name + "Input", AddMethod: "Add" + c.Name,
-			Segment:    naming.Camel(plural),
-			DocSegment: naming.Plural(c.Name),
+			// One name, three consumers: the document segment IS the declared
+			// collection name, the wire path is its lower-camel, and the read
+			// DTO's field must be the name itself.
+			Segment:    naming.Camel(c.Plural),
+			DocSegment: c.Plural,
 		}
 		for _, f := range c.Fields {
 			ch.Fields = append(ch.Fields, resolveField(c.Name, f))
@@ -1065,6 +1065,7 @@ type Base struct {
 	RowUniqueness string
 	OrphanPolicy  string
 	FuncName      string
+	LinkColumn    string
 	Fields        []Field
 	Children      []Child
 }
@@ -1082,7 +1083,8 @@ func resolveBase(s *spec.Spec) *Base {
 		Table: b.Table, Description: b.Description, Reuse: b.Reuse,
 		NaturalKey: b.NaturalKey, Link: b.Link, RowUniqueness: b.RowUniqueness,
 		OrphanPolicy: orphan,
-		FuncName:     naming.Pascal(naming.Singular(b.Table)) + "Base",
+		FuncName:     b.SchemaFunc,
+		LinkColumn:   b.LinkColumn,
 	}
 }
 

@@ -61,6 +61,16 @@ func validateHeader(s *Spec, ps *Problems) {
 			fmt.Sprintf("%q is not a usable Go type name", s.Entity),
 			"use PascalCase with no underscores, e.g. Student")
 	}
+	if s.Plural == "" {
+		ps.BlockerFix("plural",
+			"the plural of the entity name is required",
+			"it reaches the route path and the listing types, and no rule can spell "+
+				"it — declare it as your domain says it, e.g. plural: Matriculas")
+	} else if !goIdentRe.MatchString(s.Plural) {
+		ps.BlockerFix("plural",
+			fmt.Sprintf("%q is not usable as a Go identifier", s.Plural),
+			"PascalCase, letters and digits only")
+	}
 	if s.Language == "" {
 		ps.WarnFix("language",
 			"no language declared for the human-facing text",
@@ -134,12 +144,35 @@ func validateBase(s *Spec, ps *Problems) {
 			fmt.Sprintf("%q is not an orphan policy", b.OrphanPolicy),
 			"one of: "+OrphanPolicies.String())
 	}
+	if b.SchemaFunc == "" {
+		ps.BlockerFix("storage.base.schemaFunc",
+			"the base schema function needs a name",
+			"the generator cannot singularise a table, so it asks — e.g. "+
+				"schemaFunc: PessoaBase")
+	} else if !goIdentRe.MatchString(b.SchemaFunc) {
+		ps.BlockerFix("storage.base.schemaFunc",
+			fmt.Sprintf("%q is not a usable Go function name", b.SchemaFunc),
+			"PascalCase, letters and digits only")
+	}
 	if b.Link == "separate-fk" {
+		if b.LinkColumn == "" {
+			ps.BlockerFix("storage.base.linkColumn",
+				"a separate-fk link needs the column that points at the identity",
+				"a column name is declared, never derived — e.g. linkColumn: pessoa_id")
+		} else if !columnRe.MatchString(b.LinkColumn) {
+			ps.BlockerFix("storage.base.linkColumn",
+				fmt.Sprintf("%q is not a usable column name", b.LinkColumn),
+				"lowercase, digits and underscores, starting with a letter")
+		}
 		if !RowUniqueness.Has(b.RowUniqueness) {
 			ps.BlockerFix("storage.base.rowUniqueness",
 				"a separate-fk link must state how role rows are kept unique",
 				"one of: "+RowUniqueness.String())
 		}
+	} else if b.LinkColumn != "" {
+		ps.BlockerFix("storage.base.linkColumn",
+			"a shared-pk link has no column to declare",
+			"the role's own primary key IS the identity's; remove the key")
 	} else if b.RowUniqueness != "" {
 		ps.BlockerFix("storage.base.rowUniqueness",
 			"rowUniqueness only applies to a separate-fk link",
@@ -543,6 +576,31 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 		}
 		if c.Table == "" {
 			ps.Blockerf(where+".table", "the child table name is required")
+		}
+		// The collection name is a PERSISTED key — the document segment, the read
+		// DTO's field, and the notification path. The framework declares it and
+		// refuses to invent it; so does this.
+		if c.Plural == "" {
+			ps.BlockerFix(where+".plural",
+				"the collection name is required",
+				"it is the document segment, the read DTO field and the notification "+
+					"path, all at once — declare it as the domain says it, e.g. "+
+					"plural: Responsaveis")
+		} else if !goIdentRe.MatchString(c.Plural) {
+			ps.BlockerFix(where+".plural",
+				fmt.Sprintf("%q is not valid as an exported Go field name", c.Plural),
+				"first character A-Z, then letters or digits — the framework panics "+
+					"at boot on anything else")
+		}
+		if c.ParentColumn == "" {
+			ps.BlockerFix(where+".parentColumn",
+				"the foreign key back to the owner is required",
+				"a column name outlives the decision that made it — renaming one later "+
+					"is a migration, so it is declared, e.g. parentColumn: matricula_id")
+		} else if !columnRe.MatchString(c.ParentColumn) {
+			ps.BlockerFix(where+".parentColumn",
+				fmt.Sprintf("%q is not a usable column name", c.ParentColumn),
+				"lowercase, digits and underscores, starting with a letter")
 		}
 		if !ChildOwners.Has(c.OwnedBy) {
 			ps.BlockerFix(where+".ownedBy",

@@ -5,6 +5,7 @@
 # that lane can run anywhere. Saying so beats pretending the coverage is equal.
 specVersion: 1
 entity: Course
+plural: Courses
 language: pt-BR
 
 storage:
@@ -225,7 +226,9 @@ notifications:
 
 children:
   - name: Guardian
+    plural: Guardians
     table: course_guardians
+    parentColumn: course_id
     description: Responsáveis pelo aluno.
     ownedBy: root
     editStrategy: atomic-replace

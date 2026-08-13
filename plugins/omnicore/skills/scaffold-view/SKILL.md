@@ -178,8 +178,9 @@ sections structural (`N/A — <why>`, never deleted):
    list-DTO allowlist incl. nested embed groups are `query-side` ·
    `auto-query-handlers`), pagination/options, indexes beyond the join law (`?search=`
    needs a declared text index; **an index key is a PATH: segment prefixes are the Go
-   segment names, the LEAF is the physical column** (`ChildSegment.physical_col` — e.g.
-   a child segment uses the pluralized type name, `views` at the pin) — a wrong leaf or
+   segment names, the LEAF is the physical column** (`ChildSegment.physical_col` — a
+   child segment is the name its type DECLARES in `CollectionName()`, never one derived
+   from the type name; `aggregate-persistence` · `views` at the pin) — a wrong leaf or
    a snake_cased segment aborts boot instead of creating a dead index).
 6. **Read authorization** [high-risk]: who may query this model? A composed view can
    reach, VIA JOIN, data the caller's identity could not query directly — gating a

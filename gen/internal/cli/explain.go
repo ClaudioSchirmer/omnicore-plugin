@@ -19,6 +19,7 @@ func Explain(topic string) string {
 		"rules":      explainRules,
 		"coverage":   explainCoverage,
 		"ownership":  explainOwnership,
+		"names":      explainNames,
 	}
 	if topic == "" {
 		var names []string
@@ -150,6 +151,54 @@ func explainCoverage() string {
 		fmt.Fprintf(&b, "  · %s\n", p)
 	}
 	return b.String()
+}
+
+// explainNames lists the names the generator refuses to invent.
+//
+// It exists because the failure it prevents is silent: a guessed plural is a
+// persisted key, so the code compiles, the service boots, and the wrongness
+// shows up as a document written under a name nothing reads back.
+func explainNames() string {
+	return `Names you declare — the generator invents none
+=============================================
+
+There is no pluraliser and no singulariser in this build. Every name below is
+read from the spec verbatim, because each one is either PERSISTED (a column, a
+document key) or PUBLIC (a route, a JSON field) — it outlives the rule that
+would have guessed it. An English rule lands on "Matriculas" only by luck, and
+writes "Analysiss", "Persons" and "Animals" the rest of the time.
+
+  plural                     REQUIRED. The route path (/matriculas), the
+                             feature name, the listing types.
+
+  children[].plural          REQUIRED, and the heaviest of them: it is the
+                             child's CollectionName() — the segment the
+                             projection nests the collection under, the read
+                             DTO's Go field, the ?fields=/CSV token, and
+                             lower-camelled, the notification wire path
+                             (responsaveis[0].documento). Changing it later
+                             changes the document shape: bump read.view.version.
+
+  children[].parentColumn    REQUIRED. The foreign key back to the owner.
+                             Renaming a column is a migration.
+
+  storage.base.schemaFunc    REQUIRED for sharedbase-role. The exported Go
+                             function that returns the shared identity schema,
+                             e.g. PessoaBase.
+
+  storage.base.linkColumn    REQUIRED when base.link is separate-fk — and
+                             REFUSED when it is shared-pk, where the role's own
+                             primary key IS the identity's and there is no
+                             second column to name.
+
+  storage.table,
+  fields[].column, ...       Always yours. The generator only changes the CASE
+                             of a name you already gave (PascalCase → snake_case
+                             for a file, → lowerCamel for a JSON key).
+
+If a name is missing, "check" says which one and what it reaches. It never
+picks one for you.
+`
 }
 
 func explainOwnership() string {

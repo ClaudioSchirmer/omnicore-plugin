@@ -1,6 +1,13 @@
 // Package naming holds the identifier transforms the emitters share. They live
 // in one place because a generator that spells the same concept two ways in two
 // layers produces code that compiles and is wrong.
+//
+// Everything here CHANGES THE CASE of a name the author already gave. Nothing
+// here invents a word. There is deliberately no pluraliser and no singulariser:
+// a rule that turns Animal into Animals writes Animais nowhere, Person into
+// Persons, Analysis into Analysiss — and the names it would produce are route
+// paths, document keys and column names, which outlive the guess that made
+// them. Every such name is declared in the spec.
 package naming
 
 import "strings"
@@ -59,51 +66,6 @@ func Pascal(s string) string {
 	return string(r)
 }
 
-// Plural is deliberately conservative English pluralisation. It exists for
-// route and collection names; anything it would get wrong is overridable in the
-// spec, because guessing a plural is not worth a wrong URL.
-func Plural(s string) string {
-	if s == "" {
-		return s
-	}
-	lower := strings.ToLower(s)
-	switch {
-	case strings.HasSuffix(lower, "s"), strings.HasSuffix(lower, "x"),
-		strings.HasSuffix(lower, "z"), strings.HasSuffix(lower, "ch"),
-		strings.HasSuffix(lower, "sh"):
-		return s + "es"
-	case strings.HasSuffix(lower, "y") && len(s) > 1 && !isVowel(rune(lower[len(lower)-2])):
-		return s[:len(s)-1] + "ies"
-	default:
-		return s + "s"
-	}
-}
-
-// Singular strips a trailing plural. It preserves the -us/-is endings that a
-// naive rule mangles ("status" must not become "statu").
-func Singular(s string) string {
-	lower := strings.ToLower(s)
-	switch {
-	case strings.HasSuffix(lower, "us"), strings.HasSuffix(lower, "is"),
-		strings.HasSuffix(lower, "ss"):
-		return s
-	case strings.HasSuffix(lower, "ies") && len(s) > 3:
-		return s[:len(s)-3] + "y"
-	case strings.HasSuffix(lower, "es") && len(s) > 2:
-		base := lower[:len(lower)-2]
-		if strings.HasSuffix(base, "s") || strings.HasSuffix(base, "x") ||
-			strings.HasSuffix(base, "z") || strings.HasSuffix(base, "ch") ||
-			strings.HasSuffix(base, "sh") {
-			return s[:len(s)-2]
-		}
-		return s[:len(s)-1]
-	case strings.HasSuffix(lower, "s") && len(s) > 1:
-		return s[:len(s)-1]
-	default:
-		return s
-	}
-}
-
 func isUpper(r rune) bool { return r >= 'A' && r <= 'Z' }
 func toLower(r rune) rune {
 	if isUpper(r) {
@@ -116,11 +78,4 @@ func toUpper(r rune) rune {
 		return r - ('a' - 'A')
 	}
 	return r
-}
-func isVowel(r rune) bool {
-	switch r {
-	case 'a', 'e', 'i', 'o', 'u':
-		return true
-	}
-	return false
 }

@@ -1,6 +1,7 @@
 # A flat entity with the full CRUD lifecycle — the F1 vertical slice.
 specVersion: 1
 entity: Student
+plural: Students
 language: pt-BR
 
 storage:
@@ -221,7 +222,9 @@ notifications:
 
 children:
   - name: Guardian
+    plural: Guardians
     table: student_guardians
+    parentColumn: student_id
     description: Responsáveis pelo aluno.
     ownedBy: root
     editStrategy: atomic-replace

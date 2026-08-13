@@ -28,35 +28,3 @@ func TestCamel(t *testing.T) {
 		}
 	}
 }
-
-// TestSingularPreservesUsIs pins the specific mistake a naive "strip the s"
-// rule makes: it turns "status" into "statu" and silently mis-names a route.
-func TestSingularPreservesUsIs(t *testing.T) {
-	for in, want := range map[string]string{
-		"status":   "status",
-		"analysis": "analysis",
-		"students": "student",
-		"grades":   "grade",
-		"policies": "policy",
-		"boxes":    "box",
-		"address":  "address",
-	} {
-		if got := Singular(in); got != want {
-			t.Errorf("Singular(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestPlural(t *testing.T) {
-	for in, want := range map[string]string{
-		"student": "students",
-		"box":     "boxes",
-		"policy":  "policies",
-		"day":     "days",
-		"address": "addresses",
-	} {
-		if got := Plural(in); got != want {
-			t.Errorf("Plural(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

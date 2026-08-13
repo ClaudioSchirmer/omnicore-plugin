@@ -125,6 +125,7 @@ func minimalSpec() *Spec {
 	return &Spec{
 		SpecVersion: 1,
 		Entity:      "Student",
+		Plural:      "Students",
 		Language:    "pt-BR",
 		Storage: Storage{
 			Kind:        "flat",

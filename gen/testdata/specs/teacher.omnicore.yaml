@@ -5,6 +5,7 @@
 # person, and the natural key is what makes two roles resolve to ONE identity.
 specVersion: 1
 entity: Teacher
+plural: Teachers
 language: pt-BR
 
 storage:
@@ -13,6 +14,8 @@ storage:
   description: Professores — o papel docente sobre a identidade de pessoa.
   base:
     table: people
+    schemaFunc: PeopleBase
+    linkColumn: person_id
     description: Identidade de pessoa, compartilhada entre papéis.
     reuse: false
     naturalKey: Document
