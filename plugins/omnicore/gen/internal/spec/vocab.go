@@ -108,3 +108,88 @@ func (s StringSet) String() string {
 	}
 	return out
 }
+
+// Vocabulary is one closed set, at the yaml path that resolves against it.
+//
+// The registry below is the SINGLE place a vocabulary is declared to exist for
+// documentation. `explain vocabulary` renders from it rather than from a table
+// of its own, and a test asserts every set in this file is registered — because
+// the hand-written table this replaces fell eight sets behind, and one of them
+// was the key an author went looking for and could not find.
+type Vocabulary struct {
+	// Path is the yaml key, as an author writes it.
+	Path string
+	// Set is the closed set of values that key accepts.
+	Set StringSet
+	// Why is one line on what the choice decides. A list of legal strings tells
+	// nobody which one they want.
+	Why string
+}
+
+// Vocabularies lists every closed set of the language, in the order a spec is
+// written rather than alphabetically: an author reading it top to bottom walks
+// their own file.
+func Vocabularies() []Vocabulary {
+	return []Vocabulary{
+		{"storage.kind", StorageKinds,
+			"flat = its own table; sharedbase-role = a ROLE over an identity other roles may share."},
+		{"storage.base.link", LinkModels,
+			"shared-pk = the role's own key IS the identity's; separate-fk = its own column."},
+		{"storage.base.rowUniqueness", RowUniqueness,
+			"unique-fk = one role row per identity ever; active-only = an archived one frees the slot."},
+		{"storage.base.orphanPolicy", OrphanPolicies,
+			"what happens to the identity when its last role goes."},
+		{"fields[].type", FieldTypes,
+			"the persistable set; money is int64 in minor units, never a float."},
+		{"fields[].vo.kind", VOKinds,
+			"enum when the valid values are finite and known; raw when it is a shape."},
+		{"fields[].unique.enforce", UniqueEnforcements,
+			"whether a Service pre-check answers before the database constraint does."},
+		{"fields[].unique.scope", UniqueScopes,
+			"all = an archived row keeps holding the value forever; active-only = it frees it."},
+		{"valueObjects[].backing", VOBackings,
+			"what the value object stores underneath."},
+		{"children[].ownedBy", ChildOwners,
+			"base = the collection belongs to the shared identity and outlives this role."},
+		{"children[].editStrategy", EditStrategies,
+			"atomic-replace = the root's update swaps the whole collection; per-child = its own endpoints."},
+		{"children[].delete", DeleteChild,
+			"soft = the entry is archived and can come back; hard = the row is gone."},
+		{"modes", Modes,
+			"the verbs the entity has at all; an absent one is not routed."},
+		{"update.shape", UpdateShapes,
+			"patch cannot say \"set this to null\", which is why a clearable facet forces put."},
+		{"delete.root", DeleteRoot,
+			"soft = archive, reversible; hard = a permanent purge, and the HTTP verb must say so."},
+		{"rules.list[].kind", RuleKinds,
+			"what the rule checks; anything outside this set goes to rules.manual."},
+		{"rules.list[].scope", RuleScopes,
+			"the verbs the rule fires on."},
+		{"rules.list[].operator", ComparisonOps,
+			"the comparison a `comparison` rule makes between two fields."},
+		{"rules.list[].skipWhen", SkipWhens,
+			"stand down when the subject is absent — \"valid IF given\" rather than \"required\"."},
+		{"notifications[].semantic", Semantics,
+			"the HTTP status: conflict is 409, validation 422, forbidden 403."},
+		{"notifications[].package", NotificationPackages,
+			"where the type is declared; one raised by a child's rule must live in aggregatevos."},
+		{"service.facts[].kind", FactKinds,
+			"how the fact is answered; manual means you write it in the hook file."},
+		{"service.facts[].returns", FactReturns,
+			"the Go type the fact answers with."},
+		{"read.backing", ReadBackings,
+			"relational = read straight from the tables; mongo = from a projection updated shortly after."},
+		{"read.identityView", IdentityViews,
+			"whether this role creates the shared identity's own view, joins it, or skips it."},
+		{"read.indexes[].order", IndexOrders,
+			"the direction of an index key."},
+		{"read.byParams.filters[].ops", FilterOps,
+			"the operators this field is filterable by; an undeclared one is a typed 400."},
+		{"authz.dataAccess", DataAccess,
+			"whether every permission holder sees every row, or only their own / their tenant's."},
+		{"authz.permissions keys", AuthzOperations,
+			"the operations a permission can be required for."},
+		{"(discovered)", Dialects,
+			"the relational engines; read from the project, never declared in the spec."},
+	}
+}

@@ -105,10 +105,11 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("# the rest is yours. FILL this template — do not replace it with a file\n")
 	b.WriteString("# written from scratch, which is how the wrong dialect and an unservable\n")
 	b.WriteString("# read backing get in.\n#\n")
-	b.WriteString("# If you are unsure what a block should LOOK like, run\n")
-	b.WriteString("#   omnicore-gen explain example\n")
-	b.WriteString("# for a complete spec that validates, then `explain vocabulary` for every key\n")
-	b.WriteString("# and its allowed values, and `explain rules` for what the rule DSL expresses.\n#\n")
+	b.WriteString("# Before filling it in, run\n")
+	b.WriteString("#   omnicore-gen explain keys                 — every key there is\n")
+	b.WriteString("#   omnicore-gen explain example [sharedbase] — a whole spec that validates\n")
+	b.WriteString("# `explain keys` is the one that saves time: most of what looks like \"the\n")
+	b.WriteString("# generator cannot express this\" is a key whose name is not guessable.\n#\n")
 	fmt.Fprintf(&b, "# Discovered here: dialect(s) %s · read backing %s.\n",
 		strings.Join(p.Dialects, ", "), backing)
 	if len(p.ExistingVOs) > 0 {

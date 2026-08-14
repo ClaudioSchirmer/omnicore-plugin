@@ -416,6 +416,10 @@ fi
 # These used to live outside the repository, which meant the matrix was green on
 # one laptop and unknown everywhere else — the same mistake as pointing the gate
 # at a sibling checkout.
+# The examples `explain example` prints are matrix cases too. An example that
+# validates but generates a tree that does not BUILD is worse than none: it is
+# authoritative-looking, someone copies its shape, and the failure lands on them.
+# Case 18 IS the shared-identity example, byte for byte.
 say "the coverage matrix"
 MATRIX_DIR="$GEN_DIR/testdata/specs/matrix"
 for spec in "$MATRIX_DIR"/[0-9]*.yaml; do

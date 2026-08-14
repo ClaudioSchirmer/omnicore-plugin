@@ -275,9 +275,6 @@ func takesValue(flag string) bool {
 }
 
 func runExplain(args []string) {
-	topic := ""
-	if len(args) > 0 {
-		topic = args[0]
-	}
-	fmt.Print(cli.Explain(topic))
+	// Joined, because one topic takes an argument: `explain example sharedbase`.
+	fmt.Print(cli.Explain(strings.TrimSpace(strings.Join(args, " "))))
 }

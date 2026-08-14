@@ -68,18 +68,30 @@ is the part that is easiest to invent and the part that is never guessable.
 
 So, before a single line of YAML, in this order:
 
-    omnicore-gen explain example      # ← FIRST. A whole spec that validates.
-    omnicore-gen explain vocabulary   # every closed key and its allowed values
+    omnicore-gen explain keys                 # ← FIRST. Every key there IS.
+    omnicore-gen explain example              # a whole spec that validates (flat)
+    omnicore-gen explain example sharedbase   # …and the shared-identity posture
+    omnicore-gen explain vocabulary   # every closed key and what each choice decides
     omnicore-gen explain rules        # what the rule DSL can express
     omnicore-gen explain names        # the names YOU declare — it invents none
     omnicore-gen explain coverage     # what THIS build generates and what it refuses
     omnicore-gen explain ownership    # which files it owns, and the two escapes
 
-`explain example` first, and read it whole. The vocabularies tell you what a key may
-HOLD; only the example tells you what a spec LOOKS LIKE — that rules nest under `list:`,
-what a value object's members look like, where a collection's name goes, how a facet
-attaches. That is where a guessed draft goes wrong, and the example is test-gated to
-validate against this exact build, so it cannot be teaching you something stale.
+**`explain keys` first**, and read it whole once. It is the whole surface, derived from
+the language definition itself, so it cannot be behind what the loader accepts. It exists
+because of a specific failure: an author needed "unique among the rows that are not
+archived", found nothing, edited the generated SQL by hand — and only later stumbled on
+`unique.scope: active-only`, which had been there all along. **Most of what looks like
+"the generator cannot express this" is a key whose name you did not guess.**
+
+Then the examples, both of them. The vocabularies tell you what a key may HOLD; only an
+example tells you what a spec LOOKS LIKE — that rules nest under `list:`, what a value
+object's members look like, where a collection's name goes, how a facet attaches. There
+are two because `storage.kind` is ONE value: the flat one cannot show a shared identity,
+and the shared-identity one carries what only it can (the whole `base` block, per-child
+collections, the full rule set, indexes, exports). Both are test-gated — they validate
+AND they are generated, built and tested by the golden gate, so neither can teach you
+something stale.
 
 Do not paraphrase any of it from what you remember of the framework. The generator's
 vocabulary is deliberately narrower than the framework's API, and `explain coverage` is
@@ -288,9 +300,12 @@ refusal reach them as silence.
 
 ## What this skill never does
 
-- **Never writes a spec before reading `explain example`.** A first draft written from
-  what seems reasonable is a guess, and the validator will say so — after you spent the
-  tokens.
+- **Never writes a spec before reading `explain keys` and the examples.** A first draft
+  written from what seems reasonable is a guess, and the validator will say so — after you
+  spent the tokens.
+- **Never concludes "the language cannot express this" without having read `explain
+  keys`.** That conclusion is what ends in a hand-edited generated file, and it has been
+  wrong every time so far: the key existed, with a name nobody would guess.
 - Never hand-edits a generated file. Never.
 - Never re-decides the model. That was approved before the gateway.
 - Never invents a name the spec must declare.

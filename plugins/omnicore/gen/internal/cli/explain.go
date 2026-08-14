@@ -21,16 +21,22 @@ func Explain(topic string) string {
 		"coverage":   explainCoverage,
 		"ownership":  explainOwnership,
 		"names":      explainNames,
-		"example":    explainExample,
+
+		"keys": explainKeys,
 	}
 	if topic == "" {
 		var names []string
 		for k := range topics {
 			names = append(names, k)
 		}
+		names = append(names, "example [flat|sharedbase]")
 		sort.Strings(names)
 		return fmt.Sprintf(
 			"omnicore-gen explain <topic>\n\nTopics: %s\n", strings.Join(names, ", "))
+	}
+	// `example` takes an argument; every other topic is a bare word.
+	if head, arg, _ := strings.Cut(topic, " "); head == "example" {
+		return explainExample(strings.TrimSpace(arg))
 	}
 	fn, ok := topics[topic]
 	if !ok {
@@ -51,42 +57,22 @@ func explainVocabulary() string {
 	b.WriteString("Every key below accepts ONLY the listed values. A value outside the set is\n")
 	b.WriteString("refused with the whole set printed — never accepted and ignored.\n\n")
 
-	rows := []struct {
-		key string
-		set spec.StringSet
-	}{
-		{"storage.kind", spec.StorageKinds},
-		{"storage.base.link", spec.LinkModels},
-		{"storage.base.rowUniqueness", spec.RowUniqueness},
-		{"storage.base.orphanPolicy", spec.OrphanPolicies},
-		{"fields[].type", spec.FieldTypes},
-		{"fields[].vo.kind", spec.VOKinds},
-		{"fields[].unique.enforce", spec.UniqueEnforcements},
-		{"valueObjects[].backing", spec.VOBackings},
-		{"children[].ownedBy", spec.ChildOwners},
-		{"children[].editStrategy", spec.EditStrategies},
-		{"modes", spec.Modes},
-		{"update.shape", spec.UpdateShapes},
-		{"delete.root", spec.DeleteRoot},
-		{"rules.list[].kind", spec.RuleKinds},
-		{"rules.list[].scope", spec.RuleScopes},
-		{"notifications[].semantic", spec.Semantics},
-		{"service.facts[].kind", spec.FactKinds},
-		{"read.backing", spec.ReadBackings},
-		{"read.identityView", spec.IdentityViews},
-		{"read.byParams.filters[].ops", spec.FilterOps},
-		{"authz.dataAccess", spec.DataAccess},
-		{"authz.permissions keys", spec.AuthzOperations},
-	}
+	// Rendered from spec.Vocabularies(), never from a list of its own: the list
+	// this replaces was written by hand beside the sets and fell eight of them
+	// behind — including the one an author went looking for, did not find, and
+	// worked around by editing generated SQL.
+	rows := spec.Vocabularies()
 	width := 0
 	for _, r := range rows {
-		if len(r.key) > width {
-			width = len(r.key)
+		if len(r.Path) > width {
+			width = len(r.Path)
 		}
 	}
 	for _, r := range rows {
-		fmt.Fprintf(&b, "  %-*s  %s\n", width, r.key, r.set.String())
+		fmt.Fprintf(&b, "  %-*s  %s\n", width, r.Path, r.Set.String())
+		fmt.Fprintf(&b, "  %-*s  %s\n", width, "", r.Why)
 	}
+
 	b.WriteString("\nNote on 409: `conflict` is a duplicate (already exists); `state-conflict` is a\n")
 	b.WriteString("wrong state (\"cannot ship a cancelled order\"). Both map to 409 and they are\n")
 	b.WriteString("not interchangeable.\n")
@@ -249,6 +235,9 @@ fight the generator.
 //go:embed example.omnicore.yaml
 var exampleSpec string
 
+//go:embed example_sharedbase.omnicore.yaml
+var exampleSharedBaseSpec string
+
 // explainExample prints a whole spec that works.
 //
 // The other topics are reference: they answer "what may this key hold?". This
@@ -261,7 +250,24 @@ var exampleSpec string
 // It is embedded rather than described, and a test asserts it still validates,
 // so an example that stopped working fails the build instead of misleading
 // someone at 2am.
-func explainExample() string {
-	return "A complete spec that validates\n" +
-		"==============================\n\n" + exampleSpec
+// explainExample prints a whole spec that works.
+//
+// There are two, because storage.kind is ONE value and a single spec can
+// therefore never show both postures: the flat one and the shared-identity one
+// together cover the language. Asking for neither prints the flat one and says
+// the other exists — a reader who does not know there is a second example never
+// looks for it.
+func explainExample(posture string) string {
+	switch posture {
+	case "sharedbase", "shared-base", "sharedbase-role":
+		return "A complete spec that validates — the SHARED-IDENTITY posture\n" +
+			"===========================================================\n\n" +
+			exampleSharedBaseSpec
+	default:
+		return "A complete spec that validates — the FLAT posture\n" +
+			"=================================================\n\n" +
+			"For a role over a shared identity (and for per-child collections, the\n" +
+			"full rule set, indexes and exports), run `explain example sharedbase`.\n\n" +
+			exampleSpec
+	}
 }

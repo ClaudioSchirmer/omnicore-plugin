@@ -245,19 +245,21 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 		s.L("\t}")
 		s.L("\treturn found")
 	case "count":
-		s.L("\tvar n int64")
-		s.L("\tif err := s.repo.Loader.Aggregate(s.queryContext(), q, read.Count(&n)); err != nil {")
+		// The aggregate spec CARRIES the answer — it is not an out-parameter.
+		// Passing &n compiled nowhere and was never exercised, because no
+		// fixture declared a count fact until an exhaustive example did.
+		s.L("\tc := read.Count()")
+		s.L("\tif err := s.repo.Loader.Aggregate(s.queryContext(), q, c); err != nil {")
 		s.L("\t\tpanic(%s)", quote(fmt.Sprintf("%s: %s probe failed", m.Entity.Pascal, f.Name)))
 		s.L("\t}")
-		s.L("\treturn n")
+		s.L("\treturn c.Value")
 	default:
 		s.L("\t// %s over %s, computed in the database rather than in Go.", f.Kind, f.Field)
-		s.L("\tvar out %s", f.ReturnType)
-		s.L("\tif err := s.repo.Loader.Aggregate(s.queryContext(), q,")
-		s.L("\t\tread.%s(%s, &out)); err != nil {", pascal(f.Kind), quote(f.Field))
+		s.L("\ta := read.%s(%s)", aggregateFn(f), quote(f.Field))
+		s.L("\tif err := s.repo.Loader.Aggregate(s.queryContext(), q, a); err != nil {")
 		s.L("\t\tpanic(%s)", quote(fmt.Sprintf("%s: %s probe failed", m.Entity.Pascal, f.Name)))
 		s.L("\t}")
-		s.L("\treturn out")
+		s.L("\treturn a.Value")
 	}
 	s.L("}")
 	s.Blank()
@@ -334,4 +336,18 @@ func countManual(m *ir.Model) int {
 		}
 	}
 	return n
+}
+
+// aggregateFn names the framework helper for a fact's kind.
+//
+// The integer and float families are SEPARATE calls (SumInt vs Sum), because a
+// sum over an integer column is exact and one over a float is not — and the
+// framework refuses to pretend otherwise. The fact's declared return type is
+// what decides which family answers.
+func aggregateFn(f ir.Fact) string {
+	name := pascal(f.Kind)
+	if f.ReturnType == "int64" {
+		return name + "Int"
+	}
+	return name
 }

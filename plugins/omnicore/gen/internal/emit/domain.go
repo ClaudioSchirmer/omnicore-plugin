@@ -407,8 +407,13 @@ func emitOwnerCheck(s *src, rule ir.Rule, recv string, m *ir.Model) {
 		return
 	}
 	target := rule.Fields[0]
+	// The owner field is a runtime string (a token claim), so the field it is
+	// compared against has to be a string too — and a value-object field is not
+	// one until it is unwrapped. Comparing them directly does not compile, which
+	// is the good case; what it looked like was an example that validated and
+	// produced a tree that did not build.
 	cond := fmt.Sprintf("%s.%s != \"\" && %s != %s.%s",
-		recv, owner.Name, deref(target, recv), recv, owner.Name)
+		recv, owner.Name, wireValue(target, recv), recv, owner.Name)
 	if rule.AdminField != nil {
 		// The bypass is a separate question from the permission: the permission
 		// says who may attempt the verb, this says who may attempt it on a row
