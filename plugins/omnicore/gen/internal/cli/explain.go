@@ -1,6 +1,7 @@
 package cli
 
 import (
+	_ "embed"
 	"fmt"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ func Explain(topic string) string {
 		"coverage":   explainCoverage,
 		"ownership":  explainOwnership,
 		"names":      explainNames,
+		"example":    explainExample,
 	}
 	if topic == "" {
 		var names []string
@@ -232,4 +234,24 @@ If a framework newer than this build forces a small fix in an owned file, run
 "omnicore-gen adopt <path>": the fix is recorded against that framework version
 and survives regeneration instead of resurfacing as an unexplained refusal.
 `
+}
+
+//go:embed example.omnicore.yaml
+var exampleSpec string
+
+// explainExample prints a whole spec that works.
+//
+// The other topics are reference: they answer "what may this key hold?". This
+// one answers the question an author actually has first — "what does a spec
+// look like?" — and it is the one that decides whether a first draft is written
+// or guessed. A vocabulary alone leaves the SHAPE to be invented, and the shape
+// is where a draft goes wrong: rules nested under `list`, a value object's
+// members, where a collection's name lives, how a facet attaches.
+//
+// It is embedded rather than described, and a test asserts it still validates,
+// so an example that stopped working fails the build instead of misleading
+// someone at 2am.
+func explainExample() string {
+	return "A complete spec that validates\n" +
+		"==============================\n\n" + exampleSpec
 }

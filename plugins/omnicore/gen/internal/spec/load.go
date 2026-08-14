@@ -51,12 +51,49 @@ func Parse(raw []byte, path string) (*Spec, error) {
 // spaces, because it is really a fragment of a sentence.
 var unknownFieldRe = regexp.MustCompile(`line (\d+): field (.+?) not found in type (\S+)`)
 
+// shapeRe matches the OTHER decoder complaint: the key exists, but what was
+// written under it has the wrong shape — a list where a block belongs, a scalar
+// where a list belongs. Left untranslated it reads
+// "cannot unmarshal !!seq into spec.Rules", which is a sentence about Go, in a
+// file the author wrote about their domain. It is the message an author is most
+// likely to meet, because guessing a SHAPE is easier than guessing a key.
+var shapeRe = regexp.MustCompile(`line (\d+): cannot unmarshal !!(\w+) into ([\w.\[\]\*]+)`)
+
+// yamlKindName says what the author actually wrote, in yaml's own words.
+func yamlKindName(k string) string {
+	switch k {
+	case "seq":
+		return "a list"
+	case "map":
+		return "a block"
+	case "str":
+		return "text"
+	case "int", "float":
+		return "a number"
+	case "bool":
+		return "true/false"
+	case "null":
+		return "nothing"
+	}
+	return "a " + k
+}
+
 func translateDecodeError(err error, path string) error {
 	msg := err.Error()
 	var out []string
 	for _, line := range strings.Split(msg, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "yaml: unmarshal errors:") {
+			continue
+		}
+		if m := shapeRe.FindStringSubmatch(line); m != nil {
+			lineNo, wrote, goType := m[1], m[2], m[3]
+			// The section name reads "the rules block"; saying "the rules block must
+			// be a block" is noise, so the shape message uses the bare key.
+			name := strings.TrimPrefix(strings.TrimSuffix(specSectionName(goType), " block"), "the ")
+			out = append(out, fmt.Sprintf("%s:%s: %s must be %s, and %s was given%s",
+				path, lineNo, name, expectedShape(goType),
+				yamlKindName(wrote), shapeHint(goType)))
 			continue
 		}
 		if m := unknownFieldRe.FindStringSubmatch(line); m != nil {
@@ -227,4 +264,49 @@ func looksLikeProse(key string) bool {
 	return strings.ContainsAny(key, " ") ||
 		strings.HasSuffix(key, ".") ||
 		len([]rune(key)) > 40
+}
+
+// expectedShape and shapeHint describe the target in the spec's own terms.
+//
+// The hint is REFLECTED from the struct's yaml tags rather than written down,
+// so it cannot drift from what the loader accepts: a key added to the language
+// appears in the message the same day.
+func expectedShape(goType string) string {
+	if strings.HasPrefix(goType, "[]") {
+		return "a list"
+	}
+	return "a block"
+}
+
+func shapeHint(goType string) string {
+	name := goType
+	name = strings.TrimPrefix(name, "[]")
+	name = strings.TrimPrefix(name, "*")
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:]
+	}
+	t, ok := specTypes[name]
+	if !ok {
+		return ""
+	}
+	keys := yamlKeysOf(t)
+	if len(keys) == 0 {
+		return ""
+	}
+	if strings.HasPrefix(goType, "[]") {
+		return fmt.Sprintf(" — each entry takes: %s", strings.Join(keys, ", "))
+	}
+	return fmt.Sprintf(" — it takes: %s", strings.Join(keys, ", "))
+}
+
+func yamlKeysOf(t reflect.Type) []string {
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		out = append(out, strings.Split(tag, ",")[0])
+	}
+	return out
 }
