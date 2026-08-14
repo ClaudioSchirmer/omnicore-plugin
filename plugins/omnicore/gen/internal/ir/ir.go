@@ -160,8 +160,13 @@ type ManualRule struct {
 }
 
 type Notification struct {
-	Name     string
-	Package  string
+	Name    string
+	Package string
+	// Moved records that the resolver placed this notification somewhere other
+	// than where the spec said, because the spec's choice could not compile. The
+	// report says so: a type that is not where its author put it is worth one
+	// line rather than a surprise.
+	Moved    bool
 	Semantic string
 	TVars    []string
 	Text     map[string]string
@@ -276,6 +281,7 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 		m.Children[i].Clauses = resolveClausesFor(s.Children[i].Rules, m.Children[i].Fields)
 	}
 	m.Notifications = resolveNotifications(s)
+	placeNotifications(s, m)
 	m.ValueObjects = resolveValueObjects(s)
 	m.Service = resolveService(s, m)
 	m.Clauses = resolveClauses(s, m)
@@ -815,8 +821,8 @@ func enumLiteral(v any, backing string) string {
 
 // ServiceModel is the resolved domain-service port.
 type ServiceModel struct {
-	Impl      string
-	Facts     []Fact
+	Impl  string
+	Facts []Fact
 }
 
 // Fact is one question the port answers.
@@ -849,7 +855,7 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 		return nil
 	}
 	sm := &ServiceModel{
-		Impl:      m.Entity.Pascal + "ServiceImpl",
+		Impl: m.Entity.Pascal + "ServiceImpl",
 	}
 	for _, f := range s.Service.Facts {
 		fact := Fact{
@@ -993,9 +999,9 @@ type Child struct {
 	// there by business identity. It only exists per-child: an atomic replace
 	// has nothing to collide with.
 	DuplicateNotification string
-	Clauses     []Clause
-	Segment     string // the WIRE name of the collection
-	DocSegment  string // the key the projection actually stores it under
+	Clauses               []Clause
+	Segment               string // the WIRE name of the collection
+	DocSegment            string // the key the projection actually stores it under
 }
 
 // Sibling is a 1:1 facet stored in its own table, sharing the owner's key.
@@ -1020,9 +1026,9 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 		ch := Child{
 			Name: c.Name, Plural: c.Plural, GoPlural: c.Plural, Table: c.Table,
 			ParentColumn: c.ParentColumn,
-			Description: c.Description, OwnedBy: c.OwnedBy,
+			Description:  c.Description, OwnedBy: c.OwnedBy,
 			ArchivedAt: c.ArchivedAt,
-			InputType: c.Name + "Input", AddMethod: "Add" + c.Name,
+			InputType:  c.Name + "Input", AddMethod: "Add" + c.Name,
 			PerChild:              c.EditStrategy == "per-child",
 			ChangeMethod:          "Change" + c.Name + "ByID",
 			RemoveMethod:          "Remove" + c.Name + "ByID",
@@ -1368,4 +1374,51 @@ func (m *Model) UsesVOs() bool {
 		}
 	}
 	return false
+}
+
+// HasNotificationsIn reports whether any notification is declared in a package
+// other than the domain's own — which decides whether a generated test has to
+// import it.
+func (m *Model) HasNotificationsIn(pkg string) bool {
+	for _, n := range m.Notifications {
+		if n.Package == pkg {
+			return true
+		}
+	}
+	return false
+}
+
+// placeNotifications puts each notification in the package that can actually
+// reference it.
+//
+// This is not a naming choice, so it is derived rather than asked for: a
+// notification raised by a CHILD's rule has to live in aggregatevos, because
+// the child's type does, and `domain` cannot hold it — domain imports
+// aggregatevos, so the reference would be an import cycle. Emitting it in
+// domain produced a tree that did not compile at all, with the author's only
+// clue being "undefined" in a file they did not write.
+//
+// A notification raised from BOTH sides lives in aggregatevos too, and the
+// root's reference is qualified: that direction of import exists, the other
+// does not.
+func placeNotifications(s *spec.Spec, m *Model) {
+	raisedByChild := map[string]bool{}
+	for _, c := range s.Children {
+		for _, r := range c.Rules.List {
+			if r.Notification != "" {
+				raisedByChild[r.Notification] = true
+			}
+		}
+		for _, r := range c.Rules.Manual {
+			if r.Notification != "" {
+				raisedByChild[r.Notification] = true
+			}
+		}
+	}
+	for i := range m.Notifications {
+		if raisedByChild[m.Notifications[i].Name] && m.Notifications[i].Package == "domain" {
+			m.Notifications[i].Package = "aggregatevos"
+			m.Notifications[i].Moved = true
+		}
+	}
 }

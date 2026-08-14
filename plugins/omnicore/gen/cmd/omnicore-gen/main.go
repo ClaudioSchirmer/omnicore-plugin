@@ -218,12 +218,13 @@ func runAdopt(args []string) {
 	positional, flags := splitPositional(args)
 	fs := flag.NewFlagSet("adopt", flag.ExitOnError)
 	project := fs.String("project", ".", "the service root")
+	why := fs.String("why", "", "one line on what the spec could not express — recorded, and shown by doctor")
 	_ = fs.Parse(flags)
 	if len(positional) < 1 {
 		fmt.Fprintln(os.Stderr, "adopt needs the path of the generated file to accept")
 		os.Exit(2)
 	}
-	if err := cli.Adopt(os.Stdout, *project, positional[0]); err != nil {
+	if err := cli.Adopt(os.Stdout, *project, positional[0], *why); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}

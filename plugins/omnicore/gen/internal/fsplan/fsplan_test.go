@@ -183,7 +183,7 @@ func TestAdoptPreservesFixAcrossRegen(t *testing.T) {
 	_ = Apply(root, "E", "s.yaml", "h", "v0.47.2", nil, d, lock)
 
 	write(t, root, "x.go", "package x\n// fixed for a newer framework\n")
-	if err := Adopt(root, "E", "x.go", "v0.49.0", lock); err != nil {
+	if err := Adopt(root, "E", "x.go", "v0.49.0", "the framework moved and one call had to change", lock); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestAdoptPreservesFixAcrossRegen(t *testing.T) {
 func TestAdoptRejectsUnknownFile(t *testing.T) {
 	root := t.TempDir()
 	lock := &Lock{Version: 1, Entities: map[string]LockEntity{}}
-	if err := Adopt(root, "E", "nope.go", "v1", lock); err == nil {
+	if err := Adopt(root, "E", "nope.go", "v1", "adopted in a test", lock); err == nil {
 		t.Error("adopting a file the generator never wrote must fail")
 	}
 }

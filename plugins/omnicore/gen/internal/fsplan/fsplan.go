@@ -104,10 +104,20 @@ type LockFile struct {
 	// refusal last exactly one run: the next comparison would match, and the
 	// file the generator had just declined to touch would be overwritten.
 	Hash string `json:"hash"`
-	// AdjustedFor records a hand fix accepted through `adopt`, made necessary
-	// by a framework version the generator does not yet target. Such a file is
-	// preserved on regeneration instead of being refused as an unexplained edit.
+	// AdjustedFor records that a hand edit was DELIBERATELY accepted through
+	// `adopt`, and the framework version it was accepted at. The version is
+	// context — it says what the tree looked like at the time — not the reason:
+	// an adoption is equally legitimate when the generator simply does not cover
+	// something and the author wants the generated base anyway.
+	//
+	// What it is NOT is a way to keep an edit the spec could have expressed. An
+	// adopted file stops tracking the spec: every later improvement to the
+	// emitters lands everywhere except here, silently, forever.
 	AdjustedFor string `json:"adjustedFor,omitempty"`
+	// Why is the one line the author gave when adopting. Optional, and worth
+	// giving: the next person to meet this file is usually not the one who
+	// edited it, and "adopted" alone does not say whether the reason still holds.
+	Why string `json:"why,omitempty"`
 }
 
 func LoadLock(root string) (*Lock, error) {
@@ -199,7 +209,7 @@ func Plan(root string, entity string, files []File, lock *Lock, force map[string
 			switch {
 			case recorded.AdjustedFor != "":
 				out = append(out, Decision{File: f, Action: KeptHook,
-					Reason: "carries a fix adopted for framework " + recorded.AdjustedFor})
+					Reason: adoptionReason(recorded)})
 			case force[f.Path]:
 				out = append(out, Decision{File: f, Action: Update, Reason: "overwritten on request"})
 			case !sealed:
@@ -269,7 +279,7 @@ func Apply(root, entity, specPath, specHash, framework string, ordinals map[stri
 // that made it necessary. Without this, the degraded path (a framework newer
 // than the generator targets) leaves debt that only surfaces at the next
 // regeneration, as a refusal nobody can explain.
-func Adopt(root, entity, path, framework string, lock *Lock) error {
+func Adopt(root, entity, path, framework, why string, lock *Lock) error {
 	entry, ok := lock.Entities[entity]
 	if !ok {
 		return fmt.Errorf("no generated entity named %q is recorded in %s", entity, LockName)
@@ -285,6 +295,7 @@ func Adopt(root, entity, path, framework string, lock *Lock) error {
 	}
 	rec.Hash = Hash(content)
 	rec.AdjustedFor = framework
+	rec.Why = why
 	entry.Files[path] = rec
 	lock.Entities[entity] = entry
 	return lock.Save(root)
@@ -324,4 +335,15 @@ func Orphans(entity string, files []File, lock *Lock) []string {
 func IsAppliedMigration(path string) bool {
 	return strings.HasPrefix(filepath.ToSlash(path), "migrations/") &&
 		strings.HasSuffix(path, ".sql")
+}
+
+// adoptionReason phrases what an adopted file is, without claiming a cause it
+// does not know. "A fix for v0.49.0" was a guess dressed as a fact: adoption
+// records a deliberate edit, and the version is only when it happened.
+func adoptionReason(rec LockFile) string {
+	out := "carries a hand edit adopted at framework " + rec.AdjustedFor
+	if rec.Why != "" {
+		out += " — " + rec.Why
+	}
+	return out
 }

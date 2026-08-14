@@ -197,7 +197,44 @@ func renderMigrationHandoff(b *strings.Builder, in Input) {
 // renderCheck is section B: the decisions that cost a full regeneration if wrong.
 func renderCheck(b *strings.Builder, in Input) {
 	m := in.Model
+	// A type that is not where its author put it deserves one line, not a
+	// surprise the next time they go looking for it.
+	var moved []string
+	for _, n := range m.Notifications {
+		if n.Moved {
+			moved = append(moved, n.Name)
+		}
+	}
+	if len(moved) > 0 {
+		b.WriteString("### Notifications placed by the generator\n\n")
+		fmt.Fprintf(b, "%s raised by a child's rule, so declared in "+
+			"`internal/domain/aggregatevos` rather than in `internal/domain`: the child's "+
+			"type lives there, and `domain` imports `aggregatevos` — holding it in `domain` "+
+			"would be an import cycle, not a style choice.\n\n",
+			strings.Join(moved, ", "))
+	}
+
 	b.WriteString("## What to check\n\n")
+
+	// One line per raw value object. The generator cannot know whether a set is
+	// closed — but the question is worth asking every time, because the wrong
+	// answer is invisible: a shape check accepts every string that LOOKS right,
+	// including the ones that do not exist.
+	var raws []string
+	for _, vo := range m.ValueObjects {
+		if vo.Kind == "raw" {
+			raws = append(raws, vo.Name)
+		}
+	}
+	if len(raws) > 0 {
+		fmt.Fprintf(b, "- **Is the set of %s really open?** They are declared as shapes "+
+			"(`kind: raw`), so anything matching the pattern is accepted. If the valid "+
+			"values are FINITE and known — a state code, a status, a category — it is an "+
+			"`enum` instead: the caller gets the list in OpenAPI, the code gets named "+
+			"constants, and an out-of-set value converges to Unknown rather than being "+
+			"stored.\n\n", strings.Join(raws, ", "))
+	}
+
 	b.WriteString("These are the decisions the spec made that are expensive to change later. " +
 		"Read them against what you actually meant.\n\n")
 	b.WriteString("| Decision | Value | Why it matters |\n|---|---|---|\n")

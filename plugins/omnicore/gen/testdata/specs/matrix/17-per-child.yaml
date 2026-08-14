@@ -33,6 +33,16 @@ children:
       list:
         - {id: disciplina-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Disciplina], notification: RequiredFieldNotification}
         - {id: dia-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [DiaSemana], notification: RequiredFieldNotification}
+        # Notificação PRÓPRIA levantada pela regra de um FILHO. O tipo tem de
+        # nascer em aggregatevos: domain importa aggregatevos, entao declara-lo
+        # em domain nao compila e nao ha import que resolva.
+        - id: horario-tem-formato
+          kind: length
+          scope: [insertOrUpdate]
+          fields: [Horario]
+          min: 5
+          max: 5
+          notification: HorarioInvalidoNotification
 siblings:
   - name: Coordenacao
     table: turma_pc_coordenacoes
@@ -73,6 +83,10 @@ rules:
       notification: CapacidadeInvalidaNotification
       echoValue: true
 notifications:
+  - name: HorarioInvalidoNotification
+    semantic: validation
+    description: Horario fora do formato HH:MM.
+    text: {ptbr: "O horario deve ter o formato HH:MM.", eng: "The time must look like HH:MM.", esp: "La hora debe tener el formato HH:MM.", fra: "L'heure doit avoir le format HH:MM.", deu: "Die Uhrzeit muss HH:MM lauten.", ita: "L'orario deve essere HH:MM.", nld: "De tijd moet HH:MM zijn."}
   - name: AulaJaExisteNotification
     semantic: conflict
     description: Aula ja existe na turma.

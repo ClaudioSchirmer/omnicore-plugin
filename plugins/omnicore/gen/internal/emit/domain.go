@@ -231,21 +231,21 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 				continue // a false boolean is a value; there is nothing to require
 			}
 			s.L("\t\tif %s {", zeroCheck(f, recv))
-			s.L("\t\t\tr.AddNotification(%s, %s)", quote(f.Name), notifLiteral(rule.Notification))
+			s.L("\t\t\tr.AddNotification(%s, %s)", quote(f.Name), notifIn(m, rule.Notification))
 			s.L("\t\t}")
 		}
 	case "immutable":
-		emitImmutable(s, rule, recv)
+		emitImmutable(s, rule, recv, m)
 	case "range":
 		emitRange(s, rule, recv, m)
 	case "length":
 		emitLength(s, rule, recv, m)
 	case "comparison":
-		emitComparison(s, rule, recv)
+		emitComparison(s, rule, recv, m)
 	case "requiredIf":
-		emitRequiredIf(s, rule, recv)
+		emitRequiredIf(s, rule, recv, m)
 	case "transition":
-		emitTransition(s, rule, recv)
+		emitTransition(s, rule, recv, m)
 	case "childDuplicate":
 		if m != nil {
 			emitChildDuplicate(s, m, rule)
@@ -255,7 +255,7 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 			emitGroupCap(s, m, rule)
 		}
 	case "ownerCheck":
-		emitOwnerCheck(s, rule, recv)
+		emitOwnerCheck(s, rule, recv, m)
 	case "uniquePrecheck":
 		// Only the root has a service to ask.
 		if m != nil {
@@ -272,7 +272,7 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 //
 // The nil guard is not defensive noise: on an insert there is no previous
 // state, and dereferencing the snapshot there would panic.
-func emitImmutable(s *src, rule ir.Rule, recv string) {
+func emitImmutable(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	s.L("\t\tif old := domain.Old(%s); old != nil {", recv)
 	for _, f := range rule.Fields {
 		cmp := fmt.Sprintf("old.%s != %s.%s", f.Name, recv, f.Name)
@@ -281,7 +281,7 @@ func emitImmutable(s *src, rule ir.Rule, recv string) {
 		}
 		s.L("\t\t\tif %s {", cmp)
 		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifLiteral(rule.Notification), echoArgOn(rule, f, recv))
+			quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
 		s.L("\t\t\t}")
 	}
 	s.L("\t\t}")
@@ -335,7 +335,7 @@ func emitLength(s *src, rule ir.Rule, recv string, m *ir.Model) {
 //
 // The nil-and-zero guard mirrors what hand-written rules actually need: an
 // absent optional date must not be compared, and a zero instant is absence too.
-func emitComparison(s *src, rule ir.Rule, recv string) {
+func emitComparison(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	if rule.Other == nil || len(rule.Fields) == 0 {
 		return
 	}
@@ -343,7 +343,7 @@ func emitComparison(s *src, rule ir.Rule, recv string) {
 	guard := comparisonGuard(left, recv) + " && " + comparisonGuard(right, recv)
 	s.L("\t\tif %s && %s {", guard, comparisonExpr(left, right, rule.Operator, recv))
 	s.L("\t\t\tr.AddNotification(%s, %s%s)",
-		quote(left.Name), notifLiteral(rule.Notification), echoArg(rule, left))
+		quote(left.Name), notifIn(m, rule.Notification), echoArg(rule, left))
 	s.L("\t\t}")
 }
 
@@ -394,7 +394,7 @@ func comparisonExpr(left, right ir.Field, op, recv string) string {
 	return fmt.Sprintf("%s %s %s", l, inverse[op], r)
 }
 
-func emitOwnerCheck(s *src, rule ir.Rule, recv string) {
+func emitOwnerCheck(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	if rule.OwnerField == nil {
 		return
 	}
@@ -417,7 +417,7 @@ func emitOwnerCheck(s *src, rule ir.Rule, recv string) {
 		cond += fmt.Sprintf(" && !%s.%s", recv, rule.AdminField.Name)
 	}
 	s.L("\t\tif %s {", cond)
-	s.L("\t\t\tr.AddNotification(%s, %s)", quote("ID"), notifLiteral(rule.Notification))
+	s.L("\t\t\tr.AddNotification(%s, %s)", quote("ID"), notifIn(m, rule.Notification))
 	s.L("\t\t}")
 }
 
@@ -560,7 +560,7 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\tif service.(%sService).%s(%s) {",
 		m.Entity.Pascal, rule.Fact.Name, strings.Join(args, ", "))
 	s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-		quote(f.Name), notifLiteral(rule.Notification), echoArg(rule, f))
+		quote(f.Name), notifIn(m, rule.Notification), echoArg(rule, f))
 	s.L("\t\t\t}")
 	s.L("\t\t}")
 }
@@ -647,7 +647,7 @@ func emitChildMethods(s *src, m *ir.Model) {
 			s.L("\t// the collision is an answer, not a silent merge.")
 			s.L("\tfor _, existing := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 			s.L("\t\tif existing.IsSameBusinessIdentity(item) {")
-			s.L("\t\t\te.AddNotification(%s, %s)", quote(c.GoPlural), notifLiteral(c.DuplicateNotification))
+			s.L("\t\t\te.AddNotification(%s, %s)", quote(c.GoPlural), notifIn(m, c.DuplicateNotification))
 			s.L("\t\t\treturn")
 			s.L("\t\t}")
 			s.L("\t}")
@@ -748,7 +748,7 @@ func trimNumber(v float64) string {
 // The pair is what makes it different from `required`: asking for a
 // justification on every record is a different rule from asking for one only
 // when the record was rejected, and the second is the one most domains want.
-func emitRequiredIf(s *src, rule ir.Rule, recv string) {
+func emitRequiredIf(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	if rule.Other == nil || len(rule.Fields) == 0 {
 		return
 	}
@@ -756,7 +756,7 @@ func emitRequiredIf(s *src, rule ir.Rule, recv string) {
 	for _, f := range rule.Fields {
 		s.L("\t\t\tif %s {", zeroCheck(f, recv))
 		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifLiteral(rule.Notification), echoArgOn(rule, f, recv))
+			quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
 		s.L("\t\t\t}")
 	}
 	s.L("\t\t}")
@@ -768,7 +768,7 @@ func emitRequiredIf(s *src, rule ir.Rule, recv string) {
 // nothing to move from. A value that did not change is always allowed: the
 // alternative would reject an unrelated edit that merely carries the state
 // along, which every PUT does.
-func emitTransition(s *src, rule ir.Rule, recv string) {
+func emitTransition(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	if len(rule.Fields) == 0 || len(rule.Transitions) == 0 {
 		return
 	}
@@ -811,7 +811,7 @@ func emitTransition(s *src, rule ir.Rule, recv string) {
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t\tif !ok {")
 	s.L("\t\t\t\t\tr.AddNotification(%s, %s%s)",
-		quote(f.Name), notifLiteral(rule.Notification), echoArgOn(rule, f, recv))
+		quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t}")
 	s.L("\t\t}")
@@ -846,7 +846,7 @@ func emitChildDuplicate(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\t\tfor j := i + 1; j < len(items); j++ {")
 	s.L("\t\t\t\t\tif items[i].IsSameBusinessIdentity(items[j]) {")
 	s.L("\t\t\t\t\t\tr.AddNotification(%s, %s)",
-		quote(c.GoPlural), notifLiteral(rule.Notification))
+		quote(c.GoPlural), notifIn(m, rule.Notification))
 	s.L("\t\t\t\t\t\tbreak")
 	s.L("\t\t\t\t\t}")
 	s.L("\t\t\t\t}")
@@ -877,7 +877,7 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\tfor _, n := range perKey {")
 	s.L("\t\t\t\tif n > %d {", rule.Cap)
 	s.L("\t\t\t\t\tr.AddNotification(%s, %s)",
-		quote(c.GoPlural), notifLiteral(rule.Notification))
+		quote(c.GoPlural), notifIn(m, rule.Notification))
 	s.L("\t\t\t\t\tbreak")
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t}")
@@ -958,4 +958,23 @@ func skipReason(rule ir.Rule) string {
 	}
 	return "Skipped when the value is empty: this rule says what a value must " +
 		"look like, not that there must be one."
+}
+
+// notifIn spells a notification from the package that is emitting the rule.
+//
+// A child's rules are emitted INSIDE aggregatevos, so everything there is bare.
+// The root's are emitted in domain, which imports aggregatevos and vos — so a
+// notification the resolver placed in one of those has to be qualified. Getting
+// this wrong does not compile, which is the good case; what it replaces is the
+// generator emitting a type in a package that could never hold it.
+func notifIn(m *ir.Model, name string) string {
+	if m == nil || name == "" {
+		return notifLiteral(name)
+	}
+	for _, n := range m.Notifications {
+		if n.Name == name && n.Package != "" && n.Package != "domain" {
+			return n.Package + "." + name + "{}"
+		}
+	}
+	return notifLiteral(name)
 }

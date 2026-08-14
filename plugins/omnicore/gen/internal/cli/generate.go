@@ -187,7 +187,7 @@ func summarise(w io.Writer, entity string, decisions []fsplan.Decision, reportPa
 }
 
 // Adopt records a hand fix so regeneration preserves it.
-func Adopt(w io.Writer, projectDir, path string) error {
+func Adopt(w io.Writer, projectDir, path, why string) error {
 	proj, err := discover.Find(projectDir)
 	if err != nil {
 		return err
@@ -219,7 +219,7 @@ func Adopt(w io.Writer, projectDir, path string) error {
 	if fw == "" {
 		fw = "unresolved"
 	}
-	if err := fsplan.Adopt(proj.Root, entity, rel, fw, lock); err != nil {
+	if err := fsplan.Adopt(proj.Root, entity, rel, fw, why, lock); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "Adopted %s against framework %s.\n", rel, fw)
@@ -260,7 +260,11 @@ func Doctor(w io.Writer, projectDir string) error {
 			case err != nil:
 				fmt.Fprintf(w, "  ! %s is gone\n", path)
 			case rec.AdjustedFor != "":
-				fmt.Fprintf(w, "  · %s carries a fix adopted for %s\n", path, rec.AdjustedFor)
+				line := fmt.Sprintf("  · %s carries a hand edit adopted at framework %s", path, rec.AdjustedFor)
+				if rec.Why != "" {
+					line += " — " + rec.Why
+				}
+				fmt.Fprintln(w, line+"\n      (it no longer tracks the spec: emitter improvements will not reach it)")
 			case fsplan.Hash(content) != rec.Hash:
 				fmt.Fprintf(w, "  ! %s was edited by hand — regeneration will refuse it\n", path)
 			}

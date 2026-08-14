@@ -230,9 +230,19 @@ func explainOwnership() string {
 Hashes normalise line endings, so a Windows checkout or a format-on-save editor
 does not make the whole tree look hand-written.
 
-If a framework newer than this build forces a small fix in an owned file, run
-"omnicore-gen adopt <path>": the fix is recorded against that framework version
-and survives regeneration instead of resurfacing as an unexplained refusal.
+When an owned file has to carry a hand edit — a framework newer than this build,
+or something this generator simply does not cover — run
+"omnicore-gen adopt <path> -why '<what the spec could not express>'". The edit is
+then recorded and survives regeneration instead of resurfacing as an unexplained
+refusal.
+
+Adopt LAST, and know the price. An adopted file stops tracking the spec: every
+later improvement to the emitters lands everywhere except there, quietly, for as
+long as the file exists. Before adopting, look for the key that says it
+(uniqueness among active rows, a conditional requirement, per-entry endpoints —
+they exist and are easy to miss), change the spec, and regenerate; and if the
+invariant genuinely cannot be declared, rules.manual is the escape that does not
+fight the generator.
 `
 }
 

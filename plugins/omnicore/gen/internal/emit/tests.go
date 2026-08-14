@@ -97,6 +97,9 @@ func emitDomainTests(m *ir.Model) (fsplan.File, error) {
 	s.L("\t%s", quote("time"))
 	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+	if m.HasNotificationsIn("aggregatevos") {
+		s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
+	}
 	s.L(")")
 	s.Blank()
 
@@ -1441,13 +1444,7 @@ func patchSample(f ir.Field) string {
 // 409 and one declared as validation answers 422. Nothing else in the build
 // checks that mapping, and getting it wrong changes what a client retries.
 func emitNotificationSemantics(s *src, m *ir.Model) {
-	var own []ir.Notification
-	for _, n := range m.Notifications {
-		if n.Package == "domain" {
-			own = append(own, n)
-		}
-	}
-	if len(own) == 0 {
+	if len(m.Notifications) == 0 {
 		return
 	}
 	s.Doc(
@@ -1458,8 +1455,12 @@ func emitNotificationSemantics(s *src, m *ir.Model) {
 			"rejection — just the kind a client handles differently.")
 	s.L("func Test%sNotificationSemantics(t *testing.T) {", m.Entity.Pascal)
 	s.L("\tfor got, want := range map[domain.NotificationSemantic]domain.NotificationSemantic{")
-	for _, n := range own {
-		s.L("\t\t%s{}.Semantic(): %s,", n.Name, semanticConst(n.Semantic))
+	// EVERY declared notification, whatever package it lives in. Filtering to
+	// the domain package left the ones a value object or a collection raises
+	// untested — and those are the rejections a caller meets most, because they
+	// fire on the shape of what was sent.
+	for _, n := range m.Notifications {
+		s.L("\t\t%s{}.Semantic(): %s,", notificationRef(m, n), semanticConst(n.Semantic))
 	}
 	s.L("\t} {")
 	s.L("\t\tif got != want {")
@@ -1493,4 +1494,15 @@ func restrictSample(m *ir.Model, name string) string {
 		}
 	}
 	return quote("x")
+}
+
+// notificationRef spells a notification from the domain test's package: bare
+// when it lives there, qualified when it lives in vos or aggregatevos.
+func notificationRef(m *ir.Model, n ir.Notification) string {
+	switch n.Package {
+	case "", "domain":
+		return n.Name
+	default:
+		return n.Package + "." + n.Name
+	}
 }

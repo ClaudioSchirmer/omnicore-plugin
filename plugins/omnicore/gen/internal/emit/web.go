@@ -611,10 +611,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		idParam := lowerFirst(c.Name) + "Id"
 		perm := updatePermission(m)
 
-		for _, op := range []struct {
-			verb, method, path, request, response, result, summary, doc string
-			status                                                      string
-		}{
+		for _, op := range []perChildOp{
 			{
 				verb: "Add", method: "fiber.MethodPost", path: "/:id/" + seg,
 				request: "Add" + c.Name + "Request", response: "Add" + c.Name + "Response",
@@ -631,21 +628,12 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 				request: "Change" + c.Name + "Request", response: "Change" + c.Name + "Response",
 				result: "Change" + c.Name + "Result", status: "fiber.StatusOK",
 				summary: fmt.Sprintf("Replace one %s of a %s", c.Name, entity),
-				doc: fmt.Sprintf("Full replacement of ONE entry, keeping its id — the row "+
-					"is updated rather than removed and re-added, so the audit trail reads "+
-					"as a change. 404 when the owner is not there, and 404 when the owner "+
+				doc: fmt.Sprintf("Full replacement of ONE entry, keeping its id — the row " +
+					"is updated rather than removed and re-added, so the audit trail reads " +
+					"as a change. 404 when the owner is not there, and 404 when the owner " +
 					"exists but holds no entry with that id."),
 			},
-			{
-				verb: "Remove", method: "fiber.MethodDelete", path: "/:id/" + seg + "/:" + idParam,
-				request: "Remove" + c.Name + "Request", response: "Remove" + c.Name + "Response",
-				result: "Remove" + c.Name + "Result", status: "fiber.StatusOK",
-				summary: fmt.Sprintf("Remove one %s from a %s", c.Name, entity),
-				doc: fmt.Sprintf("Takes ONE entry out of the collection. Whether the row is "+
-					"archived or deleted follows the child's own declaration, not this verb. "+
-					"404 when the owner is not there, and 404 when it holds no entry with "+
-					"that id."),
-			},
+			removeOp(c, entity, seg, idParam),
 		} {
 			hv := "h" + op.verb + c.Name
 			sv := "s" + op.verb + c.Name
@@ -693,4 +681,46 @@ func lowerFirst(s string) string {
 		r[0] += 'a' - 'A'
 	}
 	return string(r)
+}
+
+// removeOp picks the VERB that tells the truth about what removal does here.
+//
+// A child that declares softRemove keeps its row and its archive stamp: taking
+// an entry out is reversible, and the framework performs it as an archive of
+// that item. Mounting it as DELETE would promise an irreversible purge the
+// endpoint does not perform — and DELETE is the one verb a caller is entitled
+// to read as permanent. A child WITHOUT an archive column really is deleted, so
+// there DELETE is the honest spelling.
+//
+// The two also differ in what the caller can do next: an archived entry can be
+// brought back, and nothing about a purged one can.
+func removeOp(c ir.Child, entity, seg, idParam string) perChildOp {
+	if c.ArchivedAt != "" {
+		return perChildOp{
+			verb: "Remove", method: "fiber.MethodPatch",
+			path:    "/:id/" + seg + "/:" + idParam + "/archive",
+			request: "Remove" + c.Name + "Request", response: "Remove" + c.Name + "Response",
+			result: "Remove" + c.Name + "Result", status: "fiber.StatusOK",
+			summary: fmt.Sprintf("Archive one %s of a %s", c.Name, entity),
+			doc: "Archives ONE entry: the row stays, stamped, and stops being " +
+				"returned — reversible, which is why this is not a DELETE. 404 when the " +
+				"owner is not there, and 404 when it holds no entry with that id.",
+		}
+	}
+	return perChildOp{
+		verb: "Remove", method: "fiber.MethodDelete",
+		path:    "/:id/" + seg + "/:" + idParam,
+		request: "Remove" + c.Name + "Request", response: "Remove" + c.Name + "Response",
+		result: "Remove" + c.Name + "Result", status: "fiber.StatusOK",
+		summary: fmt.Sprintf("Remove one %s from a %s", c.Name, entity),
+		doc: "Removes ONE entry for good: this child declares no archive column, " +
+			"so there is nothing to bring back. 404 when the owner is not there, and " +
+			"404 when it holds no entry with that id.",
+	}
+}
+
+// perChildOp is one mounted per-entry verb, fully decided.
+type perChildOp struct {
+	verb, method, path, request, response, result, summary, doc string
+	status                                                      string
 }

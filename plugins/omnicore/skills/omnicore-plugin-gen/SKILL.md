@@ -117,10 +117,16 @@ Three things to get right, because they are the ones that cost a migration later
 - **`storage.kind`** — `flat` (its own table) vs `sharedbase-role` (a ROLE over an
   identity other roles may share). Starting flat and extracting an identity afterwards is
   real data movement.
-- **Value objects.** A value whose set is fixed is an `enum` VO, not a string; a value
-  with a shape is a `raw` VO, not a regex inline in a rule. Reuse an existing one with
-  `vo: {kind: reuse, ref: <Name>}` — a second copy of a rule is a rule that can disagree
-  with itself.
+- **Value objects — and ask the closed-set question about EVERY one.** Before writing
+  `kind: raw`, ask: is the set of valid values FINITE and known? If it is, it is an
+  `enum`, not a shape. `raw` with `regex: '^[A-Z]{2}$'` accepts `XX`, `ZZ` and `QQ` — a
+  Brazilian state field that takes 676 values, 649 of which do not exist. The enum gives
+  the caller the list in OpenAPI, gives the reader named constants, and converges an
+  out-of-set value to Unknown instead of storing it.
+  The reverse holds too: a value with a SHAPE and no fixed set (a document number, a URL,
+  a plate) is a `raw` VO, not a regex inline in a rule.
+  Reuse an existing one with `vo: {kind: reuse, ref: <Name>}` — a second copy of a rule is
+  a rule that can disagree with itself.
 - **`read.byParams.controls`.** A control is served ONLY if declared, and an undeclared
   one arriving on the wire is answered with a typed 400. That is a contract, not an
   omission.
@@ -214,6 +220,36 @@ Do not re-read every file. Read against the plan the dev approved and against th
 
 Anything wrong here is fixed **in the spec**, then regenerated. The only files you author
 are the two `*_manual.go` hooks.
+
+### When the output is wrong and the spec seems unable to say so
+
+Editing a generated file is the LAST move, not the first. Before it, exhaust the spec, in
+this order — each step is cheap and most problems die at the first:
+
+1. **Re-read `explain vocabulary` and `explain rules` for that exact concern.** The key
+   usually exists and is named something you did not guess: uniqueness scoped to the
+   active rows is `unique.scope`, "required only when that other field is filled" is
+   `requiredIf`, "valid IF present" is `skipWhen`, per-entry endpoints are
+   `editStrategy: per-child`.
+2. **Change the spec and regenerate.** Regeneration is seconds and idempotent; there is
+   no cost to trying.
+3. **If the invariant genuinely cannot be declared, use `rules.manual`** — a named item,
+   a stub in a file regeneration never touches. That is the designed escape, and it does
+   not fight the generator.
+4. **Only then** consider editing a generated file — and then `omnicore-gen adopt <path>
+   -why "<what the spec could not express>"` so the edit is recorded rather than silently
+   refused on the next run.
+
+**Adoption has a permanent cost, and it is not "the file is dirty".** An adopted file
+STOPS TRACKING THE SPEC: every later improvement to the emitters — a bug fixed, a verb
+corrected, a boot-trap closed — lands everywhere except there, quietly, forever. That is
+why it goes last, and why the `-why` is worth writing: the next person to meet the file is
+usually not the one who edited it, and "adopted" alone does not say whether the reason
+still holds.
+
+**And say it out loud.** Any file you adopt goes in the hand-back with what the spec could
+not express — that list is how the generator gets better. A hand edit nobody hears about
+is a gap that stays open.
 
 ## Step 8 — prove it
 
