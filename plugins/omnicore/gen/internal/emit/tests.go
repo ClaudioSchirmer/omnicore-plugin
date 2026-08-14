@@ -504,7 +504,6 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 		s.L("\t// The result carries the id, and a verb that reaches this mapper has always")
 		s.L("\t// loaded the row first — so the entity under test has one too.")
-		s.L("\tdomain.EnsureInitialized(e)")
 		s.L("\te.SetID(domain.NewID(%s))", quote("019ffd00-0000-7000-8000-000000000000"))
 		s.L("\tc := &%s{", op.CommandType)
 		if op.InputMethod == "ApplyTo" || op.InputMethod == "ApplyPartiallyTo" {

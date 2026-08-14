@@ -698,6 +698,12 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 				"an archive column is declared but the child is not soft-removable",
 				"set softRemove: true, or drop the column")
 		}
+		if c.EditStrategy == "per-child" && len(c.BusinessIdentity) == 0 {
+			ps.BlockerFix(where+".businessIdentity",
+				"a per-entry collection needs a business identity",
+				"it is what an ADD compares against to answer duplicate, and what makes "+
+					"two entries the same one; declare the field(s) that identify an entry")
+		}
 		if c.EditStrategy == "per-child" && c.SoftRemove && c.DuplicateNotification == "" {
 			ps.WarnFix(where+".duplicateNotification",
 				"no duplicate notification for a per-child collection",

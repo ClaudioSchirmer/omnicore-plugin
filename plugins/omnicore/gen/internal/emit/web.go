@@ -396,6 +396,7 @@ func emitRoutes(m *ir.Model) (fsplan.File, error) {
 		for _, op := range m.Ops {
 			emitRoute(s, m, op, entity)
 		}
+		emitPerChildRoutes(s, m, entity)
 		emitExports(s, m)
 		s.L("}")
 	}
@@ -574,4 +575,106 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 
 	return goFile("internal/web/requests/"+m.Entity.Snake+"_children.go", fsplan.Owned,
 		fmt.Sprintf("the wire types for %d child collection(s)", len(m.Children)), s)
+}
+
+// emitPerChildRoutes mounts the three verbs that address ONE entry.
+//
+// They hang off the owner's path because the entry has no life of its own: it
+// is loaded, changed and saved as part of the aggregate, in one transaction, so
+// the collection's invariants are checked against what will actually be stored.
+// A caller who wants the whole collection replaced still has the root's own
+// update — these verbs exist so that adding one entry does not mean resending
+// every other one, which is both wasteful and a lost-update race between two
+// callers.
+func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
+	for _, c := range m.Children {
+		if !c.PerChild {
+			continue
+		}
+		seg := c.Segment
+		idParam := lowerFirst(c.Name) + "Id"
+		perm := updatePermission(m)
+
+		for _, op := range []struct {
+			verb, method, path, request, response, result, summary, doc string
+			status                                                      string
+		}{
+			{
+				verb: "Add", method: "fiber.MethodPost", path: "/:id/" + seg,
+				request: "Add" + c.Name + "Request", response: "Add" + c.Name + "Response",
+				result: "Add" + c.Name + "Result", status: "fiber.StatusCreated",
+				summary: fmt.Sprintf("Add one %s to a %s", c.Name, entity),
+				doc: fmt.Sprintf("Adds ONE entry to the %s collection of an existing %s, "+
+					"in the owner's transaction. 404 when the owner is not there. The "+
+					"response carries the entry AS STORED, including the id the server "+
+					"minted for it — that id is how the caller addresses it afterwards.",
+					c.Segment, entity),
+			},
+			{
+				verb: "Change", method: "fiber.MethodPut", path: "/:id/" + seg + "/:" + idParam,
+				request: "Change" + c.Name + "Request", response: "Change" + c.Name + "Response",
+				result: "Change" + c.Name + "Result", status: "fiber.StatusOK",
+				summary: fmt.Sprintf("Replace one %s of a %s", c.Name, entity),
+				doc: fmt.Sprintf("Full replacement of ONE entry, keeping its id — the row "+
+					"is updated rather than removed and re-added, so the audit trail reads "+
+					"as a change. 404 when the owner is not there, and 404 when the owner "+
+					"exists but holds no entry with that id."),
+			},
+			{
+				verb: "Remove", method: "fiber.MethodDelete", path: "/:id/" + seg + "/:" + idParam,
+				request: "Remove" + c.Name + "Request", response: "Remove" + c.Name + "Response",
+				result: "Remove" + c.Name + "Result", status: "fiber.StatusOK",
+				summary: fmt.Sprintf("Remove one %s from a %s", c.Name, entity),
+				doc: fmt.Sprintf("Takes ONE entry out of the collection. Whether the row is "+
+					"archived or deleted follows the child's own declaration, not this verb. "+
+					"404 when the owner is not there, and 404 when it holds no entry with "+
+					"that id."),
+			},
+		} {
+			hv := "h" + op.verb + c.Name
+			sv := "s" + op.verb + c.Name
+			s.L("\t%s, %s := fwweb.CommandWithBodyIDSpec(d.Pipeline,", hv, sv)
+			s.L("\t\trequests.%s{},", op.request)
+			s.L("\t\trequests.%s{}.FromResult,", op.response)
+			s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.%s, commands.%s]{",
+				entity, op.verb+c.Name+"Command", op.result)
+			s.L("\t\t\tRepo: repo,%s", serviceField(m))
+			s.L("\t\t}, %s)", op.status)
+			s.L("\tfwopenapi.Mount(d.OpenAPIRegistry, group, %s, %s,", op.method, quote(op.path))
+			s.L("\t\t%s, %s,", hv, sv)
+			s.L("\t\tfwopenapi.Doc{")
+			s.L("\t\t\tSummary: %s,", quote(op.summary))
+			s.L("\t\t\tDescription: %s,", quote(op.doc))
+			s.L("\t\t\tTags: []string{%s},", quote(m.Entity.PluralPascal))
+			s.L("\t\t},")
+			s.L("\t\tfwopenapi.RequirePermission(%s))", quote(perm))
+			s.Blank()
+		}
+	}
+}
+
+// updatePermission is what a per-entry verb requires.
+//
+// Editing one entry is editing the aggregate, so it asks for the same
+// permission the root's update asks for: a caller allowed to replace the whole
+// collection but not to add one entry to it would be a distinction nobody
+// asked for.
+func updatePermission(m *ir.Model) string {
+	for _, verb := range []string{"update", "patch", "insert"} {
+		if op := m.Op(verb); op != nil && op.Permission != "" {
+			return op.Permission
+		}
+	}
+	return ""
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if r[0] >= 'A' && r[0] <= 'Z' {
+		r[0] += 'a' - 'A'
+	}
+	return string(r)
 }

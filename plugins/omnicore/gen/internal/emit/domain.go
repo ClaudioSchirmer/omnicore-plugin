@@ -627,10 +627,10 @@ func emitAggregateChildren(s *src, m *ir.Model) {
 
 // emitChildMethods writes the aggregate's vocabulary for its collections.
 //
-// Each one delegates to the framework primitive, which already ensures the root
-// is initialised — so no extra guard is added here. A guard would only be
-// needed by a method that raises a notification BEFORE delegating, and none of
-// these do.
+// None of these methods prepares the entity for anything. The add-with-guard
+// emits before delegating and, on the insert path, runs inside ToEntity — ahead
+// of everything the framework does — and that is fine: an entity carries its
+// notification context from construction.
 func emitChildMethods(s *src, m *ir.Model) {
 	for _, c := range m.Children {
 		s.Doc(
@@ -641,7 +641,59 @@ func emitChildMethods(s *src, m *ir.Model) {
 				"instead of creating a second one.",
 		)
 		s.L("func (e *%s) %s(item aggregatevos.%s) {", m.Entity.Pascal, c.AddMethod, c.Name)
+		if c.PerChild && c.DuplicateNotification != "" {
+			s.L("\t// Adding ONE entry can collide with what is already there, and the")
+			s.L("\t// caller asked for this entry rather than for a whole collection — so")
+			s.L("\t// the collision is an answer, not a silent merge.")
+			s.L("\tfor _, existing := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+			s.L("\t\tif existing.IsSameBusinessIdentity(item) {")
+			s.L("\t\t\te.AddNotification(%s, %s)", quote(c.GoPlural), notifLiteral(c.DuplicateNotification))
+			s.L("\t\t\treturn")
+			s.L("\t\t}")
+			s.L("\t}")
+		}
 		s.L("\tdomain.AddAggregateChild(e, item)")
+		s.L("}")
+		s.Blank()
+
+		if !c.PerChild {
+			continue
+		}
+
+		s.Doc(
+			fmt.Sprintf("%s replaces ONE entry, keeping its id.", c.ChangeMethod),
+			"",
+			"Keeping the id is the whole point: the row is updated rather than "+
+				"removed and re-added, so whatever references it still does, and the "+
+				"audit trail reads as a change instead of as a deletion plus a creation.",
+			"",
+			"An id that is not in the collection is NOT silently ignored — it answers "+
+				"not-found, because the caller addressed a specific entry.")
+		s.L("func (e *%s) %s(id string, replacement aggregatevos.%s) {", m.Entity.Pascal, c.ChangeMethod, c.Name)
+		s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+		s.L("\t\tif current.GetID().Value() == id {")
+		s.L("\t\t\treplacement.SetID(domain.NewID(id))")
+		s.L("\t\t\tdomain.ChangeAggregateChild(e, current, replacement)")
+		s.L("\t\t\treturn")
+		s.L("\t\t}")
+		s.L("\t}")
+		s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
+		s.L("}")
+		s.Blank()
+
+		s.Doc(
+			fmt.Sprintf("%s takes ONE entry out of the collection.", c.RemoveMethod),
+			"",
+			"Same not-found posture as the change: the caller named an entry, so a "+
+				"missing one is an answer rather than a no-op.")
+		s.L("func (e *%s) %s(id string) {", m.Entity.Pascal, c.RemoveMethod)
+		s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+		s.L("\t\tif current.GetID().Value() == id {")
+		s.L("\t\t\tdomain.RemoveAggregateChild(e, current)")
+		s.L("\t\t\treturn")
+		s.L("\t\t}")
+		s.L("\t}")
+		s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
 		s.L("}")
 		s.Blank()
 	}

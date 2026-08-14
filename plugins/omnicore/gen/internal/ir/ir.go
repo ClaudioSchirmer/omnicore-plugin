@@ -982,6 +982,17 @@ type Child struct {
 	ArchivedAt  string
 	InputType   string
 	AddMethod   string
+	// PerChild says the collection is edited one entry at a time: its own
+	// endpoints, its own commands, and a 404 when the entry is not there. The
+	// alternative — atomic-replace — has no entry to address, because the root's
+	// update swaps the whole collection.
+	PerChild     bool
+	ChangeMethod string
+	RemoveMethod string
+	// DuplicateNotification is what an ADD raises when the entry is already
+	// there by business identity. It only exists per-child: an atomic replace
+	// has nothing to collide with.
+	DuplicateNotification string
 	Clauses     []Clause
 	Segment     string // the WIRE name of the collection
 	DocSegment  string // the key the projection actually stores it under
@@ -1012,6 +1023,10 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			Description: c.Description, OwnedBy: c.OwnedBy,
 			ArchivedAt: c.ArchivedAt,
 			InputType: c.Name + "Input", AddMethod: "Add" + c.Name,
+			PerChild:              c.EditStrategy == "per-child",
+			ChangeMethod:          "Change" + c.Name + "ByID",
+			RemoveMethod:          "Remove" + c.Name + "ByID",
+			DuplicateNotification: c.DuplicateNotification,
 			// One name, three consumers: the document segment IS the declared
 			// collection name, the wire path is its lower-camel, and the read
 			// DTO's field must be the name itself.

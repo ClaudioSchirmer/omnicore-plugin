@@ -124,6 +124,12 @@ Three things to get right, because they are the ones that cost a migration later
 - **`read.byParams.controls`.** A control is served ONLY if declared, and an undeclared
   one arriving on the wire is answered with a typed 400. That is a contract, not an
   omission.
+- **`children[].editStrategy`.** `atomic-replace` means the root's update swaps the whole
+  collection — a caller adding one entry must resend every other one, and two callers
+  doing that lose each other's work. `per-child` adds POST/PUT/DELETE on
+  `/<entity>/:id/<collection>[/:entryId]`, a duplicate answer on ADD (declare
+  `duplicateNotification`) and a 404 for an entry that is not there. Per-child needs
+  `businessIdentity`: it is what "the same entry" means.
 
 ## Step 3 — check, and read the refusals as instructions
 
