@@ -259,15 +259,32 @@ PYSHAPE
 fi
 
 # ── Lane 5: the DDL applies to real engines ──────────────────────────────────
+#
+# Against the GENERATOR'S OWN bench (devops/docker-compose.yml), never a dev or
+# QA one. These lanes drop and recreate tables; the engines a developer keeps
+# running are the ones their service and their QA suite are using right now, and
+# borrowing them means a gate that passes here by breaking work over there.
+#
+#   docker compose -f devops/docker-compose.yml up -d              # pg + mysql
+#   docker compose -f devops/docker-compose.yml --profile heavy up -d
+#
+# Whatever is not up SKIPS, loudly. Point the vars at something else only if you
+# know what you are pointing them at.
 echo "── DDL against real engines"
+
+PG_CONTAINER="${PG_CONTAINER:-omnicore-gen-postgres}"
+MYSQL_CONTAINER="${MYSQL_CONTAINER:-omnicore-gen-mysql}"
+SQLSERVER_CONTAINER="${SQLSERVER_CONTAINER:-omnicore-gen-sqlserver}"
+ORACLE_CONTAINER="${ORACLE_CONTAINER:-omnicore-gen-oracle}"
+DDL_DB="${DDL_DB:-gen_ddl}"
 
 apply_pg() {
   local f=$1
-  docker exec -i omnicore-qa-postgres psql -U omnicore -d users_db -v ON_ERROR_STOP=1 -q < "$f" >/dev/null 2>&1
+  docker exec -i "$PG_CONTAINER" psql -U omnicore -d "$DDL_DB" -v ON_ERROR_STOP=1 -q < "$f" >/dev/null 2>&1
 }
 apply_mysql() {
   local f=$1 out
-  out=$(docker exec -i omnicore-qa-mysql mysql -uroot -proot users_db < "$f" 2>&1 | grep -v 'Using a password')
+  out=$(docker exec -i "$MYSQL_CONTAINER" mysql -uroot -proot "$DDL_DB" < "$f" 2>&1 | grep -v 'Using a password')
   [[ -z "$out" ]]
 }
 
@@ -294,22 +311,22 @@ ddl_lane() {
   [[ $okall -eq 1 ]] && ok "$engine: down is idempotent" || bad "$engine: down is not idempotent"
 }
 
-ddl_lane postgres apply_pg omnicore-qa-postgres
+ddl_lane postgres apply_pg "$PG_CONTAINER"
 
-ddl_lane mysql apply_mysql omnicore-qa-mysql
+ddl_lane mysql apply_mysql "$MYSQL_CONTAINER"
 
 apply_sqlserver() {
   local f=$1
-  docker exec -i omnicore-qa-sqlserver /opt/mssql-tools18/bin/sqlcmd \
-    -S localhost -U sa -P 'OmnicoreQA!2026' -C -d users_db -b -i /dev/stdin < "$f" >/dev/null 2>&1
+  docker exec -i "$SQLSERVER_CONTAINER" /opt/mssql-tools18/bin/sqlcmd \
+    -S localhost -U sa -P "${SQLSERVER_PASSWORD:-OmnicoreGen!2026}" -C -d master -b -i /dev/stdin < "$f" >/dev/null 2>&1
 }
-ddl_lane sqlserver apply_sqlserver omnicore-qa-sqlserver
+ddl_lane sqlserver apply_sqlserver "$SQLSERVER_CONTAINER"
 
 apply_oracle() {
   local f=$1 out
   # Oracle's client returns 0 even on a rejected statement, so the transcript is
   # what decides: any ORA- line means the DDL did not apply.
-  out=$(docker exec -i omnicore-qa-oracle bash -lc \
+  out=$(docker exec -i "$ORACLE_CONTAINER" bash -lc \
     "sqlplus -S omnicore/omnicore@//localhost:1521/FREEPDB1 <<'EOSQL'
 WHENEVER SQLERROR EXIT SQL.SQLCODE
 $(cat "$f")
@@ -317,7 +334,7 @@ EXIT
 EOSQL" 2>&1)
   ! grep -q 'ORA-' <<<"$out"
 }
-ddl_lane oracle apply_oracle omnicore-qa-oracle
+ddl_lane oracle apply_oracle "$ORACLE_CONTAINER"
 
 if command -v sqlite3 >/dev/null 2>&1; then
   UP_LITE=$(ls "$WORK"/migrations/sqlite/*_student.up.sql 2>/dev/null | head -1)

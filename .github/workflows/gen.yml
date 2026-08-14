@@ -141,5 +141,6 @@ jobs:
 
       # SQL Server and Oracle are deliberately absent: their images cost minutes
       # per run, and a gate slow enough to be ignored protects nothing. Their DDL
-      # is covered by scripts/golden.sh against the local bench — a limit worth
-      # stating rather than hiding behind a green tick.
+      # is covered by scripts/golden.sh against the generator's OWN local bench
+      # (plugins/omnicore/gen/devops/docker-compose.yml, `--profile heavy`) — a
+      # limit worth stating rather than hiding behind a green tick.
