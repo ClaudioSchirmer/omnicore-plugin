@@ -175,6 +175,27 @@ func renderMigrationHandoff(b *strings.Builder, in Input) {
 			}
 			fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", c.Name, typ, null, c.Note)
 		}
+		// The constraints, right after the columns. A uniqueness whose scope
+		// changed adds no column, so a shape that stops at the columns looks
+		// already satisfied while the rule the domain relies on is still the old
+		// one — and that gap surfaces as a value the API accepts and the database
+		// refuses.
+		if len(t.Indexes) > 0 {
+			b.WriteString("\nIndexes it expects:\n\n")
+			for _, idx := range t.Indexes {
+				kind := "index"
+				if idx.Unique {
+					kind = "UNIQUE"
+				}
+				scope := "over every row"
+				if idx.ActiveOnly {
+					scope = "over the ACTIVE rows only — an archived one frees the value"
+				}
+				fmt.Fprintf(b, "- `%s` — %s on (%s), %s; %s\n",
+					idx.Name, kind, strings.Join(idx.Columns, ", "), scope, idx.Note)
+			}
+			b.WriteString("\n")
+		}
 		b.WriteString("\n")
 	}
 
@@ -239,8 +260,19 @@ func renderCheck(b *strings.Builder, in Input) {
 		"Read them against what you actually meant.\n\n")
 	b.WriteString("| Decision | Value | Why it matters |\n|---|---|---|\n")
 
-	fmt.Fprintf(b, "| Storage | flat table `%s` | A field group that should be shared with another "+
-		"role later would need a real migration to extract. |\n", m.Table)
+	// The posture, not an assumption about it. This line said "flat table" for
+	// every entity, including a shared-base role — and a reviewer who trusts the
+	// summary then verifies the wrong thing, while one who does not trust it has
+	// no reason to trust the rest of the table either.
+	if m.IsRole() {
+		fmt.Fprintf(b, "| Storage | role `%s` over the shared identity `%s` (%s) | The "+
+			"identity is deduplicated by %s and outlives this role; fields marked "+
+			"`livesOn: base` are seen by every other role over the same one. |\n",
+			m.Table, m.Base.Table, m.Base.Link, m.Base.NaturalKey)
+	} else {
+		fmt.Fprintf(b, "| Storage | flat table `%s` | A field group that should be shared with "+
+			"another role later would need a real migration to extract. |\n", m.Table)
+	}
 
 	modes := make([]string, 0, len(m.Ops))
 	for _, op := range m.Ops {
@@ -260,8 +292,20 @@ func renderCheck(b *strings.Builder, in Input) {
 		if f.Unique == nil {
 			continue
 		}
-		fmt.Fprintf(b, "| Unique | `%s` (%s) | A duplicate is refused at the database and "+
-			"reported as `%s`. |\n", f.Name, f.Unique.Enforce, f.Unique.Notification)
+		// The SCOPE belongs here as much as the enforcement: whether an archived
+		// row keeps holding the value is the half a reviewer actually has an
+		// opinion about, and leaving it out reads as "unique, period".
+		scope := f.Unique.Scope
+		if scope == "" {
+			scope = "all"
+		}
+		reuse := "an archived row keeps holding it, so the value is never free again"
+		if scope == "active-only" {
+			reuse = "an archived row frees it, so the value can be taken again"
+		}
+		fmt.Fprintf(b, "| Unique | `%s` — scope `%s` (%s) | %s; a duplicate is refused at "+
+			"the database and reported as `%s`. |\n",
+			f.Name, scope, f.Unique.Enforce, reuse, f.Unique.Notification)
 	}
 
 	fmt.Fprintf(b, "| Data access | %s | %s |\n", m.Authz.DataAccess,

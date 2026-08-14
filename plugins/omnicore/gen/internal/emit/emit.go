@@ -39,6 +39,24 @@ type TargetTable struct {
 	Name    string
 	Purpose string
 	Columns []TargetColumn
+	// Indexes are the constraints the generated CODE expects to exist. They
+	// belong in the hand-off as much as the columns do: a uniqueness whose SCOPE
+	// changed adds no column at all, so a target shape that lists only columns
+	// describes a table that looks already correct while the constraint the
+	// domain relies on is still the old one.
+	Indexes []TargetIndex
+}
+
+// TargetIndex is one index the code depends on, dialect-neutral.
+type TargetIndex struct {
+	Name    string
+	Columns []string
+	Unique  bool
+	// ActiveOnly says the index covers only the rows that are not archived —
+	// the difference between a value that is never free again and one that comes
+	// back when the row is archived.
+	ActiveOnly bool
+	Note       string
 }
 
 // TargetColumn is deliberately dialect-neutral: what an ALTER has to add is a
@@ -65,6 +83,7 @@ func TargetShape(m *ir.Model) []TargetTable {
 	out = append(out, TargetTable{
 		Name: m.Table, Purpose: "the aggregate root",
 		Columns: columnsOf(roleFieldsOf(m), m, true),
+		Indexes: indexesOf(m),
 	})
 	for _, sib := range m.Siblings {
 		out = append(out, TargetTable{
@@ -371,4 +390,33 @@ func entityValue(f ir.Field, expr string) string {
 
 func fwImport(path string) string {
 	return "github.com/ClaudioSchirmer/omnicore/" + path
+}
+
+// indexesOf lists the constraints the generated code counts on.
+//
+// A uniqueness that changed SCOPE is the case this exists for: it adds no
+// column, so a hand-off describing only columns shows a table that already
+// matches while the constraint still holds the old rule — and the mismatch
+// surfaces as a duplicate the API accepts and the database refuses.
+func indexesOf(m *ir.Model) []TargetIndex {
+	var out []TargetIndex
+	for _, c := range m.Constraints {
+		if c.Kind != "unique" {
+			continue
+		}
+		note := "a duplicate is reported as " + strings.TrimSuffix(c.Notification, "{}")
+		out = append(out, TargetIndex{
+			Name: uniqueName(c), Columns: c.Columns, Unique: true,
+			ActiveOnly: c.Scope == "active-only" && m.Managed.ArchivedAt != "",
+			Note:       note,
+		})
+	}
+	if m.IsRole() && m.Base.Link == "separate-fk" {
+		out = append(out, TargetIndex{
+			Name: m.Table + "_identity_key", Columns: []string{baseLinkColumn(m)}, Unique: true,
+			ActiveOnly: m.Base.RowUniqueness == "active-only",
+			Note:       "one role row per identity",
+		})
+	}
+	return out
 }
