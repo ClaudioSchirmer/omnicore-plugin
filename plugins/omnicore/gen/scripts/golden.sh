@@ -203,6 +203,48 @@ else
     else
       bad "the generated listing does not answer"; sed -n '1,25p' /tmp/gg-boot.log
     fi
+    # The by-id read and the listing must return the SAME record, in the same
+    # shape. They are written by two different emitters, and the one that drifted
+    # dropped the collections and the facet's fields from by-id alone: opening a
+    # record showed LESS of it than the list it was opened from, and no second
+    # request would have filled the gap, because the document was already there.
+    NEW_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/students" \
+      -H 'Content-Type: application/json' \
+      -d '{"name":"Ana Paula","enrollmentNumber":"2026-09999","email":"ana@escola.br","status":"active","grade":8.5,"enrolledAt":"2026-02-01T09:00:00Z","scholarshipSponsor":"Fundacao Alfa","scholarshipPercentage":50,"guardians":[{"fullName":"Marcos","document":"123.456.789-00","phone":"11999999999"}]}' \
+      2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
+    if [[ -n "$NEW_ID" ]]; then
+      SHAPES=$(python3 - "$NEW_ID" <<'PYSHAPE'
+import json, sys, urllib.request
+
+entry_id = sys.argv[1]
+base = "http://127.0.0.1:18099/students"
+
+
+def keys(url):
+    with urllib.request.urlopen(url) as fh:
+        return json.load(fh)["data"]
+
+
+listed = [r for r in keys(base) if r["id"] == entry_id]
+if not listed:
+    print("the record just written is not in the listing")
+    raise SystemExit
+
+one = keys(base + "/" + entry_id)
+missing = sorted(set(listed[0]) - set(one))
+if missing:
+    print("by-id is missing what the listing returns: " + ", ".join(missing))
+PYSHAPE
+)
+      if [[ -z "$SHAPES" ]]; then
+        ok "the by-id read returns the same record as the listing"
+      else
+        bad "by-id and the listing disagree — $SHAPES"
+      fi
+    else
+      bad "could not write a student to compare the two reads"
+    fi
+
     OPENAPI=$(curl -fsS "http://127.0.0.1:18099/openapi.json")
     if grep -q "teachers" <<<"$OPENAPI" && grep -q "students" <<<"$OPENAPI"; then
       ok "both entities appear in the OpenAPI document"

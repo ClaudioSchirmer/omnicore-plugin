@@ -192,11 +192,20 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	s.L("}")
 	s.Blank()
 
-	s.Doc(fmt.Sprintf("%s is the projected document.", op.ResponseType))
+	s.Doc(
+		fmt.Sprintf("%s is the projected document.", op.ResponseType),
+		"",
+		"It carries the WHOLE aggregate — the root's fields, the facets' fields and "+
+			"the collections. Reading one record and getting less of it than the listing "+
+			"gives for the same record is the shape nobody expects, and there is no "+
+			"second request that would fill the gap: the document was already fetched.")
 	s.L("type %s struct {", op.ResponseType)
 	s.L("\tID string `json:\"id\" example:\"7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51\"`")
-	for _, f := range m.Fields {
+	for _, f := range m.AllOwnerFields() {
 		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType, quote(f.JSONName), quote(f.Example))
+	}
+	for _, c := range m.Children {
+		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
 	}
 	s.L("}")
 	s.Blank()
@@ -270,30 +279,6 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment+",omitempty"))
 	}
 	s.L("}")
-	s.Blank()
-	// A nested row of a listing that serves ?fields= must be pointer-and-omitempty
-	// throughout, RECURSIVELY — the framework refuses to build the endpoint
-	// otherwise, and the refusal happens at boot rather than at compile time.
-	for _, c := range m.Children {
-		s.Doc(fmt.Sprintf("%sRow is one entry of the %s collection as the listing returns it.",
-			c.Name, c.Segment))
-		s.L("type %sRow struct {", c.Name)
-		if pointered {
-			s.L("\tID *string `json:\"id,omitempty\"`")
-		} else {
-			s.L("\tID string `json:\"id\"`")
-		}
-		for _, f := range c.Fields {
-			typ, tag := f.GoType, quote(f.JSONName)
-			if pointered {
-				typ = "*" + f.BaseGoType
-				tag = quote(f.JSONName + ",omitempty")
-			}
-			s.L("\t%s %s `json:%s example:%s`", f.Name, typ, tag, quote(f.Example))
-		}
-		s.L("}")
-		s.Blank()
-	}
 	s.Blank()
 	s.L("var _ = time.Time{}")
 
@@ -539,6 +524,37 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 	s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
 	s.L(")")
 	s.Blank()
+
+	// The nested row BOTH reads return. One type, so a caller that walks the
+	// listing and then opens one record does not meet two shapes for one thing.
+	//
+	// Pointer-and-omitempty throughout, RECURSIVELY, when the listing serves
+	// ?fields=: partial projection has to be able to leave a field out, and the
+	// framework refuses to build that endpoint otherwise — at boot, not at
+	// compile time.
+	if m.Read.Enabled {
+		pointered := m.Read.Controls.Fields
+		for _, c := range m.Children {
+			s.Doc(fmt.Sprintf("%sRow is one entry of the %s collection as a read returns it.",
+				c.Name, c.Segment))
+			s.L("type %sRow struct {", c.Name)
+			if pointered {
+				s.L("\tID *string `json:\"id,omitempty\"`")
+			} else {
+				s.L("\tID string `json:\"id\"`")
+			}
+			for _, f := range c.Fields {
+				typ, tag := f.GoType, quote(f.JSONName)
+				if pointered {
+					typ = "*" + f.BaseGoType
+					tag = quote(f.JSONName + ",omitempty")
+				}
+				s.L("\t%s %s `json:%s example:%s`", f.Name, typ, tag, quote(f.Example))
+			}
+			s.L("}")
+			s.Blank()
+		}
+	}
 
 	for _, c := range m.Children {
 		s.Doc(fmt.Sprintf("%sRequest is one entry sent in the %s collection.", c.Name, c.Segment),
