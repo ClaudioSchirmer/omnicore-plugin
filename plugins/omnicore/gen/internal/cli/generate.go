@@ -87,6 +87,28 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 		model.Ordinal[dialect] = n
 	}
 
+	// A projected shape that changed while its version did not is a boot abort,
+	// and INV-3 says a boot trap is a static error. The generator is the only
+	// party that can see BOTH shapes — the one it just resolved and the one it
+	// wrote last time — so it is the only one that can say this before the
+	// service is started.
+	view := fsplan.ViewState{
+		Shape:   fsplan.Hash([]byte(emit.ViewShape(model))),
+		Version: model.Read.Version,
+	}
+	if was, changed := lock.ViewShapeChangedWithoutBump(model.Entity.Pascal, view); changed {
+		return fmt.Errorf(
+			"the read view %q projects a different shape than the last generation, and "+
+				"read.view.version is still %d.\n\n"+
+				"The framework compares the declared version against what is stored and "+
+				"REFUSES TO BOOT rather than serve a projection built to an older shape, so "+
+				"generating this would produce a tree that does not start.\n\n"+
+				"  → bump read.view.version to %d\n\n"+
+				"On a Mongo backing that bump is also what triggers the rebuild; on a "+
+				"relational one it is what tells a reader the shape moved.",
+			model.Read.ViewName, was, was+1)
+	}
+
 	specRel, _ := filepath.Rel(proj.Root, opt.SpecPath)
 	if specRel == "" {
 		specRel = opt.SpecPath
@@ -121,7 +143,7 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 
 	specBytes, _ := os.ReadFile(opt.SpecPath)
 	if err := fsplan.Apply(proj.Root, model.Entity.Pascal, specRel,
-		fsplan.Hash(specBytes), proj.FrameworkVersion, model.Ordinal, decisions, lock); err != nil {
+		fsplan.Hash(specBytes), proj.FrameworkVersion, model.Ordinal, view, decisions, lock); err != nil {
 		return err
 	}
 

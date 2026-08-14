@@ -420,3 +420,30 @@ func indexesOf(m *ir.Model) []TargetIndex {
 	}
 	return out
 }
+
+// ViewShape renders what the read side PROJECTS, and nothing else.
+//
+// It is a fingerprint, not a document: the point is that it changes when the
+// projected shape changes — a field added or removed, a collection renamed, a
+// facet folded in — and does not change when anything else in the spec moves.
+// Comparing it across runs is what lets the generator catch a shape that
+// changed while read.view.version stayed put, which the framework answers by
+// refusing to boot.
+func ViewShape(m *ir.Model) string {
+	if !m.Read.Enabled {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(m.Read.ViewName + "\n")
+	for _, f := range m.AllOwnerFields() {
+		fmt.Fprintf(&b, "%s:%s\n", f.Name, f.GoType)
+	}
+	for _, c := range m.Children {
+		fmt.Fprintf(&b, "%s[\n", c.GoPlural)
+		for _, f := range c.Fields {
+			fmt.Fprintf(&b, "  %s:%s\n", f.Name, f.GoType)
+		}
+		b.WriteString("]\n")
+	}
+	return b.String()
+}

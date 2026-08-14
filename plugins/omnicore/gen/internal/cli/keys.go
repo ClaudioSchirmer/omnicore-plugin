@@ -41,7 +41,9 @@ func explainKeys() string {
 	b.WriteString("the loader accepts. Read it once before writing a spec: most of what looks\n")
 	b.WriteString("like \"the generator cannot express this\" is a key whose name was not\n")
 	b.WriteString("guessable.\n\n")
-	b.WriteString("A key not listed here does not exist, and writing it is refused by name.\n\n")
+	b.WriteString("A key not listed here does not exist, and writing it is refused by name.\n")
+	b.WriteString("A key marked REFUSED exists in the language and this build will not act on\n")
+	b.WriteString("it — writing it is blocked, with the reason, before any code is written.\n\n")
 
 	width := 0
 	for _, f := range fields {
@@ -53,8 +55,21 @@ func explainKeys() string {
 		width = 44
 	}
 
+	refused := spec.RefusedKeys()
 	for _, f := range fields {
 		line := fmt.Sprintf("  %-*s  %s", width, f.Path, f.Type)
+		if why, no := refused[f.Path]; no {
+			// Marked, not hidden. Hiding it would make a spec written for a later
+			// build look like it contains a typo; listing it unmarked sends an
+			// author to write it, run, and get blocked — which is a round trip
+			// this line costs nothing to save.
+			line += "   REFUSED by this build"
+			b.WriteString(line + "\n")
+			for _, l := range wrapAt(why+" (see `explain coverage`)", 72) {
+				fmt.Fprintf(&b, "  %-*s    %s\n", width, "", l)
+			}
+			continue
+		}
 		if v, ok := setFor(f.Path); ok {
 			line += "   " + v.Set.String()
 		}
@@ -71,7 +86,6 @@ func explainKeys() string {
 	b.WriteString("`explain vocabulary` adds one line on what each choice decides.\n")
 	return b.String()
 }
-
 
 // wrapAt breaks a line so the reference stays readable in a terminal. A key
 // list that scrolls sideways is a key list nobody reads to the end.

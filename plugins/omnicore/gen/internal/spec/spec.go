@@ -10,6 +10,11 @@ package spec
 
 // Spec is one entity, the unit the generator consumes.
 type Spec struct {
+	// SpecVersion is the version of THIS LANGUAGE, not of your file. It is 1, it
+	// stays 1, and editing your spec never changes it — a different value is
+	// refused, because it would mean the file speaks a dialect this build does
+	// not. Do not confuse it with read.view.version, which is yours and which you
+	// DO bump.
 	SpecVersion int    `yaml:"specVersion"`
 	Entity      string `yaml:"entity"`
 	// Plural is REQUIRED. It reaches the route path, the feature name and the
@@ -49,11 +54,11 @@ type Storage struct {
 }
 
 type Base struct {
-	Table         string `yaml:"table"`
-	Description   string `yaml:"description"`
-	Reuse         bool   `yaml:"reuse"`
-	NaturalKey    string `yaml:"naturalKey"`
-	Link          string `yaml:"link"`          // shared-pk | separate-fk
+	Table       string `yaml:"table"`
+	Description string `yaml:"description"`
+	Reuse       bool   `yaml:"reuse"`
+	NaturalKey  string `yaml:"naturalKey"`
+	Link        string `yaml:"link"` // shared-pk | separate-fk
 	// LinkColumn is the role's foreign key to the identity, REQUIRED for a
 	// separate-fk link. A shared-pk link has none to declare: the role's own
 	// primary key IS the identity's, which is the framework's contract rather
@@ -61,7 +66,7 @@ type Base struct {
 	LinkColumn string `yaml:"linkColumn"`
 	// SchemaFunc names the Go function that declares the base schema. Declared
 	// because the generator has no way to singularise a table name.
-	SchemaFunc string `yaml:"schemaFunc"`
+	SchemaFunc    string `yaml:"schemaFunc"`
 	RowUniqueness string `yaml:"rowUniqueness"` // unique-fk | active-only
 	OrphanPolicy  string `yaml:"orphanPolicy"`  // keep | delete-when-unreferenced
 }
@@ -151,7 +156,7 @@ type Child struct {
 	// ParentColumn is REQUIRED: the foreign key back to the owner. It is a
 	// column name, so deriving it would be inventing a name that outlives the
 	// decision — renaming it later is a migration.
-	ParentColumn string `yaml:"parentColumn"`
+	ParentColumn          string   `yaml:"parentColumn"`
 	Table                 string   `yaml:"table"`
 	Description           string   `yaml:"description"`
 	OwnedBy               string   `yaml:"ownedBy"`      // root | base | role
@@ -295,11 +300,17 @@ type Read struct {
 }
 
 type View struct {
-	Name            string `yaml:"name"`
-	Version         int    `yaml:"version"`
-	MaxLimit        int    `yaml:"maxLimit"`
-	DeleteOnArchive bool   `yaml:"deleteOnArchive"`
-	TTLSeconds      int    `yaml:"ttlSeconds"`
+	Name string `yaml:"name"`
+	// Version is YOURS, and it is the opposite of specVersion: bump it whenever
+	// the projected SHAPE changes — a field added or removed, a collection
+	// renamed, a facet folded in. The framework compares it against what is
+	// stored and refuses to boot rather than serve a projection built to an
+	// older shape, so forgetting is a failed start; and on a Mongo backing,
+	// bumping it is what triggers the rebuild.
+	Version         int  `yaml:"version"`
+	MaxLimit        int  `yaml:"maxLimit"`
+	DeleteOnArchive bool `yaml:"deleteOnArchive"`
+	TTLSeconds      int  `yaml:"ttlSeconds"`
 }
 
 type Index struct {

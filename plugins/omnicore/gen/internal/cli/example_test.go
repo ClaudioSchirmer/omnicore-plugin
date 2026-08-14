@@ -66,6 +66,9 @@ func TestExamplesTogetherCoverTheLanguage(t *testing.T) {
 		if _, ok := notShownOnPurpose[k.Path]; ok {
 			continue
 		}
+		if _, refused := spec.RefusedKeys()[k.Path]; refused {
+			continue // an example must not teach a key that `check` blocks
+		}
 		if !shown(k.Path) {
 			missing = append(missing, k.Path)
 		}
@@ -78,23 +81,13 @@ func TestExamplesTogetherCoverTheLanguage(t *testing.T) {
 	}
 }
 
-// notShownOnPurpose lists keys the examples deliberately do not demonstrate,
-// each with the reason. Two kinds only:
+// notShownOnPurpose lists keys the examples deliberately do not demonstrate.
 //
-//   - a key this build REFUSES. Showing it in a file whose header promises it
-//     validates would be a contradiction, and copying it costs the reader a
-//     blocked run. `explain coverage` is where those live.
-//   - a key that needs a THIRD posture the pair cannot hold at once.
+// Refused keys come from spec.RefusedKeys(), the same list `explain keys` marks
+// from — one source, so a key that stops being refused stops being exempt here
+// on the same day. What is written out is only what needs a reason beyond
+// "refused".
 var notShownOnPurpose = map[string]string{
-	"valueObjects[].descriptionKeys":       "refused by this build",
-	"rules.list[].actionName":              "refused by this build",
-	"rules.manual[].actionName":            "refused by this build",
-	"children[].rules.list[].actionName":   "refused by this build",
-	"children[].rules.manual[].actionName": "refused by this build",
-	"read.byParams.sort":                   "refused by this build",
-	"read.indexes[].partial":               "refused by this build",
-	"read.identityView": "refused by this build (the shared identity's own view " +
-		"is the one capability still unimplemented)",
 	"authz.tenantField": "needs dataAccess: tenant, and both examples show " +
 		"anyone-with-permission; a third example for one key is not worth its " +
 		"maintenance — `explain keys` lists it and `explain vocabulary` says what " +
@@ -110,18 +103,13 @@ var notShownOnPurpose = map[string]string{
 // The matrix generates, builds, vets and tests every case, so the example is
 // one, and this asserts they are the same bytes.
 func TestExamplesAreGoldenMatrixCases(t *testing.T) {
-	for _, pair := range []struct{ embedded, matrix string }{
-		{exampleSharedBaseSpec, "../../testdata/specs/matrix/18-exemplo-sharedbase.yaml"},
-	} {
-		onDisk, err := os.ReadFile(pair.matrix)
-		if err != nil {
-			t.Fatalf("the matrix case for a printed example is missing: %v", err)
-		}
-		if string(onDisk) != pair.embedded {
-			t.Errorf("%s has drifted from the example `explain example` prints — the "+
-				"gate is then proving something nobody reads. Copy one over the other.",
-				pair.matrix)
-		}
+	onDisk, err := os.ReadFile("../../testdata/specs/matrix/18-exemplo-sharedbase.yaml")
+	if err != nil {
+		t.Fatalf("the matrix case for a printed example is missing: %v", err)
+	}
+	if string(onDisk) != exampleSharedBaseSpec {
+		t.Error("the matrix case has drifted from the example `explain example` prints — " +
+			"the gate is then proving something nobody reads. Copy one over the other.")
 	}
 }
 

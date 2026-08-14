@@ -49,7 +49,7 @@ func TestRefusesHandEditedFile(t *testing.T) {
 	if d[0].Action != Create {
 		t.Fatalf("first run should create, got %s", d[0].Action)
 	}
-	if err := Apply(root, "Student", "s.yaml", "h", "v0.47.2", nil, d, lock); err != nil {
+	if err := Apply(root, "Student", "s.yaml", "h", "v0.47.2", nil, ViewState{}, d, lock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -62,7 +62,7 @@ func TestRefusesHandEditedFile(t *testing.T) {
 	if d2[0].Action != RefusedEdited {
 		t.Fatalf("a hand-edited file must be refused, got %s", d2[0].Action)
 	}
-	if err := Apply(root, "Student", "s.yaml", "h", "v0.47.2", nil, d2, lock); err != nil {
+	if err := Apply(root, "Student", "s.yaml", "h", "v0.47.2", nil, ViewState{}, d2, lock); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(root, "internal/domain/student.go"))
@@ -76,7 +76,7 @@ func TestRefusesHandEditedFile(t *testing.T) {
 	if d3[0].Action != RefusedEdited {
 		t.Fatalf("a refusal must persist across runs, got %s", d3[0].Action)
 	}
-	_ = Apply(root, "Student", "s.yaml", "h", "v0.47.2", nil, d3, lock)
+	_ = Apply(root, "Student", "s.yaml", "h", "v0.47.2", nil, ViewState{}, d3, lock)
 	got, _ = os.ReadFile(filepath.Join(root, "internal/domain/student.go"))
 	if string(got) != "package domain // HAND EDITED\n" {
 		t.Errorf("the hand edit was clobbered on the third run: %q", got)
@@ -91,7 +91,7 @@ func TestForceOverwritesOnlyNamedPath(t *testing.T) {
 		ownedFile("b.go", "package b // v1\n"),
 	}
 	d, _ := Plan(root, "E", files, lock, nil)
-	_ = Apply(root, "E", "s.yaml", "h", "v1", nil, d, lock)
+	_ = Apply(root, "E", "s.yaml", "h", "v1", nil, ViewState{}, d, lock)
 	write(t, root, "a.go", "package a // edited\n")
 	write(t, root, "b.go", "package b // edited\n")
 
@@ -122,7 +122,7 @@ func TestHookFileIsWrittenOnceAndKept(t *testing.T) {
 	if d[0].Action != Create {
 		t.Fatalf("a missing hook file should be created, got %s", d[0].Action)
 	}
-	_ = Apply(root, "Student", "s.yaml", "h", "v1", nil, d, lock)
+	_ = Apply(root, "Student", "s.yaml", "h", "v1", nil, ViewState{}, d, lock)
 
 	write(t, root, "internal/domain/student_rules_manual.go", "package domain\n// real rules\n")
 	d2, _ := Plan(root, "Student", []File{hook}, lock, nil)
@@ -132,7 +132,7 @@ func TestHookFileIsWrittenOnceAndKept(t *testing.T) {
 	if !d2[0].Expected() {
 		t.Error("keeping a hook file is expected, not a failure to report")
 	}
-	_ = Apply(root, "Student", "s.yaml", "h", "v1", nil, d2, lock)
+	_ = Apply(root, "Student", "s.yaml", "h", "v1", nil, ViewState{}, d2, lock)
 	got, _ := os.ReadFile(filepath.Join(root, "internal/domain/student_rules_manual.go"))
 	if string(got) != "package domain\n// real rules\n" {
 		t.Errorf("the hook file was overwritten: %q", got)
@@ -149,7 +149,7 @@ func TestRegenIsIdempotent(t *testing.T) {
 	files := []File{ownedFile("x.go", "package x\n")}
 
 	d, _ := Plan(root, "E", files, lock, nil)
-	_ = Apply(root, "E", "s.yaml", "h", "v1", nil, d, lock)
+	_ = Apply(root, "E", "s.yaml", "h", "v1", nil, ViewState{}, d, lock)
 
 	d2, _ := Plan(root, "E", files, lock, nil)
 	if d2[0].Action != Unchanged {
@@ -164,7 +164,7 @@ func TestCRLFDoesNotLookLikeAnEdit(t *testing.T) {
 	lock := &Lock{Version: 1, Entities: map[string]LockEntity{}}
 	files := []File{ownedFile("x.go", "package x\nfunc A() {}\n")}
 	d, _ := Plan(root, "E", files, lock, nil)
-	_ = Apply(root, "E", "s.yaml", "h", "v1", nil, d, lock)
+	_ = Apply(root, "E", "s.yaml", "h", "v1", nil, ViewState{}, d, lock)
 
 	// The same file with Windows line endings: different bytes, same content.
 	sealed := ownedFile("x.go", "package x\nfunc A() {}\n")
@@ -180,7 +180,7 @@ func TestAdoptPreservesFixAcrossRegen(t *testing.T) {
 	lock := &Lock{Version: 1, Entities: map[string]LockEntity{}}
 	files := []File{ownedFile("x.go", "package x\n")}
 	d, _ := Plan(root, "E", files, lock, nil)
-	_ = Apply(root, "E", "s.yaml", "h", "v0.47.2", nil, d, lock)
+	_ = Apply(root, "E", "s.yaml", "h", "v0.47.2", nil, ViewState{}, d, lock)
 
 	write(t, root, "x.go", "package x\n// fixed for a newer framework\n")
 	if err := Adopt(root, "E", "x.go", "v0.49.0", "the framework moved and one call had to change", lock); err != nil {

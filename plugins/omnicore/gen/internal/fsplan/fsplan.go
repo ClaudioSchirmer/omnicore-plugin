@@ -95,6 +95,15 @@ type LockEntity struct {
 	// the previous run's own files push the counter along — and the project
 	// would accumulate one duplicate migration per run.
 	Ordinals map[string]int `json:"ordinals,omitempty"`
+	// ViewShape is a hash of what the read side PROJECTS, and ViewVersion the
+	// number the spec declared alongside it. Kept together because the pair is
+	// the only way to catch the mistake they exist for: a shape that changed
+	// while the version did not. The framework answers that by refusing to boot,
+	// so it is a failed start rather than a wrong answer — but it is a failed
+	// start found minutes later, by whoever runs the service, instead of by the
+	// tool that just wrote the change.
+	ViewShape   string `json:"viewShape,omitempty"`
+	ViewVersion int    `json:"viewVersion,omitempty"`
 }
 
 type LockFile struct {
@@ -232,7 +241,7 @@ func Plan(root string, entity string, files []File, lock *Lock, force map[string
 // Apply writes what the plan allows and records the result. The lock always
 // stores the hash of what is actually ON DISK — recording the hash of content
 // that was refused would make the next run believe the file matched.
-func Apply(root, entity, specPath, specHash, framework string, ordinals map[string]int, decisions []Decision, lock *Lock) error {
+func Apply(root, entity, specPath, specHash, framework string, ordinals map[string]int, view ViewState, decisions []Decision, lock *Lock) error {
 	entry, ok := lock.Entities[entity]
 	if !ok {
 		entry = LockEntity{Files: map[string]LockFile{}}
@@ -241,6 +250,7 @@ func Apply(root, entity, specPath, specHash, framework string, ordinals map[stri
 		entry.Files = map[string]LockFile{}
 	}
 	entry.Spec, entry.SpecHash, entry.Framework = specPath, specHash, framework
+	entry.ViewShape, entry.ViewVersion = view.Shape, view.Version
 	if ordinals != nil {
 		entry.Ordinals = ordinals
 	}
@@ -346,4 +356,30 @@ func adoptionReason(rec LockFile) string {
 		out += " — " + rec.Why
 	}
 	return out
+}
+
+// ViewState is what the read side projected on this run, and the version the
+// spec claimed for it.
+type ViewState struct {
+	Shape   string
+	Version int
+}
+
+// ViewShapeChangedWithoutBump reports the one mistake the pair exists to catch.
+//
+// It answers false on a first generation (there is nothing to compare) and
+// false when the version moved, whatever else changed — bumping is the author
+// declaring the new shape, which is all that is being asked of them.
+func (l *Lock) ViewShapeChangedWithoutBump(entity string, now ViewState) (was int, changed bool) {
+	prev, ok := l.Entities[entity]
+	if !ok || prev.ViewShape == "" || now.Shape == "" {
+		return 0, false
+	}
+	if prev.ViewShape == now.Shape {
+		return 0, false
+	}
+	if prev.ViewVersion != now.Version {
+		return 0, false
+	}
+	return prev.ViewVersion, true
 }

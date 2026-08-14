@@ -193,3 +193,30 @@ func Vocabularies() []Vocabulary {
 			"the relational engines; read from the project, never declared in the spec."},
 	}
 }
+
+// RefusedKeys are the keys this build accepts in the LANGUAGE and refuses in
+// practice, each with the one-line reason.
+//
+// They exist because the language is frozen and the emitters are not: a key
+// stays in the definition so a spec written for a later build still parses,
+// while `check` says plainly that this build will not act on it.
+//
+// The list is here rather than inside coverage.go's conditionals because two
+// consumers need it: `explain keys`, which must mark them — a reference that
+// lists a refused key like any other sends an author to write it, run, and get
+// blocked — and the test asserting the examples cover the language, which must
+// not demand that a refused key be demonstrated.
+func RefusedKeys() map[string]string {
+	return map[string]string{
+		"read.byParams.sort": "declared sort allowlists are not generated; controls.orderBy " +
+			"decides whether ?orderBy= is served at all",
+		"read.indexes[].partial": "the framework takes a document filter there, and this " +
+			"language has no way to write one",
+		"read.identityView":                    "the shared identity's own view is not generated yet",
+		"valueObjects[].descriptionKeys":       "per-value translation keys are not generated",
+		"rules.list[].actionName":              "gate the rule by verb scope instead",
+		"rules.manual[].actionName":            "describe the condition in the description instead",
+		"children[].rules.list[].actionName":   "gate the rule by verb scope instead",
+		"children[].rules.manual[].actionName": "describe the condition in the description instead",
+	}
+}
