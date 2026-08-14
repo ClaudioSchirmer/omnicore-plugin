@@ -60,19 +60,30 @@ the dev, not the number.
 
 ## Step 1 — learn the language from the binary, not from memory
 
-The spec language is documented BY the generator, generated from the same vocabularies
-the validator enforces, so it cannot drift from what the build actually accepts. Read it
-before writing a line of YAML:
+**You do not know this language.** It is not YAML-flavoured Go, it is not the framework's
+API, and it is not any spec format you have seen: it is narrower than all three ON PURPOSE,
+because every key it accepts is a key some emitter reads. Writing a first draft from
+what seems reasonable produces a file the validator rejects — reliably, because the shape
+is the part that is easiest to invent and the part that is never guessable.
 
+So, before a single line of YAML, in this order:
+
+    omnicore-gen explain example      # ← FIRST. A whole spec that validates.
     omnicore-gen explain vocabulary   # every closed key and its allowed values
     omnicore-gen explain rules        # what the rule DSL can express
     omnicore-gen explain names        # the names YOU declare — it invents none
     omnicore-gen explain coverage     # what THIS build generates and what it refuses
     omnicore-gen explain ownership    # which files it owns, and the two escapes
 
-Do not paraphrase these into the spec from what you remember of the framework. The
-generator's vocabulary is narrower than the framework's API on purpose, and `explain
-coverage` is the only honest list of what this build will actually emit.
+`explain example` first, and read it whole. The vocabularies tell you what a key may
+HOLD; only the example tells you what a spec LOOKS LIKE — that rules nest under `list:`,
+what a value object's members look like, where a collection's name goes, how a facet
+attaches. That is where a guessed draft goes wrong, and the example is test-gated to
+validate against this exact build, so it cannot be teaching you something stale.
+
+Do not paraphrase any of it from what you remember of the framework. The generator's
+vocabulary is deliberately narrower than the framework's API, and `explain coverage` is
+the only honest list of what this build will actually emit.
 
 **It invents no names.** There is no pluraliser: `plural`, each `children[].plural` (which
 IS the collection's `CollectionName()` — a persisted document key), each
@@ -85,11 +96,21 @@ under a key nothing reads back.
 
     omnicore-gen init <Entity> -project <service-dir>
 
-`init` pre-fills what the project already states — the dialects, whether there is a Mongo
-to project into, which value objects already exist — and comments say WHY each choice
-matters. Fill the rest from the model the dev approved at scaffold-entity's gate. Do not
-re-decide the model here; if writing the YAML exposes a genuine modelling question, take
-it back to the dev.
+**Start from `init`, never from a blank file.** It pre-fills what the project already
+states — the dialects, whether there is a Mongo to project into, which value objects
+already exist — and its comments say WHY each choice matters. A spec typed from scratch
+re-derives all of that from memory, which is where the wrong dialect and the impossible
+read backing come from. FILL the template; do not replace it.
+
+Fill it from the model the dev approved at scaffold-entity's gate. Do not re-decide the
+model here; if writing the YAML exposes a genuine modelling question, take it back to the
+dev.
+
+**Check as you go, not at the end.** Write the storage block and the fields, run `check`,
+read what it says; then the rules, `check` again; then the read side. A 300-line spec
+checked once returns a wall of blockers where each one might be a symptom of the one
+above it. Checked in four passes, each blocker is about the thing you just wrote — and
+`check` is instant and free.
 
 Three things to get right, because they are the ones that cost a migration later:
 
@@ -225,6 +246,9 @@ refusal reach them as silence.
 
 ## What this skill never does
 
+- **Never writes a spec before reading `explain example`.** A first draft written from
+  what seems reasonable is a guess, and the validator will say so — after you spent the
+  tokens.
 - Never hand-edits a generated file. Never.
 - Never re-decides the model. That was approved before the gateway.
 - Never invents a name the spec must declare.
