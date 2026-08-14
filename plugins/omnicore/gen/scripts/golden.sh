@@ -167,13 +167,40 @@ fi
 # at boot and is invisible to the compiler.
 echo "── boot"
 BOOT_DIR="$WORK"
-rm -f "$BOOT_DIR/golden.db"
+# ABSOLUTE, both here and in the DSN below. A relative "file:./golden.db"
+# resolves against whatever the process's working directory turns out to be, and
+# when that is not the directory this line cleans, the boot lane runs against a
+# database that accumulates across runs — which is how a write assertion starts
+# colliding with a row some earlier run left behind.
+BOOT_DB="$BOOT_DIR/golden.db"
+rm -f "$BOOT_DB" "$BOOT_DB-wal" "$BOOT_DB-shm"
+
+# A previous run that did not shut down cleanly leaves its service holding the
+# port. The new one then fails to bind, and every assertion below is answered by
+# the OLD binary — a boot lane that proves yesterday's code still works. It is
+# invisible: the service answers, readiness answers, the listing answers.
+#
+# Only this gate's own binary is ever killed, by path, so nothing else on the
+# machine is touched.
+STALE=$(lsof -nP -iTCP:18099 -sTCP:LISTEN -t 2>/dev/null || true)
+for pid in $STALE; do
+  if [[ "$(ps -o comm= -p "$pid" 2>/dev/null)" == */gg-host ]]; then
+    kill "$pid" 2>/dev/null && say_killed=1
+  fi
+done
+if [[ -n "${say_killed:-}" ]]; then
+  echo "  (a previous run's service was still holding :18099 — killed before booting)"
+  sleep 1
+fi
+if lsof -nP -iTCP:18099 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  bad "port 18099 is held by something this gate did not start — the boot lane would test it instead"
+fi
 (cd "$BOOT_DIR" && GOWORK=off go build -tags sqlite -o /tmp/gg-host ./bootstrap) >/tmp/gg-bootbuild.log 2>&1
 if [[ ! -x /tmp/gg-host ]]; then
   bad "the service did not build"; sed -n '1,20p' /tmp/gg-bootbuild.log
 else
   (cd "$BOOT_DIR" && APP_PROFILE=dev HTTP_ADDR=:18099 \
-     MIGRATIONS_DIR=./migrations/sqlite DATABASE_URL="file:./golden.db" \
+     MIGRATIONS_DIR="$BOOT_DIR/migrations/sqlite" DATABASE_URL="file:$BOOT_DB" \
      /tmp/gg-host >/tmp/gg-boot.log 2>&1) &
   BOOT_PID=$!
   READY=0
@@ -254,8 +281,17 @@ PYSHAPE
   else
     bad "the service never came up"; sed -n '1,30p' /tmp/gg-boot.log
   fi
+  # Kill the BINARY, not the subshell that launched it. `( … ) &` puts the
+  # subshell's pid in $!, and killing that leaves the service running — which is
+  # how a run leaks its host, and how the NEXT run ends up asserting against the
+  # previous build while every check answers happily.
   kill $BOOT_PID 2>/dev/null
   wait $BOOT_PID 2>/dev/null
+  pkill -f '^/tmp/gg-host$' 2>/dev/null
+  for _ in $(seq 1 20); do
+    lsof -nP -iTCP:18099 -sTCP:LISTEN -t >/dev/null 2>&1 || break
+    sleep 0.2
+  done
 fi
 
 # ── Lane 5: the DDL applies to real engines ──────────────────────────────────
