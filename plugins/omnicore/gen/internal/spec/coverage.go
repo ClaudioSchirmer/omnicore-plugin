@@ -22,7 +22,7 @@ const (
 	CapSharedBase     Capability = "shared-base role"
 	CapValueObjects   Capability = "value objects"
 	CapChildren       Capability = "child collections"
-	CapSiblings       Capability = "sibling facets"
+	CapSiblings       Capability = "sibling facets (with their clear path on both surfaces)"
 	CapRulesDSL       Capability = "the declarative rule set"
 	CapManualRules    Capability = "hand-written rules (hook file)"
 	CapService        Capability = "domain service"

@@ -528,6 +528,52 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.Blank()
 	}
 
+	// The facet-clear commands, which exist only when GraphQL does. They are
+	// small and their whole behaviour is "assign nil to exactly these fields",
+	// which is precisely the kind of thing a later edit breaks silently.
+	if m.Surfaces.GraphQL {
+		for _, sib := range m.SiblingsOn("") {
+			s.Doc(
+				fmt.Sprintf("Clear%sCommand empties the facet and touches nothing else.", sib.Name),
+				"",
+				"It is dispatched through the UPDATE handler on purpose: the framework's "+
+					"sibling write leaves an all-nil facet untouched on a PARTIAL update and "+
+					"deletes its row on a full one, so a partial-shaped clear would answer "+
+					"success and change nothing.")
+			s.L("func TestClear%sEmptiesTheFacet(t *testing.T) {", sib.Name)
+			s.L("\tctx := &configuration.AppContext{}")
+			s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
+			for _, f := range sib.Fields {
+				s.L("\te.%s = %s", f.Name, entitySample(f))
+			}
+			s.L("\tif err := (&Clear%sCommand{}).ApplyTo(ctx, e); err != nil {", sib.Name)
+			s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
+			s.L("\t}")
+			for _, f := range sib.Fields {
+				s.L("\tif e.%s != nil {", f.Name)
+				s.L("\t\tt.Errorf(\"%s survived the clear\")", f.Name)
+				s.L("\t}")
+			}
+			s.L("}")
+			s.Blank()
+
+			s.Doc(fmt.Sprintf("Clear%sCommand answers with the owner it emptied.", sib.Name))
+			s.L("func TestClear%sAnswersTheOwner(t *testing.T) {", sib.Name)
+			s.L("\tctx := &configuration.AppContext{}")
+			s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
+			s.L("\te.SetID(domain.NewID(%s))", quote("019ffd00-0000-7000-8000-000000000000"))
+			s.L("\tout, err := (&Clear%sCommand{}).FromEntity(ctx, e)", sib.Name)
+			s.L("\tif err != nil {")
+			s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+			s.L("\t}")
+			s.L("\tif out.%sID != *e.GetID() {", m.Entity.Pascal)
+			s.L("\t\tt.Error(\"the result does not carry the owner it cleared\")")
+			s.L("\t}")
+			s.L("}")
+			s.Blank()
+		}
+	}
+
 	return goFile("internal/application/commands/"+m.Entity.Snake+"_commands_test.go",
 		fsplan.Owned, "tests for the command mappers", s)
 }

@@ -5,6 +5,23 @@ All notable changes to the omnicore plugin. The format follows
 `version` field of `plugins/omnicore/.claude-plugin/plugin.json` — each release
 is the commit bumping that field on `main`, tagged `v<version>`.
 
+## [Unreleased]
+
+### Fixed
+
+- **`scaffold-entity/conventions/siblings.md` prescribed an idiom that does not work.**
+  For clearing a 1:1 facet on GraphQL it called for a "mini-PATCH mutation" whose
+  `ApplyPartiallyTo` assigns nil. The framework's sibling write reads an all-nil facet as
+  "untouched" on a partial write and as "delete the row" only on a full one, so that
+  mutation answers 200 and changes nothing — worse than not offering it, because the
+  caller believes the facet is revoked. The convention now says FULL update handler, and
+  states the real reason the surface needs a verb at all: an omitted field and an explicit
+  null reach the DTO identically, so "clear this" cannot be told from "leave this alone".
+  Found by following the convention literally and testing the result.
+- **The generator now emits that mutation** — `clear<Facet>Of<Entity>`, its command and
+  its tests — for any root-attached facet when GraphQL is on, so the contract closes on
+  both surfaces without anyone writing it by hand.
+
 ## [0.18.0] — 2026-08-13
 
 ### Added

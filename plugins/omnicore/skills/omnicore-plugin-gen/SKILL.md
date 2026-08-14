@@ -142,6 +142,13 @@ Three things to get right, because they are the ones that cost a migration later
 - **`read.byParams.controls`.** A control is served ONLY if declared, and an undeclared
   one arriving on the wire is answered with a typed 400. That is a contract, not an
   omission.
+- **A 1:1 facet (`siblings`) has one coupling worth knowing before you write it.** It is
+  cleared by the ROOT's full update with its fields null — so `update.shape` cannot be
+  `patch` alone, or a granted facet could never be revoked. And **with GraphQL on, the
+  generator adds a `clear<Facet>Of<Entity>` mutation by itself**: there, an omitted field
+  and an explicit null reach the code identically, so "clear this" cannot be told from
+  "leave this alone" and the intent needs its own verb. You declare the facet; the clear
+  path on both surfaces comes with it.
 - **`children[].editStrategy`.** `atomic-replace` means the root's update swaps the whole
   collection — a caller adding one entry must resend every other one, and two callers
   doing that lose each other's work. `per-child` adds POST/PUT/DELETE on
@@ -229,6 +236,10 @@ Do not re-read every file. Read against the plan the dev approved and against th
    permission).
 5. **The read side** — the view name and `Version`, the declared filters and controls,
    the indexes. A `?search=` needs a declared text index.
+6. **If the entity has a facet and GraphQL**, check that both clear paths are there: the
+   root's PUT with the facet's fields null, and `clear<Facet>Of<Entity>`. The report lists
+   them side by side. A facet a caller can grant and never revoke is the failure this
+   pair exists to prevent.
 
 Anything wrong here is fixed **in the spec**, then regenerated. The only files you author
 are the two `*_manual.go` hooks.

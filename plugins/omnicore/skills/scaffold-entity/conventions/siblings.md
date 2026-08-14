@@ -41,12 +41,28 @@ absent facet means "remove it"). Hence:
 > clear path is the framework's native one: the ROOT's PUT with the facet's fields all
 > null/absent. Surface this §4↔§8 coupling in the spec.
 >
-> **⚠️ And the GraphQL corollary — check it whenever GraphQL: yes.** GraphQL input can't
-> express explicit null (strict rejects it at parse; lenient nil ≡ absent), so the
-> PUT-all-null clear path does NOT exist on that surface. A clearable facet + GraphQL
-> demands the documented idiom — an intent-specific mini-PATCH mutation (a dedicated
-> Cmd whose `ApplyPartiallyTo` assigns nil, via `MutationByID`; `graphql.html` at the
-> pin). Offer it in the spec, or the dev approves a contract one surface can't keep.
+> **⚠️ And the GraphQL corollary — check it whenever GraphQL: yes.** The PUT-all-null
+> clear path does NOT exist on that surface, and both ways round are closed: a LENIENT
+> mutation cannot express it because an omitted field and an explicit null reach the DTO
+> identically (the args map is marshalled to JSON and decoded; both leave the pointer
+> nil), so "clear this" and "leave this alone" are one message; a STRICT one cannot
+> either, its input being NonNull throughout, so null dies at parse. The intent therefore
+> needs its own VERB: a dedicated bodyless mutation via `MutationByID` (`graphql.html` at
+> the pin).
+>
+> **That mutation must dispatch through the FULL update handler, not the partial one** —
+> the difference is the whole feature. The framework's sibling write reads an all-nil
+> facet as "untouched" on a partial write and as "delete the row" on a full one
+> (`applySiblingUpdates`: `if allNilFields { if partial { continue }; …delete… }`), so a
+> PATCH-shaped clear answers 200 and changes nothing, which is worse than not offering it
+> — the caller believes the facet is revoked. Verified by A/B on one spec and one
+> database, the handler the only variable: partial left `Helena` in place, full cleared it
+> and kept the children.
+>
+> **`omnicore-plugin-gen` emits this automatically** for any root-attached facet when
+> GraphQL is on — `clear<Facet>Of<Entity>`, its command, and its tests. On the manual path
+> it is yours to write; either way, surface the coupling in the spec so the dev sees that
+> the contract closes on both surfaces.
 
 ## Elicitation reminder
 

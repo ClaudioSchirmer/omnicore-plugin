@@ -308,6 +308,15 @@ func renderCheck(b *strings.Builder, in Input) {
 			f.Name, scope, f.Unique.Enforce, reuse, f.Unique.Notification)
 	}
 
+	if m.Surfaces.GraphQL {
+		for _, sib := range m.SiblingsOn("") {
+			fmt.Fprintf(b, "| Clearing the %s facet | REST: `PUT` with its fields null · "+
+				"GraphQL: `clear%sOf%s` | On GraphQL an omitted field and an explicit null "+
+				"reach the DTO identically, so \"clear it\" cannot be told from \"leave it\" "+
+				"— the intent needs its own verb. Both surfaces end in the same write. |\n", sib.Name, sib.Name, m.Entity.Pascal)
+		}
+	}
+
 	fmt.Fprintf(b, "| Data access | %s | %s |\n", m.Authz.DataAccess,
 		dataAccessNote(m.Authz.DataAccess))
 

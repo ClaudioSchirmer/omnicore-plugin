@@ -2,6 +2,8 @@ package emit
 
 import (
 	"fmt"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
 )
@@ -125,6 +127,7 @@ func emitGraphQL(m *ir.Model) (*src, bool) {
 		}
 		emitGQLMutation(s, m, op, entity)
 	}
+	emitFacetClearMutations(s, m, entity)
 	s.L("}")
 	return s, true
 }
@@ -170,4 +173,123 @@ func emitGQLMutation(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(op.Permission))
 	}
 	s.Blank()
+}
+
+// emitFacetClearMutations gives GraphQL the one thing REST gets for free.
+//
+// A 1:1 facet is cleared by the ROOT's PUT with its fields null — the
+// framework's native path, and on REST it works. On GraphQL it cannot exist,
+// and not for one reason but two:
+//
+//   - a LENIENT (patch-shaped) mutation cannot say it, because an omitted field
+//     and an explicit null are the same thing by the time the input reaches the
+//     DTO: the args map is marshalled to JSON and decoded, and both leave the
+//     pointer nil. "Clear this" and "leave this alone" become one message.
+//   - a STRICT (full-body) mutation cannot say it either: every field of its
+//     input is NonNull in the SDL, so null is refused at parse.
+//
+// Without a third way, a caller could grant a facet through GraphQL and never
+// revoke it — a contract one surface cannot keep.
+//
+// So the intent gets its own mutation, which is the idiom the conventions
+// prescribe: no body to express null WITH, just a verb that says what it does.
+// It is emitted rather than declared because it is not a modelling choice —
+// it is the GraphQL spelling of a capability the entity already has.
+func emitFacetClearMutations(s *src, m *ir.Model, entity string) {
+	if !m.Surfaces.GraphQL {
+		return
+	}
+	for _, sib := range m.SiblingsOn("") {
+		s.L("\t// The REST clear path — PUT with the facet's fields null — has no")
+		s.L("\t// equivalent here, and both ways round are closed. A lenient mutation")
+		s.L("\t// cannot express it because an OMITTED field and an explicit null arrive")
+		s.L("\t// the same way (the input map is marshalled to JSON and decoded into the")
+		s.L("\t// DTO, and both leave the pointer nil) — so \"clear this\" is")
+		s.L("\t// indistinguishable from \"leave this alone\". A strict one cannot express")
+		s.L("\t// it either: its input is NonNull throughout, so null is rejected at parse.")
+		s.L("\t// An intent has no such ambiguity, which is why it gets its own verb.")
+		s.L("\treg.Register(fwgraphql.MutationByID(")
+		s.L("\t\t%s,", quote("clear"+sib.Name+"Of"+m.Entity.Pascal))
+		// The UPDATE handler, not the partial one, and the difference IS the
+		// feature: the framework's sibling write skips an all-nil facet on a
+		// partial update and deletes its row on a full one.
+		s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.Clear%sCommand, commands.Clear%sResult]{",
+			entity, sib.Name, sib.Name)
+		s.L("\t\t\tRepo: repo,%s", serviceField(m))
+		s.L("\t\t},")
+		s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(updatePermission(m)))
+		s.Blank()
+	}
+}
+
+// emitFacetClearCommands writes the command behind that mutation.
+//
+// It dispatches through the UPDATE handler, and that is the whole feature: the
+// framework's sibling write SKIPS an all-nil facet on a partial update and
+// deletes its row on a full one. A PATCH-shaped clear answers 200 and changes
+// nothing — which is worse than not offering it, because the caller believes
+// the facet is gone.
+func emitFacetClearCommands(m *ir.Model) ([]fsplan.File, error) {
+	if !m.Surfaces.GraphQL {
+		return nil, nil
+	}
+	var out []fsplan.File
+	for _, sib := range m.SiblingsOn("") {
+		s := &src{}
+		s.header(m, fmt.Sprintf("Clearing the %s facet, for the surface that cannot send null.", sib.Name))
+		s.Blank()
+		s.L("package commands")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote(fwImport("application/configuration")))
+		s.L("\t%s", quote(fwImport("application/pipeline")))
+		s.L("\t%s", quote(fwImport("domain")))
+		s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
+		s.L(")")
+		s.Blank()
+
+		s.Doc(
+			fmt.Sprintf("Clear%sCommand removes the %s facet of one %s.",
+				sib.Name, sib.Name, m.Entity.Pascal),
+			"",
+			"It exists for GraphQL, where a full-body mutation cannot carry an explicit "+
+				"null and the root's PUT-with-nulls path is therefore unavailable. On REST "+
+				"the same effect is a PUT with the facet's fields null — this command is "+
+				"the same intent, spelled as a verb instead of as a value.",
+			"",
+			"It carries no body: everything it needs is the id and what it means.")
+		s.L("type Clear%sCommand struct {", sib.Name)
+		s.L("\tpipeline.CommandWithBodyIDBase")
+		s.L("}")
+		s.Blank()
+		s.L("func (cmd *Clear%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {",
+			sib.Name, m.Entity.Pascal)
+		s.L("\t// ApplyTo, not ApplyPartiallyTo: the framework's sibling write leaves an")
+		s.L("\t// all-nil facet UNTOUCHED on a partial update and DELETES its row on a")
+		s.L("\t// full one. Everything this command does not assign keeps the value it")
+		s.L("\t// was loaded with, so \"full\" costs nothing here.")
+		for _, f := range sib.Fields {
+			s.L("\te.%s = nil", f.Name)
+		}
+		s.L("\treturn nil")
+		s.L("}")
+		s.Blank()
+		s.Doc(fmt.Sprintf("Clear%sResult answers with the owner alone: the facet is gone.", sib.Name))
+		s.L("type Clear%sResult struct {", sib.Name)
+		s.L("\t%sID domain.ID", m.Entity.Pascal)
+		s.L("}")
+		s.Blank()
+		s.L("func (cmd *Clear%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Clear%sResult, error) {",
+			sib.Name, m.Entity.Pascal, sib.Name)
+		s.L("\treturn Clear%sResult{%sID: *e.GetID()}, nil", sib.Name, m.Entity.Pascal)
+		s.L("}")
+
+		f, err := goFile("internal/application/commands/clear_"+naming.Snake(sib.Name)+"_command.go",
+			fsplan.Owned, fmt.Sprintf("the %s facet clear command", sib.Name), s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }

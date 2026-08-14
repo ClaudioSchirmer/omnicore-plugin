@@ -149,6 +149,7 @@ func All(m *ir.Model, root string, meta FileMeta) (*Result, error) {
 		emitDomain,
 		emitService,
 		emitApplication,
+		emitFacetClearCommands,
 		emitWeb,
 		emitInfra,
 		emitBootstrap,

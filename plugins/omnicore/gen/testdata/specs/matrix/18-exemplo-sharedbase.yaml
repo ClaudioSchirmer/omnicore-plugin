@@ -17,6 +17,12 @@
 #          childDuplicate · ownerCheck with adminField
 #   read.indexes · search · ttlSeconds · fieldRestrict
 #
+# It also shows something you do NOT declare: because it has a facet AND GraphQL,
+# the generator adds a `clearTitulacaoOfProfessor` mutation. On GraphQL an
+# omitted field and an explicit null reach the code identically, so "clear this"
+# cannot be told from "leave this alone" — the intent needs its own verb, and the
+# REST equivalent stays the root's PUT with the facet's fields null.
+#
 # Copy the STRUCTURE, never the domain.
 specVersion: 1
 entity: Professor
