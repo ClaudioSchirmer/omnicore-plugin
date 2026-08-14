@@ -383,6 +383,50 @@ else
   skipf "sqlite DDL" "sqlite3 not installed"
 fi
 
+# ── the launcher serves the CURRENT version ──────────────────────────────────
+#
+# The plugin ships the generator as SOURCE and caches the compiled binary in the
+# data dir, which survives updates by design. So after an update the previous
+# version's binary is still sitting there while the new source arrives — and a
+# freshness check by mtime is only as trustworthy as whatever wrote the files.
+# Getting this wrong runs the OLD generator against the NEW skills, silently:
+# everything answers, nothing is current. That exact shape (a stale binary
+# answering happily) already cost this gate a day, so it is checked rather than
+# assumed.
+say "the launcher"
+LAUNCHER="$GEN_DIR/../bin/omnicore-gen"
+if [[ -x "$LAUNCHER" ]]; then
+  LDATA=$(mktemp -d)
+  OLDROOT=$(mktemp -d)
+  NEWROOT=$(mktemp -d)
+  cp -R "$GEN_DIR/.." "$OLDROOT/omnicore" 2>/dev/null
+  cp -R "$GEN_DIR/.." "$NEWROOT/omnicore" 2>/dev/null
+  # The worst case an update can produce: fresh source, older timestamps.
+  find "$NEWROOT/omnicore/gen" -name '*.go' -exec touch -t 202001010000 {} + 2>/dev/null
+
+  CLAUDE_PLUGIN_ROOT="$OLDROOT/omnicore" CLAUDE_PLUGIN_DATA="$LDATA" \
+    "$OLDROOT/omnicore/bin/omnicore-gen" explain >/dev/null 2>&1
+  FIRST=$(ls "$LDATA" 2>/dev/null | head -1)
+
+  CLAUDE_PLUGIN_ROOT="$NEWROOT/omnicore" CLAUDE_PLUGIN_DATA="$LDATA" \
+    "$NEWROOT/omnicore/bin/omnicore-gen" explain >/dev/null 2>&1
+  SECOND=$(ls "$LDATA" 2>/dev/null | head -1)
+
+  if [[ -n "$FIRST" && -n "$SECOND" && "$FIRST" != "$SECOND" ]]; then
+    ok "an update rebuilds the generator instead of reusing the previous binary"
+  else
+    bad "the launcher reused a cached binary across versions ($FIRST → $SECOND) — a session would run the previous generator against the new skills"
+  fi
+  if [[ $(ls "$LDATA" 2>/dev/null | wc -l | tr -d ' ') == "1" ]]; then
+    ok "the previous version's binary is cleaned up"
+  else
+    bad "the data dir keeps one binary per update forever"
+  fi
+  rm -rf "$LDATA" "$OLDROOT" "$NEWROOT"
+else
+  skipf "launcher" "bin/omnicore-gen is not where the plugin ships it"
+fi
+
 # ── the generated tests actually cover the generated code ────────────────────
 #
 # D4 asks for 80% per generated FILE. How the number is measured is part of the

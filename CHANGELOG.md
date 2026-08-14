@@ -18,6 +18,13 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   states the real reason the surface needs a verb at all: an omitted field and an explicit
   null reach the DTO identically, so "clear this" cannot be told from "leave this alone".
   Found by following the convention literally and testing the result.
+- **The launcher could serve the PREVIOUS version after a plugin update.** The compiled
+  binary is cached in `${CLAUDE_PLUGIN_DATA}`, which survives updates by design, and the
+  freshness check was by mtime — only as trustworthy as whatever wrote the files. A
+  session could therefore run the old generator against the new skills, silently:
+  everything answers, nothing is current. The binary is now keyed by the plugin root,
+  which changes on every update, and older ones are removed. Gated: the golden simulates
+  an update with backdated sources and fails if the cached binary is reused.
 - **The generator now emits that mutation** — `clear<Facet>Of<Entity>`, its command and
   its tests — for any root-attached facet when GraphQL is on, so the contract closes on
   both surfaces without anyone writing it by hand.

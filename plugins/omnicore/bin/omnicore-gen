@@ -29,10 +29,24 @@ fi
 # back to a temp dir when the variable is not set (running from a checkout).
 CACHE="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/omnicore-plugin-gen}"
 mkdir -p "$CACHE"
-BIN="$CACHE/omnicore-gen"
 
-# Rebuild only when the source is newer than the binary: the common case is many
-# calls in one session, and rebuilding each time would make `check` feel broken.
+# The binary is keyed by the plugin root, and that is what makes an UPDATE safe.
+# The data dir survives updates by design, so yesterday's binary is still sitting
+# there when today's source arrives — and the freshness check below is by mtime,
+# which is only as trustworthy as whatever wrote the files. A cache dir that
+# resolves the same before and after an update is how a session ends up running
+# the OLD generator against the NEW skills, silently, which is the worst kind of
+# wrong: everything answers, nothing is current.
+#
+# ${CLAUDE_PLUGIN_ROOT} changes on every update, so keying on it guarantees a
+# fresh build per installed version while repeat calls within one version stay
+# instant.
+KEY=$(printf '%s' "$ROOT" | cksum | cut -d' ' -f1)
+BIN="$CACHE/omnicore-gen-$KEY"
+
+# Within one version, rebuild only when the source is newer: the common case is
+# many calls in one session, and rebuilding each time would make `check` feel
+# broken.
 NEWEST=$(find "$SRC" -name '*.go' -newer "$BIN" -print -quit 2>/dev/null || true)
 if [[ ! -x "$BIN" || -n "$NEWEST" ]]; then
   # GOWORK=off: a go.work in the surrounding tree would drag the service's own
@@ -41,6 +55,9 @@ if [[ ! -x "$BIN" || -n "$NEWEST" ]]; then
     echo "omnicore-gen: the generator failed to build from $SRC" >&2
     exit 127
   fi
+  # Previous versions' binaries, now unreachable: the data dir is ours and it
+  # would otherwise grow one binary per update, forever.
+  find "$CACHE" -maxdepth 1 -name 'omnicore-gen-*' ! -name "$(basename "$BIN")" -delete 2>/dev/null || true
 fi
 
 exec "$BIN" "$@"
