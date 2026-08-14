@@ -46,6 +46,23 @@ delete: {root: soft}
 rules:
   list:
     - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    # Regras sobre campos do SIBLING. O facet e um recorte fisico da mesma
+    # entidade, entao seus campos entram no escopo das regras da raiz como
+    # qualquer outro — recusa-los empurrava invariantes que a DSL escreve para
+    # o arquivo escrito a mao.
+    - id: email-do-coordenador-exige-nome
+      kind: requiredIf
+      scope: [insertOrUpdate]
+      fields: [CoordenadorNome]
+      other: CoordenadorEmail
+      notification: RequiredFieldNotification
+    - id: nome-do-coordenador-tem-tamanho
+      kind: length
+      scope: [insertOrUpdate]
+      fields: [CoordenadorNome]
+      min: 3
+      skipWhen: "null"
+      notification: NomeCoordenadorInvalidoNotification
     - id: capacidade-valida
       kind: range
       scope: [insertOrUpdate]
@@ -55,6 +72,10 @@ rules:
       notification: CapacidadeInvalidaNotification
       echoValue: true
 notifications:
+  - name: NomeCoordenadorInvalidoNotification
+    semantic: validation
+    description: Nome do coordenador fora do tamanho.
+    text: {ptbr: "O nome do coordenador e curto demais.", eng: "The coordinator name is too short.", esp: "El nombre del coordinador es demasiado corto.", fra: "Le nom du coordinateur est trop court.", deu: "Der Name des Koordinators ist zu kurz.", ita: "Il nome del coordinatore e troppo corto.", nld: "De naam van de coordinator is te kort."}
   - name: CapacidadeInvalidaNotification
     semantic: validation
     tvars: [min, max]
