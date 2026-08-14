@@ -14,6 +14,7 @@ Invoked as `/omnicore:<skill>` once installed:
 | `/omnicore:scaffold-service` | Create a brand-new omnicore service from an empty directory — `go.mod` pinned to a published release, the bootable bootstrap shell, the `microservice.*.yaml` profiles, migrations skeleton, and EITHER a local docker bench (DB + Mongo + broker + Debezium CDC relay) OR a zero-infra SQLite MVP (single pure-Go binary, one `app.db` or `:memory:`, no Docker) — then prove the shell boots. |
 | `/omnicore:scaffold-system` | Turn a whole-system/MVP description — several entities, shared identities and read models in one prose drop — into an approved domain map, then scaffold it entity by entity by delegating to `scaffold-entity` (and cross-entity read models to `scaffold-view`). Decomposition only: it never generates code itself. |
 | `/omnicore:scaffold-entity` | Scaffold a complete CRUD entity across every layer (domain → application → web → infra → migrations → bootstrap) of an existing omnicore service. |
+| `/omnicore:omnicore-plugin-gen` | Drive **omnicore-plugin-gen**, the spec-driven code generator, to write a whole entity from one YAML spec — then review it, implement the rules the spec language cannot express, and prove it with build + tests + a real boot. Reached from `scaffold-entity`'s generation gateway, where the dev chooses between generating with it (seconds, a fraction of the tokens) or file by file by the agent. |
 | `/omnicore:evolve-entity` | Change an EXISTING entity — add/remove/rename fields, uniqueness, children, modes — with schema evolution done right: migration, TableSchema, DTOs, translations, view `Version` bump and OpenAPI move together, via an approved impact-map spec. |
 | `/omnicore:remove-entity` | Surgically remove an entity from every layer via an inventory-first removal plan you approve before anything is deleted; shared bases, composed views and integration-event consumers are detected and block until you decide. |
 | `/omnicore:scaffold-view` | Create a NEW read model beyond an entity's own view — ComposedView across entities, SharedBaseView identity, Upstream/Embed composition — projected to Mongo and exposed on REST/GraphQL/gRPC, via an approved spec. |
@@ -100,6 +101,12 @@ Clients pin to a released **version**, so a code change reaches them only when y
    marketplaces; clients opt in per marketplace to get background checks + a
    "run `/reload-plugins`" notification instead.
 
+> **Everything the plugin needs lives UNDER `plugins/omnicore/`** — that is Claude Code's
+> rule, not a preference: components must be at the plugin root, and a path that traverses
+> outside it (`../`) stops resolving once the plugin is cached. That is why the generator
+> sits at `plugins/omnicore/gen/` rather than at the repo root, and why its launcher is in
+> `bin/`, which is added to PATH for the session.
+
 > **Manifest gotchas (bench-proven):** the marketplace entry's `source` must be the explicit
 > relative path `./plugins/omnicore` — a bare string (`"omnicore"`) is rejected at install as
 > an unsupported source type. And keep `.gitignore` from matching the skill directories
@@ -116,10 +123,15 @@ omnicore-plugin/                     # repo root = marketplace
     └── omnicore/                    # the plugin
         ├── .claude-plugin/
         │   └── plugin.json          # plugin manifest (name: omnicore)
+        ├── bin/
+        │   └── omnicore-gen         # on the session PATH — builds gen/ and execs it
+        ├── gen/                     # omnicore-plugin-gen: the generator, as Go source
+        ├── shared/
         └── skills/
             ├── scaffold-service/
             ├── scaffold-system/
             ├── scaffold-entity/
+            ├── omnicore-plugin-gen/
             ├── evolve-entity/
             ├── remove-entity/
             ├── scaffold-view/

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# omnicore-gen — the plugin's code generator, on PATH.
+#
+# Everything in bin/ is added to PATH for the session, so the generator is a bare
+# command wherever the session is: `omnicore-gen check -spec … -project .`. The
+# alternative — teaching every skill to spell a path into the plugin cache — breaks
+# the moment the cache directory changes, which it does on every update.
+#
+# It BUILDS and execs rather than `go run`-ing, for one reason that matters to a
+# caller: `go run` reports a non-zero program exit as "exit status N" on stderr and
+# exits 1 itself, so every failure looks identical. Building once and exec'ing the
+# binary preserves the real exit code — and makes every later invocation instant.
+set -euo pipefail
+
+ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SRC="$ROOT/gen"
+
+if [[ ! -d "$SRC/cmd/omnicore-gen" ]]; then
+  echo "omnicore-gen: the generator's source is not at $SRC — this plugin install is incomplete" >&2
+  exit 127
+fi
+
+if ! command -v go >/dev/null 2>&1; then
+  echo "omnicore-gen: needs a Go toolchain on PATH (the generator ships as source, not as a binary)" >&2
+  exit 127
+fi
+
+# The build lands in the plugin's DATA dir, which survives plugin updates, and falls
+# back to a temp dir when the variable is not set (running from a checkout).
+CACHE="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/omnicore-plugin-gen}"
+mkdir -p "$CACHE"
+BIN="$CACHE/omnicore-gen"
+
+# Rebuild only when the source is newer than the binary: the common case is many
+# calls in one session, and rebuilding each time would make `check` feel broken.
+NEWEST=$(find "$SRC" -name '*.go' -newer "$BIN" -print -quit 2>/dev/null || true)
+if [[ ! -x "$BIN" || -n "$NEWEST" ]]; then
+  # GOWORK=off: a go.work in the surrounding tree would drag the service's own
+  # modules into this build, which has nothing to do with them.
+  if ! (cd "$SRC" && GOWORK=off go build -o "$BIN" ./cmd/omnicore-gen); then
+    echo "omnicore-gen: the generator failed to build from $SRC" >&2
+    exit 127
+  fi
+fi
+
+exec "$BIN" "$@"

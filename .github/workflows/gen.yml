@@ -2,20 +2,20 @@
 #
 # A generator that drifts emits code that does not compile, and that is worse
 # than having no generator: the failure lands on whoever used it, not on whoever
-# broke it. So this runs on every pull request touching gen/.
+# broke it. So this runs on every pull request touching the generator.
 #
 # It needs nothing outside this repository. The service it generates into is
-# vendored under gen/testdata/host and runs on SQLite with no broker and no
+# vendored under the generator's testdata/host and runs on SQLite with no broker and no
 # Mongo, so the whole generate → build → test → boot half gates unconditionally.
 # Only the DDL lanes for the four SQL engines need services, and they say so.
 name: omnicore-gen
 
 on:
   pull_request:
-    paths: ['gen/**', '.github/workflows/gen.yml']
+    paths: ['plugins/omnicore/gen/**', '.github/workflows/gen.yml']
   push:
     branches: [main]
-    paths: ['gen/**', '.github/workflows/gen.yml']
+    paths: ['plugins/omnicore/gen/**', '.github/workflows/gen.yml']
 
 jobs:
   gate:
@@ -30,11 +30,11 @@ jobs:
           # — but the gate BUILDS a service that imports the framework, and the
           # framework's floor is higher. Reading the lower one installs a
           # toolchain that cannot build what this job exists to build.
-          go-version-file: gen/testdata/host/go.mod
-          cache-dependency-path: gen/go.sum
+          go-version-file: plugins/omnicore/gen/testdata/host/go.mod
+          cache-dependency-path: plugins/omnicore/gen/go.sum
 
       - name: the generator itself is formatted
-        working-directory: gen
+        working-directory: plugins/omnicore/gen
         # A generator that emits gofmt-clean code had better be gofmt-clean.
         run: |
           unformatted=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))
@@ -43,15 +43,15 @@ jobs:
           fi
 
       - name: vet
-        working-directory: gen
+        working-directory: plugins/omnicore/gen
         run: go vet ./...
 
       - name: unit tests
-        working-directory: gen
+        working-directory: plugins/omnicore/gen
         run: go test ./... -count=1
 
       - name: the behavioural gate
-        working-directory: gen
+        working-directory: plugins/omnicore/gen
         # No docker here, so the SQL-engine DDL lanes skip themselves and say so.
         # Everything that does not need a server still gates: generation,
         # formatting, build, vet, the generated tests, idempotent regeneration,
@@ -85,11 +85,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: gen/testdata/host/go.mod
-          cache-dependency-path: gen/go.sum
+          go-version-file: plugins/omnicore/gen/testdata/host/go.mod
+          cache-dependency-path: plugins/omnicore/gen/go.sum
 
       - name: emit the migrations
-        working-directory: gen
+        working-directory: plugins/omnicore/gen
         run: |
           set -e
           WORK=/tmp/ddl-host

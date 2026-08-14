@@ -1,0 +1,22 @@
+# Eixo: entidade SEM leitura — só escreve. Nenhuma view, nenhuma rota GET.
+specVersion: 1
+entity: Auditoria
+plural: Auditorias
+language: pt-BR
+storage:
+  kind: flat
+  table: auditorias
+  description: Registros de auditoria — escritos, nunca lidos por esta API.
+  managed: {revision: revision, createdAt: created_at}
+fields:
+  - {name: Acao, type: string, column: acao, length: 80, livesOn: root, example: matricula.criada, description: Ação registrada.}
+  - {name: Detalhe, type: string, column: detalhe, length: 500, livesOn: root, nullable: true, example: "id=417", description: Detalhe livre.}
+modes: [insert]
+rules:
+  list:
+    - {id: acao-obrigatoria, kind: required, scope: [insert], fields: [Acao], notification: RequiredFieldNotification}
+surfaces: {rest: true}
+authz:
+  resource: auditoria
+  dataAccess: anyone-with-permission
+  permissions: {insert: "auditoria:escrever"}

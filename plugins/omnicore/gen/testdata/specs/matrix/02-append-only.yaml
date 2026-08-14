@@ -1,0 +1,32 @@
+# Eixo: modo append-only — um livro-razão, imune a edição E a arquivamento.
+specVersion: 1
+entity: Lancamento
+plural: Lancamentos
+language: pt-BR
+storage:
+  kind: flat
+  table: lancamentos
+  description: Lançamentos financeiros — nunca editados, nunca removidos.
+  managed: {revision: revision, createdAt: created_at}
+fields:
+  - {name: Descricao, type: string, column: descricao, length: 200, livesOn: root, example: Mensalidade, description: Descrição do lançamento.}
+  - {name: ValorCentavos, type: int64, column: valor_centavos, livesOn: root, example: "45000", description: "Valor em centavos — nunca float para dinheiro."}
+  - {name: Ocorrido, type: time, column: ocorrido, livesOn: root, example: "2026-02-01T09:00:00Z", description: Quando ocorreu.}
+modes: [display, insert]
+rules:
+  list:
+    - {id: descricao-obrigatoria, kind: required, scope: [insert], fields: [Descricao], notification: RequiredFieldNotification}
+read:
+  backing: relational
+  view: {name: lancamentos, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Ocorrido, ops: [gte, lte]}
+      - {field: ValorCentavos, ops: [gte, lte]}
+    controls: {pagination: true, orderBy: true}
+surfaces: {rest: true}
+authz:
+  resource: lancamento
+  dataAccess: anyone-with-permission
+  permissions: {insert: "lancamento:escrever", read: "lancamento:ler"}

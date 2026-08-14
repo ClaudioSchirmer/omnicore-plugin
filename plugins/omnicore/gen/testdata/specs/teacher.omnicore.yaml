@@ -1,0 +1,140 @@
+# A ROLE over a shared identity — the second structural shape.
+#
+# The same person may also be something else (a student, a supplier). Modelling
+# the identity separately is what lets that happen without duplicating the
+# person, and the natural key is what makes two roles resolve to ONE identity.
+specVersion: 1
+entity: Teacher
+plural: Teachers
+language: pt-BR
+
+storage:
+  kind: sharedbase-role
+  table: teachers
+  description: Professores — o papel docente sobre a identidade de pessoa.
+  base:
+    table: people
+    schemaFunc: PeopleBase
+    linkColumn: person_id
+    description: Identidade de pessoa, compartilhada entre papéis.
+    reuse: false
+    naturalKey: Document
+    link: separate-fk
+    rowUniqueness: active-only
+    orphanPolicy: delete-when-unreferenced
+  managed:
+    createdAt: created_at
+    updatedAt: updated_at
+    archivedAt: deleted_at
+    revision: revision
+
+fields:
+  # ── the shared identity
+  - name: Document
+    type: string
+    column: document
+    length: 20
+    livesOn: base
+    example: "123.456.789-00"
+    description: Documento da pessoa — a chave natural da identidade.
+    labelKey: PersonDocumentField
+
+  - name: FullName
+    type: string
+    column: full_name
+    length: 160
+    livesOn: base
+    example: Helena Duarte
+    description: Nome completo da pessoa.
+    labelKey: PersonFullNameField
+
+  # ── the role's own
+  - name: RegistrationCode
+    type: string
+    column: registration_code
+    length: 20
+    livesOn: role
+    example: DOC-2026-0031
+    description: Código funcional do professor.
+    labelKey: TeacherRegistrationCodeField
+
+  - name: HiredAt
+    type: time
+    column: hired_at
+    livesOn: role
+    example: "2026-02-01T09:00:00Z"
+    description: Data de admissão.
+    labelKey: TeacherHiredAtField
+
+modes: [display, insert, update, archive, unarchive]
+
+update:
+  shape: patch
+
+delete:
+  root: soft
+
+rules:
+  list:
+    - id: document-required
+      kind: required
+      scope: [insertOrUpdate]
+      fields: [Document]
+      notification: RequiredFieldNotification
+
+    - id: registration-required
+      kind: required
+      scope: [insertOrUpdate]
+      fields: [RegistrationCode]
+      notification: RequiredFieldNotification
+
+    # The natural key derives the identity's own key, so re-keying it would
+    # silently move the row to a different identity.
+    - id: document-immutable
+      kind: immutable
+      scope: [update]
+      fields: [Document]
+      notification: DocumentCannotChangeNotification
+      echoValue: true
+
+notifications:
+  - name: DocumentCannotChangeNotification
+    semantic: validation
+    text:
+      ptbr: O documento não pode ser alterado após o cadastro.
+      eng: The document cannot be changed once registered.
+      esp: El documento no se puede modificar tras el registro.
+      fra: Le document ne peut pas être modifié après l'enregistrement.
+      deu: Das Dokument kann nach der Registrierung nicht geändert werden.
+      ita: Il documento non può essere modificato dopo la registrazione.
+      nld: Het document kan na registratie niet worden gewijzigd.
+
+read:
+  backing: relational
+  view:
+    name: teachers
+    version: 1
+  byId: true
+  byParams:
+    filters:
+      - field: FullName
+        ops: [eq, contains, icontains]
+      - field: RegistrationCode
+        ops: [eq, in]
+    controls:
+      pagination: true
+      orderBy: true
+      includeArchived: true
+
+surfaces:
+  rest: true
+
+authz:
+  resource: teacher
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: teacher:write
+    patch: teacher:write
+    archive: teacher:archive
+    unarchive: teacher:archive
+    read: teacher:read

@@ -1,0 +1,110 @@
+# Eixos que só existem deste lado: view projetada no MONGO (nada de relacional),
+# índices e busca textual na projeção, e a superfície GraphQL exercitada de
+# verdade — query paginada e mutations.
+specVersion: 1
+entity: Curso
+plural: Cursos
+language: pt-BR
+
+storage:
+  kind: flat
+  table: cursos
+  description: Cursos oferecidos, lidos por uma projeção no Mongo.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "MAT-101", description: Código do curso.}
+  - {name: Nome, type: string, column: nome, length: 160, livesOn: root, example: Matemática Aplicada, description: Nome do curso.}
+  - {name: Ementa, type: string, column: ementa, length: 1000, livesOn: root, nullable: true, example: Álgebra e cálculo, description: Ementa resumida.}
+  - name: Situacao
+    type: string
+    column: situacao
+    length: 20
+    livesOn: root
+    vo: {kind: enum, ref: SituacaoCurso}
+    example: aberto
+    description: Situação do curso.
+  - {name: CargaHoraria, type: int, column: carga_horaria, livesOn: root, example: "60", description: Carga horária em horas.}
+
+valueObjects:
+  - name: SituacaoCurso
+    kind: enum
+    backing: string
+    description: Situações possíveis de um curso.
+    unknownNotification: SituacaoCursoDesconhecidaNotification
+    members:
+      - {name: Aberto,    value: aberto}
+      - {name: Fechado,   value: fechado}
+      - {name: Suspenso,  value: suspenso}
+
+children:
+  - name: Modulo
+    plural: Modulos
+    table: curso_modulos
+    parentColumn: curso_id
+    description: Módulos que compõem o curso.
+    ownedBy: root
+    editStrategy: atomic-replace
+    businessIdentity: [Ordem]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - {name: Ordem, type: int, column: ordem, example: "1", description: Posição do módulo.}
+      - {name: Titulo, type: string, column: titulo, length: 120, example: Introdução, description: Título do módulo.}
+    rules:
+      list:
+        - {id: titulo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Titulo], notification: RequiredFieldNotification}
+
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+delete: {root: soft}
+
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    - id: carga-valida
+      kind: range
+      scope: [insertOrUpdate]
+      fields: [CargaHoraria]
+      min: 10
+      max: 400
+      notification: CargaInvalidaNotification
+      echoValue: true
+
+notifications:
+  - name: CargaInvalidaNotification
+    semantic: validation
+    tvars: [min, max]
+    text: {ptbr: "A carga horária deve ficar entre {min} e {max} horas.", eng: "The workload must be between {min} and {max} hours.", esp: "La carga debe estar entre {min} y {max} horas.", fra: "La charge doit être comprise entre {min} et {max} heures.", deu: "Die Stundenzahl muss zwischen {min} und {max} liegen.", ita: "Il carico deve essere compreso tra {min} e {max} ore.", nld: "De studielast moet tussen {min} en {max} uur liggen."}
+  - name: SituacaoCursoDesconhecidaNotification
+    package: vos
+    semantic: validation
+    text: {ptbr: Situação de curso desconhecida., eng: Unknown course status., esp: Situación de curso desconocida., fra: Statut de cours inconnu., deu: Unbekannter Kursstatus., ita: Stato del corso sconosciuto., nld: Onbekende cursusstatus.}
+
+read:
+  backing: mongo
+  view:
+    name: cursos
+    version: 1
+    maxLimit: 100
+  indexes:
+    - {fields: [Codigo], unique: true}
+    - {fields: [Situacao, CargaHoraria]}
+    - {fields: [Nome, Ementa], text: true}
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, in]}
+      - {field: Nome, ops: [eq, contains, icontains]}
+      - {field: Situacao, ops: [eq, in]}
+      - {field: CargaHoraria, ops: [gte, lte]}
+    controls: {pagination: true, orderBy: true, fields: true, onlyTotal: true, includeArchived: true, search: [Nome, Ementa]}
+
+surfaces:
+  rest: true
+  graphql: {enabled: true, connection: true, mutations: [insert, update, archive, unarchive]}
+
+authz:
+  resource: curso
+  dataAccess: anyone-with-permission
+  permissions: {insert: "curso:escrever", update: "curso:escrever", patch: "curso:escrever", archive: "curso:arquivar", unarchive: "curso:arquivar", read: "curso:ler"}

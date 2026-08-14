@@ -1,0 +1,135 @@
+# Eixos: coleção 1:N com regras próprias, sibling anexado ao ROOT, PUT+PATCH,
+# e um filho cuja identidade de negócio é composta por dois campos.
+specVersion: 1
+entity: TurmaR
+plural: TurmasR
+language: pt-BR
+storage:
+  kind: flat
+  table: turmas_r
+  description: Turmas com sua grade de aulas.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "3B-2026", description: Código da turma.}
+  - {name: Situacao, type: string, column: situacao, length: 20, livesOn: root, example: aberta, description: Situacao da turma., vo: {kind: enum, ref: SituacaoTurma}}
+  - {name: Motivo, type: string, column: motivo, length: 120, nullable: true, livesOn: root, example: Reforma, description: "Motivo, obrigatorio quando ha observacao."}
+  - {name: Observacao, type: string, column: observacao, length: 200, nullable: true, livesOn: root, example: Sala interditada, description: Observacao livre.}
+  - {name: Capacidade, type: int, column: capacidade, livesOn: root, example: "30", description: Número máximo de alunos.}
+children:
+  - name: Aula
+    plural: Aulas
+    table: turma_aulas
+    parentColumn: turma_id
+    description: Aulas da grade da turma.
+    ownedBy: root
+    editStrategy: atomic-replace
+    businessIdentity: [DiaSemana, Horario]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - {name: DiaSemana, type: string, column: dia_semana, length: 15, example: segunda, description: Dia da semana.}
+      - {name: Horario, type: string, column: horario, length: 5, example: "08:00", description: Horário de início.}
+      - {name: Disciplina, type: string, column: disciplina, length: 80, example: Matemática, description: Disciplina ministrada.}
+      - {name: Sala, type: string, column: sala, length: 10, nullable: true, example: "A-101", description: "Sala, quando definida."}
+    rules:
+      list:
+        - {id: disciplina-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Disciplina], notification: RequiredFieldNotification}
+        - {id: dia-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [DiaSemana], notification: RequiredFieldNotification}
+siblings:
+  - name: Coordenacao
+    table: turma_coordenacoes
+    description: Dados do professor coordenador, quando houver.
+    attachTo: root
+    fields:
+      - {name: CoordenadorNome, type: string, column: coordenador_nome, length: 160, nullable: true, example: Helena Duarte, description: Nome do coordenador.}
+      - {name: CoordenadorEmail, type: string, column: coordenador_email, length: 160, nullable: true, example: helena@escola.br, description: E-mail do coordenador.}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+delete: {root: soft}
+valueObjects:
+  - name: SituacaoTurma
+    kind: enum
+    backing: string
+    description: Situacao da turma.
+    unknownNotification: SituacaoTurmaInvalidaNotification
+    members:
+      - {name: Aberta, value: aberta}
+      - {name: Suspensa, value: suspensa}
+      - {name: Fechada, value: fechada}
+
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    - id: sem-aula-repetida
+      kind: childDuplicate
+      scope: [insertOrUpdate]
+      fields: [Aula]
+      notification: AulaDuplicadaNotification
+    - id: no-maximo-duas-por-dia
+      kind: groupCap
+      scope: [insertOrUpdate]
+      fields: [Aula]
+      groupBy: [DiaSemana]
+      cap: 2
+      notification: DemasiadasAulasNotification
+    - id: transicao-de-situacao
+      kind: transition
+      scope: [update]
+      fields: [Situacao]
+      transitions:
+        aberta: [suspensa, fechada]
+        suspensa: [aberta]
+      notification: TransicaoInvalidaNotification
+    - id: motivo-se-suspensa
+      kind: requiredIf
+      scope: [insertOrUpdate]
+      fields: [Motivo]
+      other: Observacao
+      notification: RequiredFieldNotification
+    - id: capacidade-valida
+      kind: range
+      scope: [insertOrUpdate]
+      fields: [Capacidade]
+      min: 1
+      max: 60
+      notification: CapacidadeInvalidaNotification
+      echoValue: true
+notifications:
+  - name: SituacaoTurmaInvalidaNotification
+    package: vos
+    semantic: validation
+    description: Valor fora do conjunto.
+    text: {ptbr: "Situacao invalida.", eng: "Invalid state.", esp: "Estado invalido.", fra: "Etat invalide.", deu: "Ungueltiger Zustand.", ita: "Stato non valido.", nld: "Ongeldige staat."}
+  - name: AulaDuplicadaNotification
+    semantic: conflict
+    description: Duas aulas iguais na mesma turma.
+    text: {ptbr: "A aula ja consta na turma.", eng: "The lesson is already in the class.", esp: "La clase ya consta.", fra: "Le cours figure deja.", deu: "Die Stunde ist bereits vorhanden.", ita: "La lezione e gia presente.", nld: "De les staat er al."}
+  - name: DemasiadasAulasNotification
+    semantic: validation
+    description: Excesso de aulas no mesmo dia.
+    text: {ptbr: "Ha aulas demais no mesmo dia.", eng: "Too many lessons on the same day.", esp: "Demasiadas clases el mismo dia.", fra: "Trop de cours le meme jour.", deu: "Zu viele Stunden am selben Tag.", ita: "Troppe lezioni nello stesso giorno.", nld: "Te veel lessen op dezelfde dag."}
+  - name: TransicaoInvalidaNotification
+    semantic: state-conflict
+    description: Mudanca de situacao nao permitida.
+    text: {ptbr: "A turma nao pode ir para essa situacao.", eng: "The class cannot move to that state.", esp: "La clase no puede pasar a ese estado.", fra: "La classe ne peut pas passer a cet etat.", deu: "Die Klasse kann nicht in diesen Zustand wechseln.", ita: "La classe non puo passare a questo stato.", nld: "De klas kan niet naar die staat."}
+  - name: CapacidadeInvalidaNotification
+    semantic: validation
+    tvars: [min, max]
+    text: {ptbr: "A capacidade deve ficar entre {min} e {max}.", eng: "Capacity must be between {min} and {max}.", esp: "La capacidad debe estar entre {min} y {max}.", fra: "La capacité doit être comprise entre {min} et {max}.", deu: "Die Kapazität muss zwischen {min} und {max} liegen.", ita: "La capacità deve essere compresa tra {min} e {max}.", nld: "De capaciteit moet tussen {min} en {max} liggen."}
+read:
+  backing: relational
+  view: {name: turmas_r, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, contains]}
+      - {field: Capacidade, ops: [gte, lte]}
+    controls: {pagination: true, fields: true, onlyTotal: true, includeArchived: true}
+surfaces:
+  rest: true
+  graphql: {enabled: true, connection: true, mutations: [insert, update, archive, unarchive]}
+  exports: {csv: {delimiter: ";"}, xlsx: {sheet: Turmas}}
+authz:
+  resource: turma
+  dataAccess: anyone-with-permission
+  permissions: {insert: "turma:escrever", update: "turma:escrever", patch: "turma:escrever", archive: "turma:arquivar", unarchive: "turma:arquivar", read: "turma:ler"}

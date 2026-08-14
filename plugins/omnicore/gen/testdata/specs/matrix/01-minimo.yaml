@@ -1,0 +1,22 @@
+# Eixo: o menor spec possível — flat, só leitura + insert, sem VO, sem regra.
+specVersion: 1
+entity: Sala
+plural: Salas
+language: pt-BR
+storage:
+  kind: flat
+  table: salas
+  description: Salas de aula.
+  managed: {revision: revision}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 10, livesOn: root, example: "A-101", description: Código da sala.}
+modes: [display, insert]
+read:
+  backing: relational
+  view: {name: salas, version: 1}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: sala
+  dataAccess: anyone-with-permission
+  permissions: {insert: "sala:escrever", read: "sala:ler"}

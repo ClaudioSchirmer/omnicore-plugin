@@ -1,0 +1,44 @@
+# Eixos: authz de tenant (Layer 3) e unicidade só por constraint — sem
+# pré-check no domínio, então a duplicata só aparece como 409 no fim.
+specVersion: 1
+entity: Fornecedor
+plural: Fornecedores
+language: pt-BR
+storage:
+  kind: flat
+  table: fornecedores
+  description: Fornecedores, isolados por tenant.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - name: Cnpj
+    type: string
+    column: cnpj
+    length: 20
+    livesOn: root
+    example: "12.345.678/0001-90"
+    description: CNPJ do fornecedor.
+    unique: {enforce: constraint-only, notification: CnpjJaExisteNotification}
+  - {name: RazaoSocial, type: string, column: razao_social, length: 160, livesOn: root, example: Alfa Materiais LTDA, description: Razão social.}
+  - {name: TenantID, type: string, column: tenant_id, length: 60, livesOn: root, example: escola-alfa, description: Tenant dono da linha.}
+modes: [display, insert, update]
+update: {shape: patch}
+rules:
+  list:
+    - {id: cnpj-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Cnpj], notification: RequiredFieldNotification}
+notifications:
+  - name: CnpjJaExisteNotification
+    semantic: conflict
+    text: {ptbr: Já existe um fornecedor com este CNPJ., eng: A supplier with this tax id already exists., esp: Ya existe un proveedor con este CNPJ., fra: Un fournisseur avec ce numéro existe déjà., deu: Ein Lieferant mit dieser Nummer existiert bereits., ita: Esiste già un fornitore con questa partita IVA., nld: Er bestaat al een leverancier met dit nummer.}
+read:
+  backing: relational
+  view: {name: fornecedores, version: 1}
+  byId: true
+  byParams:
+    filters: [{field: RazaoSocial, ops: [eq, contains, icontains]}]
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: fornecedor
+  dataAccess: tenant
+  tenantField: TenantID
+  permissions: {insert: "fornecedor:escrever", patch: "fornecedor:escrever", read: "fornecedor:ler"}
