@@ -1,6 +1,6 @@
 # omnicore-plugin — repo rules
 
-The Claude Code plugin for the omnicore framework: 15 `/omnicore:*` skills under
+The Claude Code plugin for the omnicore framework: 16 `/omnicore:*` skills under
 `plugins/omnicore/skills/`, plus **omnicore-gen** — the spec-driven code
 generator — as Go source under `plugins/omnicore/gen/`, launched by
 `plugins/omnicore/bin/omnicore-gen` (on the session PATH).

@@ -103,6 +103,18 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Added
 
+- **`/omnicore:gen` — a door to the generator's CLI for a project that already exists.**
+  Five of the six commands were reachable only as steps inside `scaffold-entity`'s codegen
+  flow, and `doctor` was reachable from nowhere at all: the word did not appear once in any
+  skill. So "is this tree still in step with its spec?" — a read-only, offline, instant
+  question — had no way to be asked. The new skill is deliberately small: run one command,
+  read its answer, act on it. It documents what each line of `doctor` means and what to do
+  about it, that its exit code is NOT the verdict (it exits 0 either way — only `check`
+  answers through its status), and that an adopted file prints the cost of the adoption
+  every time. Authoring a spec and generating an entity stay where the model and plan gates
+  are: `generate` here is allowed only for an entity the lock already knows, and a first
+  generation is handed back to `/omnicore:scaffold-entity`.
+
 - **A declared fact can now be ENFORCED declaratively: `rules.list[].kind: factRange`.**
   The generator wrote the query and stopped there — the port answered a number and nothing
   compared it, so every limit over rows in the table was a hand-written clause in the manual

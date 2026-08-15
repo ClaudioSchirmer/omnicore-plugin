@@ -4,7 +4,9 @@ description: >-
   omnicore: drive omnicore-gen, the spec-driven code generator, to produce a
   complete entity from one YAML file — then review it, implement what the generator
   refused, and prove it. Read this ONLY after the dev has chosen the codegen path at
-  scaffold-entity's generation gateway; it is not a standalone entry point.
+  scaffold-entity's generation gateway; it is not a standalone entry point. To run a single
+  generator command against a project that already exists — doctor, check, explain, adopt —
+  use /omnicore:gen instead.
 ---
 
 # omnicore-gen
@@ -16,7 +18,9 @@ business rules the spec language cannot express, the review, and the final tests
 **This skill is only reached through `scaffold-entity`'s generation gateway.** If you are
 reading it because the dev asked about the generator directly, that is fine — but a real
 entity still starts at `/omnicore:scaffold-entity`, because the model gate and the plan
-gate are where the thinking happens and this skill does not repeat them.
+gate are where the thinking happens and this skill does not repeat them. And if what they
+actually want is ONE command against a project that already exists — `doctor`, `check`,
+`explain`, `adopt` — that is `/omnicore:gen`, which is forty lines instead of four hundred.
 
 ## What the generator guarantees, and what it does not
 
