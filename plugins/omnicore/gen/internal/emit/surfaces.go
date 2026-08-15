@@ -248,7 +248,6 @@ func emitFacetClearCommands(m *ir.Model) ([]fsplan.File, error) {
 	var out []fsplan.File
 	for _, sib := range m.SiblingsOn("") {
 		s := &src{}
-		s.header(m, fmt.Sprintf("Clearing the %s facet, for the surface that cannot send null.", sib.Name))
 		s.Blank()
 		s.L("package commands")
 		s.Blank()
@@ -297,7 +296,7 @@ func emitFacetClearCommands(m *ir.Model) ([]fsplan.File, error) {
 		s.L("}")
 
 		f, err := goFile("internal/application/commands/clear_"+naming.Snake(sib.Name)+"_command.go",
-			fsplan.Owned, fmt.Sprintf("the %s facet clear command", sib.Name), s)
+			fsplan.Owned, fmt.Sprintf("the %s facet clear command, for the surface that cannot send null", sib.Name), s)
 		if err != nil {
 			return nil, err
 		}

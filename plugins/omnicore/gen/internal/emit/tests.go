@@ -86,7 +86,6 @@ func emitTests(m *ir.Model) ([]fsplan.File, error) {
 
 func emitDomainTests(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("Tests for %s's rules.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package domain")
 	s.Blank()
@@ -410,7 +409,6 @@ func emitBoundCase(s *src, m *ir.Model, rule ir.Rule, f ir.Field, side, value st
 
 func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, "Tests for the command mappers.")
 	s.Blank()
 	s.L("package commands")
 	s.Blank()
@@ -625,7 +623,6 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 
 func emitVOTests(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, "Tests for the value objects.")
 	s.Blank()
 	s.L("package vos")
 	s.Blank()
@@ -966,7 +963,6 @@ func pointerize(f ir.Field, literal string) string {
 // `go test`.
 func emitSchemaTests(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, "The schema builders are exercised, so a boot panic is a test failure.")
 	s.Blank()
 	s.L("package schemas")
 	s.Blank()
@@ -1044,7 +1040,7 @@ func emitSchemaTests(m *ir.Model) (fsplan.File, error) {
 	}
 
 	return goFile("internal/infra/schemas/"+m.Entity.Snake+"_schemas_test.go", fsplan.Owned,
-		"the schema builder tests", s)
+		"the schema builder tests — they run the builders, so a boot panic is a test failure", s)
 }
 
 // emitChildTests covers the collection types.
@@ -1054,7 +1050,6 @@ func emitSchemaTests(m *ir.Model) (fsplan.File, error) {
 // aggregate, reported against a type nobody tests by hand.
 func emitChildTests(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, "Tests for the aggregate's collection types.")
 	s.Blank()
 	s.L("package aggregatevos")
 	s.Blank()
@@ -1181,7 +1176,6 @@ func emitValidChildBuilder(s *src, m *ir.Model, c ir.Child) {
 // missing entry is not a compile error.
 func emitTranslationTests(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, "Every notification must be translatable in every catalog.")
 	s.Blank()
 	s.L("package translations")
 	s.Blank()
@@ -1239,7 +1233,7 @@ func emitTranslationTests(m *ir.Model) (fsplan.File, error) {
 	s.L("}")
 
 	return goFile("internal/application/translations/"+m.Entity.Snake+"_translations_test.go",
-		fsplan.Owned, "the translation coverage test", s)
+		fsplan.Owned, "the translation coverage test — every notification must be translatable in every catalog", s)
 }
 
 // emitRequestTests covers the wire→command mapping.
@@ -1259,7 +1253,6 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 	}
 
 	s := &src{}
-	s.header(m, "Tests for the wire request mappers.")
 	s.Blank()
 	s.L("package requests")
 	s.Blank()
@@ -1403,7 +1396,6 @@ func emitQueryTests(m *ir.Model) (fsplan.File, error) {
 		return fsplan.File{}, nil
 	}
 	s := &src{}
-	s.header(m, "Tests for the read criteria mappers.")
 	s.Blank()
 	s.L("package queries")
 	s.Blank()
@@ -1492,7 +1484,6 @@ func emitViewTests(m *ir.Model) (fsplan.File, error) {
 		return fsplan.File{}, nil
 	}
 	s := &src{}
-	s.header(m, "The view definition is built, so a boot panic is a test failure.")
 	s.Blank()
 	s.L("package views")
 	s.Blank()
@@ -1523,7 +1514,8 @@ func emitViewTests(m *ir.Model) (fsplan.File, error) {
 	s.L("}")
 
 	return goFile("internal/infra/views/"+m.Entity.Snake+"_view_test.go",
-		fsplan.Owned, "the view definition test", s)
+		fsplan.Owned,
+		"the view definition test — it builds the definition, so a boot panic is a test failure", s)
 }
 
 // applyMethod names the mapper a verb uses. A bodyless verb still has one: it

@@ -59,7 +59,6 @@ func hasManualFacts(m *ir.Model) bool {
 
 func emitServicePort(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s domain service port.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package domain")
 	s.Blank()
@@ -185,7 +184,6 @@ func factParams(f ir.Fact) string {
 
 func emitServiceImpl(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s domain service, implemented.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package infra")
 	s.Blank()

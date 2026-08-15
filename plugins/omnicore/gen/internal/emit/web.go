@@ -66,7 +66,6 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	partial := op.InputMethod == "ApplyPartiallyTo"
 
 	s := &src{}
-	s.header(m, fmt.Sprintf("Wire types for the %s operation.", op.Verb))
 	s.Blank()
 	s.L("package requests")
 	s.Blank()
@@ -160,7 +159,6 @@ func jsonTag(f ir.Field, optional bool) string {
 func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	op := m.Op("byId")
 	s := &src{}
-	s.header(m, "Wire types for the by-id read.")
 	s.Blank()
 	s.L("package requests")
 	s.Blank()
@@ -218,7 +216,6 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 func emitListDTO(m *ir.Model) (fsplan.File, error) {
 	op := m.Op("byParams")
 	s := &src{}
-	s.header(m, "Wire types for the listing.")
 	s.Blank()
 	s.L("package requests")
 	s.Blank()
@@ -318,7 +315,6 @@ func emitReadControls(s *src, m *ir.Model) {
 
 func emitRoutes(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("Every surface of %s is mounted here.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package web")
 	s.Blank()
@@ -514,7 +510,6 @@ func serviceField(m *ir.Model) string {
 // afterwards.
 func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, "Wire types for the child collections.")
 	s.Blank()
 	s.L("package requests")
 	s.Blank()

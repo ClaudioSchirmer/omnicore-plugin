@@ -15,7 +15,6 @@ import (
 // structural mistake in a service like this.
 func emitBootstrap(m *ir.Model) ([]fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s feature.", m.Entity.PluralPascal))
 	s.Blank()
 	s.L("package main")
 	s.Blank()

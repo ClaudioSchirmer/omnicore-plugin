@@ -31,7 +31,6 @@ func emitDomain(m *ir.Model) ([]fsplan.File, error) {
 // emitAggregate writes the root aggregate: the struct, its modes and its rules.
 func emitAggregate(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("%s is the aggregate root.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package domain")
 	s.Blank()

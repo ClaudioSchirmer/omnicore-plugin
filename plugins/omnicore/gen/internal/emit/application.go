@@ -53,7 +53,6 @@ func commandImports(s *src, m *ir.Model, needsDomain bool) {
 
 func emitCommand(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("%s and its result.", op.CommandType))
 	s.Blank()
 	s.L("package commands")
 	s.Blank()
@@ -365,7 +364,6 @@ func emitQueries(m *ir.Model) ([]fsplan.File, error) {
 
 	if m.Read.ByID {
 		s := &src{}
-		s.header(m, fmt.Sprintf("%s reads one %s from the view.", m.Read.QueryByID, m.Entity.Pascal))
 		s.Blank()
 		s.L("package queries")
 		s.Blank()
@@ -406,8 +404,6 @@ func emitQueries(m *ir.Model) ([]fsplan.File, error) {
 
 	if m.Read.ByParams {
 		s := &src{}
-		s.header(m, fmt.Sprintf("%s reads a filtered page of %s.",
-			m.Read.QueryList, m.Entity.PluralCamel))
 		s.Blank()
 		s.L("package queries")
 		s.Blank()
@@ -445,7 +441,6 @@ func emitQueries(m *ir.Model) ([]fsplan.File, error) {
 // place, because every verb that returns the aggregate needs the same ones.
 func emitChildResults(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, "The child collection shapes shared by every write result.")
 	s.Blank()
 	s.L("package commands")
 	s.Blank()

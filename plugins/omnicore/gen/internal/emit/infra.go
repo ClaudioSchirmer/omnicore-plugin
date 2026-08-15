@@ -43,7 +43,6 @@ func emitInfra(m *ir.Model) ([]fsplan.File, error) {
 // impossible to see.
 func emitSchema(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s table schema.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package schemas")
 	s.Blank()
@@ -143,7 +142,6 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 
 func emitRepository(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s repository.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package infra")
 	s.Blank()
@@ -253,7 +251,6 @@ func uniqueName(c ir.Constraint) string {
 
 func emitView(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s read projection.", m.Entity.Pascal))
 	s.Blank()
 	s.L("package views")
 	s.Blank()
@@ -353,7 +350,6 @@ func baseLinkColumn(m *ir.Model) string {
 // resolves to the same identity, with no read-back and no race.
 func emitBaseSchema(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s shared identity.", m.Base.Table))
 	s.Blank()
 	s.L("package schemas")
 	s.Blank()

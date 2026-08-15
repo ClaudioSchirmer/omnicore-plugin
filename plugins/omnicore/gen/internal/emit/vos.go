@@ -45,7 +45,6 @@ func emitValueObjects(m *ir.Model) ([]fsplan.File, error) {
 
 func emitRawVO(m *ir.Model, vo ir.ValueObject) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s value object.", vo.Name))
 	s.Blank()
 	s.L("package vos")
 	s.Blank()
@@ -149,7 +148,6 @@ func numberIn(v float64, backing string) string {
 
 func emitEnumVO(m *ir.Model, vo ir.ValueObject) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s enumeration.", vo.Name))
 	s.Blank()
 	s.L("package vos")
 	s.Blank()

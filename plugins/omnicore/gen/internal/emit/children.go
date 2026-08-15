@@ -69,7 +69,6 @@ func emitChildren(m *ir.Model) ([]fsplan.File, error) {
 
 func emitAVO(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s child of %s.", c.Name, m.Entity.Pascal))
 	s.Blank()
 	s.L("package aggregatevos")
 	s.Blank()
@@ -278,7 +277,6 @@ func emitChildRulesHook(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The %s child table schema.", c.Name))
 	s.Blank()
 	s.L("package schemas")
 	s.Blank()
@@ -360,7 +358,6 @@ func childTail(m *ir.Model, c ir.Child) []string {
 // stays free of both.
 func emitChildInput(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s := &src{}
-	s.header(m, fmt.Sprintf("The application input for a %s.", c.Name))
 	s.Blank()
 	s.L("package dtos")
 	s.Blank()
@@ -417,7 +414,6 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	// already, and it is bound to ITS aggregate.
 	op := c.OpBase
 	s := &src{}
-	s.header(m, fmt.Sprintf("Per-entry commands for the %s collection.", c.Segment))
 	s.Blank()
 	s.L("package commands")
 	s.Blank()
@@ -566,7 +562,6 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	idParam := naming.Camel(c.Name) + "Id"
 
 	s := &src{}
-	s.header(m, fmt.Sprintf("Per-entry wire types for the %s collection.", c.Segment))
 	s.Blank()
 	s.L("package requests")
 	s.Blank()

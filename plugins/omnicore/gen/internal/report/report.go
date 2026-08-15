@@ -28,13 +28,13 @@ type Input struct {
 	// StaleRegistrations names what a shared registration file declares with
 	// content that no longer matches this spec.
 	StaleRegistrations []string
-	Orphans             []string
-	MigrationsKept      []string
-	TargetTables        []emit.TargetTable
-	CompatLevel         string
-	CompatMessage       string
-	FrameworkPinned     string
-	Warnings            []string
+	Orphans            []string
+	MigrationsKept     []string
+	TargetTables       []emit.TargetTable
+	CompatLevel        string
+	CompatMessage      string
+	FrameworkPinned    string
+	Warnings           []string
 }
 
 // Render produces the markdown.
