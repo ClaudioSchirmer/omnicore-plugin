@@ -68,6 +68,47 @@ rules:
       cap: 2
       notification: DemasiadasAulasGNotification
 
+    # `factRange` é a outra metade de um fato: o fato responde o número, a regra
+    # diz o que o número pode ser, e o gerador escreve a chamada, a comparação e
+    # a notificação. Os três formatos de resposta aparecem aqui de propósito —
+    # cada um emite um corpo diferente e nenhum é alcançável pelos outros.
+
+    # 1. escalar simples (count): compara direto.
+    - id: teto-de-turmas
+      kind: factRange
+      scope: [insert]
+      fact: TotalDeTurmas
+      max: 500
+      attachTo: Codigo
+      notification: LimiteDeTurmasNotification
+      # O texto interpola {max}, preenchido a partir do MESMO limite que a
+      # comparação usa, e echoValue devolve o número que o serviço respondeu.
+      echoValue: true
+
+    # 2. escalar que carrega `found` (max): sobre nenhuma linha não há máximo, e
+    #    a regra fica de fora em vez de tratar o zero como resposta.
+    - id: capacidade-coerente
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: MaiorCapacidade
+      max: 200
+      attachTo: Capacidade
+      notification: CapacidadeIncoerenteNotification
+
+    # 3. agrupado: o banco já reduziu a tabela a uma linha por chave, e a regra
+    #    compara respostas em vez de contar linhas. É o groupCap acima, só que
+    #    sobre o que ESTÁ na tabela.
+    - id: teto-por-situacao
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: TurmasPorSituacao
+      max: 50
+      attachTo: Situacao
+      notification: DemasiadasTurmasNaSituacaoNotification
+      # No agrupado o eco é o valor do GRUPO que estourou; qual grupo foi vem
+      # do attachTo, que aqui é a própria chave.
+      echoValue: true
+
 service:
   required: true
   facts:
@@ -132,6 +173,20 @@ notifications:
     semantic: validation
     description: Valor fora do conjunto.
     text: {ptbr: "Situacao invalida.", eng: "Invalid state.", esp: "Estado invalido.", fra: "Etat invalide.", deu: "Ungueltiger Zustand.", ita: "Stato non valido.", nld: "Ongeldige staat."}
+  - name: LimiteDeTurmasNotification
+    semantic: validation
+    description: Teto de turmas da instituicao.
+    tvars: [max]
+    text: {ptbr: "A instituicao ja atingiu o limite de {max} turmas.", eng: "The institution has reached its limit of {max} classes.", esp: "La institucion alcanzo el limite de {max} clases.", fra: "L'etablissement a atteint sa limite de {max} classes.", deu: "Die Einrichtung hat ihr Limit von {max} Klassen erreicht.", ita: "L'istituto ha raggiunto il limite di {max} classi.", nld: "De instelling heeft haar limiet van {max} klassen bereikt."}
+  - name: CapacidadeIncoerenteNotification
+    semantic: validation
+    description: Capacidade acima do teto praticado.
+    text: {ptbr: "A capacidade excede o teto praticado.", eng: "The capacity exceeds the practised ceiling.", esp: "La capacidad excede el tope practicado.", fra: "La capacite depasse le plafond pratique.", deu: "Die Kapazitaet uebersteigt die uebliche Obergrenze.", ita: "La capacita supera il tetto praticato.", nld: "De capaciteit overschrijdt het gangbare plafond."}
+  - name: DemasiadasTurmasNaSituacaoNotification
+    semantic: validation
+    description: Excesso de turmas na mesma situacao.
+    tvars: [max]
+    text: {ptbr: "Cada situacao aceita no maximo {max} turmas.", eng: "Each state accepts at most {max} classes.", esp: "Cada estado acepta como maximo {max} clases.", fra: "Chaque etat accepte au plus {max} classes.", deu: "Jeder Zustand erlaubt hoechstens {max} Klassen.", ita: "Ogni stato accetta al massimo {max} classi.", nld: "Elke staat accepteert maximaal {max} klassen."}
   - name: DemasiadasAulasGNotification
     semantic: validation
     description: Excesso de aulas no mesmo dia.

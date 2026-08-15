@@ -139,7 +139,12 @@ type Rule struct {
 	// says who may attempt the verb at all, this says who may attempt it on a row
 	// that is not theirs.
 	AdminField *Field
-	Fact       *Fact
+	// FactName is the fact a factRange reads, by name; Fact is the resolved one,
+	// bound after the service is. Two steps because the rules are lowered before
+	// the port is, and a rule holding a copy of a fact resolved too early would
+	// silently miss the params the service adds.
+	FactName string
+	Fact     *Fact
 	// Transitions is the allowed state machine: from → the states it may move to.
 	Transitions map[string][]string
 	// Collection names the child collection a rule reads, for the two kinds that
@@ -307,6 +312,7 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	m.Clauses = resolveClauses(s, m)
 	m.Clauses = mergeClauses(m.Clauses, hoisted)
 	bindOnlyFields(m)
+	bindFacts(m)
 	m.Clauses = appendUniqueClauses(m)
 	m.ManualRules = resolveManualRules(s.Rules)
 	m.HasHookFile = len(m.ManualRules) > 0
@@ -456,7 +462,7 @@ func resolveClauseSet(rs spec.Rules, lookup func(string) *Field) []Clause {
 			Min: r.Min, Max: r.Max, Notification: r.Notification,
 			AttachTo: r.AttachTo, EchoValue: r.EchoValue, Description: r.Description,
 			Transitions: r.Transitions, GroupBy: r.GroupBy, Cap: r.Cap,
-			SkipWhen: r.SkipWhen,
+			SkipWhen: r.SkipWhen, FactName: r.Fact,
 		}
 		// The two set-wide kinds name a COLLECTION where the others name fields:
 		// they ask what the aggregate holds, not what one record says.
@@ -1053,6 +1059,32 @@ func appendUniqueClauses(m *Model) []Clause {
 		}
 	}
 	return append(m.Clauses, Clause{Gate: "IfInsertOrUpdate", Rules: extra})
+}
+
+// bindFacts resolves the fact a factRange names, now that the port exists.
+//
+// A rule whose fact cannot be found is dropped rather than emitted half-way:
+// validation refuses that spec, so reaching here with an unknown name means the
+// model is already being reported as invalid, and emitting a call to a method
+// nobody declared would replace a readable blocker with a compile error.
+func bindFacts(m *Model) {
+	if m.Service == nil {
+		return
+	}
+	for ci := range m.Clauses {
+		for ri := range m.Clauses[ci].Rules {
+			r := &m.Clauses[ci].Rules[ri]
+			if r.Kind != "factRange" || r.FactName == "" {
+				continue
+			}
+			for i := range m.Service.Facts {
+				if m.Service.Facts[i].Name == r.FactName {
+					r.Fact = &m.Service.Facts[i]
+					break
+				}
+			}
+		}
+	}
 }
 
 // factFor finds the existence probe that answers for a field.

@@ -437,6 +437,13 @@ type Rule struct {
 	// with no grouping the cap is on the whole collection, which is what "at most
 	// N of these" usually means.
 	GroupBy []string `yaml:"groupBy"`
+	// Fact names the service fact a factRange rule reads — an entry of
+	// service.facts, by name. It is what turns a declared query into an enforced
+	// invariant: the fact answers the number, min/max here say what the number
+	// may be, and the generator writes the call, the comparison and the
+	// notification. Any argument the fact takes is filled from the entity's own
+	// field of the same name, exactly as the unique precheck does.
+	Fact string `yaml:"fact"`
 	// Cap is the maximum number of entries a groupCap allows — per group when
 	// groupBy is set, over the whole collection otherwise.
 	Cap int `yaml:"cap"`

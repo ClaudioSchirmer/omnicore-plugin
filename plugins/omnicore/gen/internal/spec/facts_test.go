@@ -194,3 +194,125 @@ func TestGroupedFactCountsAsACapability(t *testing.T) {
 		t.Error("CapGroupedFact must be in the closed list, or `explain coverage` never mentions it")
 	}
 }
+
+// ── factRange: the rule half of a fact ───────────────────────────────────────
+//
+// These pin the shapes that would otherwise be discovered by the compiler or,
+// worse, not at all: a rule limiting a fact nobody declared, a limit with no
+// bound, a notification with nowhere to land.
+
+// factRangeSpec is the baseline: a service with one countable fact, plus a rule
+// limiting it.
+func factRangeSpec(r Rule) *Spec {
+	s := factSpec(Fact{
+		Name: "TotalDeTurmas", Kind: "count", Description: "Quantas turmas existem.",
+	})
+	s.Service.Facts = append(s.Service.Facts,
+		Fact{Name: "PorSituacao", Kind: "count", GroupBy: []string{"Status"},
+			Description: "Quantas por situação."},
+		Fact{Name: "TemAlguma", Kind: "exists", Filters: []string{"Status"},
+			Description: "Existe alguma."},
+		Fact{Name: "AberturaDoCurso", Kind: "manual", Returns: "bool",
+			Description: "Respondida por outro serviço."},
+	)
+	s.Notifications = append(s.Notifications, Notification{
+		Name: "LimiteNotification", Semantic: "validation",
+		Text: Texts{
+			PTBR: "Limite atingido.", ENG: "Limit reached.", ESP: "Limite alcanzado.",
+			FRA: "Limite atteinte.", DEU: "Grenze erreicht.", ITA: "Limite raggiunto.",
+			NLD: "Limiet bereikt.",
+		},
+	})
+	s.Rules.List = append(s.Rules.List, r)
+	return s
+}
+
+func validFactRange() Rule {
+	max := 500.0
+	return Rule{
+		ID: "teto", Kind: "factRange", Scope: []string{"insert"},
+		Fact: "TotalDeTurmas", Max: &max, AttachTo: "Name",
+		Notification: "LimiteNotification",
+	}
+}
+
+func TestFactRangeBaselineIsClean(t *testing.T) {
+	ps := Validate(factRangeSpec(validFactRange()), Options{})
+	if ps.HasBlockers() {
+		t.Fatalf("the baseline factRange should validate cleanly, got:\n%v", ps.Error())
+	}
+}
+
+func TestFactRangeAcceptsEveryAnswerShape(t *testing.T) {
+	// A scalar, a scalar carrying found, and a grouped one each emit a DIFFERENT
+	// body; a spec that validates for one and not the others would leave two of
+	// the three unreachable.
+	for _, fact := range []string{"TotalDeTurmas", "PorSituacao"} {
+		r := validFactRange()
+		r.Fact = fact
+		if ps := Validate(factRangeSpec(r), Options{}); ps.HasBlockers() {
+			t.Errorf("limiting %s should be accepted, got:\n%v", fact, ps.Error())
+		}
+	}
+}
+
+func TestFactRangeNeedsABound(t *testing.T) {
+	r := validFactRange()
+	r.Min, r.Max = nil, nil
+	if ps := Validate(factRangeSpec(r), Options{}); !ps.HasBlockers() {
+		t.Fatal("a rule that says nothing about the answer must be refused")
+	}
+}
+
+func TestFactRangeNeedsSomewhereToLand(t *testing.T) {
+	r := validFactRange()
+	r.AttachTo = ""
+	if ps := Validate(factRangeSpec(r), Options{}); !blockerAbout(ps, "attachTo") {
+		t.Fatalf("a fact's answer is not a field, so attachTo is required, got:\n%v", ps.Error())
+	}
+	r.AttachTo = "Departamento"
+	if ps := Validate(factRangeSpec(r), Options{}); !ps.HasBlockers() {
+		t.Fatal("attachTo must name a field that exists")
+	}
+}
+
+func TestFactRangeNamesAFactThatExists(t *testing.T) {
+	r := validFactRange()
+	r.Fact = "NaoDeclarado"
+	if ps := Validate(factRangeSpec(r), Options{}); !ps.HasBlockers() {
+		t.Fatal("limiting a fact nobody declared must be refused")
+	}
+	r.Fact = ""
+	if ps := Validate(factRangeSpec(r), Options{}); !blockerAbout(ps, "fact") {
+		t.Fatal("the rule must name the fact it limits")
+	}
+}
+
+// TestFactRangeRefusesAnUncomparableFact keeps the pairing honest: a yes/no
+// answer has nothing to compare against a bound, and a manual fact returning a
+// bool is the same problem wearing another kind.
+func TestFactRangeRefusesAnUncomparableFact(t *testing.T) {
+	for _, fact := range []string{"TemAlguma", "AberturaDoCurso"} {
+		r := validFactRange()
+		r.Fact = fact
+		if ps := Validate(factRangeSpec(r), Options{}); !ps.HasBlockers() {
+			t.Errorf("limiting %s must be refused: there is no number to compare", fact)
+		}
+	}
+}
+
+func TestFactRangeNamesNoFields(t *testing.T) {
+	r := validFactRange()
+	r.Fields = []string{"Name"}
+	if ps := Validate(factRangeSpec(r), Options{}); !blockerAbout(ps, "fields") {
+		t.Fatalf("the subject is the fact, not a field — declaring both is refused, got:\n%v", ps.Error())
+	}
+}
+
+func TestFactRangeWithoutAServiceIsRefused(t *testing.T) {
+	s := factRangeSpec(validFactRange())
+	s.Service = nil
+	if ps := Validate(s, Options{}); !ps.HasBlockers() {
+		t.Fatal("a rule reading a fact needs the service that answers it")
+	}
+}

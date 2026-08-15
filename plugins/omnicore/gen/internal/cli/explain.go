@@ -101,6 +101,12 @@ a clause the framework dispatches by verb.
                   write carries. Use it for the collection being written; for a
                   cap over rows already in the TABLE, declare a service fact
                   with groupBy and let the database group them.
+  factRange       a service fact's ANSWER must stay within min/max. It is the
+                  other half of service.facts: the fact asks the database the
+                  number, this says what the number may be, and the call, the
+                  comparison and the notification are written for you. Over a
+                  grouped fact it fires when ANY group is out of bounds — the
+                  same shape as groupCap, but over rows already in the table.
   childDuplicate  two entries of a collection share a business identity.
   ownerCheck      the caller must own the row. Reads a runtime-only field fed
                   from the request identity.

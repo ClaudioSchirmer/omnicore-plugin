@@ -67,6 +67,9 @@ var unreadByEmitters = map[string]string{
 	"Rule.OnlyFieldName": "the resolver binds it into OnlyField against the collection " +
 		"it counts, and that is what the emitter reads; the name is kept because a " +
 		"collection whose field vanished is worth reporting as the author wrote it",
+	"Rule.FactName": "the resolver binds it into Fact once the port exists, and that " +
+		"is what the emitter reads; the name is kept because a rule naming a fact " +
+		"that vanished is worth reporting as the author wrote it",
 	"ManualRule.ID": "names the item in the hook file and the report",
 	"Child.OwnedBy": "read through BaseChildren/RoleChildren and childOwnerTable, " +
 		"which is where the ownership decision actually lands",

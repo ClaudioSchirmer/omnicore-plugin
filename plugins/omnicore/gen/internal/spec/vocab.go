@@ -35,7 +35,7 @@ var (
 
 	RuleKinds = set(
 		"required", "immutable", "length", "range", "comparison", "transition",
-		"requiredIf", "groupCap", "childDuplicate", "ownerCheck",
+		"requiredIf", "groupCap", "childDuplicate", "ownerCheck", "factRange",
 	)
 	RuleScopes    = set("insert", "update", "insertOrUpdate", "archive", "unarchive", "delete")
 	ComparisonOps = set("gte", "gt", "lte", "lt", "eq", "ne")

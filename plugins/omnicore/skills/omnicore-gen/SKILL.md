@@ -200,6 +200,18 @@ Three things to get right, because they are the ones that cost a migration later
   rows that exist. *"no more than 30 photos in this listing"* is a `groupCap` — it is about
   what is being saved right now. If a rule needs both (the table's count PLUS what the write
   adds), the fact gives you the first half and the arithmetic belongs in `rules.manual`.
+- **A fact is only half a rule — `factRange` is the other half.** Declaring
+  `TurmasPorSituacao` puts a number on the port; it enforces nothing until something
+  compares it. `kind: factRange` with `fact: <name>` and `min:`/`max:` writes the call, the
+  comparison and the notification, exactly as `range` does over a field — including `{min}`
+  and `{max}` in the message, filled from the same bounds the code enforces, and
+  `echoValue: true` to send back the number the service answered. It handles all three
+  answer shapes: a plain scalar, one carrying `found` (the rule stands down when there is
+  nothing to compare), and a grouped one (it fires when ANY group is out of bounds).
+  `attachTo:` is required — a fact's answer is not a field, so the notification needs to be
+  told where to land; over a grouped fact, name the key field and the caller sees which
+  group. **Only reach for `rules.manual` when the comparison itself is not a bound** — an
+  arithmetic combination of two facts, or the table's count plus what this write adds.
 - **Rules on a collection are declared on the collection.** `children[].rules` takes the
   same DSL the root does, including `transition` and `skipWhen`, plus `rules.manual` with
   a hook of its own (`aggregatevos/<child>_rules_manual.go`). Two kinds are refused there

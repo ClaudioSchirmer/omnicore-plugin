@@ -59,6 +59,31 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Added
 
+- **A declared fact can now be ENFORCED declaratively: `rules.list[].kind: factRange`.**
+  The generator wrote the query and stopped there — the port answered a number and nothing
+  compared it, so every limit over rows in the table was a hand-written clause in the manual
+  hook, for an invariant whose shape never varies. The pattern was already in the build
+  (`unique.enforce` emits its precheck AND the call); this is the same wiring for the rest
+  of the facts. `fact:` names the entry of `service.facts`, `min:`/`max:` say what its
+  answer may be, and the generator writes the call — arguments filled from the entity's own
+  fields, exactly as the precheck does — the comparison and the notification.
+  - all three answer shapes emit a different body, and all three are covered: a plain
+    scalar; one carrying `found`, where the rule STANDS DOWN over an empty set instead of
+    comparing the zero; and a grouped one, which fires when any group is out of bounds —
+    the same invariant as `groupCap`, over rows that are already in the table.
+  - the notification is built as `range` builds it: `{min}`/`{max}` are filled from the same
+    bounds the emitted code enforces, so the text cannot drift from the check. `echoValue:
+    true` sends back the number the SERVICE answered — "the limit is 50" plus "you are at
+    51" — and in the grouped form it is the offending group's own value, with `attachTo`
+    naming the key field so the caller sees which group.
+  - `attachTo` is REQUIRED here: a fact's answer is not a field of the entity, so there is
+    no natural place for the notification to land. Declaring `fields` is refused for the
+    same reason.
+  - refused by name: a fact nobody declared, no bound at all, an `exists` (nothing to
+    compare — that one goes through `unique.enforce`), a `manual` fact that returns a
+    non-number, the rule on a CHILD's rule set (only the root is handed a service), and a
+    spec with the rule and no service.
+
 - **A fact can be computed PER GROUP, by the database: `service.facts[].groupBy`.** The
   language could ask "how many rows match" and could not ask "how many, per category" — so
   an author who needed a distribution had two ways out, and both were wrong: bend

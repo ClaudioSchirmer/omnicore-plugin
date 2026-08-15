@@ -272,6 +272,10 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 		if m != nil {
 			emitUniquePrecheck(s, m, rule)
 		}
+	case "factRange":
+		if m != nil {
+			emitFactRange(s, m, rule)
+		}
 	default:
 		// Unreachable: validation refuses an unknown kind. Emitting a marker
 		// rather than nothing means a gap can never pass silently.
@@ -1002,6 +1006,116 @@ func emitChildDuplicate(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t}")
 	s.L("\t\t}")
+}
+
+// emitFactRange enforces a limit on what the service answered.
+//
+// It is the other half of a fact: the port declares the question, this writes
+// the comparison. Without it every limit over rows already in the table — a cap
+// per category, a total that may not be exceeded — was a hand-written clause in
+// the manual hook, for an invariant whose shape never varies. The three answer
+// shapes a fact can have are all handled here, because leaving one out would
+// have meant a spec that validates and emits nothing.
+func emitFactRange(s *src, m *ir.Model, rule ir.Rule) {
+	f := rule.Fact
+	if f == nil {
+		return
+	}
+	args := factCallArgs(s, m, f)
+	call := fmt.Sprintf("service.(%sService).%s(%s)", m.Entity.Pascal, f.Name, strings.Join(args, ", "))
+
+	// The notification is built exactly as a range over a FIELD builds it: {min}
+	// and {max} are filled from the same bounds the comparison uses, so the text
+	// the caller reads states the limit the code enforced rather than a number
+	// someone typed into a catalog and has to keep in step by hand.
+	notif := notifLiteralFor(rule, m)
+
+	switch {
+	case f.Grouped():
+		s.L("\t\t// One group at a time: the database already reduced the table to one")
+		s.L("\t\t// row per key, so the loop compares answers rather than counting rows.")
+		s.L("\t\tfor _, g := range %s {", call)
+		s.L("\t\t\tif %s {", factBoundCond("g.Value", rule))
+		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
+			quote(rule.AttachTo), notif, factEcho(rule, "g.Value"))
+		s.L("\t\t\t\tbreak")
+		s.L("\t\t\t}")
+		s.L("\t\t}")
+	case f.ReturnsFound:
+		s.L("\t\t// No matching row means there is no %s to compare — the rule stands", f.Kind)
+		s.L("\t\t// down rather than treating the zero as an answer.")
+		s.L("\t\tif v, ok := %s; ok && %s {", call, factBoundCond("v", rule))
+		s.L("\t\t\tr.AddNotification(%s, %s%s)",
+			quote(rule.AttachTo), notif, factEcho(rule, "v"))
+		s.L("\t\t}")
+	default:
+		s.L("\t\tif v := %s; %s {", call, factBoundCond("v", rule))
+		s.L("\t\t\tr.AddNotification(%s, %s%s)",
+			quote(rule.AttachTo), notif, factEcho(rule, "v"))
+		s.L("\t\t}")
+	}
+}
+
+// factEcho passes the ANSWER back when the rule asked for it.
+//
+// What comes back is the number the service computed, not a field of the entity
+// — that is the whole difference from an ordinary echo, and it is the useful
+// half: "the limit is 50" plus "you are at 51" is a message someone can act on.
+// In the grouped form the offending group's own value is echoed, and WHICH group
+// it was is carried by attachTo, which is normally the key field itself.
+func factEcho(rule ir.Rule, v string) string {
+	if !rule.EchoValue {
+		return ""
+	}
+	return ", " + v
+}
+
+// factBoundCond renders the VIOLATION, not the allowed range: the emitted code
+// raises a notification, so the condition it guards is the failing one.
+func factBoundCond(v string, rule ir.Rule) string {
+	var conds []string
+	if rule.Min != nil {
+		conds = append(conds, fmt.Sprintf("%s < %s", v, number(*rule.Min, factNumberType(rule))))
+	}
+	if rule.Max != nil {
+		conds = append(conds, fmt.Sprintf("%s > %s", v, number(*rule.Max, factNumberType(rule))))
+	}
+	return strings.Join(conds, " || ")
+}
+
+// factNumberType keeps the literal in the fact's own arithmetic: comparing an
+// int64 count against 5.0 does not compile, and comparing a float64 average
+// against 5 loses the point of declaring a fraction.
+func factNumberType(rule ir.Rule) string {
+	if rule.Fact != nil {
+		return rule.Fact.ReturnType
+	}
+	return "float64"
+}
+
+// factCallArgs fills a fact's parameters from the entity being written, the
+// same way the unique precheck does — a filter names a field, so the value is
+// the one this write carries.
+func factCallArgs(s *src, m *ir.Model, f *ir.Fact) []string {
+	var args []string
+	needsSelf := false
+	for _, p := range f.Params {
+		if p.Role == "exclude-self" {
+			needsSelf = true
+			args = append(args, "selfID")
+			continue
+		}
+		args = append(args, wireValue(fieldNamed(m, p.Field), "e"))
+	}
+	if needsSelf {
+		s.L("\t\t// On an insert there is no row yet, so there is nothing to exclude —")
+		s.L("\t\t// and the id is not minted until after the rules run.")
+		s.L("\t\tvar selfID domain.ID")
+		s.L("\t\tif id := e.GetID(); id != nil {")
+		s.L("\t\t\tselfID = *id")
+		s.L("\t\t}")
+	}
+	return args
 }
 
 // emitGroupCap writes "at most N of these per key".

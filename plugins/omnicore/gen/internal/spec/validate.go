@@ -1178,6 +1178,8 @@ var aggregateWideKinds = map[string]string{
 		"naming the collection: rules.list[].fields: [%s]",
 	"ownerCheck": "it compares the CALLER against the row's owner, and the owner is a " +
 		"field of the entity — declare it at the root",
+	"factRange": "it asks the domain service, and only the root is handed one — declare " +
+		"it at the root, where the fact's arguments are fields of the entity",
 }
 
 func validateAggregateWideKinds(c Child, where string, ps *Problems) {
@@ -1289,6 +1291,17 @@ func validateRuleScope(r Rule, w string, ps *Problems) {
 }
 
 func validateRuleFields(r Rule, scopeFields []Field, w string, ps *Problems) {
+	// A factRange names a FACT, not a field: the subject of the rule is a number
+	// the service answers, and where the notification lands is attachTo's job.
+	if r.Kind == "factRange" {
+		if len(r.Fields) > 0 {
+			ps.BlockerFix(w+".fields",
+				"a factRange reads a fact, not a field of the entity",
+				"drop fields — name the fact with fact:, and the field the answer is "+
+					"about with attachTo:")
+		}
+		return
+	}
 	if len(r.Fields) == 0 {
 		ps.Blockerf(w+".fields", "the rule names no field")
 		return
@@ -1302,6 +1315,65 @@ func validateRuleFields(r Rule, scopeFields []Field, w string, ps *Problems) {
 		if findField(scopeFields, fn) == nil {
 			ps.Blockerf(w+".fields", "%q does not name a field in this scope", fn)
 		}
+	}
+}
+
+// validateFactRange keeps the rule and the fact it reads in step.
+//
+// The rule is the half that was missing: the language could DECLARE a count, a
+// sum or a per-group aggregate and had no way to say what the number may be, so
+// every author with a limit to enforce wrote the comparison by hand in the
+// manual hook — for an invariant whose shape is always the same.
+func validateFactRange(s *Spec, r Rule, scopeFields []Field, w string, ps *Problems) {
+	if r.Notification == "" {
+		ps.Blockerf(w+".notification", "the rule needs the notification it raises")
+	}
+	if r.Min == nil && r.Max == nil {
+		ps.BlockerFix(w,
+			"the rule says nothing about what the fact's answer may be",
+			"set max: (a ceiling), min: (a floor), or both")
+	}
+	if r.AttachTo == "" {
+		ps.BlockerFix(w+".attachTo",
+			"a fact's answer is not a field, so the notification has nowhere to land",
+			"set attachTo: <field> — the field the caller should look at when the "+
+				"limit is exceeded")
+	} else if findField(scopeFields, r.AttachTo) == nil {
+		ps.Blockerf(w+".attachTo", "%q does not name a field in this scope", r.AttachTo)
+	}
+	if r.Fact == "" {
+		ps.BlockerFix(w+".fact",
+			"the rule needs the fact whose answer it limits",
+			"set fact: <name> — one of service.facts")
+		return
+	}
+	if s.Service == nil || !s.Service.Required {
+		ps.BlockerFix(w+".fact",
+			"the rule reads a fact and the entity declares no service",
+			"add service.required: true with the fact this rule names")
+		return
+	}
+	var found *Fact
+	for i := range s.Service.Facts {
+		if s.Service.Facts[i].Name == r.Fact {
+			found = &s.Service.Facts[i]
+			break
+		}
+	}
+	if found == nil {
+		ps.Blockerf(w+".fact", "%q does not name a fact of this entity's service", r.Fact)
+		return
+	}
+	if found.Kind == "exists" {
+		ps.BlockerFix(w+".fact",
+			"exists answers yes or no, and a range has nothing to compare it against",
+			"limit a count, a sum, an avg, a min or a max — or enforce the exists "+
+				"through unique.enforce, which is what it is for")
+	}
+	if found.Kind == "manual" && found.Returns != "int64" && found.Returns != "float64" {
+		ps.BlockerFix(w+".fact",
+			fmt.Sprintf("%s returns %s, which is not a number to compare", r.Fact, found.Returns),
+			"limit a fact that answers int64 or float64")
 	}
 }
 
@@ -1331,6 +1403,8 @@ func validateNotificationRef(s *Spec, name, where string, ps *Problems) {
 
 func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Problems) {
 	switch r.Kind {
+	case "factRange":
+		validateFactRange(s, r, scopeFields, w, ps)
 	case "requiredIf":
 		if r.Other == "" {
 			ps.BlockerFix(w+".other",
