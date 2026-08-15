@@ -1741,7 +1741,35 @@ func validateService(s *Spec, ps *Problems) {
 				ps.Blockerf(where, "%q does not name a field of this entity", fl)
 			}
 		}
+		validateAggregatedField(s, f, where, ps)
 	}
+}
+
+// validateAggregatedField refuses an aggregation the framework cannot carry.
+//
+// It computes in the DATABASE and comes back in one of three carriers: a count
+// (int64), an exact integer, or a float. There is no carrier for text, for a
+// timestamp or for a boolean — so `max` over a name reads a float out of a
+// string column, which compiles and then means nothing. The check exists
+// because the spec was green for exactly that: kind and field type were each
+// validated alone, and nothing asked whether the pair made sense.
+func validateAggregatedField(s *Spec, f Fact, where string, ps *Problems) {
+	if f.Field == "" || f.Kind == "exists" || f.Kind == "count" || f.Kind == "manual" {
+		return
+	}
+	fld := findField(s.Fields, f.Field)
+	if fld == nil {
+		return // already reported as an unknown field
+	}
+	switch fld.Type {
+	case "int", "int64", "float64":
+		return
+	}
+	ps.BlockerFix(where+".field",
+		fmt.Sprintf("%s cannot aggregate %s, which is %s", f.Kind, f.Field, fld.Type),
+		"aggregate a numeric field (int, int64, float64) — the database computes "+
+			"these and the framework carries the answer as an exact integer or a float; "+
+			"for anything else, make it a manual fact and write the query you mean")
 }
 
 // validateManualFact keeps the ELSE honest.

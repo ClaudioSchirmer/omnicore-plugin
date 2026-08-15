@@ -394,6 +394,31 @@ service:
       filters: [Situacao]
       excludeSelf: true
       activeOnly: true
+    # The aggregating kinds — sum, avg, min, max — compute in the DATABASE over
+    # the rows the filters select. Two things about them are decided for you and
+    # are worth knowing before you read the generated port:
+    #
+    #   * the RETURN TYPE follows the kind, not the column. An average is
+    #     fractional even over an integer field (float64); a sum, a minimum or a
+    #     maximum over int or int64 is exact (int64). Only a numeric field can be
+    #     aggregated — max over a name or a date is refused, because the
+    #     framework carries an aggregate as an exact integer or a float and has
+    #     no carrier for text or for a timestamp.
+    #   * min, max and avg answer `(value, bool)`. Over an empty set SQL says
+    #     NULL, and a zero returned on its own reads as a real result — so the
+    #     rule that consults the fact is made to decide what "there was nothing
+    #     to average" means. sum and count return the value alone: there, zero
+    #     IS the answer.
+    - name: CargaHorariaMedia
+      kind: avg
+      description: Carga horária média dos professores ativos.
+      field: CargaHoraria
+      activeOnly: true
+    - name: MaiorCargaHoraria
+      kind: max
+      description: A maior carga horária em vigor.
+      field: CargaHoraria
+      activeOnly: true
 
 read:
   backing: mongo

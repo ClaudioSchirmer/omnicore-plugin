@@ -239,7 +239,7 @@ func emitServiceStub(s *src, m *ir.Model) {
 	s.Blank()
 	for _, f := range m.Service.Facts {
 		s.L("func (%s) %s(%s) %s { return %s }",
-			name, f.Name, stubParams(f), f.ReturnType, stubZero(f.ReturnType))
+			name, f.Name, stubParams(f), factResults(f), stubResult(f))
 	}
 	s.Blank()
 }
@@ -254,6 +254,16 @@ func stubParams(f ir.Fact) string {
 		_ = i
 	}
 	return strings.Join(out, ", ")
+}
+
+// stubResult answers "nothing found" in whatever shape the fact declares. For
+// a fact that carries Found, that is the zero AND false — a stub claiming a
+// minimum exists would let a rule through for a reason no test wrote down.
+func stubResult(f ir.Fact) string {
+	if f.ReturnsFound {
+		return stubZero(f.ReturnType) + ", false"
+	}
+	return stubZero(f.ReturnType)
 }
 
 func stubZero(t string) string {

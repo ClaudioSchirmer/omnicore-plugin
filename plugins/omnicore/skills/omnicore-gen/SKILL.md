@@ -163,6 +163,15 @@ Three things to get right, because they are the ones that cost a migration later
   The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
   `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
   refused — the build used to accept the string and silently emit only the constraint.
+- **An aggregating fact answers in the shape the KIND decides, not the column.** `sum`,
+  `avg`, `min` and `max` compute in the database over a numeric field (`int`, `int64`,
+  `float64` — anything else is refused, because the framework carries an aggregate as an
+  exact integer or a float and has no carrier for text or a timestamp). `avg` is `float64`
+  even over an integer field; `sum`/`min`/`max` over any integer width is exact `int64`.
+  And **`min`, `max` and `avg` return `(value, bool)`** — over an empty set SQL says NULL,
+  so the rule consulting the fact has to decide what "there was nothing to average" means
+  rather than reading a zero nobody computed. `sum`, `count` and `exists` answer with the
+  value alone: there, the zero IS the answer.
 - **A state machine wants a closed, PRESENT state.** `transition` requires a non-nullable,
   string-backed enum declared in the same spec, and every state in the map must be one of
   its member values. "No state yet" is an explicit member, never a nullable field.

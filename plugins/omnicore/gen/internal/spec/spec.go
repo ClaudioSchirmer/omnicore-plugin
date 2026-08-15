@@ -532,9 +532,20 @@ type Fact struct {
 	Kind string `yaml:"kind"` // exists | count | sum | avg | min | max | manual
 	// Returns is required for a manual fact: the generator has to know the
 	// signature it is declaring, and for the other kinds it follows from the kind.
+	//
+	// For an aggregating kind it follows the KIND, not the column: an average is
+	// float64 even over an integer field, while sum/min/max over int or int64 is
+	// exact int64. And min, max and avg answer `(value, bool)` — over an empty
+	// set SQL says NULL, and a zero returned alone reads as a real result.
 	Returns string `yaml:"returns"` // bool | int64 | float64 | string
 	// Field is the field the fact aggregates — required for sum, avg, min and
 	// max; refused for manual, whose body is hand-written.
+	//
+	// It must be numeric (int, int64, float64). The database computes the
+	// aggregate and the framework carries it back as an exact integer or a
+	// float; there is no carrier for text, a timestamp or a boolean, so max over
+	// a name or a date is refused rather than emitted as something that compiles
+	// and means nothing.
 	Field string `yaml:"field"`
 	// Filters names the fields the query narrows by; each becomes a parameter
 	// of the generated method.

@@ -874,13 +874,27 @@ type Fact struct {
 	// refuses to build until a human writes it. That is deliberate — a missing
 	// method fails loudly, and a query against the wrong store compiles, returns
 	// and means nothing.
-	Manual      bool
-	Kind        string
-	Field       string
-	ReturnType  string
-	ActiveOnly  bool
-	Description string
-	Params      []FactParam
+	Manual bool
+	Kind   string
+	Field  string
+	// ReturnType is the VALUE the fact answers with. It is decided by the kind
+	// and the aggregated field together, never by the field alone: an average
+	// over an integer column is fractional, and a sum over any integer width is
+	// exact int64.
+	ReturnType string
+	// ReturnsFound makes the port answer (value, found) instead of value alone.
+	//
+	// It is on for min, max and avg, and off for sum, count and exists, because
+	// that is where the empty set is ambiguous. SQL answers NULL over no rows,
+	// which the framework's carriers surface as Found=false with a zero Value:
+	// for a sum, zero IS the empty sum; for a minimum, a maximum or an average,
+	// zero is indistinguishable from a real one. Returning it alone hands a rule
+	// a number nobody computed — quietly, which is why this is in the signature
+	// rather than in a comment.
+	ReturnsFound bool
+	ActiveOnly   bool
+	Description  string
+	Params       []FactParam
 }
 
 // FactParam is one argument the rule passes in.
@@ -903,7 +917,8 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 			Name: f.Name, Kind: f.Kind, Field: f.Field,
 			Manual:     f.Kind == "manual",
 			ActiveOnly: f.ActiveOnly, Description: f.Description,
-			ReturnType: factReturnType(f, m),
+			ReturnType:   factReturnType(f, m),
+			ReturnsFound: factReturnsFound(f.Kind),
 		}
 		for _, filter := range f.Filters {
 			if fld := lookupField(m, filter); fld != nil {
@@ -933,12 +948,37 @@ func factReturnType(f spec.Fact, m *Model) string {
 		return "bool"
 	case "count":
 		return "int64"
+	case "avg":
+		// An average is fractional even over an integer column, which is what
+		// the framework offers: Avg returns float64 and there is no AvgInt. The
+		// field's own width says nothing about the answer's.
+		return "float64"
 	default:
+		// sum, min, max: EXACT over any integer width, fractional otherwise.
+		// int and int64 both land on the Int carriers, whose Value is int64 —
+		// the sum of ints does not fit an int by rights, and narrowing the
+		// answer to the column's width is how a total silently wraps.
 		if fld := lookupField(m, f.Field); fld != nil {
-			return fld.BaseGoType
+			switch fld.BaseGoType {
+			case "int", "int64":
+				return "int64"
+			}
 		}
 		return "float64"
 	}
+}
+
+// factReturnsFound reports whether the empty set is ambiguous for this kind.
+//
+// exists and count answer for themselves (false, 0). A sum over nothing is 0 by
+// definition. A minimum, a maximum or an average over nothing is NOT zero — SQL
+// says NULL — so those three carry the second return.
+func factReturnsFound(kind string) bool {
+	switch kind {
+	case "min", "max", "avg":
+		return true
+	}
+	return false
 }
 
 // appendUniqueClauses turns a unique field with a service pre-check into a real

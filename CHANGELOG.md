@@ -104,6 +104,33 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Fixed
 
+- **Four of the six aggregating-fact shapes passed a green `check` and did not compile.**
+  `service.facts` has accepted `sum`, `avg`, `min` and `max` all along, but the return type
+  was taken from the aggregated COLUMN and the framework function was named by appending
+  `Int` to the kind. So `avg` over an `int64` emitted `read.AvgInt`, which has never
+  existed — an average is fractional even over an integer column, which is why the
+  framework offers only `Avg`. `sum` over a plain `int` returned a `float64` into an `int`
+  signature. `min`/`max` over a `time` or a `string` returned a `float64` into that type,
+  and the port did not even import `time`. Only `int64` and `float64` worked, and nothing
+  covered the rest — no fixture declared an aggregating fact at all. Now:
+  - the return type follows the KIND: `avg` is always `float64`; `sum`/`min`/`max` over
+    `int` or `int64` is exact `int64` (narrowing a total to the column's width is how one
+    silently wraps); over `float64` it is `float64`.
+  - a non-numeric field is REFUSED by `check`, naming the field and its type. The framework
+    carries an aggregate as `CountAgg`, `IntAgg` or `FloatAgg` and has no carrier for text,
+    a timestamp or a boolean — emitting one would compile and mean nothing.
+  - the example and the coverage matrix now declare an `avg` and a `max` over an integer
+    field, so the path is generated, built and DDL'd by the gate rather than by a user.
+
+- **`min`, `max` and `avg` reported an empty set as zero.** The framework's carriers pair
+  every aggregate with `Found`, because SQL answers NULL over no rows: for a sum the zero
+  IS the empty sum, but for a minimum, a maximum or an average it is indistinguishable from
+  a real result. The generated port returned `Value` alone, so a rule asking "is the lowest
+  grade below 5?" got a yes from an empty table. Those three kinds now answer
+  `(value, bool)` — the caller is made to decide what "there was nothing to average" means.
+  `sum`, `count` and `exists` are unchanged, and the generated service stub answers
+  `0, false` so a test still fails for the rule under test.
+
 - **A `groupCap` with neither `groupBy` nor `only` generated a tree that did not compile,
   past a green `check`.** That shape is the cap on the collection's own SIZE — "at most 30
   photos" — and the validator accepts it deliberately (it asks only that the author say so

@@ -82,7 +82,7 @@ func emitServicePort(m *ir.Model) (fsplan.File, error) {
 		for _, line := range wrap(factDoc(f), 72) {
 			s.L("\t// %s", line)
 		}
-		s.L("\t%s(%s) %s", f.Name, factParams(f), f.ReturnType)
+		s.L("\t%s(%s) %s", f.Name, factParams(f), factResults(f))
 	}
 	s.L("}")
 
@@ -100,8 +100,24 @@ func factDoc(f ir.Fact) string {
 	case "count":
 		return fmt.Sprintf("%s counts the matching rows.", f.Name)
 	default:
-		return fmt.Sprintf("%s is the %s of %s over the matching rows.", f.Name, f.Kind, f.Field)
+		doc := fmt.Sprintf("%s is the %s of %s over the matching rows.", f.Name, f.Kind, f.Field)
+		if f.ReturnsFound {
+			doc += " The second return is false when NO row matched: over an empty set " +
+				"there is no " + f.Kind + ", and the zero beside it is not one."
+		}
+		return doc
 	}
+}
+
+// factResults renders what a fact answers with. The second return exists only
+// where the empty set is ambiguous — see ir.Fact.ReturnsFound — and it is
+// rendered here rather than at each call site so the port, the implementation
+// and the generated stub cannot disagree about the signature.
+func factResults(f ir.Fact) string {
+	if f.ReturnsFound {
+		return "(" + f.ReturnType + ", bool)"
+	}
+	return f.ReturnType
 }
 
 func factParams(f ir.Fact) string {
@@ -208,7 +224,7 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 			"a plausible answer instead would skip the very invariant this exists to "+
 			"enforce.",
 	)
-	s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), f.ReturnType)
+	s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), factResults(f))
 
 	s.L("\tconds := []criteria.Expr{")
 	for _, p := range f.Params {
@@ -259,7 +275,13 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 		s.L("\tif err := s.repo.Loader.Aggregate(s.queryContext(), q, a); err != nil {")
 		s.L("\t\tpanic(%s)", quote(fmt.Sprintf("%s: %s probe failed", m.Entity.Pascal, f.Name)))
 		s.L("\t}")
-		s.L("\treturn a.Value")
+		if f.ReturnsFound {
+			s.L("\t// Found is the answer to \"was there anything to %s?\" — over no rows", f.Kind)
+			s.L("\t// SQL says NULL, and a zero returned alone would read as a real result.")
+			s.L("\treturn a.Value, a.Found")
+		} else {
+			s.L("\treturn a.Value")
+		}
 	}
 	s.L("}")
 	s.Blank()
@@ -310,7 +332,7 @@ func emitServiceStubFile(m *ir.Model) (fsplan.File, error) {
 		}
 		s.L("//")
 		s.L("// TODO(%s): implement. The request context is s.queryContext().", f.Name)
-		s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), f.ReturnType)
+		s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), factResults(f))
 		s.L("\tpanic(%s)", quote(fmt.Sprintf(
 			"%s.%s is not implemented yet — see the generation report", m.Entity.Pascal, f.Name)))
 		s.L("}")
