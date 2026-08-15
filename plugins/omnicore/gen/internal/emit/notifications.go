@@ -198,10 +198,47 @@ func catalogEntries(m *ir.Model) map[string][]MapEntry {
 		// The entity name doubles as the context label of every error envelope;
 		// without this entry the raw Go type name leaks to the end user.
 		entries = append(entries, MapEntry{Key: m.Entity.Pascal, Value: m.Entity.Pascal})
-		for _, f := range m.Fields {
+		// EVERY field that carries a labelKey, not just the root's columns.
+		//
+		// The tag is emitted on the fields of a facet and of a collection too,
+		// and the catalog only ever received the root's — so those keys resolved
+		// to nothing and the raw Go identifier reached the end user:
+		// `ProposalProponentDocumentField` as a CSV column header. A label that
+		// is declared and not translated is worse than one that does not exist,
+		// because nothing reports it: the export succeeds, the data is right,
+		// and the heading is an internal name.
+		for _, f := range labelledFields(m) {
 			entries = append(entries, MapEntry{Key: f.LabelKey, Value: labelText(f, lang)})
 		}
 		out[lang] = entries
+	}
+	return out
+}
+
+// labelledFields is every field this entity declares a labelKey on, in a stable
+// order and without duplicates.
+//
+// A MOUNTED collection is included deliberately: the entry type belongs to the
+// other role, but the catalog is per-entity and a reader of THIS role's export
+// needs the heading translated just the same. The merge into the catalog is
+// key-wise, so both roles contributing the same key is a no-op rather than a
+// conflict.
+func labelledFields(m *ir.Model) []ir.Field {
+	var out []ir.Field
+	seen := map[string]bool{}
+	add := func(fs []ir.Field) {
+		for _, f := range fs {
+			if f.LabelKey == "" || seen[f.LabelKey] {
+				continue
+			}
+			seen[f.LabelKey] = true
+			out = append(out, f)
+		}
+	}
+	add(m.AllOwnerFields()) // the root's own columns and every facet on it
+	add(m.Runtime)          // never persisted, but a rule can attach a notification to one
+	for _, c := range m.Children {
+		add(c.Fields) // already carries the fields of a facet declared inside it
 	}
 	return out
 }

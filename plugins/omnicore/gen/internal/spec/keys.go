@@ -159,4 +159,3 @@ func firstSentence(doc *ast.CommentGroup) string {
 	}
 	return strings.TrimSpace(joined)
 }
-

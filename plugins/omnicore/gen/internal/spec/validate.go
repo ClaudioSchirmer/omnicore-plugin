@@ -1192,15 +1192,46 @@ func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 			if r.Cap <= 0 {
 				ps.BlockerFix(w+".cap", "a cap needs a positive limit", "set cap: 1 or more")
 			}
-			if len(r.GroupBy) == 0 {
-				ps.BlockerFix(w+".groupBy",
-					"a cap needs the key it counts per",
-					"name one or more fields of the child, e.g. groupBy: [Tipo]")
-			}
+			// groupBy is OPTIONAL: with none, the cap is on the collection as a
+			// whole, which is what "at most N of these" means when no key is
+			// named. It used to be required, and the only way to write that rule
+			// was to group by something — which caps every value of that
+			// something equally, quietly enforcing a rule nobody declared.
 			for _, g := range r.GroupBy {
 				if findField(c.Fields, g) == nil {
 					ps.Blockerf(w+".groupBy", "%q does not name a field of %s", g, c.Name)
 				}
+			}
+			// A cap with neither a key nor a restriction is a limit on the
+			// collection's SIZE. That is a legitimate rule ("at most 10 photos"),
+			// and it is also what you get by forgetting the restriction you meant
+			// — so it is allowed only when the author says out loud that it is
+			// deliberate. The description is where they say it, and it is the
+			// text the report quotes back to a reviewer.
+			if len(r.GroupBy) == 0 && r.Only == nil && strings.TrimSpace(r.Description) == "" {
+				ps.BlockerFix(w,
+					"the cap counts every entry of the collection: no key, no restriction",
+					"if a limit on the collection's SIZE is what you mean, say so in "+
+						"description: and it is accepted — otherwise add groupBy (a cap per "+
+						"key) or only (a cap on the entries that match)")
+			}
+		}
+		if r.Only != nil {
+			if r.Kind != "groupCap" {
+				ps.BlockerFix(w+".only",
+					fmt.Sprintf("only restricts which entries are COUNTED, and %s counts nothing", r.Kind),
+					"drop it, or use kind: groupCap")
+			}
+			if r.Only.Field == "" || r.Only.Equals == "" {
+				ps.BlockerFix(w+".only",
+					"a restriction needs the field and the value that makes an entry count",
+					"only: {field: Situacao, equals: em_analise}")
+			} else if f := findField(c.Fields, r.Only.Field); f == nil {
+				ps.Blockerf(w+".only.field", "%q does not name a field of %s", r.Only.Field, c.Name)
+			} else if f.Type != "string" {
+				ps.BlockerFix(w+".only.field",
+					"the restriction compares text, so the field it names is text",
+					"restrict on a status or a type, not on a number or a date")
 			}
 		}
 	case "comparison":

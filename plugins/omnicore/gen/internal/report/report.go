@@ -327,6 +327,22 @@ func renderCheck(b *strings.Builder, in Input) {
 		b.WriteString("\n")
 	}
 
+	// Newly generated tests can collide with ones an author wrote to fill the
+	// same gap. The compiler says so, but it says it as "redeclared in this
+	// block", which reads like a generator bug rather than a redundancy.
+	if m.HasPerChild() {
+		b.WriteString("### Per-entry command tests are generated now\n\n")
+		b.WriteString("The three verbs that address ONE entry — add, change, remove — have " +
+			"generated tests in `" + fmt.Sprintf("internal/application/commands/%s_commands_test.go",
+			m.Entity.Snake) + "`: the entry is applied and projected back, the change keeps its " +
+			"id, an unknown id projects nothing.\n\n")
+		b.WriteString("**If you wrote your own tests for those mappers before this run**, the " +
+			"package will not compile until you delete them — Go reports it as `redeclared in " +
+			"this block`, which reads like a generator bug and is not one. The generated cases " +
+			"cover the same ground; anything yours asserts beyond them is worth keeping under a " +
+			"different name.\n\n")
+	}
+
 	b.WriteString("## What to check\n\n")
 
 	// One line per raw value object. The generator cannot know whether a set is

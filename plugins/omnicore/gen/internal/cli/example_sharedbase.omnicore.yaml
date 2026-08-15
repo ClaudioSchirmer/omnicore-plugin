@@ -289,6 +289,17 @@ rules:
       groupBy: [Periodo]
       cap: 2
       notification: DemasiadasTurmasNotification
+    # `only` conta SÓ as entradas que casam. Sem ele o teto vale para todo valor
+    # do campo agrupado igualmente — "no máximo 3 em análise" viraria também "no
+    # máximo 3 recusadas", uma regra que ninguém declarou. Com `only` e sem
+    # `groupBy`, o teto é sobre a coleção inteira restrita ao valor.
+    - id: no-maximo-uma-turma-da-manha
+      kind: groupCap
+      scope: [insertOrUpdate]
+      fields: [Turma]
+      cap: 1
+      only: {field: Periodo, equals: manha}
+      notification: DemasiadasTurmasNotification
     # ownerCheck is Layer 2: the permission says who may attempt the verb at all,
     # this says who may attempt it on a row that is not theirs. adminField is the
     # bypass, and it is a separate question from the permission.

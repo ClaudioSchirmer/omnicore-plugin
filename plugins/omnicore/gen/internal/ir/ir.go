@@ -102,8 +102,8 @@ type Field struct {
 	Claim          string
 	// AssignedFrom names where the server reads this field's value when the
 	// client is not allowed to send it. Empty for an ordinary field.
-	AssignedFrom   string
-	LivesOn        string
+	AssignedFrom string
+	LivesOn      string
 	// Facet names the 1:1 facet a field is stored in, when it is not stored on
 	// its owner's own table. The Go type carries it like any other field — the
 	// split is physical — so only the two emitters that write TABLES care.
@@ -147,6 +147,13 @@ type Rule struct {
 	Collection string
 	GroupBy    []string
 	Cap        int
+	// OnlyField/OnlyEquals restrict WHICH entries a set-wide rule counts. A cap
+	// with no restriction applies to every value of the grouping field equally,
+	// which is a different rule from the one a domain usually means: "at most 3
+	// under review" is not "at most 3 of each status".
+	OnlyFieldName string
+	OnlyField     *Field
+	OnlyEquals    string
 	// Hoisted records that this rule was declared on a COLLECTION and moved to
 	// the root, because only the root can see what the entries were before the
 	// write. The report says so: a rule that runs somewhere other than where it
@@ -299,6 +306,7 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	m.Service = resolveService(s, m)
 	m.Clauses = resolveClauses(s, m)
 	m.Clauses = mergeClauses(m.Clauses, hoisted)
+	bindOnlyFields(m)
 	m.Clauses = appendUniqueClauses(m)
 	m.ManualRules = resolveManualRules(s.Rules)
 	m.HasHookFile = len(m.ManualRules) > 0
@@ -385,7 +393,7 @@ func resolveField(entity string, f spec.Field) Field {
 		JSONName: naming.Camel(f.Name), LabelKey: label,
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
 		AssignedFrom: f.AssignedFrom,
-		LivesOn: f.LivesOn,
+		LivesOn:      f.LivesOn,
 	}
 	if f.Unique != nil {
 		scope := f.Unique.Scope
@@ -456,6 +464,9 @@ func resolveClauseSet(rs spec.Rules, lookup func(string) *Field) []Clause {
 			if len(r.Fields) > 0 {
 				rule.Collection = r.Fields[0]
 			}
+		}
+		if r.Only != nil {
+			rule.OnlyFieldName, rule.OnlyEquals = r.Only.Field, r.Only.Equals
 		}
 		for _, fn := range r.Fields {
 			if f := lookup(fn); f != nil {
@@ -1058,8 +1069,8 @@ type Child struct {
 	// child's own, called from its BuildRules.
 	ManualRules []ManualRule
 	HasHookFile bool
-	Segment               string // the WIRE name of the collection
-	DocSegment            string // the key the projection actually stores it under
+	Segment     string // the WIRE name of the collection
+	DocSegment  string // the key the projection actually stores it under
 }
 
 // Sibling is a 1:1 facet stored in its own table, sharing the owner's key.
@@ -1189,6 +1200,30 @@ func hoistToRoot(rs spec.Rules, c *Child) []Clause {
 	return clauses
 }
 
+// bindOnlyFields resolves a set-wide rule's restriction against the COLLECTION
+// it counts, which is the only scope where that field exists — the root's own
+// lookup would find nothing and the restriction would quietly not apply.
+func bindOnlyFields(m *Model) {
+	for i := range m.Clauses {
+		for j := range m.Clauses[i].Rules {
+			r := &m.Clauses[i].Rules[j]
+			if r.OnlyFieldName == "" || r.Collection == "" {
+				continue
+			}
+			for ci := range m.Children {
+				if m.Children[ci].Name != r.Collection {
+					continue
+				}
+				for fi := range m.Children[ci].Fields {
+					if m.Children[ci].Fields[fi].Name == r.OnlyFieldName {
+						r.OnlyField = &m.Children[ci].Fields[fi]
+					}
+				}
+			}
+		}
+	}
+}
+
 // mergeClauses folds hoisted clauses into the root's, by gate: two clauses on
 // the same verb would emit two blocks that run in an order nobody declared.
 func mergeClauses(into, extra []Clause) []Clause {
@@ -1222,6 +1257,16 @@ func resolveClausesFor(rs spec.Rules, scope []Field) []Clause {
 		}
 		return nil
 	})
+}
+
+// HasPerChild reports whether any collection is edited one entry at a time.
+func (m *Model) HasPerChild() bool {
+	for _, c := range m.Children {
+		if c.PerChild {
+			return true
+		}
+	}
+	return false
 }
 
 // AllOwnerFields is the root's own columns plus every sibling facet: together

@@ -159,6 +159,11 @@ Three things to get right, because they are the ones that cost a migration later
   `/<entity>/:id/<collection>[/:entryId]`, a duplicate answer on ADD (declare
   `duplicateNotification`) and a 404 for an entry that is not there. Per-child needs
   `businessIdentity`: it is what "the same entry" means.
+- **A cap counts what you tell it to count.** `groupCap` takes `cap` plus, optionally,
+  `groupBy` (a cap per key) and `only: {field: X, equals: v}` (count only the entries that
+  match). "At most 3 proposals under review" is `cap: 3` + `only`, with no `groupBy` — with
+  a `groupBy: [Status]` and no `only` the same cap lands on accepted and rejected too, a
+  rule nobody declared and nothing reports.
 - **Rules on a collection are declared on the collection.** `children[].rules` takes the
   same DSL the root does, including `transition` and `skipWhen`, plus `rules.manual` with
   a hook of its own (`aggregatevos/<child>_rules_manual.go`). Two kinds are refused there

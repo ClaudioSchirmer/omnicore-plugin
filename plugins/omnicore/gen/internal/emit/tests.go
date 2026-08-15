@@ -576,6 +576,8 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		}
 	}
 
+	emitPerChildOpTests(s, m)
+
 	return goFile("internal/application/commands/"+m.Entity.Snake+"_commands_test.go",
 		fsplan.Owned, "tests for the command mappers", s)
 }
@@ -1553,4 +1555,168 @@ func notificationRef(m *ir.Model, n ir.Notification) string {
 	default:
 		return n.Package + "." + n.Name
 	}
+}
+
+// emitPerChildOpTests covers the three verbs that address ONE entry.
+//
+// They had no generated tests at all, and the gap was invisible in the usual
+// way: the root's command tests are thorough, so a coverage report looked
+// healthy while AddXCommand, ChangeXCommand and RemoveXCommand — the mappers a
+// per-entry collection is edited through — sat at zero. Two consecutive real
+// runs closed it by hand, writing the same four shapes each time. That is the
+// definition of something a generator should be writing.
+// It writes into the command-test file the generator already owns, and declares
+// NOTHING at package scope — no fixture constant, no helper function. A project
+// that closed this gap by hand before the generator learned to (both real runs
+// did) would otherwise stop compiling on the upgrade, over a name nobody chose
+// deliberately. Test function names can still coincide; that one the compiler
+// reports honestly, and the answer is to delete the now-redundant file.
+func emitPerChildOpTests(s *src, m *ir.Model) {
+	for _, c := range m.Children {
+		if !c.PerChild {
+			continue
+		}
+		emitAddChildOpTest(s, m, c)
+		emitChangeChildOpTest(s, m, c)
+		emitRemoveChildOpTest(s, m, c)
+	}
+}
+
+// ownerFixture seeds a loaded aggregate, inline. The verbs it feeds always run
+// against a row that was read first, so the fixture carries an id like one.
+func ownerFixture(s *src, m *ir.Model) {
+	s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
+	s.L("\te.SetID(domain.NewID(%s))", quote(fixtureOwnerID))
+}
+
+// fixtureOwnerID is a valid UUIDv7 the framework accepts. It is a constant
+// rather than a generated one because a test that reads differently on every
+// run cannot be diffed.
+const fixtureOwnerID = "019ffd00-0000-7000-8000-000000000000"
+
+// seededEntryID is the id the change/remove fixtures address.
+const seededEntryID = "019ffd00-0000-7000-8000-0000000000a1"
+
+func emitAddChildOpTest(s *src, m *ir.Model, c ir.Child) {
+	s.Doc(fmt.Sprintf("Add%sCommand appends the entry and projects it back with the id "+
+		"the server minted for it — the id the caller addresses it by afterwards.", c.OpBase))
+	s.L("func TestAdd%sCommand_AppliesAndProjects(t *testing.T) {", c.OpBase)
+	s.L("\tctx := &configuration.AppContext{}")
+	ownerFixture(s, m)
+	s.L("\tcmd := &Add%sCommand{%s: %s}", c.OpBase, c.Name, childInputLiteral(m, c, false))
+	s.L("\tif err := cmd.ApplyTo(ctx, e); err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
+	s.L("\t}")
+	s.L("\tout, err := cmd.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	s.L("\tif out.%sID.Value() != %s {", m.Entity.Pascal, quote(fixtureOwnerID))
+	s.L("\t\tt.Error(%s)", quote("the result does not carry the owner id"))
+	s.L("\t}")
+	for _, f := range c.Fields {
+		if f.Nullable {
+			continue // a nil sample proves nothing about the mapping
+		}
+		s.L("\tif out.%s.%s != %s {", c.Name, f.Name, literalFor(f))
+		s.L("\t\tt.Errorf(%s)", quote("the projected entry lost "+f.Name))
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+func emitChangeChildOpTest(s *src, m *ir.Model, c ir.Child) {
+	s.Doc(fmt.Sprintf("Change%sCommand replaces the named entry and KEEPS its id: the row "+
+		"is updated rather than removed and re-added, which is what makes the history read "+
+		"as a change.", c.OpBase))
+	s.L("func TestChange%sCommand_KeepsTheEntryID(t *testing.T) {", c.OpBase)
+	s.L("\tctx := &configuration.AppContext{}")
+	ownerFixture(s, m)
+	s.L("\tseeded := domain.WithID(")
+	s.L("\t\t%s.To%s(),", childInputLiteral(m, c, false), c.Name)
+	s.L("\t\tdomain.NewID(%s),", quote(seededEntryID))
+	s.L("\t)")
+	s.L("\te.AggregateConstructor([]domain.AggregateValueObject{seeded})")
+	s.Blank()
+	s.L("\tcmd := &Change%sCommand{", c.OpBase)
+	s.L("\t\t%sID: %s,", c.Name, quote(seededEntryID))
+	s.L("\t\t%s: %s,", c.Name, childInputLiteral(m, c, false))
+	s.L("\t}")
+	s.L("\tif err := cmd.ApplyTo(ctx, e); err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
+	s.L("\t}")
+	s.L("\tout, err := cmd.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	s.L("\tif out.%s.ID.Value() != %s {", c.Name, quote(seededEntryID))
+	s.L("\t\tt.Error(%s)", quote("the entry lost its id across the change"))
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
+
+	s.Doc(fmt.Sprintf("An id the collection does not hold leaves the result's %s "+
+		"zero-valued. The 404 is the handler's answer; what is checked here is that the "+
+		"projection does not invent an entry to fill the gap.", c.Name))
+	s.L("func TestChange%sCommand_UnknownIDProjectsNothing(t *testing.T) {", c.OpBase)
+	s.L("\tctx := &configuration.AppContext{}")
+	ownerFixture(s, m)
+	s.L("\tcmd := &Change%sCommand{%sID: %s, %s: %s}",
+		c.OpBase, c.Name, quote("019ffd00-0000-7000-8000-0000000000ff"), c.Name,
+		childInputLiteral(m, c, true))
+	s.L("\tout, err := cmd.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	s.L("\tif !out.%s.ID.IsEmpty() {", c.Name)
+	s.L("\t\tt.Errorf(%s, out.%s)", quote("an unknown id projected an entry: %+v"), c.Name)
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
+}
+
+func emitRemoveChildOpTest(s *src, m *ir.Model, c ir.Child) {
+	s.Doc(fmt.Sprintf("Remove%sCommand takes the entry out and answers with the owner "+
+		"alone — the entry it names is gone, so there is nothing to project.", c.OpBase))
+	s.L("func TestRemove%sCommand_AppliesAndProjects(t *testing.T) {", c.OpBase)
+	s.L("\tctx := &configuration.AppContext{}")
+	ownerFixture(s, m)
+	s.L("\tseeded := domain.WithID(")
+	s.L("\t\t%s.To%s(),", childInputLiteral(m, c, false), c.Name)
+	s.L("\t\tdomain.NewID(%s),", quote(seededEntryID))
+	s.L("\t)")
+	s.L("\te.AggregateConstructor([]domain.AggregateValueObject{seeded})")
+	s.Blank()
+	s.L("\tcmd := &Remove%sCommand{%sID: %s}", c.OpBase, c.Name, quote(seededEntryID))
+	s.L("\tif err := cmd.ApplyTo(ctx, e); err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
+	s.L("\t}")
+	s.L("\tout, err := cmd.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	s.L("\tif out.%sID.Value() != %s {", m.Entity.Pascal, quote(fixtureOwnerID))
+	s.L("\t\tt.Error(%s)", quote("the result does not carry the owner id"))
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
+}
+
+// childInputLiteral builds the entry's input DTO. `empty` produces the zero
+// value, for the case where the entry is never meant to be found.
+func childInputLiteral(m *ir.Model, c ir.Child, empty bool) string {
+	if empty {
+		return fmt.Sprintf("dtos.%s{}", c.InputType)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "dtos.%s{", c.InputType)
+	for i, f := range c.Fields {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s: %s", f.Name, wireSample(f))
+	}
+	b.WriteString("}")
+	return b.String()
 }

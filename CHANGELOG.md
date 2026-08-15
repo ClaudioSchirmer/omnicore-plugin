@@ -25,13 +25,46 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   input DTO is written, and the commands, requests and routes are named `<Entity><Child>…`
   so they cannot collide with the owning role's. The run that motivated this wrote 389 lines
   and four files by hand for exactly this.
+- **`groupCap` can count only the entries a rule is about.** `only: {field, equals}`
+  restricts what the cap counts, and `groupBy` became optional — with neither, the cap is on
+  the collection as a whole. "At most 3 proposals under review" had no expression: grouping
+  by the status field capped accepted, rejected and withdrawn at 3 as well, so the rule went
+  to `rules.manual` and was written by hand, twice, in two runs of the same domain.
+- **Per-entry command tests are generated.** The three verbs that address ONE entry had no
+  generated tests at all — the root's were thorough, so coverage looked healthy while the
+  add/change/remove mappers sat at zero. Two consecutive real runs closed it by hand with
+  the same four shapes. They are emitted into the command-test file the generator already
+  owns and declare nothing at package scope, so a project that filled the gap itself does
+  not break on a name nobody chose; a colliding TEST name is reported by the compiler and
+  the report says what it means.
 - **Rules on a collection now take the whole DSL**, including `transition`, `skipWhen` and
   `rules.manual` with a hook of the collection's own. `childDuplicate`, `groupCap` and
   `ownerCheck` are refused there BY NAME, pointing at the root — they ask about the whole
   set, and one entry cannot see it.
 
+- **Three tests that check for SILENCE**, in `internal/emit/silence_test.go`, over every
+  spec of the coverage matrix at once: every declared rule's notification must be RAISED by
+  some emitted line (a clause with no edges, a kind the emitter skips, a resolver that fell
+  behind — all leave it unreferenced); every `labelKey` tagged onto a field must exist in
+  the catalogs; and no two emitted files may declare one symbol, including across the two
+  roles of a shared identity, which is the collision the compiler only reports once someone
+  assembles both specs by hand. Each was verified by reintroducing the bug it is named for
+  and watching it fail. They widen for free: a new matrix case is new coverage for all
+  three.
+
 ### Fixed
 
+- **Labels for the fields of a collection or a facet were never translated.** The generator
+  emits a `labelKey` tag on them and only ever registered the ROOT's keys in the seven
+  catalogs, so those resolved to nothing and the raw Go identifier reached the end user —
+  `ProposalProponentDocumentField` as a CSV column heading. Nothing reported it: the export
+  succeeded and the data was right.
+- **`doctor` reported a hand edit nobody had made.** It judged by the hash the lock records
+  per entity, while `generate` judges by the checksum in the file's own header. A file two
+  entities legitimately share — the `vos` package doc — goes stale in the first one's record
+  the moment the second regenerates, so the one command whose whole job is to tell the truth
+  about drift invented some, and the fix it implied was `adopt`, which would have frozen a
+  current file out of every future improvement. It now asks the file, like `generate` does.
 - **`vo: {kind: reuse}` could not see a single real value object.** The project inventory
   skipped every generated file — so `UF`, `URL` and the enums a previous entity created were
   invisible — and collected every exported type of the hand-written `notifications.go`, so

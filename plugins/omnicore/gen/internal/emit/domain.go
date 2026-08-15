@@ -986,18 +986,50 @@ func emitChildDuplicate(s *src, m *ir.Model, rule ir.Rule) {
 // make true, and it is the only count the aggregate can answer without IO.
 func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 	c := childNamed(m, rule)
-	if c == nil || len(rule.GroupBy) == 0 || rule.Cap <= 0 {
+	if c == nil || rule.Cap <= 0 {
 		return
 	}
 	s.L("\t\t{")
 	s.L("\t\t\titems := domain.GetCurrentItemsOf[aggregatevos.%s](%s.GetAggregateRoot())", c.Name, "e")
+
+	// The restriction, when there is one: an entry that does not match is not
+	// counted at all. Without it the cap lands on every value of the grouping
+	// field equally, so "at most 3 under review" also capped rejected and
+	// withdrawn at 3 — a rule nobody declared, enforced silently.
+	countOne := func(indent, body string) {
+		if rule.OnlyField != nil {
+			s.L("%s// Only the entries this rule is about: %s == %s.",
+				indent, rule.OnlyField.Name, quote(rule.OnlyEquals))
+			s.L("%sif %s == %s {", indent, onlyValueExpr(rule), quote(rule.OnlyEquals))
+			s.L("%s\t%s", indent, body)
+			s.L("%s}", indent)
+			return
+		}
+		s.L("%s%s", indent, body)
+	}
+
+	if len(rule.GroupBy) == 0 {
+		// No grouping: the cap is on the collection as a whole, which is what
+		// "at most N of these" means when no key is named.
+		s.L("\t\t\tn := 0")
+		s.L("\t\t\tfor _, item := range items {")
+		countOne("\t\t\t\t", "n++")
+		s.L("\t\t\t}")
+		s.L("\t\t\tif n > %d {", rule.Cap)
+		s.L("\t\t\t\tr.AddNotification(%s, %s)",
+			quote(c.GoPlural), notifIn(m, rule.Notification))
+		s.L("\t\t\t}")
+		s.L("\t\t}")
+		return
+	}
+
 	s.L("\t\t\tperKey := map[string]int{}")
 	s.L("\t\t\tfor _, item := range items {")
 	var parts []string
 	for _, g := range rule.GroupBy {
 		parts = append(parts, groupKeyExpr(c, g))
 	}
-	s.L("\t\t\t\tperKey[%s]++", strings.Join(parts, " + \"|\" + "))
+	countOne("\t\t\t\t", fmt.Sprintf("perKey[%s]++", strings.Join(parts, " + \"|\" + ")))
 	s.L("\t\t\t}")
 	s.L("\t\t\tfor _, n := range perKey {")
 	s.L("\t\t\t\tif n > %d {", rule.Cap)
@@ -1007,6 +1039,19 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t}")
 	s.L("\t\t}")
+}
+
+// onlyValueExpr reads the restricted field off one entry, unwrapping a value
+// object so the comparison is against the stored value rather than the type.
+func onlyValueExpr(rule ir.Rule) string {
+	ref := "item." + rule.OnlyField.Name
+	if rule.OnlyField.VOKind != "" {
+		ref += ".Value()"
+	}
+	if rule.OnlyField.Nullable {
+		ref = "*" + ref
+	}
+	return ref
 }
 
 // groupKeyExpr renders one grouping field as text, which is what makes a

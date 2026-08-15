@@ -201,7 +201,7 @@ func TestCoverageRefusesWhatNoEmitterImplements(t *testing.T) {
 		BusinessIdentity: []string{"Subject"},
 		// A per-entry duplicate notification with no per-entry ADD to raise it.
 		DuplicateNotification: "GradeAlreadyThereNotification",
-		Fields: []Field{{Name: "Subject", Type: "string", Column: "subject", Length: 40}},
+		Fields:                []Field{{Name: "Subject", Type: "string", Column: "subject", Length: 40}},
 	}}
 	ps := CheckCoverage(s)
 	if !ps.HasBlockers() {

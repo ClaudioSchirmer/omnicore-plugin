@@ -235,10 +235,26 @@ type Rule struct {
 	Other       string              `yaml:"other"`    // the second field of a comparison
 	SkipWhen    string              `yaml:"skipWhen"` // empty | null
 	Transitions map[string][]string `yaml:"transitions"`
-	GroupBy     []string            `yaml:"groupBy"`
-	Cap         int                 `yaml:"cap"`
-	OwnerField  string              `yaml:"ownerField"`
-	AdminField  string              `yaml:"adminField"`
+	// GroupBy partitions a collection before a cap is applied. It is OPTIONAL:
+	// with no grouping the cap is on the whole collection, which is what "at most
+	// N of these" usually means.
+	GroupBy []string `yaml:"groupBy"`
+	Cap     int      `yaml:"cap"`
+	// Only restricts WHICH entries the cap counts. Without it a cap on a status
+	// field caps every status equally — "at most 3 under review" silently became
+	// "at most 3 rejected" too, which no domain asked for and which nothing
+	// reports.
+	Only       *RuleOnly `yaml:"only"`
+	OwnerField string    `yaml:"ownerField"`
+	AdminField string    `yaml:"adminField"`
+}
+
+// RuleOnly narrows a set-wide rule to the entries whose field carries one
+// value. It is deliberately a single equality: anything richer is a query, and a
+// query in a rule is the point where the language stops being readable.
+type RuleOnly struct {
+	Field  string `yaml:"field"`  // a field of the collection being counted
+	Equals string `yaml:"equals"` // the value that makes an entry count
 }
 
 // ---------------------------------------------------------------- notifications

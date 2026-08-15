@@ -259,8 +259,8 @@ func runGo(dir string, args ...string) (string, error) {
 }
 
 var (
-	voTypeRe  = regexp.MustCompile(`(?m)^type\s+([A-Z][A-Za-z0-9]*)\s`)
-	voValueRe = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*Value\s*\(`)
+	voTypeRe   = regexp.MustCompile(`(?m)^type\s+([A-Z][A-Za-z0-9]*)\s`)
+	voValueRe  = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*Value\s*\(`)
 	voEntityRe = regexp.MustCompile(`(?m)^//\s*entity:\s*([A-Za-z0-9_]+)`)
 )
 

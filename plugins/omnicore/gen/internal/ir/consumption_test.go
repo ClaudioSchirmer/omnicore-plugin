@@ -64,7 +64,10 @@ var unreadByEmitters = map[string]string{
 		"write Go, never the spec's own type names",
 	"Field.BaseGoType": "used by the resolver to build GoType for a nullable field",
 	"Rule.ID":          "names the rule in the report and in the refusal messages",
-	"ManualRule.ID":    "names the item in the hook file and the report",
+	"Rule.OnlyFieldName": "the resolver binds it into OnlyField against the collection " +
+		"it counts, and that is what the emitter reads; the name is kept because a " +
+		"collection whose field vanished is worth reporting as the author wrote it",
+	"ManualRule.ID": "names the item in the hook file and the report",
 	"Child.OwnedBy": "read through BaseChildren/RoleChildren and childOwnerTable, " +
 		"which is where the ownership decision actually lands",
 	"Child.DocSegment": "read by readColumn when an index or filter addresses a " +

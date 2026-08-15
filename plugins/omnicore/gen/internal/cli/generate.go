@@ -11,6 +11,7 @@ import (
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/discover"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/emit"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/gofile"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/report"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/spec"
@@ -287,8 +288,21 @@ func Doctor(w io.Writer, projectDir string) error {
 					line += " — " + rec.Why
 				}
 				fmt.Fprintln(w, line+"\n      (it no longer tracks the spec: emitter improvements will not reach it)")
-			case fsplan.Hash(content) != rec.Hash:
-				fmt.Fprintf(w, "  ! %s was edited by hand — regeneration will refuse it\n", path)
+			default:
+				// The FILE decides, through the checksum in its own header —
+				// the same authority `generate` refuses on. The lock's hash is a
+				// record of what one entity last wrote, and a file two entities
+				// legitimately share (the vos package doc) goes stale in the
+				// first one's record the moment the second regenerates. Judging
+				// by that reported a hand edit nobody had made, on the one
+				// command whose entire job is to tell the truth about drift —
+				// and the fix it implies is `adopt`, which would have frozen a
+				// perfectly current file out of future improvements.
+				if intact, sealed := gofile.VerifyHeader(content); sealed && !intact {
+					fmt.Fprintf(w, "  ! %s was edited by hand — regeneration will refuse it\n", path)
+				} else if !sealed {
+					fmt.Fprintf(w, "  ! %s carries no generator checksum — regeneration will refuse it\n", path)
+				}
 			}
 		}
 	}
