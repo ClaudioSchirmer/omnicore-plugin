@@ -103,6 +103,18 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Added
 
+- **`help` knows the generator is not the framework, and where to read about it.** The
+  skill answers from the version-pinned `/docs`, and `omnicore-gen` has no section there —
+  it ships inside the plugin. So a question about the spec language routed through the
+  Documentation Map, found nothing, and the honest failure mode was silence while the
+  likely one was an answer from memory: a key that does not exist, recommended
+  confidently. `help` now states where that authority lives — the binary's own `explain`,
+  derived from the language definition and therefore never stale — with the topic per
+  question, and it says the generator is in beta and covers less than the framework does.
+  It also carries the distinction the wording almost never makes: "how do I cap a
+  collection per key?" is the framework when the dev is writing Go and the generator when
+  they are writing YAML, and a question about a `.omnicore.yaml` is always the generator's.
+
 - **`/omnicore:gen` — a door to the generator's CLI for a project that already exists.**
   Five of the six commands were reachable only as steps inside `scaffold-entity`'s codegen
   flow, and `doctor` was reachable from nowhere at all: the word did not appear once in any
