@@ -9,6 +9,15 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Changed
 
+- **The generation gateway offers `omnicore-gen (beta)`, and says what beta means.** The
+  generator is still being improved round by round and `scaffold-entity` is so far the only
+  skill that reaches it, so the label on option 1 now carries that — followed by the one
+  thing a dev actually needs to know: its gate covers a lot and it can still meet a case
+  nobody has met, usually a spec that validates and produces something that does not
+  compile. The option also states what happens then, because the honest answer is
+  reassuring: the agent says so, works around it, and it is fixed upstream — and the review
+  and proof steps already in that option are exactly what catch it.
+
 - **Everything the generator reads or writes about a service now lives in one directory,
   `omnicore-gen/`.** It was in three places: the spec in a generic `specs/`, its report
   beside it, and the lock loose at the project root as a dotfile. A reader had to already
@@ -23,6 +32,29 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   otherwise; it is the DEFAULT that moved, along with where sibling specs are looked for.
   The four call sites that resolved these paths now read them from one `internal/layout`,
   because a layout spelled out four times is a layout that moves three times.
+
+- **The generator maintains its own declarations in the SHARED files, and can now tell them
+  apart from yours.** `notifications.go` and the seven catalogs belong to every entity, so
+  the generator only ever inserted into them — and therefore never updated a declaration it
+  had written itself. That is how a notification which gained a `tvars` entry stopped a
+  package compiling: the rules emitted for it write `N{Max: "50"}` and the struct on disk
+  had no such field, with the compiler pointing at the rule rather than at the declaration.
+  The file still has no header and no checksum — nothing seals a file five entities write
+  to — so the LOCK now records a hash per declaration and per message, and each one is
+  answered separately:
+  - recorded hash matches what is on disk → the text is still the generator's own, and a
+    spec that moved moves it. Only that declaration is rewritten; everything around it,
+    including every other entity's, is untouched.
+  - it differs → somebody edited it. Left exactly as it is, and NAMED IN THE REPORT, with
+    the note that a stale declaration is what breaks the build while a stale message only
+    reads oddly.
+  - no record at all → left alone and reported too. Not knowing who wrote something is not
+    a licence to overwrite it, and that is every tree generated before this change.
+
+  Inserting is unchanged, which is the part that was never the problem. A translator's
+  improved wording still survives regeneration — it simply survives by being recognised
+  rather than by the generator refusing to look. Hashes are whitespace-normalised, so
+  gofmt realigning a struct when a longer field arrives is not read as an edit.
 
 - **A migration is written ONCE and never regenerated — it is a hook, named
   `NNNN_<entity>_manual.sql`, exactly like the `_manual` rule files.** It is the only output
@@ -58,29 +90,6 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   and 1c states that a clean grep is the expected outcome, not a fix-up round.
 
 ### Added
-
-- **The generator maintains its own declarations in the SHARED files, and can now tell them
-  apart from yours.** `notifications.go` and the seven catalogs belong to every entity, so
-  the generator only ever inserted into them — and therefore never updated a declaration it
-  had written itself. That is how a notification which gained a `tvars` entry stopped a
-  package compiling: the rules emitted for it write `N{Max: "50"}` and the struct on disk
-  had no such field, with the compiler pointing at the rule rather than at the declaration.
-  The file still has no header and no checksum — nothing seals a file five entities write
-  to — so the LOCK now records a hash per declaration and per message, and each one is
-  answered separately:
-  - recorded hash matches what is on disk → the text is still the generator's own, and a
-    spec that moved moves it. Only that declaration is rewritten; everything around it,
-    including every other entity's, is untouched.
-  - it differs → somebody edited it. Left exactly as it is, and NAMED IN THE REPORT, with
-    the note that a stale declaration is what breaks the build while a stale message only
-    reads oddly.
-  - no record at all → left alone and reported too. Not knowing who wrote something is not
-    a licence to overwrite it, and that is every tree generated before this change.
-
-  Inserting is unchanged, which is the part that was never the problem. A translator's
-  improved wording still survives regeneration — it simply survives by being recognised
-  rather than by the generator refusing to look. Hashes are whitespace-normalised, so
-  gofmt realigning a struct when a longer field arrives is not read as an edit.
 
 - **A declared fact can now be ENFORCED declaratively: `rules.list[].kind: factRange`.**
   The generator wrote the query and stopped there — the port answered a number and nothing
@@ -144,6 +153,13 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   letting the body carry it means anyone can create a row owned by someone else. It had no
   key, so the invariant went to `rules.manual`, the insert mapper was edited by hand, the
   generated test that asserted the old mapping started failing, and both files were adopted.
+  It also closes a hole that was open the whole time it was missing: the validator's own
+  fix text recommended "a runtime-only field fed from the caller's identity" for
+  `owner-only`/`tenant`, a runtime field has no column, the lowering carried the emptiness
+  through, and the emitter quietly skipped the row filter — spec green, report saying
+  "owner-only", every permission holder reading every row. That shape is now REFUSED: the
+  owner/tenant field must be persisted, the fix text says `assignedFrom`, and the emitter
+  panics rather than skips if the invariant is ever violated again.
 - **A second role can EXPOSE a collection of the shared identity.** `children[].ownedBy:
   base` under `storage.base.reuse: true` used to be refused outright — "this role reuses an
   existing base, so it does not write the base's schema". True of the SCHEMA, and the
@@ -157,7 +173,13 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   restricts what the cap counts, and `groupBy` became optional — with neither, the cap is on
   the collection as a whole. "At most 3 proposals under review" had no expression: grouping
   by the status field capped accepted, rejected and withdrawn at 3 as well, so the rule went
-  to `rules.manual` and was written by hand, twice, in two runs of the same domain.
+  to `rules.manual` and was written by hand, twice, in two runs of the same domain. The
+  bare form — no key, no filter — is accepted only when `description:` says the whole
+  collection is the subject, because it is also what you get by forgetting the restriction
+  you meant. It is emitted as `len(items)`: the general counting loop's body is nothing but
+  `n++` there, which never mentions the entry it ranges over, and Go refuses `declared and
+  not used`. No fixture had used that shape, so `student` — a tree the gate BUILDS — now
+  carries a bare cap.
 - **Per-entry command tests are generated.** The three verbs that address ONE entry had no
   generated tests at all — the root's were thorough, so coverage looked healthy while the
   add/change/remove mappers sat at zero. Two consecutive real runs closed it by hand with
@@ -168,7 +190,19 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 - **Rules on a collection now take the whole DSL**, including `transition`, `skipWhen` and
   `rules.manual` with a hook of the collection's own. `childDuplicate`, `groupCap` and
   `ownerCheck` are refused there BY NAME, pointing at the root — they ask about the whole
-  set, and one entry cannot see it.
+  set, and one entry cannot see it. What was there before did not deserve the name: the
+  collection had a resolver of its own that had fallen behind the root's, silently dropping
+  `Transitions`, `GroupBy`, `Cap`, `SkipWhen`, `AdminField` and `OwnerField`, so a
+  `transition` under `children[]` validated, generated its notification and all seven
+  translations, and emitted a clause with NO edges — allowing every move. `rules.manual`
+  there was parsed and discarded whole: no hook, no call site, no report line. There is one
+  resolver now, asserted per ATTRIBUTE. A rule that compares an entry against its previous
+  state could not work where it was declared either (`domain.Old` is defined over `Entity`;
+  an aggregate child is not one), so `transition` and `immutable` on a collection are
+  enforced from the root — pairing surviving entries with their former selves, by id when
+  the collection is per-child and by business identity when it is replaced wholesale — and
+  the report says where they went. The matrix had only ever exercised `required` and
+  `length` inside a collection, which happen to be the two kinds the broken resolver kept.
 
 - **Three tests that check for SILENCE**, in `internal/emit/silence_test.go`, over every
   spec of the coverage matrix at once: every declared rule's notification must be RAISED by
@@ -182,43 +216,30 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Fixed
 
-- **Four of the six aggregating-fact shapes passed a green `check` and did not compile.**
-  `service.facts` has accepted `sum`, `avg`, `min` and `max` all along, but the return type
-  was taken from the aggregated COLUMN and the framework function was named by appending
-  `Int` to the kind. So `avg` over an `int64` emitted `read.AvgInt`, which has never
-  existed — an average is fractional even over an integer column, which is why the
-  framework offers only `Avg`. `sum` over a plain `int` returned a `float64` into an `int`
-  signature. `min`/`max` over a `time` or a `string` returned a `float64` into that type,
-  and the port did not even import `time`. Only `int64` and `float64` worked, and nothing
-  covered the rest — no fixture declared an aggregating fact at all. Now:
-  - the return type follows the KIND: `avg` is always `float64`; `sum`/`min`/`max` over
-    `int` or `int64` is exact `int64` (narrowing a total to the column's width is how one
-    silently wraps); over `float64` it is `float64`.
-  - a non-numeric field is REFUSED by `check`, naming the field and its type. The framework
-    carries an aggregate as `CountAgg`, `IntAgg` or `FloatAgg` and has no carrier for text,
-    a timestamp or a boolean — emitting one would compile and mean nothing.
-  - the example and the coverage matrix now declare an `avg` and a `max` over an integer
-    field, so the path is generated, built and DDL'd by the gate rather than by a user.
+- **The aggregating facts were broken in two ways, both past a green `check`.**
+  `service.facts` has accepted `sum`, `avg`, `min` and `max` since they shipped, and no
+  fixture had ever declared one.
+  - **Four of the six kind/type combinations did not compile.** The return type was taken
+    from the aggregated COLUMN and the framework function named by appending `Int` to the
+    kind, so `avg` over an `int64` emitted `read.AvgInt`, which has never existed — an
+    average is fractional even over an integer column, which is why the framework offers
+    only `Avg`. `sum` over a plain `int` returned a `float64` into an `int` signature;
+    `min`/`max` over a `time` or a `string` returned a `float64` into that type, and the
+    port did not even import `time`. The return type now follows the KIND — `avg` is always
+    `float64`, `sum`/`min`/`max` over any integer width is exact `int64` (narrowing a total
+    to the column's width is how one silently wraps) — and a non-numeric field is REFUSED,
+    naming the field and its type: the framework carries an aggregate as `CountAgg`,
+    `IntAgg` or `FloatAgg` and has no carrier for text, a timestamp or a boolean.
+  - **An empty set was reported as zero.** The framework pairs every aggregate with
+    `Found`, because SQL answers NULL over no rows: for a sum the zero IS the empty sum,
+    but for a minimum, a maximum or an average it is indistinguishable from a real result.
+    The port returned `Value` alone, so a rule asking "is the lowest grade below 5?" got a
+    yes from an empty table. Those three kinds now answer `(value, bool)`; `sum`, `count`
+    and `exists` are unchanged, and the generated stub answers `0, false`.
 
-- **`min`, `max` and `avg` reported an empty set as zero.** The framework's carriers pair
-  every aggregate with `Found`, because SQL answers NULL over no rows: for a sum the zero
-  IS the empty sum, but for a minimum, a maximum or an average it is indistinguishable from
-  a real result. The generated port returned `Value` alone, so a rule asking "is the lowest
-  grade below 5?" got a yes from an empty table. Those three kinds now answer
-  `(value, bool)` — the caller is made to decide what "there was nothing to average" means.
-  `sum`, `count` and `exists` are unchanged, and the generated service stub answers
-  `0, false` so a test still fails for the rule under test.
+  The example and the coverage matrix now declare an `avg` and a `max` over an integer
+  field, so both paths are generated, built and DDL'd by the gate rather than by a user.
 
-- **A `groupCap` with neither `groupBy` nor `only` generated a tree that did not compile,
-  past a green `check`.** That shape is the cap on the collection's own SIZE — "at most 30
-  photos" — and the validator accepts it deliberately (it asks only that the author say so
-  in `description:`). The emitter still wrote the general counting loop, whose body in that
-  one case is nothing but `n++`: `for _, item := range items { n++ }` never mentions the
-  entry it ranges over, and Go refuses `declared and not used: item`. The count is now
-  `len(items)` when there is no restriction to apply, and the loop is emitted only when
-  `only` gives it something to test. The path escaped every gate because no fixture used
-  it — all three matrix specs pair the cap with a key or a filter — so `student` (a tree
-  the golden gate BUILDS, not just resolves) now carries a bare cap.
 - **A value object echoed the rejected value through a conversion that has done nothing
   since framework v0.49.1.** `IsValid` emitted `ctx.AddNotification(fieldName, N{}, int(v))`
   / `string(v)`; `AddNotification` renders its variadic with `fmt.Sprint`, and a value
@@ -227,13 +248,6 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   as if the framework needed the help. The generator requires v0.49.1 or later, which is
   the release that made a pointer of any type dereference correctly, so nothing about what
   the caller sees changes.
-- **`owner-only`/`tenant` with a runtime owner field generated a service with NO row
-  scoping.** The validator's own fix text recommended "a runtime-only field fed from the
-  caller's identity"; a runtime field has no column, the lowering carried the emptiness
-  through, and the emitter quietly skipped the filter — spec green, report saying
-  "owner-only", every permission holder reading every row. The shape is now refused: the
-  owner/tenant field must be persisted (`assignedFrom`), the fix text says so, and the
-  emitter panics rather than skips if the invariant is ever violated again.
 - **The first regeneration on a later day rewrote every owned file.** The header's
   keep-the-date comparison tested the new content against itself-with-the-old-date, which
   only agreed when the dates were already equal — so "regeneration is a no-op" held within
@@ -334,30 +348,12 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   method and records who generated it: referencing one is open to everybody, redeclaring is
   refused to everybody except the entity that already owns it, and a `ref` ending in
   `Notification` is named as the confusion it is.
-- **Rules declared inside `children[]` lost half of themselves, silently.** The collection
-  had a resolver of its own that had fallen behind the root's: it dropped `Transitions`,
-  `GroupBy`, `Cap`, `SkipWhen`, `AdminField` and `OwnerField`. A `transition` under
-  `children[]` therefore validated, generated its notification and all seven translations,
-  and emitted a clause with NO edges — allowing every move, which is the opposite of what
-  was declared. Nothing failed: not the build, not the tests, not the report. There is one
-  resolver now, and the regression test asserts per ATTRIBUTE.
-- **`children[].rules.manual` was parsed and then dropped entirely** — no hook, no call
-  site, no report line. The spec asked for an invariant and the generator forgot it.
-- **A rule comparing an entry against its previous state could not work where it was
-  declared** (`domain.Old` is defined over `Entity`; an aggregate child is not one).
-  `transition` and `immutable` on a collection are now enforced from the root, pairing
-  surviving entries with their former selves — by id when the collection is per-child, by
-  business identity when it is replaced wholesale — and the report says where they went.
 - **A value object's own notification was emitted into `domain`**, where the package that
   declares the type cannot reach it: the tree did not compile, and the only clue was
   "undefined" in a generated file. It is placed in `vos`, the same way a child-raised one is
   placed in `aggregatevos`.
 - **`comparison` between two non-nullable fields emitted `true && true`**, which `go vet`
   rejects — so a generated project could fail its own checks.
-- **The coverage matrix only ever exercised `required` and `length` inside a collection**,
-  which happen to be the two kinds that survived the broken resolver. Two cases were added:
-  a collection with `transition`, `skipWhen`, `comparison` and a manual rule, and a pair of
-  roles sharing one identity where the second mounts the first's collection.
 - **`scaffold-service` shipped a `.gitignore` that hid the reasoning, and only two of the
   eight working dirs had any rule at all.** The generated file
   listed the `scaffold-service/` and `scaffold-entity/` working dirs, so the approved
@@ -379,7 +375,10 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   caller believes the facet is revoked. The convention now says FULL update handler, and
   states the real reason the surface needs a verb at all: an omitted field and an explicit
   null reach the DTO identically, so "clear this" cannot be told from "leave this alone".
-  Found by following the convention literally and testing the result.
+  Found by following the convention literally and testing the result. The generator emits
+  that mutation now — `clear<Facet>Of<Entity>`, its command and its tests — for any
+  root-attached facet when GraphQL is on, so the contract closes on both surfaces without
+  anyone writing it by hand.
 - **The launcher could serve the PREVIOUS version after a plugin update.** The compiled
   binary is cached in `${CLAUDE_PLUGIN_DATA}`, which survives updates by design, and the
   freshness check was by mtime — only as trustworthy as whatever wrote the files. A
@@ -387,9 +386,6 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   everything answers, nothing is current. The binary is now keyed by the plugin root,
   which changes on every update, and older ones are removed. Gated: the golden simulates
   an update with backdated sources and fails if the cached binary is reused.
-- **The generator now emits that mutation** — `clear<Facet>Of<Entity>`, its command and
-  its tests — for any root-attached facet when GraphQL is on, so the contract closes on
-  both surfaces without anyone writing it by hand.
 
 ## [0.18.0] — 2026-08-13
 
