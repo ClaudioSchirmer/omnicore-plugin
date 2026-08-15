@@ -537,7 +537,7 @@ Present it like this, verbatim in substance:
 
 > ⏸️ **How should this be generated?** Two options, and only these two:
 >
-> **1. `omnicore-gen` + review by me** *(recommended)*
+> **1. `omnicore-gen` (beta) + review by me** *(recommended)*
 > The generator writes the whole mechanical tree from one spec file — domain, application,
 > web, infra, migrations, wiring, translations and its own tests — in **seconds**, and at a
 > **fraction of the tokens** the manual path costs. What it cannot express, I implement by
@@ -545,6 +545,11 @@ Present it like this, verbatim in substance:
 > tests for those are mine to write. I then review the output against the plan you just
 > approved, read the generator's report, and prove it with build + vet + tests + a real
 > boot.
+> **Beta**: it is still being improved round by round, and `scaffold-entity` is so far the
+> only skill that uses it. Its gate covers a lot, and it can still hit a case nobody has
+> hit yet — usually a spec that validates and produces something that does not compile.
+> When that happens I say so, work around it, and it gets fixed upstream; the review and
+> the proof steps above are exactly what catch it.
 >
 > **2. Manually, file by file, by me**
 > I generate every file myself, layer by layer, reading the pinned `/docs` before each
