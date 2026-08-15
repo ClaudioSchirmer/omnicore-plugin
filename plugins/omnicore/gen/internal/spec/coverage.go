@@ -39,6 +39,7 @@ const (
 	CapPerChild       Capability = "per-entry child operations"
 	CapAssignedField  Capability = "server-assigned fields (from the caller's identity)"
 	CapMountedChild   Capability = "a shared identity's collection, exposed on a second role"
+	CapGroupedFact    Capability = "per-group facts, computed by the database (GROUP BY)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -52,6 +53,7 @@ var implemented = map[Capability]bool{
 
 	CapValueObjects:   true,
 	CapService:        true,
+	CapGroupedFact:    true,
 	CapChildren:       true,
 	CapSiblings:       true,
 	CapSharedBase:     true,
@@ -84,7 +86,7 @@ func AllCapabilities() []Capability {
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapGeneratedTests, CapPerChild,
-		CapAssignedField, CapMountedChild,
+		CapAssignedField, CapMountedChild, CapGroupedFact,
 	}
 }
 
@@ -123,6 +125,13 @@ func CheckCoverage(s *Spec) *Problems {
 	}
 	if s.Service != nil && s.Service.Required {
 		uses(CapService, "service", "a domain service")
+		for _, f := range s.Service.Facts {
+			if len(f.GroupBy) > 0 {
+				uses(CapGroupedFact, "service.facts[].groupBy",
+					"a fact computed per group by the database")
+				break
+			}
+		}
 	}
 	if s.Read.Backing == "mongo" {
 		uses(CapMongoView, "read.backing", "a mongo-backed view")

@@ -183,6 +183,23 @@ Three things to get right, because they are the ones that cost a migration later
   collection itself ("at most 30 photos") — a real rule, and also what you get by
   forgetting the restriction you meant, which is why it is accepted only when
   `description:` says out loud that the whole collection is the subject.
+- **Counting rows is the DATABASE's job — decide which set you are counting FIRST.** This
+  is the one place where the two halves of the language overlap by appearance and not by
+  meaning, and picking the wrong one is not a style mistake:
+  - the rows are **already in the table** (other aggregates included) → a `service.facts`
+    entry. `count`/`sum`/`avg`/`min`/`max`, plus **`groupBy: [Field]`** when the question is
+    "…per category" — one SELECT with GROUP BY, answered as one entry per key. **Never**
+    answer this by listing rows and folding them in Go: that reads a whole table to compute
+    what the database computes in one pass, and it is the shape the framework added
+    `AggregateBy` to kill.
+  - the entries are **what this write carries** → `groupCap`. No query can see them: they
+    are not in the table yet. Counting in memory is not a shortcut here, it is the only
+    correct answer.
+
+  So: *"no more than 5 active enrolments per course"* is a fact with `groupBy` — it is about
+  rows that exist. *"no more than 30 photos in this listing"* is a `groupCap` — it is about
+  what is being saved right now. If a rule needs both (the table's count PLUS what the write
+  adds), the fact gives you the first half and the arithmetic belongs in `rules.manual`.
 - **Rules on a collection are declared on the collection.** `children[].rules` takes the
   same DSL the root does, including `transition` and `skipWhen`, plus `rules.manual` with
   a hook of its own (`aggregatevos/<child>_rules_manual.go`). Two kinds are refused there

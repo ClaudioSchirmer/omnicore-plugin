@@ -97,7 +97,10 @@ a clause the framework dispatches by verb.
                   non-nullable, string-backed enum declared in THIS spec, and
                   every state named in the map is one of its member values.
   requiredIf      required when another field has a value (see skipWhen).
-  groupCap        at most N rows per key. Needs a service fact to count them.
+  groupCap        at most N entries per key — counted IN GO, over what this
+                  write carries. Use it for the collection being written; for a
+                  cap over rows already in the TABLE, declare a service fact
+                  with groupBy and let the database group them.
   childDuplicate  two entries of a collection share a business identity.
   ownerCheck      the caller must own the row. Reads a runtime-only field fed
                   from the request identity.

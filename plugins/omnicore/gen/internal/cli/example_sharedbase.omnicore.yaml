@@ -419,6 +419,22 @@ service:
       description: A maior carga horária em vigor.
       field: CargaHoraria
       activeOnly: true
+    # `groupBy` makes the same aggregate PER GROUP — one SELECT with GROUP BY,
+    # answered as one entry per distinct key, and the generated port returns a
+    # slice of a struct carrying the key plus the value. Reach for it whenever
+    # the question is "…per category": the alternative is loading the rows and
+    # bucketing them in Go, which reads a whole table to compute what the
+    # database computes in one pass.
+    #
+    # It is NOT the same tool as rules.list[].groupCap, and the difference is
+    # not style. A fact counts rows that are IN THE TABLE. A groupCap counts the
+    # entries THIS WRITE carries, which no query can see yet. Ask which set the
+    # invariant is about and the choice makes itself.
+    - name: ProfessoresPorSituacao
+      kind: count
+      groupBy: [Situacao]
+      description: Quantos professores em cada situação de vínculo.
+      activeOnly: true
 
 read:
   backing: mongo

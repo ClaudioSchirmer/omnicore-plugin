@@ -339,6 +339,16 @@ service:
         number. Excludes the row being updated, so an update never collides
         with itself.
 
+    # A per-group fact: one SELECT with GROUP BY, one entry per status. The
+    # alternative it exists to replace is loading the students and bucketing
+    # them in Go, which reads the whole table to answer a question the database
+    # answers in one row per group.
+    - name: AlunosPorSituacao
+      kind: count
+      groupBy: [Status]
+      description: Quantos alunos ativos em cada situação de matrícula.
+      activeOnly: true
+
 read:
   backing: relational
   view:

@@ -1742,6 +1742,56 @@ func validateService(s *Spec, ps *Problems) {
 			}
 		}
 		validateAggregatedField(s, f, where, ps)
+		validateGroupedFact(s, f, where, ps)
+	}
+}
+
+// validateGroupedFact keeps a per-group fact answerable in ONE query.
+//
+// Everything it refuses would otherwise be discovered at run time, by the
+// database or by a nil key: a grouping field that is not a column has nothing
+// to GROUP BY, a nullable one has no bucket for the rows without a value, and
+// grouping by the identity produces one group per row, which is the query
+// nobody meant and the slowest way to ask nothing.
+func validateGroupedFact(s *Spec, f Fact, where string, ps *Problems) {
+	if len(f.GroupBy) == 0 {
+		return
+	}
+	switch f.Kind {
+	case "count", "sum", "avg", "min", "max":
+	case "exists":
+		ps.BlockerFix(where+".groupBy",
+			"exists answers yes or no, so there is nothing to report per group",
+			"use count with the same groupBy — the number of matching rows per key")
+	default:
+		ps.BlockerFix(where+".groupBy",
+			fmt.Sprintf("a %s fact is not computed by this generator, so it has no query to group", f.Kind),
+			"drop groupBy, or use one of: count, sum, avg, min, max")
+		return
+	}
+	seen := map[string]bool{}
+	for _, g := range f.GroupBy {
+		if seen[g] {
+			ps.Blockerf(where+".groupBy", "%q is named twice as a grouping key", g)
+			continue
+		}
+		seen[g] = true
+		fld := findField(s.Fields, g)
+		if fld == nil {
+			ps.Blockerf(where+".groupBy", "%q does not name a field of this entity", g)
+			continue
+		}
+		if fld.Runtime {
+			ps.BlockerFix(where+".groupBy",
+				fmt.Sprintf("%q is a runtime-only field, so there is no column to group by", g),
+				"group by a persisted field")
+			continue
+		}
+		if fld.Nullable {
+			ps.BlockerFix(where+".groupBy",
+				fmt.Sprintf("%q is nullable, so a row without it belongs to no group", g),
+				"make the field non-nullable, or model \"none\" as an explicit value")
+		}
 	}
 }
 
@@ -1804,6 +1854,13 @@ func validateManualFact(f Fact, where string, ps *Problems) {
 		ps.BlockerFix(where+".activeOnly",
 			"the archived scope describes a query this generator is not writing",
 			"drop it — what the hand-written body considers is its own decision")
+	}
+	if len(f.GroupBy) > 0 {
+		ps.BlockerFix(where+".groupBy",
+			"a manual fact has no generated query, so there is nothing to group",
+			"drop it — the hand-written body decides how it groups; if the answer "+
+				"comes from THIS service's own tables, a computed kind with groupBy "+
+				"writes the GROUP BY for you")
 	}
 }
 

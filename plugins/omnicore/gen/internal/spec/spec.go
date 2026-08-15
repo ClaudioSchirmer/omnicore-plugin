@@ -547,6 +547,21 @@ type Fact struct {
 	// a name or a date is refused rather than emitted as something that compiles
 	// and means nothing.
 	Field string `yaml:"field"`
+	// GroupBy turns the fact into a PER-GROUP one: the same aggregate, computed
+	// by the database in a single GROUP BY, answered as one entry per distinct
+	// key. Allowed on count, sum, avg, min and max.
+	//
+	// It is the difference between "how many rows match" and "how many rows
+	// match, per category" — and it exists so a rule about a distribution is not
+	// written by loading the rows and bucketing them in Go, which is the shape
+	// this key is here to kill. Contrast with rules.list[].groupCap, which caps a
+	// COLLECTION THIS WRITE carries: that count cannot come from the database,
+	// because the entries being written are not in it yet.
+	//
+	// Each key field must be persisted and non-nullable: an entry with no value
+	// belongs to no group, and counting the nulls together, apart, or not at all
+	// are three different rules the spec has not chosen between.
+	GroupBy []string `yaml:"groupBy"`
 	// Filters names the fields the query narrows by; each becomes a parameter
 	// of the generated method.
 	Filters []string `yaml:"filters"`

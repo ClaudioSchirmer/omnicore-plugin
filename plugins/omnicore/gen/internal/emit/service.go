@@ -86,8 +86,48 @@ func emitServicePort(m *ir.Model) (fsplan.File, error) {
 	}
 	s.L("}")
 
+	emitGroupTypes(s, m)
+
 	return goFile("internal/domain/"+m.Entity.Snake+"_service.go", fsplan.Owned,
 		fmt.Sprintf("the %s service port (%d fact(s))", m.Entity.Pascal, len(m.Service.Facts)), s)
+}
+
+// emitGroupTypes writes the row shape a per-group fact answers with.
+//
+// It lives here, in the domain, and not in infra: the port is what the rules
+// speak to, and a domain that had to name the framework's own *read.Group to
+// read an answer would import infra to state an invariant.
+//
+// The key is a string on every backend. The framework normalises a group key to
+// a driver-neutral Go value handed over as `any`, and rendering it is the one
+// reading that cannot fail on either engine — a key is read to be compared or
+// reported, not to be summed.
+func emitGroupTypes(s *src, m *ir.Model) {
+	for _, f := range m.Service.Facts {
+		if !f.Grouped() {
+			continue
+		}
+		s.Blank()
+		keys := make([]string, 0, len(f.GroupKeys))
+		for _, k := range f.GroupKeys {
+			keys = append(keys, k.Name)
+		}
+		s.Doc(
+			fmt.Sprintf("%s is one group of %s: the key, and this group's value.",
+				f.GroupType, f.Name),
+			"",
+			fmt.Sprintf("A group exists BECAUSE at least one row matched, so there is no "+
+				"\"found\" flag here and Value is never a stand-in for an empty set — over "+
+				"no matching rows the fact answers no groups at all. The key is %s.",
+				strings.Join(keys, " + ")),
+		)
+		s.L("type %s struct {", f.GroupType)
+		for _, k := range f.GroupKeys {
+			s.L("\t%s %s", k.Name, k.GoType)
+		}
+		s.L("\tValue %s", f.ReturnType)
+		s.L("}")
+	}
 }
 
 func factDoc(f ir.Fact) string {
@@ -98,8 +138,15 @@ func factDoc(f ir.Fact) string {
 	case "exists":
 		return fmt.Sprintf("%s reports whether a matching row already exists.", f.Name)
 	case "count":
+		if f.Grouped() {
+			return fmt.Sprintf("%s counts the matching rows per group, in one query.", f.Name)
+		}
 		return fmt.Sprintf("%s counts the matching rows.", f.Name)
 	default:
+		if f.Grouped() {
+			return fmt.Sprintf("%s is the %s of %s per group, computed by the database in one query.",
+				f.Name, f.Kind, f.Field)
+		}
 		doc := fmt.Sprintf("%s is the %s of %s over the matching rows.", f.Name, f.Kind, f.Field)
 		if f.ReturnsFound {
 			doc += " The second return is false when NO row matched: over an empty set " +
@@ -113,7 +160,15 @@ func factDoc(f ir.Fact) string {
 // where the empty set is ambiguous — see ir.Fact.ReturnsFound — and it is
 // rendered here rather than at each call site so the port, the implementation
 // and the generated stub cannot disagree about the signature.
-func factResults(f ir.Fact) string {
+func factResults(f ir.Fact) string { return factResultsIn(f, "") }
+
+// factResultsIn is the same, qualified for a package that is not the domain's.
+// The group type is DECLARED in the domain beside the port, so infra names it
+// through its import alias while the port and the generated stub name it bare.
+func factResultsIn(f ir.Fact, pkg string) string {
+	if f.Grouped() {
+		return "[]" + pkg + f.GroupType
+	}
 	if f.ReturnsFound {
 		return "(" + f.ReturnType + ", bool)"
 	}
@@ -224,7 +279,7 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 			"a plausible answer instead would skip the very invariant this exists to "+
 			"enforce.",
 	)
-	s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), factResults(f))
+	s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), factResultsIn(f, "appdomain."))
 
 	s.L("\tconds := []criteria.Expr{")
 	for _, p := range f.Params {
@@ -252,6 +307,13 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 		s.L("\tq = q.IncludeArchived()")
 	}
 	s.Blank()
+
+	if f.Grouped() {
+		emitGroupedFactBody(s, m, f)
+		s.L("}")
+		s.Blank()
+		return
+	}
 
 	switch f.Kind {
 	case "exists":
@@ -285,6 +347,43 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 	}
 	s.L("}")
 	s.Blank()
+}
+
+// emitGroupedFactBody writes the per-group answer: ONE select, grouped by the
+// declared keys, over the same criteria as the ungrouped form.
+//
+// The specs handed to AggregateBy are TEMPLATES — they carry no result after
+// the call, and each group's own copy is read back through GroupResult with the
+// template as the handle. Reusing one template instance per fact is what makes
+// that lookup work, so the variable is declared once, above the loop.
+func emitGroupedFactBody(s *src, m *ir.Model, f ir.Fact) {
+	keys := make([]string, 0, len(f.GroupKeys))
+	for _, k := range f.GroupKeys {
+		keys = append(keys, quote(k.Field))
+	}
+	s.L("\tby := read.By(%s)", strings.Join(keys, ", "))
+	if f.Kind == "count" {
+		s.L("\tagg := read.Count()")
+	} else {
+		s.L("\tagg := read.%s(%s)", aggregateFn(f), quote(f.Field))
+	}
+	s.L("\tgroups, err := s.repo.Loader.AggregateBy(s.queryContext(), q, by, agg)")
+	s.L("\tif err != nil {")
+	s.L("\t\tpanic(%s)", quote(fmt.Sprintf("%s: %s probe failed", m.Entity.Pascal, f.Name)))
+	s.L("\t}")
+	s.Blank()
+	s.L("\t// One entry per distinct key. An empty set yields NO groups, which is why")
+	s.L("\t// the caller never has to tell a real zero from an absent one here.")
+	s.L("\tout := make([]appdomain.%s, 0, len(groups))", f.GroupType)
+	s.L("\tfor _, g := range groups {")
+	s.L("\t\tout = append(out, appdomain.%s{", f.GroupType)
+	for _, k := range f.GroupKeys {
+		s.L("\t\t\t%s: g.KeyString(%s),", k.Name, quote(k.Field))
+	}
+	s.L("\t\t\tValue: read.GroupResult(g, agg).Value,")
+	s.L("\t\t})")
+	s.L("\t}")
+	s.L("\treturn out")
 }
 
 func pascal(s string) string {

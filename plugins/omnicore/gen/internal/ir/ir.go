@@ -892,10 +892,21 @@ type Fact struct {
 	// a number nobody computed — quietly, which is why this is in the signature
 	// rather than in a comment.
 	ReturnsFound bool
-	ActiveOnly   bool
-	Description  string
-	Params       []FactParam
+	// GroupKeys turns the fact into a per-group one. Non-empty means the answer
+	// is a slice of GroupType, one entry per distinct key combination, computed
+	// by the database in a single GROUP BY.
+	GroupKeys []FactParam
+	// GroupType is the generated struct one group comes back as. It lives in the
+	// domain package beside the port, because the port cannot speak in the
+	// framework's own *read.Group without dragging infra into the domain.
+	GroupType   string
+	ActiveOnly  bool
+	Description string
+	Params      []FactParam
 }
+
+// Grouped reports whether this fact answers per group.
+func (f Fact) Grouped() bool { return len(f.GroupKeys) > 0 }
 
 // FactParam is one argument the rule passes in.
 type FactParam struct {
@@ -919,6 +930,25 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 			ActiveOnly: f.ActiveOnly, Description: f.Description,
 			ReturnType:   factReturnType(f, m),
 			ReturnsFound: factReturnsFound(f.Kind),
+		}
+		for _, g := range f.GroupBy {
+			fld := lookupField(m, g)
+			if fld == nil {
+				continue
+			}
+			// The key is carried as TEXT, always. The framework normalises a key
+			// to a driver-neutral Go value and hands it over as `any`; rendering
+			// it is the one reading that cannot fail on either backend, and a
+			// group key is read to be compared or reported, not to be summed.
+			fact.GroupKeys = append(fact.GroupKeys, FactParam{
+				Name: fld.Name, GoType: "string", Field: fld.Name,
+			})
+		}
+		if fact.Grouped() {
+			fact.GroupType = m.Entity.Pascal + f.Name + "Group"
+			// Every group EXISTS because a row matched, so there is nothing
+			// ambiguous left for Found to report: an empty set is zero groups.
+			fact.ReturnsFound = false
 		}
 		for _, filter := range f.Filters {
 			if fld := lookupField(m, filter); fld != nil {

@@ -260,6 +260,11 @@ func stubParams(f ir.Fact) string {
 // a fact that carries Found, that is the zero AND false — a stub claiming a
 // minimum exists would let a rule through for a reason no test wrote down.
 func stubResult(f ir.Fact) string {
+	if f.Grouped() {
+		// No groups is the honest "nothing found" for a per-group fact, and it
+		// is what an empty table really answers.
+		return "nil"
+	}
 	if f.ReturnsFound {
 		return stubZero(f.ReturnType) + ", false"
 	}

@@ -59,6 +59,36 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Added
 
+- **A fact can be computed PER GROUP, by the database: `service.facts[].groupBy`.** The
+  language could ask "how many rows match" and could not ask "how many, per category" — so
+  an author who needed a distribution had two ways out, and both were wrong: bend
+  `rules.list[].groupCap`, which counts what the WRITE carries and not what the table
+  holds, or declare a `manual` fact and fold the rows in Go. The framework has had the
+  primitive all along and says what it is for — `AggregateBy` is "the write-path primitive
+  for business rules over per-group facts", and "fetching the rows to bucket them in Go is
+  the anti-pattern it exists to kill". Now `count`, `sum`, `avg`, `min` and `max` all take
+  `groupBy: [Field, …]` and emit ONE select with a GROUP BY.
+  - the port answers `[]<Entity><Fact>Group`, a struct generated beside it carrying the
+    key(s) and the value. It lives in the DOMAIN: a rule that had to name the framework's
+    own `*read.Group` would drag infra in to state an invariant.
+  - a key is carried as text on every backend — the framework normalises it to a
+    driver-neutral value handed over as `any`, and rendering it is the one reading that
+    cannot fail on either engine. A key is read to be compared or reported, not summed.
+  - no `found` flag, unlike the ungrouped `min`/`max`/`avg`: a group EXISTS because a row
+    matched, and an empty set answers no groups at all.
+  - refused, each by name: a nullable key (a row without it belongs to no group), a
+    runtime-only key (no column to group by), a repeated key, an unknown key, `groupBy` on
+    `exists` (the fix names `count`) and on `manual` (no generated query to group).
+  - **`groupCap` and a grouped fact now say out loud that they are not alternatives** — in
+    the skill, in `explain rules` and in the example: one counts rows in the TABLE, the
+    other counts the entries THIS WRITE carries, which no query can see yet. `explain
+    rules` also stops claiming `groupCap` "needs a service fact to count them"; it never
+    did, and that line is how someone talks themselves into the wrong one.
+  - covered by a new matrix fixture (`24-fatos-agrupados`: every kind grouped, a composite
+    key, grouped-and-filtered, alongside a `groupCap` in the same spec), by a grouped fact
+    on the tree the gate BOOTS, and by a refusal test for each rejected shape.
+
+
 - **`assignedFrom` — a persisted field the SERVER fills from the caller's identity.**
   `assignedFrom: identity-subject` (or `identity-claim` with `claim:`) writes the field on
   insert and leaves it out of every write request and command, so there is no client value
