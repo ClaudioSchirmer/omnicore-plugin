@@ -1,0 +1,73 @@
+# Eixo: um SEGUNDO papel sobre a identidade do caso 12, EXPONDO a coleção que
+# aquele papel declarou.
+#
+# Antes isto era recusado por inteiro — "este papel reusa uma base existente,
+# então não escreve o schema da base". Verdade quanto ao SCHEMA, e a recusa
+# cobria muito mais do que isso: o papel não precisava criar tabela nenhuma,
+# precisava das rotas, dos comandos e das requests da coleção na sua própria
+# superfície. O custo da recusa foi tudo isso escrito à mão.
+#
+# O que este caso prova: a tabela não é criada de novo, o tipo da entrada e seu
+# input DTO não são redeclarados, e os comandos/requests deste papel nascem
+# qualificados pela entidade — AddEstagiarioBibTituloCommand — porque
+# AddTituloCommand já é do outro papel e está preso ao agregado dele.
+specVersion: 1
+entity: EstagiarioBib
+plural: EstagiariosBib
+language: pt-BR
+storage:
+  kind: sharedbase-role
+  table: estagiarios_bib
+  description: Estagiários da biblioteca — outro papel sobre a mesma identidade.
+  base:
+    table: pessoas_bib
+    reuse: true
+    schemaFunc: PessoaBibBase
+    linkColumn: pessoa_bib_id
+    description: Identidade de pessoa.
+    naturalKey: Documento
+    link: separate-fk
+    rowUniqueness: active-only
+    orphanPolicy: keep
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "123.456.789-00", description: Documento — chave natural.}
+  - {name: Nome, type: string, column: nome, length: 160, livesOn: base, example: Carlos Lima, description: Nome da pessoa.}
+  - {name: Turno, type: string, column: turno, length: 20, livesOn: role, example: manha, description: Turno do estágio.}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: put}
+delete: {root: soft}
+rules:
+  list:
+    - {id: doc-obrigatorio, kind: required, scope: [insert], fields: [Documento], notification: RequiredFieldNotification}
+children:
+  # A MESMA coleção do caso 12, restatada com a mesma forma — e a validação
+  # compara campo a campo com a declaração de lá, porque duas declarações de uma
+  # tabela podem discordar sem que nada quebre na hora.
+  - name: Titulo
+    plural: Titulos
+    table: pessoa_titulos
+    parentColumn: pessoa_bib_id
+    description: Titulos academicos da pessoa.
+    ownedBy: base
+    editStrategy: per-child
+    duplicateNotification: TituloJaExisteNotification
+    businessIdentity: [Nome]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - {name: Nome, type: string, column: nome, length: 80, example: Mestrado, description: Nome do titulo.}
+notifications:
+  - name: TituloJaExisteNotification
+    semantic: conflict
+    description: Titulo ja consta na pessoa.
+    text: {ptbr: "Esse título já consta.", eng: "That degree is already there.", esp: "Ese título ya consta.", fra: "Ce titre figure déjà.", deu: "Dieser Titel ist bereits vorhanden.", ita: "Questo titolo è già presente.", nld: "Die titel staat er al."}
+read:
+  backing: relational
+  view: {name: estagiarios_bib, version: 1}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: estagiariobib
+  dataAccess: anyone-with-permission
+  permissions: {insert: "estag:escrever", update: "estag:escrever", archive: "estag:arquivar", unarchive: "estag:arquivar", read: "estag:ler"}

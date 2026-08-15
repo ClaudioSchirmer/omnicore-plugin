@@ -535,6 +535,9 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 	if m.Read.Enabled {
 		pointered := m.Read.Controls.Fields
 		for _, c := range m.Children {
+			if c.Mounted {
+				continue // one shape, declared by the role that owns the identity
+			}
 			s.Doc(fmt.Sprintf("%sRow is one entry of the %s collection as a read returns it.",
 				c.Name, c.Segment))
 			s.L("type %sRow struct {", c.Name)
@@ -557,6 +560,12 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 	}
 
 	for _, c := range m.Children {
+		if c.Mounted {
+			// The entry's wire shape is the collection's, not this role's: it is
+			// declared once, by the spec that owns the identity, and both roles
+			// send and return the same JSON for the same row.
+			continue
+		}
 		s.Doc(fmt.Sprintf("%sRequest is one entry sent in the %s collection.", c.Name, c.Segment),
 			"",
 			"It carries no id: the server mints one.")
@@ -608,14 +617,15 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			continue
 		}
 		seg := c.Segment
+		opName := c.OpBase // qualified when the collection is mounted from a shared identity
 		idParam := lowerFirst(c.Name) + "Id"
 		perm := updatePermission(m)
 
 		for _, op := range []perChildOp{
 			{
 				verb: "Add", method: "fiber.MethodPost", path: "/:id/" + seg,
-				request: "Add" + c.Name + "Request", response: "Add" + c.Name + "Response",
-				result: "Add" + c.Name + "Result", status: "fiber.StatusCreated",
+				request: "Add" + opName + "Request", response: "Add" + opName + "Response",
+				result: "Add" + opName + "Result", status: "fiber.StatusCreated",
 				summary: fmt.Sprintf("Add one %s to a %s", c.Name, entity),
 				doc: fmt.Sprintf("Adds ONE entry to the %s collection of an existing %s, "+
 					"in the owner's transaction. 404 when the owner is not there. The "+
@@ -625,23 +635,23 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			},
 			{
 				verb: "Change", method: "fiber.MethodPut", path: "/:id/" + seg + "/:" + idParam,
-				request: "Change" + c.Name + "Request", response: "Change" + c.Name + "Response",
-				result: "Change" + c.Name + "Result", status: "fiber.StatusOK",
+				request: "Change" + opName + "Request", response: "Change" + opName + "Response",
+				result: "Change" + opName + "Result", status: "fiber.StatusOK",
 				summary: fmt.Sprintf("Replace one %s of a %s", c.Name, entity),
 				doc: fmt.Sprintf("Full replacement of ONE entry, keeping its id — the row " +
 					"is updated rather than removed and re-added, so the audit trail reads " +
 					"as a change. 404 when the owner is not there, and 404 when the owner " +
 					"exists but holds no entry with that id."),
 			},
-			removeOp(c, entity, seg, idParam),
+			removeOp(c, entity, seg, idParam, opName),
 		} {
-			hv := "h" + op.verb + c.Name
-			sv := "s" + op.verb + c.Name
+			hv := "h" + op.verb + opName
+			sv := "s" + op.verb + opName
 			s.L("\t%s, %s := fwweb.CommandWithBodyIDSpec(d.Pipeline,", hv, sv)
 			s.L("\t\trequests.%s{},", op.request)
 			s.L("\t\trequests.%s{}.FromResult,", op.response)
 			s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.%s, commands.%s]{",
-				entity, op.verb+c.Name+"Command", op.result)
+				entity, op.verb+opName+"Command", op.result)
 			s.L("\t\t\tRepo: repo,%s", serviceField(m))
 			s.L("\t\t}, %s)", op.status)
 			s.L("\tfwopenapi.Mount(d.OpenAPIRegistry, group, %s, %s,", op.method, quote(op.path))
@@ -694,13 +704,13 @@ func lowerFirst(s string) string {
 //
 // The two also differ in what the caller can do next: an archived entry can be
 // brought back, and nothing about a purged one can.
-func removeOp(c ir.Child, entity, seg, idParam string) perChildOp {
+func removeOp(c ir.Child, entity, seg, idParam, opName string) perChildOp {
 	if c.ArchivedAt != "" {
 		return perChildOp{
 			verb: "Remove", method: "fiber.MethodPatch",
 			path:    "/:id/" + seg + "/:" + idParam + "/archive",
-			request: "Remove" + c.Name + "Request", response: "Remove" + c.Name + "Response",
-			result: "Remove" + c.Name + "Result", status: "fiber.StatusOK",
+			request: "Remove" + opName + "Request", response: "Remove" + opName + "Response",
+			result: "Remove" + opName + "Result", status: "fiber.StatusOK",
 			summary: fmt.Sprintf("Archive one %s of a %s", c.Name, entity),
 			doc: "Archives ONE entry: the row stays, stamped, and stops being " +
 				"returned — reversible, which is why this is not a DELETE. 404 when the " +
@@ -710,8 +720,8 @@ func removeOp(c ir.Child, entity, seg, idParam string) perChildOp {
 	return perChildOp{
 		verb: "Remove", method: "fiber.MethodDelete",
 		path:    "/:id/" + seg + "/:" + idParam,
-		request: "Remove" + c.Name + "Request", response: "Remove" + c.Name + "Response",
-		result: "Remove" + c.Name + "Result", status: "fiber.StatusOK",
+		request: "Remove" + opName + "Request", response: "Remove" + opName + "Response",
+		result: "Remove" + opName + "Result", status: "fiber.StatusOK",
 		summary: fmt.Sprintf("Remove one %s from a %s", c.Name, entity),
 		doc: "Removes ONE entry for good: this child declares no archive column, " +
 			"so there is nothing to bring back. 404 when the owner is not there, and " +

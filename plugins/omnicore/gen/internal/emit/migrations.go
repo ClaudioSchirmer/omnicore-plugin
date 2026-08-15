@@ -279,6 +279,13 @@ func upSQL(m *ir.Model, d dialect) string {
 		writeSiblingTable(&b, m, sib, d)
 	}
 	for _, c := range m.Children {
+		if c.Mounted {
+			// The identity's collection is created by the spec that declares the
+			// identity. Creating it again would be a second CREATE TABLE for one
+			// table, and dropping it on this role's rollback would take another
+			// role's rows with it.
+			continue
+		}
 		b.WriteString("\n")
 		writeChildTable(&b, m, c, d)
 		for _, sib := range m.SiblingsOn(c.Name) {
@@ -359,6 +366,9 @@ func downSQL(m *ir.Model, d dialect) string {
 	// between engines (MySQL has no IF EXISTS for it) to be a liability for no gain.
 	// Reverse order: a table pointed at cannot go before the tables pointing at it.
 	for _, c := range m.Children {
+		if c.Mounted {
+			continue // not this spec's table to drop
+		}
 		for _, sib := range m.SiblingsOn(c.Name) {
 			fmt.Fprintf(&b, "DROP TABLE IF EXISTS %s;\n", d.Quote(sib.Table))
 		}

@@ -59,7 +59,7 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	if err != nil {
 		return err
 	}
-	problems := spec.Validate(s, spec.Options{LangFallback: opt.LangFallback, ExistingVOs: proj.ExistingVOs, Neighbours: neighboursOf(proj)})
+	problems := spec.Validate(s, spec.Options{LangFallback: opt.LangFallback, ExistingVOs: proj.ExistingVOs, VOOwner: proj.VOOwner, Neighbours: neighboursOf(proj)})
 	if problems.HasBlockers() {
 		return problems.Error()
 	}

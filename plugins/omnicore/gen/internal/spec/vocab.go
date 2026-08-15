@@ -15,6 +15,11 @@ var (
 	// a dialect column mapping, never an accident.
 	FieldTypes = set("string", "int", "int64", "float64", "bool", "time", "id")
 
+	// AssignedFrom is where the SERVER reads a persisted field's value, for the
+	// fields a client is not allowed to send. The subject is the caller's own
+	// identifier; a claim is anything else the token carries.
+	AssignedFrom = set("identity-subject", "identity-claim")
+
 	VOKinds            = set("none", "reuse", "raw", "enum")
 	VOBackings         = set("string", "int")
 	UniqueEnforcements = set("service-precheck+constraint", "constraint-only")
@@ -143,6 +148,8 @@ func Vocabularies() []Vocabulary {
 			"the persistable set; money is int64 in minor units, never a float."},
 		{"fields[].vo.kind", VOKinds,
 			"enum when the valid values are finite and known; raw when it is a shape."},
+		{"fields[].assignedFrom", AssignedFrom,
+			"the server fills it from the caller's identity, so no write request carries it."},
 		{"fields[].unique.enforce", UniqueEnforcements,
 			"whether a Service pre-check answers before the database constraint does."},
 		{"fields[].unique.scope", UniqueScopes,
@@ -218,5 +225,7 @@ func RefusedKeys() map[string]string {
 		"rules.manual[].actionName":            "describe the condition in the description instead",
 		"children[].rules.list[].actionName":   "gate the rule by verb scope instead",
 		"children[].rules.manual[].actionName": "describe the condition in the description instead",
+		"children[].fields[].assignedFrom": "an entry of a collection has no identity of its " +
+			"own to be assigned from — the field that records who acted belongs to the root",
 	}
 }

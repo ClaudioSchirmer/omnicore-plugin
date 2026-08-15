@@ -103,7 +103,7 @@ func Check(w io.Writer, opt CheckOptions) (CheckResult, error) {
 	}
 	res.Entity = s.Entity
 
-	problems := spec.Validate(s, spec.Options{LangFallback: opt.LangFallback, ExistingVOs: proj.ExistingVOs, Neighbours: neighboursOf(proj)})
+	problems := spec.Validate(s, spec.Options{LangFallback: opt.LangFallback, ExistingVOs: proj.ExistingVOs, VOOwner: proj.VOOwner, Neighbours: neighboursOf(proj)})
 	appendFindings(&res, problems)
 
 	// Coverage runs only once the spec is otherwise sound: meeting "not in this
@@ -208,9 +208,19 @@ func Fatal(where, msg string, asJSON bool) {
 func neighboursOf(p *discover.Project) []spec.Neighbour {
 	out := make([]spec.Neighbour, 0, len(p.SiblingSpecs))
 	for _, c := range p.SiblingSpecs {
-		out = append(out, spec.Neighbour{
+		n := spec.Neighbour{
 			Path: c.Path, Entity: c.Entity, ViewName: c.ViewName, Route: c.Route,
-		})
+		}
+		for _, ch := range c.Children {
+			nc := spec.NeighbourChild{Name: ch.Name, Table: ch.Table, OwnedBy: ch.OwnedBy}
+			for _, f := range ch.Fields {
+				nc.Fields = append(nc.Fields, spec.NeighbourField{
+					Name: f.Name, Column: f.Column, Type: f.Type,
+				})
+			}
+			n.Children = append(n.Children, nc)
+		}
+		out = append(out, n)
 	}
 	return out
 }

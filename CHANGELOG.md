@@ -7,8 +7,64 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+### Added
+
+- **`assignedFrom` — a persisted field the SERVER fills from the caller's identity.**
+  `assignedFrom: identity-subject` (or `identity-claim` with `claim:`) writes the field on
+  insert and leaves it out of every write request and command, so there is no client value
+  to ignore and an update cannot reassign it. It is the field an `owner-only` policy reads:
+  letting the body carry it means anyone can create a row owned by someone else. It had no
+  key, so the invariant went to `rules.manual`, the insert mapper was edited by hand, the
+  generated test that asserted the old mapping started failing, and both files were adopted.
+- **A second role can EXPOSE a collection of the shared identity.** `children[].ownedBy:
+  base` under `storage.base.reuse: true` used to be refused outright — "this role reuses an
+  existing base, so it does not write the base's schema". True of the SCHEMA, and the
+  refusal covered far more: the role needed no table, it needed the collection on its own
+  surface. It now mounts: the shape is compared field by field against the spec that
+  declares it (a disagreement is a blocker, not a runtime surprise), no table, entry type or
+  input DTO is written, and the commands, requests and routes are named `<Entity><Child>…`
+  so they cannot collide with the owning role's. The run that motivated this wrote 389 lines
+  and four files by hand for exactly this.
+- **Rules on a collection now take the whole DSL**, including `transition`, `skipWhen` and
+  `rules.manual` with a hook of the collection's own. `childDuplicate`, `groupCap` and
+  `ownerCheck` are refused there BY NAME, pointing at the root — they ask about the whole
+  set, and one entry cannot see it.
+
 ### Fixed
 
+- **`vo: {kind: reuse}` could not see a single real value object.** The project inventory
+  skipped every generated file — so `UF`, `URL` and the enums a previous entity created were
+  invisible — and collected every exported type of the hand-written `notifications.go`, so
+  the answer to "which value objects does this project have?" was three NOTIFICATIONS. The
+  author of a second role over a shared base was told to reuse one of those, did, and
+  validation accepted it. The inventory now identifies a value object by its `Value()`
+  method and records who generated it: referencing one is open to everybody, redeclaring is
+  refused to everybody except the entity that already owns it, and a `ref` ending in
+  `Notification` is named as the confusion it is.
+- **Rules declared inside `children[]` lost half of themselves, silently.** The collection
+  had a resolver of its own that had fallen behind the root's: it dropped `Transitions`,
+  `GroupBy`, `Cap`, `SkipWhen`, `AdminField` and `OwnerField`. A `transition` under
+  `children[]` therefore validated, generated its notification and all seven translations,
+  and emitted a clause with NO edges — allowing every move, which is the opposite of what
+  was declared. Nothing failed: not the build, not the tests, not the report. There is one
+  resolver now, and the regression test asserts per ATTRIBUTE.
+- **`children[].rules.manual` was parsed and then dropped entirely** — no hook, no call
+  site, no report line. The spec asked for an invariant and the generator forgot it.
+- **A rule comparing an entry against its previous state could not work where it was
+  declared** (`domain.Old` is defined over `Entity`; an aggregate child is not one).
+  `transition` and `immutable` on a collection are now enforced from the root, pairing
+  surviving entries with their former selves — by id when the collection is per-child, by
+  business identity when it is replaced wholesale — and the report says where they went.
+- **A value object's own notification was emitted into `domain`**, where the package that
+  declares the type cannot reach it: the tree did not compile, and the only clue was
+  "undefined" in a generated file. It is placed in `vos`, the same way a child-raised one is
+  placed in `aggregatevos`.
+- **`comparison` between two non-nullable fields emitted `true && true`**, which `go vet`
+  rejects — so a generated project could fail its own checks.
+- **The coverage matrix only ever exercised `required` and `length` inside a collection**,
+  which happen to be the two kinds that survived the broken resolver. Two cases were added:
+  a collection with `transition`, `skipWhen`, `comparison` and a manual rule, and a pair of
+  roles sharing one identity where the second mounts the first's collection.
 - **`scaffold-service` shipped a `.gitignore` that hid the reasoning, and only two of the
   eight working dirs had any rule at all.** The generated file
   listed the `scaffold-service/` and `scaffold-entity/` working dirs, so the approved

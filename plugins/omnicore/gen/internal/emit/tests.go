@@ -403,7 +403,9 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("func TestInsert%sMapsEveryField(t *testing.T) {", m.Entity.Pascal)
 		s.L("\tctx := &configuration.AppContext{}")
 		s.L("\tc := &%s{", op.CommandType)
-		for _, f := range m.AllOwnerFields() {
+		// The command carries what a CLIENT may send. A server-assigned field is
+		// not in the type at all, so naming it here would not compile.
+		for _, f := range m.WritableFields() {
 			s.L("\t\t%s: %s,", f.Name, wireSample(f))
 		}
 		for _, c := range m.Children {
@@ -428,7 +430,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 			s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
 			s.L("\t}")
 		}
-		for _, f := range m.AllOwnerFields() {
+		for _, f := range m.WritableFields() {
 			if f.Nullable {
 				continue
 			}
@@ -448,7 +450,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("func TestPatch%sLeavesAbsentFieldsAlone(t *testing.T) {", m.Entity.Pascal)
 		s.L("\tctx := &configuration.AppContext{}")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
-		first := m.AllOwnerFields()[0]
+		first := m.PatchableFields()[0]
 		s.L("\te.%s = %s", first.Name, entitySample(first))
 		s.L("\tc := &%s{} // nothing sent", op.CommandType)
 		s.L("\tif err := c.ApplyPartiallyTo(ctx, e); err != nil {")
@@ -469,7 +471,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\tctx := &configuration.AppContext{}")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 		s.L("\tc := &%s{", op.CommandType)
-		for _, f := range m.AllOwnerFields() {
+		for _, f := range m.PatchableFields() {
 			if m.PatchExcludes[f.Name] {
 				continue
 			}
@@ -479,7 +481,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\tif err := c.ApplyPartiallyTo(ctx, e); err != nil {")
 		s.L("\t\tt.Fatalf(%s, err)", quote("ApplyPartiallyTo: %v"))
 		s.L("\t}")
-		for _, f := range m.AllOwnerFields() {
+		for _, f := range m.PatchableFields() {
 			if m.PatchExcludes[f.Name] || f.Nullable {
 				continue
 			}
@@ -510,7 +512,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\te.SetID(domain.NewID(%s))", quote("019ffd00-0000-7000-8000-000000000000"))
 		s.L("\tc := &%s{", op.CommandType)
 		if op.InputMethod == "ApplyTo" || op.InputMethod == "ApplyPartiallyTo" {
-			for _, f := range m.AllOwnerFields() {
+			for _, f := range m.WritableFields() {
 				if m.PatchExcludes[f.Name] {
 					continue
 				}
@@ -1192,7 +1194,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 				"and the value the caller sent is not in the row.")
 		s.L("func Test%s_CarriesEveryField(t *testing.T) {", op.RequestType)
 		s.L("\tr := %s{", op.RequestType)
-		for _, f := range m.AllOwnerFields() {
+		for _, f := range m.WritableFields() {
 			if m.PatchExcludes[f.Name] && op.Verb == "patch" {
 				continue
 			}
@@ -1223,7 +1225,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 			s.L("\t\tt.Errorf(\"the %s collection did not reach the command\")", c.Name)
 			s.L("\t}")
 		}
-		for _, f := range m.AllOwnerFields() {
+		for _, f := range m.WritableFields() {
 			if m.PatchExcludes[f.Name] && op.Verb == "patch" {
 				continue
 			}

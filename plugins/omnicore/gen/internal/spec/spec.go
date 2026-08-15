@@ -99,6 +99,12 @@ type Field struct {
 	// for such a field: the framework deliberately does not opine on which custom
 	// claims a token carries, so any convention here would be a guess.
 	Claim string `yaml:"claim"`
+	// AssignedFrom says the SERVER fills this persisted field from the caller's
+	// identity, so the client never sends it: it is absent from every write
+	// request and command, written on insert, and left alone afterwards. Use it
+	// for the field that records who created the row — the one an owner-only
+	// policy then reads.
+	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim
 }
 
 type FieldVO struct {

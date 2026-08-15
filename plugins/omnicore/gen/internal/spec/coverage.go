@@ -37,6 +37,8 @@ const (
 	CapTenantAccess   Capability = "tenant data access"
 	CapGeneratedTests Capability = "generated unit tests"
 	CapPerChild       Capability = "per-entry child operations"
+	CapAssignedField  Capability = "server-assigned fields (from the caller's identity)"
+	CapMountedChild   Capability = "a shared identity's collection, exposed on a second role"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -62,6 +64,8 @@ var implemented = map[Capability]bool{
 	CapTenantAccess:   true,
 	CapGeneratedTests: true,
 	CapPerChild:       true,
+	CapAssignedField:  true,
+	CapMountedChild:   true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -80,6 +84,7 @@ func AllCapabilities() []Capability {
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapGeneratedTests, CapPerChild,
+		CapAssignedField, CapMountedChild,
 	}
 }
 

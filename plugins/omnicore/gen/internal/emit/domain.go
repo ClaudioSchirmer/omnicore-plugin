@@ -219,7 +219,10 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 			s.L("\t\t// %s", line)
 		}
 	}
-	if guard := skipGuard(rule, recv); guard != "" {
+	// A hoisted rule's subject is the ENTRY, reached inside the pairing loop the
+	// child emitters open — never the root receiver, which has no such field.
+	// Its guard is emitted in there, on the entry.
+	if guard := skipGuard(rule, recv); guard != "" && !rule.Hoisted {
 		s.L("\t\t// %s", skipReason(rule))
 		s.L("\t\tif %s {", guard)
 		defer s.L("\t\t}")
@@ -246,6 +249,14 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 		emitRequiredIf(s, rule, recv, m)
 	case "transition":
 		emitTransition(s, rule, recv, m)
+	case "childTransition":
+		if m != nil {
+			emitChildTransition(s, m, rule)
+		}
+	case "childImmutable":
+		if m != nil {
+			emitChildImmutable(s, m, rule)
+		}
 	case "childDuplicate":
 		if m != nil {
 			emitChildDuplicate(s, m, rule)
@@ -340,8 +351,18 @@ func emitComparison(s *src, rule ir.Rule, recv string, m *ir.Model) {
 		return
 	}
 	left, right := rule.Fields[0], *rule.Other
-	guard := comparisonGuard(left, recv) + " && " + comparisonGuard(right, recv)
-	s.L("\t\tif %s && %s {", guard, comparisonExpr(left, right, rule.Operator, recv))
+	// A field that cannot be absent needs no guard, and emitting "true" for it
+	// is not merely noise: two of them in a row is `true && true`, which vet
+	// rejects as a redundant condition and which therefore fails the generated
+	// project's own checks.
+	var conds []string
+	for _, g := range []string{comparisonGuard(left, recv), comparisonGuard(right, recv)} {
+		if g != "" && g != "true" {
+			conds = append(conds, g)
+		}
+	}
+	conds = append(conds, comparisonExpr(left, right, rule.Operator, recv))
+	s.L("\t\tif %s {", strings.Join(conds, " && "))
 	s.L("\t\t\tr.AddNotification(%s, %s%s)",
 		quote(left.Name), notifIn(m, rule.Notification), echoArg(rule, left))
 	s.L("\t\t}")
@@ -823,6 +844,105 @@ func emitTransition(s *src, rule ir.Rule, recv string, m *ir.Model) {
 }
 
 func transitionKeyType(f ir.Field) string { return "string" }
+
+// emitChildPairing opens a block that walks the entries this write leaves
+// behind, each next to the way it was before.
+//
+// It is the root's answer to a rule an ENTRY cannot decide. A collection's
+// BuildRules is handed one entry and no history — domain.Old is defined over
+// Entity — so the rules that compare against the previous version are emitted
+// here, where the framework does expose both sides: the surviving entries from
+// the aggregate root, the previous ones from the ghost the write carries.
+//
+// Pairing is by id when the collection is edited one entry at a time, and by
+// business identity when it is replaced wholesale — a replace hands back
+// entries with no id, so every one of them would read as new.
+func emitChildPairing(s *src, c *ir.Child, body func(cur, old string)) {
+	s.L("\t\t{")
+	s.L("\t\t\tcurrent := domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot())", c.Name)
+	s.L("\t\t\tvar previous []aggregatevos.%s", c.Name)
+	s.L("\t\t\tif ghost := domain.Old(e); ghost != nil {")
+	s.L("\t\t\t\tprevious = domain.GetCurrentItemsOf[aggregatevos.%s](ghost.GetAggregateRoot())", c.Name)
+	s.L("\t\t\t}")
+	s.L("\t\t\tfor _, cur := range current {")
+	s.L("\t\t\t\tfor _, was := range previous {")
+	if c.PerChild {
+		s.L("\t\t\t\t\tif cur.GetID().Value() != was.GetID().Value() {")
+	} else {
+		s.L("\t\t\t\t\tif !cur.IsSameBusinessIdentity(was) {")
+	}
+	s.L("\t\t\t\t\t\tcontinue")
+	s.L("\t\t\t\t\t}")
+	body("cur", "was")
+	s.L("\t\t\t\t\tbreak")
+	s.L("\t\t\t\t}")
+	s.L("\t\t\t}")
+	s.L("\t\t}")
+}
+
+// emitChildTransition is `transition` declared on a collection.
+func emitChildTransition(s *src, m *ir.Model, rule ir.Rule) {
+	c := childNamed(m, rule)
+	if c == nil || len(rule.Fields) == 0 || len(rule.Transitions) == 0 {
+		return
+	}
+	f := rule.Fields[0]
+	read := func(recv string) string {
+		v := recv + "." + f.Name
+		if f.VOKind != "" {
+			v += ".Value()"
+		}
+		if f.Nullable {
+			v = "*" + v
+		}
+		return v
+	}
+	emitChildPairing(s, c, func(cur, old string) {
+		if guard := skipGuard(rule, cur); guard != "" {
+			s.L("\t\t\t\t\t// %s", skipReason(rule))
+			s.L("\t\t\t\t\tif %s {", guard)
+			defer s.L("\t\t\t\t\t}")
+		}
+		s.L("\t\t\t\t\tallowed := map[string][]string{")
+		for _, from := range sortedKeys(rule.Transitions) {
+			var quoted []string
+			for _, to := range rule.Transitions[from] {
+				quoted = append(quoted, quote(to))
+			}
+			s.L("\t\t\t\t\t\t%s: {%s},", quote(from), strings.Join(quoted, ", "))
+		}
+		s.L("\t\t\t\t\t}")
+		s.L("\t\t\t\t\tif %s != %s {", read(old), read(cur))
+		s.L("\t\t\t\t\t\tok := false")
+		s.L("\t\t\t\t\t\tfor _, to := range allowed[%s] {", read(old))
+		s.L("\t\t\t\t\t\t\tif to == %s {", read(cur))
+		s.L("\t\t\t\t\t\t\t\tok = true")
+		s.L("\t\t\t\t\t\t\t\tbreak")
+		s.L("\t\t\t\t\t\t\t}")
+		s.L("\t\t\t\t\t\t}")
+		s.L("\t\t\t\t\t\tif !ok {")
+		s.L("\t\t\t\t\t\t\tr.AddNotification(%s, %s)",
+			quote(rule.AttachTo), notifIn(m, rule.Notification))
+		s.L("\t\t\t\t\t\t}")
+		s.L("\t\t\t\t\t}")
+	})
+}
+
+// emitChildImmutable is `immutable` declared on a collection: the entry may be
+// edited, this field may not.
+func emitChildImmutable(s *src, m *ir.Model, rule ir.Rule) {
+	c := childNamed(m, rule)
+	if c == nil || len(rule.Fields) == 0 {
+		return
+	}
+	f := rule.Fields[0]
+	emitChildPairing(s, c, func(cur, old string) {
+		s.L("\t\t\t\t\tif %s.%s != %s.%s {", old, f.Name, cur, f.Name)
+		s.L("\t\t\t\t\t\tr.AddNotification(%s, %s)",
+			quote(rule.AttachTo), notifIn(m, rule.Notification))
+		s.L("\t\t\t\t\t}")
+	})
+}
 
 func sortedKeys(m map[string][]string) []string {
 	out := make([]string, 0, len(m))

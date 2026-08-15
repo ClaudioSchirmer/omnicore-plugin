@@ -136,7 +136,7 @@ func emitBodyCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 func writableFields(m *ir.Model) []ir.Field {
 	// A sibling facet is not a separate input: its fields are more fields of the
 	// owner, and the row is materialised only when at least one carries a value.
-	return m.AllOwnerFields()
+	return m.WritableFields()
 }
 
 // commandFields are the fields a given verb accepts.
@@ -149,7 +149,7 @@ func commandFields(m *ir.Model, partial bool) []ir.Field {
 	if partial {
 		return m.PatchableFields()
 	}
-	return m.AllOwnerFields()
+	return m.WritableFields()
 }
 
 func commandFieldType(f ir.Field, partial bool) string {
@@ -167,6 +167,7 @@ func emitToEntity(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\te.%s = %s", f.Name, entityValue(f, "c."+f.Name))
 	}
 	emitChildAdds(s, m)
+	emitAssignedFields(s, m)
 	emitIdentityFeed(s, m)
 	s.L("\treturn e, nil")
 	s.L("}")
@@ -191,6 +192,11 @@ func emitApplyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\te.%s = %s", f.Name, entityValue(f, "c."+f.Name))
 	}
 	emitChildAdds(s, m)
+	// An insert through the identity path assigns too; an update must not —
+	// re-reading the caller would hand the row to whoever edited it last.
+	if op.Verb == "insert" {
+		emitAssignedFields(s, m)
+	}
 	emitIdentityFeed(s, m)
 	s.L("\treturn nil")
 	s.L("}")
@@ -220,13 +226,42 @@ func emitApplyPartiallyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 	s.Blank()
 }
 
+// emitAssignedFields writes the persisted fields the SERVER owns.
+//
+// It runs on insert only. The value is the caller's, not the client's: the
+// field is absent from the request, so there is nothing to ignore, and a later
+// update leaves it alone because it is absent from that mapper too — which is
+// what makes "who created this row" a fact rather than a claim.
+func emitAssignedFields(s *src, m *ir.Model) {
+	assigned := m.AssignedFields()
+	if len(assigned) == 0 {
+		return
+	}
+	s.Blank()
+	s.L("\t// Filled from the caller's identity, never from the request: these fields")
+	s.L("\t// are not part of any write DTO. Only an insert sets them.")
+	s.L("\tif id := ctx.Identity(); id != nil {")
+	for _, f := range assigned {
+		if f.AssignedFrom == "identity-subject" {
+			s.L("\t\te.%s = %s", f.Name, entityValue(f, "id.Subject"))
+			continue
+		}
+		s.L("\t\tif raw, ok := id.Claims[%s].(string); ok {", quote(f.Claim))
+		s.L("\t\t\te.%s = %s", f.Name, entityValue(f, "raw"))
+		s.L("\t\t}")
+	}
+	s.L("\t}")
+}
+
 // emitIdentityFeed populates the runtime-only fields the rules read.
 //
 // This is the one place below the web layer that touches the request identity:
 // the command feeds it onto the entity, and BuildRules enforces with it.
 func emitIdentityFeed(s *src, m *ir.Model) {
 	if len(m.Runtime) == 0 {
-		s.L("\t_ = ctx")
+		if len(m.AssignedFields()) == 0 {
+			s.L("\t_ = ctx")
+		}
 		return
 	}
 	s.Blank()
@@ -282,7 +317,7 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\t\t%s: %s,", f.Name, wireValue(f, "e"))
 	}
 	for _, c := range m.Children {
-		s.L("\t\t%s: %s,", c.GoPlural, "project"+c.GoPlural+"(e)")
+		s.L("\t\t%s: %s,", c.GoPlural, c.Projector+"(e)")
 	}
 	s.L("\t}, nil")
 	s.L("}")
@@ -308,7 +343,7 @@ func emitChildAdds(s *src, m *ir.Model) {
 // persister has just written the minted ids back.
 func emitChildProjectors(s *src, m *ir.Model, entity string) {
 	for _, c := range m.Children {
-		s.L("func project%s(e *%s) []%sResult {", c.GoPlural, entity, c.Name)
+		s.L("func %s(e *%s) []%sResult {", c.Projector, entity, c.Name)
 		s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](&e.AggregateRoot)", c.Name)
 		s.L("\tout := make([]%sResult, 0, len(items))", c.Name)
 		s.L("\tfor _, item := range items {")
@@ -424,6 +459,9 @@ func emitChildResults(m *ir.Model) (fsplan.File, error) {
 
 	entity := "appdomain." + m.Entity.Pascal
 	for _, c := range m.Children {
+		if c.Mounted {
+			continue // declared, with this shape, by the role that owns the identity
+		}
 		s.Doc(fmt.Sprintf("%sResult mirrors one persisted %s.", c.Name, c.Name),
 			"",
 			"The id is included because the persister writes the minted ids back before "+

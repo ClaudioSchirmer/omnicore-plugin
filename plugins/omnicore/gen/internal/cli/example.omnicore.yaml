@@ -81,6 +81,21 @@ fields:
     description: Data da matrícula.
     labelKey: StudentEnrolledAtField
 
+  # assignedFrom: PERSISTIDO, mas preenchido pelo servidor a partir da identidade
+  # do chamador. O campo não aparece em nenhum DTO de escrita — o cliente não tem
+  # o que mandar, e não há valor para ignorar. Escrito no insert e deixado em paz
+  # depois: é assim que "quem criou" vira fato e não alegação.
+  - name: RegisteredBy
+    type: string
+    column: registered_by
+    length: 160
+    livesOn: root
+    assignedFrom: identity-subject
+    example: coordenacao@escola.br
+    description: Quem registrou a matrícula, lido da identidade autenticada.
+
+  # runtime: o oposto — NUNCA persistido. Existe só para as regras lerem, e vem
+  # de um claim nomeado, porque o framework não opina sobre claims customizados.
   - name: RequestingPrincipalEmail
     type: string
     runtime: true

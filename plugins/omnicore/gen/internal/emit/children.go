@@ -21,19 +21,33 @@ import (
 func emitChildren(m *ir.Model) ([]fsplan.File, error) {
 	var out []fsplan.File
 	for _, c := range m.Children {
-		avo, err := emitAVO(m, c)
-		if err != nil {
-			return nil, err
+		// A MOUNTED collection is declared by the role that owns the shared
+		// identity: the table, the schema, the entry type, its input DTO and its
+		// rules all exist and belong to that spec. What this role is missing is
+		// the SURFACE — which is the whole of what it could not have before.
+		if !c.Mounted {
+			avo, err := emitAVO(m, c)
+			if err != nil {
+				return nil, err
+			}
+			schema, err := emitChildSchema(m, c)
+			if err != nil {
+				return nil, err
+			}
+			input, err := emitChildInput(m, c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, avo, schema, input)
 		}
-		schema, err := emitChildSchema(m, c)
-		if err != nil {
-			return nil, err
+
+		if c.HasHookFile && !c.Mounted {
+			hook, err := emitChildRulesHook(m, c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, hook)
 		}
-		input, err := emitChildInput(m, c)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, avo, schema, input)
 
 		// Per-entry editing is a different SURFACE, not a different storage: the
 		// same table, the same type, plus three verbs that address one entry.
@@ -86,7 +100,7 @@ func emitAVO(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 	emitCollectionName(s, c)
 	emitBusinessIdentity(s, c)
-	emitChildRules(s, c)
+	emitChildRules(s, m, c)
 
 	return goFile("internal/domain/aggregatevos/"+naming.Snake(c.Name)+".go", fsplan.Owned,
 		fmt.Sprintf("the %s child value object", c.Name), s)
@@ -148,7 +162,7 @@ func emitBusinessIdentity(s *src, c ir.Child) {
 	s.Blank()
 }
 
-func emitChildRules(s *src, c ir.Child) {
+func emitChildRules(s *src, m *ir.Model, c ir.Child) {
 	s.Doc(
 		fmt.Sprintf("BuildRules validates one %s.", c.Name),
 		"",
@@ -156,7 +170,7 @@ func emitChildRules(s *src, c ir.Child) {
 			"addressed to the exact position in the collection rather than to the root.",
 	)
 	s.L("func (c %s) BuildRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
-	if len(c.Clauses) == 0 {
+	if len(c.Clauses) == 0 && !c.HasHookFile {
 		s.L("\t// No rule beyond what the value objects validate on their own.")
 		s.L("\t_ = actionName")
 		s.L("\t_ = service")
@@ -167,14 +181,92 @@ func emitChildRules(s *src, c ir.Child) {
 	for _, clause := range c.Clauses {
 		s.L("\tr.%s(func() {", clause.Gate)
 		for _, rule := range clause.Rules {
+			// No model, on purpose: it is what tells the shared emitters they are
+			// writing INSIDE aggregatevos, where a notification of this package
+			// is spelled bare. The aggregate-wide kinds — the only ones that
+			// would need the model for anything else — are refused in a
+			// collection's scope, so nothing here is left without it.
 			emitRuleOn(s, clause.Gate, rule, "c")
 		}
 		s.L("\t})")
 		s.Blank()
 	}
+	if c.HasHookFile {
+		s.L("\t// Invariants this collection declared that the spec could not express.")
+		s.L("\t// They live in %s_rules_manual.go, written once and never touched again.",
+			naming.Snake(c.Name))
+		s.L("\tc.customRules(actionName, service, r)")
+	} else {
+		s.L("\t_ = actionName")
+		s.L("\t_ = service")
+	}
+	s.L("}")
+}
+
+// emitChildRulesHook is the collection's own escape hatch.
+//
+// A manual rule declared under children[] used to be parsed and then dropped:
+// no hook, no report line, no compile error — the invariant simply did not
+// exist, and the only way to notice was to go looking for it. A collection
+// states invariants about one entry, so it gets a hook that runs where those
+// invariants belong, rather than being told to reach for the root's.
+func emitChildRulesHook(m *ir.Model, c ir.Child) (fsplan.File, error) {
+	s := &src{}
+	s.Blank()
+	s.L("package aggregatevos")
+	s.Blank()
+	s.L("import %s", quote(fwImport("domain")))
+	s.Blank()
+
+	s.Doc(
+		fmt.Sprintf("customRules is called at the end of %s's generated BuildRules, with "+
+			"the same arguments and scoped to ONE entry. Add each rule inside the verb "+
+			"gate it belongs to — r.IfInsert, r.IfUpdate and so on — and report a "+
+			"violation with r.AddNotification.", c.Name),
+		"",
+		"A notification raised here is addressed to this entry's position in the "+
+			"collection, which is what makes the caller able to tell which one failed.",
+	)
+	s.L("func (c %s) customRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
+	for _, mr := range c.ManualRules {
+		s.Blank()
+		s.L("\t// ── %s ──", mr.ID)
+		for _, line := range wrap(mr.Description, 68) {
+			s.L("\t// %s", line)
+		}
+		if mr.Notification != "" {
+			s.L("\t// Notification to raise: %s{}", mr.Notification)
+		}
+		if mr.AttachTo != "" {
+			s.L("\t// Attach it to the field: %s", quote(mr.AttachTo))
+		}
+		gates := mr.Gates
+		if len(gates) == 0 {
+			gates = []string{"IfInsertOrUpdate"}
+		}
+		for _, gate := range gates {
+			s.L("\tr.%s(func() {", gate)
+			s.L("\t\t// TODO(%s): implement the rule described above.", mr.ID)
+			s.L("\t})")
+		}
+	}
+	s.Blank()
 	s.L("\t_ = actionName")
 	s.L("\t_ = service")
+	s.L("\t_ = r")
 	s.L("}")
+
+	f, err := goFile("internal/domain/aggregatevos/"+naming.Snake(c.Name)+"_rules_manual.go",
+		fsplan.Hook,
+		fmt.Sprintf("the hand-written rules for one %s (%d to implement)",
+			c.Name, len(c.ManualRules)), s)
+	if err != nil {
+		return f, err
+	}
+	f.Consequence = "Until these are written the collection accepts every entry the " +
+		"declared rules allow — the invariants described in the spec are simply not " +
+		"enforced, quietly."
+	return f, nil
 }
 
 func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
@@ -312,6 +404,11 @@ func parentColumn(c ir.Child) string { return c.ParentColumn }
 // is a different operation, and it needs its own not-found answer.
 func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	entity := m.Entity.Pascal
+	// op is what THIS spec's command types are called. It differs from the
+	// collection's own name only when the collection is mounted from a shared
+	// identity: the other role generated AddPhotoCommand into the same package
+	// already, and it is bound to ITS aggregate.
+	op := c.OpBase
 	s := &src{}
 	s.header(m, fmt.Sprintf("Per-entry commands for the %s collection.", c.Segment))
 	s.Blank()
@@ -329,26 +426,26 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 	// ── add
 	s.Doc(
-		fmt.Sprintf("Add%sCommand adds ONE entry to %s's %s.", c.Name, entity, c.Segment),
+		fmt.Sprintf("Add%sCommand adds ONE entry to %s's %s.", op, entity, c.Segment),
 		"",
 		"The path carries the OWNER's id; the body is the entry. The aggregate is "+
 			"loaded, the entry appended, and the whole thing saved in one transaction — "+
 			"so the collection's invariants are checked against what will actually be "+
 			"stored.")
-	s.L("type Add%sCommand struct {", c.Name)
+	s.L("type Add%sCommand struct {", op)
 	s.L("\tpipeline.CommandWithBodyIDBase")
 	s.L("\t%s dtos.%s", c.Name, c.InputType)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Add%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", c.Name, entity)
+	s.L("func (cmd *Add%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
 	s.L("\te.%s(cmd.%s.To%s())", c.AddMethod, c.Name, c.Name)
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
 	emitPerChildResult(s, m, c, "Add")
-	s.L("func (cmd *Add%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Add%sResult, error) {", c.Name, entity, c.Name)
+	s.L("func (cmd *Add%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Add%sResult, error) {", op, entity, op)
 	s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot())", c.Name)
-	s.L("\tout := Add%sResult{%sID: *e.GetID()}", c.Name, entity)
+	s.L("\tout := Add%sResult{%sID: *e.GetID()}", op, entity)
 	s.L("\t// The entry as STORED, which is the last one the aggregate holds — the")
 	s.L("\t// domain may have normalised a value the caller sent.")
 	s.L("\tif len(items) > 0 {")
@@ -360,25 +457,25 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 	// ── change
 	s.Doc(
-		fmt.Sprintf("Change%sCommand replaces ONE entry, keeping its id.", c.Name),
+		fmt.Sprintf("Change%sCommand replaces ONE entry, keeping its id.", op),
 		"",
 		"Full replacement of that entry: every writable field must arrive, because "+
 			"an absent one here cannot be told from an explicit null. An id the "+
 			"collection does not hold answers not-found rather than doing nothing.")
-	s.L("type Change%sCommand struct {", c.Name)
+	s.L("type Change%sCommand struct {", op)
 	s.L("\tpipeline.CommandWithBodyIDBase")
 	s.L("\t%sID string", c.Name)
 	s.L("\t%s dtos.%s", c.Name, c.InputType)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Change%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", c.Name, entity)
+	s.L("func (cmd *Change%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
 	s.L("\te.%s(cmd.%sID, cmd.%s.To%s())", c.ChangeMethod, c.Name, c.Name, c.Name)
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
 	emitPerChildResult(s, m, c, "Change")
-	s.L("func (cmd *Change%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Change%sResult, error) {", c.Name, entity, c.Name)
-	s.L("\tout := Change%sResult{%sID: *e.GetID()}", c.Name, entity)
+	s.L("func (cmd *Change%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Change%sResult, error) {", op, entity, op)
+	s.L("\tout := Change%sResult{%sID: *e.GetID()}", op, entity)
 	s.L("\tfor _, item := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 	s.L("\t\tif item.GetID().Value() == cmd.%sID {", c.Name)
 	s.L("\t\t\tout.%s = projectOne%s(item)", c.Name, c.Name)
@@ -391,29 +488,36 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 	// ── remove
 	s.Doc(
-		fmt.Sprintf("Remove%sCommand takes ONE entry out of the collection.", c.Name),
+		fmt.Sprintf("Remove%sCommand takes ONE entry out of the collection.", op),
 		"",
 		"There is no body: the entry is named by the path. Whether the row is "+
 			"archived or deleted follows the child's own declaration, not this verb.")
-	s.L("type Remove%sCommand struct {", c.Name)
+	s.L("type Remove%sCommand struct {", op)
 	s.L("\tpipeline.CommandWithBodyIDBase")
 	s.L("\t%sID string", c.Name)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Remove%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", c.Name, entity)
+	s.L("func (cmd *Remove%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
 	s.L("\te.%s(cmd.%sID)", c.RemoveMethod, c.Name)
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
-	s.L("// Remove%sResult carries only the owner: the entry it names is gone.", c.Name)
-	s.L("type Remove%sResult struct {", c.Name)
+	s.L("// Remove%sResult carries only the owner: the entry it names is gone.", op)
+	s.L("type Remove%sResult struct {", op)
 	s.L("\t%sID domain.ID", entity)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Remove%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Remove%sResult, error) {", c.Name, entity, c.Name)
-	s.L("\treturn Remove%sResult{%sID: *e.GetID()}, nil", c.Name, entity)
+	s.L("func (cmd *Remove%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Remove%sResult, error) {", op, entity, op)
+	s.L("\treturn Remove%sResult{%sID: *e.GetID()}, nil", op, entity)
 	s.L("}")
 	s.Blank()
+
+	if c.Mounted {
+		// The projector belongs to the spec that declares the entry type, and it
+		// is the same function for every role over the identity.
+		return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",
+			fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
+	}
 
 	s.Doc(
 		fmt.Sprintf("projectOne%s renders one stored entry.", c.Name),
@@ -430,13 +534,13 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("\t}")
 	s.L("}")
 
-	return goFile("internal/application/commands/"+naming.Snake(c.Name)+"_commands.go",
+	return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",
 		fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
 }
 
 func emitPerChildResult(s *src, m *ir.Model, c ir.Child, verb string) {
-	s.Doc(fmt.Sprintf("%s%sResult is the owner plus the entry as stored.", verb, c.Name))
-	s.L("type %s%sResult struct {", verb, c.Name)
+	s.Doc(fmt.Sprintf("%s%sResult is the owner plus the entry as stored.", verb, c.OpBase))
+	s.L("type %s%sResult struct {", verb, c.OpBase)
 	s.L("\t%sID domain.ID", m.Entity.Pascal)
 	s.L("\t%s %sResult", c.Name, c.Name)
 	s.L("}")
@@ -451,6 +555,7 @@ func emitPerChildResult(s *src, m *ir.Model, c ir.Child, verb string) {
 // concept drift apart the first time a field is added.
 func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	entity := m.Entity.Pascal
+	op := c.OpBase
 	idParam := naming.Camel(c.Name) + "Id"
 
 	s := &src{}
@@ -466,34 +571,34 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 	// ── add
 	s.Doc(
-		fmt.Sprintf("Add%sRequest adds one entry to an existing %s.", c.Name, entity),
+		fmt.Sprintf("Add%sRequest adds one entry to an existing %s.", op, entity),
 		"",
 		"The owner comes from the path; the body is the entry, in the same shape it "+
 			"has inside the root's own body.")
-	s.L("type Add%sRequest struct {", c.Name)
+	s.L("type Add%sRequest struct {", op)
 	s.L("\t%sRequest", c.Name)
 	s.L("}")
 	s.Blank()
-	s.L("func (r Add%sRequest) ToCommand() *commands.Add%sCommand {", c.Name, c.Name)
-	s.L("\treturn &commands.Add%sCommand{%s: r.%sRequest.ToInput()}", c.Name, c.Name, c.Name)
+	s.L("func (r Add%sRequest) ToCommand() *commands.Add%sCommand {", op, op)
+	s.L("\treturn &commands.Add%sCommand{%s: r.%sRequest.ToInput()}", op, c.Name, c.Name)
 	s.L("}")
 	s.Blank()
 	emitPerChildResponse(s, m, c, "Add")
 
 	// ── change
 	s.Doc(
-		fmt.Sprintf("Change%sRequest replaces one entry, keeping its id.", c.Name),
+		fmt.Sprintf("Change%sRequest replaces one entry, keeping its id.", op),
 		"",
 		fmt.Sprintf("The entry is named by the %s path segment. The body is a FULL "+
 			"replacement — a field left out is not \"unchanged\", it is a field the "+
 			"caller did not send.", idParam))
-	s.L("type Change%sRequest struct {", c.Name)
+	s.L("type Change%sRequest struct {", op)
 	s.L("\t%sID string `path:%s`", c.Name, quote(idParam))
 	s.L("\t%sRequest", c.Name)
 	s.L("}")
 	s.Blank()
-	s.L("func (r Change%sRequest) ToCommand() *commands.Change%sCommand {", c.Name, c.Name)
-	s.L("\treturn &commands.Change%sCommand{", c.Name)
+	s.L("func (r Change%sRequest) ToCommand() *commands.Change%sCommand {", op, op)
+	s.L("\treturn &commands.Change%sCommand{", op)
 	s.L("\t\t%sID: r.%sID,", c.Name, c.Name)
 	s.L("\t\t%s: r.%sRequest.ToInput(),", c.Name, c.Name)
 	s.L("\t}")
@@ -503,42 +608,42 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 	// ── remove
 	s.Doc(
-		fmt.Sprintf("Remove%sRequest names the entry to take out.", c.Name),
+		fmt.Sprintf("Remove%sRequest names the entry to take out.", op),
 		"",
 		"There is no body: everything the verb needs is in the path.")
-	s.L("type Remove%sRequest struct {", c.Name)
+	s.L("type Remove%sRequest struct {", op)
 	s.L("\t%sID string `path:%s`", c.Name, quote(idParam))
 	s.L("}")
 	s.Blank()
-	s.L("func (r Remove%sRequest) ToCommand() *commands.Remove%sCommand {", c.Name, c.Name)
-	s.L("\treturn &commands.Remove%sCommand{%sID: r.%sID}", c.Name, c.Name, c.Name)
+	s.L("func (r Remove%sRequest) ToCommand() *commands.Remove%sCommand {", op, op)
+	s.L("\treturn &commands.Remove%sCommand{%sID: r.%sID}", op, c.Name, c.Name)
 	s.L("}")
 	s.Blank()
-	s.Doc(fmt.Sprintf("Remove%sResponse answers with the owner alone.", c.Name))
-	s.L("type Remove%sResponse struct {", c.Name)
+	s.Doc(fmt.Sprintf("Remove%sResponse answers with the owner alone.", op))
+	s.L("type Remove%sResponse struct {", op)
 	s.L("\t%sID domain.ID `json:%s`", entity, quote(m.Entity.Camel+"Id"))
 	s.L("}")
 	s.Blank()
 	s.L("func (Remove%sResponse) FromResult(r commands.Remove%sResult) Remove%sResponse {",
-		c.Name, c.Name, c.Name)
-	s.L("\treturn Remove%sResponse{%sID: r.%sID}", c.Name, entity, entity)
+		op, op, op)
+	s.L("\treturn Remove%sResponse{%sID: r.%sID}", op, entity, entity)
 	s.L("}")
 
-	return goFile("internal/web/requests/"+naming.Snake(c.Name)+"_requests.go",
+	return goFile("internal/web/requests/"+naming.Snake(op)+"_requests.go",
 		fsplan.Owned, fmt.Sprintf("the per-entry wire types for %s", c.Table), s)
 }
 
 func emitPerChildResponse(s *src, m *ir.Model, c ir.Child, verb string) {
 	entity := m.Entity.Pascal
-	s.Doc(fmt.Sprintf("%s%sResponse is the owner's id plus the entry as stored.", verb, c.Name))
-	s.L("type %s%sResponse struct {", verb, c.Name)
+	s.Doc(fmt.Sprintf("%s%sResponse is the owner's id plus the entry as stored.", verb, c.OpBase))
+	s.L("type %s%sResponse struct {", verb, c.OpBase)
 	s.L("\t%sID domain.ID `json:%s`", entity, quote(m.Entity.Camel+"Id"))
 	s.L("\t%s %sResponse `json:%s`", c.Name, c.Name, quote(naming.Camel(c.Name)))
 	s.L("}")
 	s.Blank()
 	s.L("func (%s%sResponse) FromResult(r commands.%s%sResult) %s%sResponse {",
-		verb, c.Name, verb, c.Name, verb, c.Name)
-	s.L("\treturn %s%sResponse{", verb, c.Name)
+		verb, c.OpBase, verb, c.OpBase, verb, c.OpBase)
+	s.L("\treturn %s%sResponse{", verb, c.OpBase)
 	s.L("\t\t%sID: r.%sID,", entity, entity)
 	s.L("\t\t%s: %sResponse{", c.Name, c.Name)
 	s.L("\t\t\tID: r.%s.ID,", c.Name)

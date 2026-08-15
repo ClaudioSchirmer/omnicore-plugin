@@ -138,7 +138,11 @@ Three things to get right, because they are the ones that cost a migration later
   The reverse holds too: a value with a SHAPE and no fixed set (a document number, a URL,
   a plate) is a `raw` VO, not a regex inline in a rule.
   Reuse an existing one with `vo: {kind: reuse, ref: <Name>}` — a second copy of a rule is
-  a rule that can disagree with itself.
+  a rule that can disagree with itself. Reuse reaches **every** value object the project
+  has, including the ones a previous run generated for another entity: two roles over one
+  shared base share the base's columns, so they share the value objects on them. If a
+  refusal names a type ending in `Notification`, that is the answer to a different
+  question — a notification is what a rule RAISES, a value object is what a field IS.
 - **`read.byParams.controls`.** A control is served ONLY if declared, and an undeclared
   one arriving on the wire is answered with a typed 400. That is a contract, not an
   omission.
@@ -155,6 +159,28 @@ Three things to get right, because they are the ones that cost a migration later
   `/<entity>/:id/<collection>[/:entryId]`, a duplicate answer on ADD (declare
   `duplicateNotification`) and a 404 for an entry that is not there. Per-child needs
   `businessIdentity`: it is what "the same entry" means.
+- **Rules on a collection are declared on the collection.** `children[].rules` takes the
+  same DSL the root does, including `transition` and `skipWhen`, plus `rules.manual` with
+  a hook of its own (`aggregatevos/<child>_rules_manual.go`). Two kinds are refused there
+  by name and belong at the ROOT, naming the collection: `childDuplicate` and `groupCap`
+  ask about the whole set, and one entry cannot see it. `ownerCheck` is the root's too.
+  A rule that compares an entry against the way it WAS — `transition`, `immutable` — is
+  declared on the collection and enforced from the root, because an entry has no previous
+  version; the generator moves it and the report says so.
+- **A field the CALLER owns, not the client: `assignedFrom: identity-subject`** (or
+  `identity-claim` with `claim: <name>`). The field is persisted, written on insert from
+  the authenticated identity, and **absent from every write request and command** — so
+  there is no client value to ignore, and an update cannot reassign it. This is the field
+  an `owner-only` policy then reads; letting the body carry it means anyone can create a
+  row owned by someone else. Do not describe it in `rules.manual` and hand-write the
+  mapper: it is a key.
+- **A second role can EXPOSE the identity's collection.** With `storage.base.reuse: true`,
+  declaring `children[].ownedBy: base` MOUNTS a collection the base-owning spec already
+  declared: restate its shape verbatim (the generator compares it field by field against
+  that spec and refuses a disagreement), and this run writes the surface only — routes,
+  commands, requests, named `<Entity><Child>…` so they cannot collide with the other
+  role's. No table, no entry type, no input DTO: those are the owner's, and adding a
+  field to the collection means adding it there first.
 
 ## Step 3 — check, and read the refusals as instructions
 
@@ -249,11 +275,18 @@ are the two `*_manual.go` hooks.
 Editing a generated file is the LAST move, not the first. Before it, exhaust the spec, in
 this order — each step is cheap and most problems die at the first:
 
-1. **Re-read `explain vocabulary` and `explain rules` for that exact concern.** The key
-   usually exists and is named something you did not guess: uniqueness scoped to the
-   active rows is `unique.scope`, "required only when that other field is filled" is
-   `requiredIf`, "valid IF present" is `skipWhen`, per-entry endpoints are
-   `editStrategy: per-child`.
+1. **Re-read `explain keys`, `explain vocabulary` and `explain rules` for that exact
+   concern.** The key usually exists and is named something you did not guess:
+   uniqueness scoped to the active rows is `unique.scope`, "required only when that other
+   field is filled" is `requiredIf`, "valid IF present" is `skipWhen`, per-entry endpoints
+   are `editStrategy: per-child`, "the server fills this from the caller" is
+   `assignedFrom`, and a collection of the shared identity on a second role is
+   `ownedBy: base` under `base.reuse: true`.
+
+   The four listed here were each found AFTER someone hand-wrote the thing they express —
+   a hand-edited SQL constraint, a hand-written insert mapper, four hand-written files for
+   a collection. Reading this list costs seconds; the alternative cost hours and left
+   files that no longer track the spec.
 2. **Change the spec and regenerate.** Regeneration is seconds and idempotent; there is
    no cost to trying.
 3. **If the invariant genuinely cannot be declared, use `rules.manual`** — a named item,

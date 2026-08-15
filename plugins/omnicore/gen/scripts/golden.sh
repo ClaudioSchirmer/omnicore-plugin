@@ -470,6 +470,7 @@ for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   name=$(basename "$spec" .yaml)
   case "$name" in
     16-*) continue ;;  # paired with 06 below: it REUSES that base
+    20-*) continue ;;  # paired with 12 below: it MOUNTS that identity's collection
   esac
   work="/tmp/omnicore-gen-matrix/$name"
   rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"
@@ -519,6 +520,40 @@ if [[ $reuse_ok -eq 1 ]] && (cd "$work" && GOWORK=off go build -tags "$ENGINE_TA
   fi
 else
   bad "a second role reuses the identity — $(tail -3 "$work/build.log" 2>/dev/null | tr '\n' ' ')"
+fi
+
+# A second role that MOUNTS a collection of the shared identity. Its own lane
+# for the same reason as the one above — the input is another case's output —
+# and the specs are copied under their real names because a mounted collection
+# is checked against the spec that declares it, which is found by the
+# *.omnicore.yaml convention a real project always follows.
+work="/tmp/omnicore-gen-matrix/mounted"
+rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"; mkdir -p "$work/specs"
+cp "$MATRIX_DIR/12-filho-de-base.yaml" "$work/specs/bibliotecario.omnicore.yaml"
+cp "$MATRIX_DIR/20-filho-de-base-montado.yaml" "$work/specs/estagiario_bib.omnicore.yaml"
+mounted_ok=1
+for f in "$work/specs/bibliotecario.omnicore.yaml" "$work/specs/estagiario_bib.omnicore.yaml"; do
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$f" -project "$work" \
+     >>"$work/gen.log" 2>&1) || mounted_ok=0
+done
+if [[ $mounted_ok -ne 1 ]]; then
+  bad "a second role mounts the identity's collection — $(tail -3 "$work/gen.log" 2>/dev/null | tr '\n' ' ')"
+elif ! (cd "$work" && GOWORK=off go build -tags "$ENGINE_TAGS" ./... >"$work/build.log" 2>&1); then
+  bad "a second role mounts the identity's collection — $(tail -3 "$work/build.log" 2>/dev/null | tr '\n' ' ')"
+elif ! (cd "$work" && GOWORK=off go vet -tags "$ENGINE_TAGS" ./... >"$work/vet.log" 2>&1); then
+  bad "a second role mounts the identity's collection: vet — $(tail -3 "$work/vet.log" 2>/dev/null | tr '\n' ' ')"
+elif ! (cd "$work" && GOWORK=off go test -tags "$ENGINE_TAGS" ./internal/... >"$work/test.log" 2>&1); then
+  bad "a second role mounts the identity's collection: the generated tests — $(tail -3 "$work/test.log" | tr '\n' ' ')"
+else
+  CHILD_COUNT=$(grep -h 'CREATE TABLE "pessoa_titulos"' "$work"/migrations/sqlite/*.up.sql 2>/dev/null | wc -l | tr -d ' ')
+  ROUTES=$(grep -c '"/:id/titulos"' "$work/internal/web/estagiario_bib_routes.go" 2>/dev/null || echo 0)
+  if [[ "$CHILD_COUNT" != "1" ]]; then
+    bad "a second role mounts the identity's collection: its table was written $CHILD_COUNT time(s)"
+  elif [[ "$ROUTES" == "0" ]]; then
+    bad "a second role mounts the identity's collection: the collection is not on its surface"
+  else
+    ok "a second role mounts the identity's collection (one table, both surfaces)"
+  fi
 fi
 
 echo

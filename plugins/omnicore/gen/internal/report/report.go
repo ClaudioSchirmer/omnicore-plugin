@@ -16,6 +16,7 @@ import (
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/emit"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 // Input is everything the report describes.
@@ -66,13 +67,43 @@ func renderTodo(b *strings.Builder, in Input) {
 
 	empty := true
 
-	if len(m.ManualRules) > 0 {
+	// The root's hook, then one per collection that declared its own. A manual
+	// rule under children[] was once parsed and dropped without a hook OR a line
+	// here, so the only trace of it was the spec that asked for it.
+	hooks := []struct {
+		path  string
+		scope string
+		rules []ir.ManualRule
+	}{{
+		path:  fmt.Sprintf("internal/domain/%s_rules_manual.go", m.Entity.Snake),
+		scope: "",
+		rules: m.ManualRules,
+	}}
+	for _, c := range m.Children {
+		if len(c.ManualRules) == 0 {
+			continue
+		}
+		hooks = append(hooks, struct {
+			path  string
+			scope string
+			rules []ir.ManualRule
+		}{
+			path: fmt.Sprintf("internal/domain/aggregatevos/%s_rules_manual.go", naming.Snake(c.Name)),
+			scope: fmt.Sprintf(" They run scoped to ONE `%s`, so a notification they raise "+
+				"addresses that entry's position in the collection.", c.Name),
+			rules: c.ManualRules,
+		})
+	}
+	for _, h := range hooks {
+		if len(h.rules) == 0 {
+			continue
+		}
 		empty = false
-		fmt.Fprintf(b, "### `internal/domain/%s_rules_manual.go`\n\n", m.Entity.Snake)
+		fmt.Fprintf(b, "### `%s`\n\n", h.path)
 		b.WriteString("The spec declared these invariants as ones it could not express. " +
 			"The file was created with a stub for each; the code is yours to write, and " +
-			"regeneration will never touch it.\n\n")
-		for _, r := range m.ManualRules {
+			"regeneration will never touch it." + h.scope + "\n\n")
+		for _, r := range h.rules {
 			fmt.Fprintf(b, "**`%s`**\n\n", r.ID)
 			fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(r.Description, "\n", " "))
 			var facts []string
@@ -228,11 +259,72 @@ func renderCheck(b *strings.Builder, in Input) {
 	}
 	if len(moved) > 0 {
 		b.WriteString("### Notifications placed by the generator\n\n")
-		fmt.Fprintf(b, "%s raised by a child's rule, so declared in "+
-			"`internal/domain/aggregatevos` rather than in `internal/domain`: the child's "+
-			"type lives there, and `domain` imports `aggregatevos` — holding it in `domain` "+
-			"would be an import cycle, not a style choice.\n\n",
+		fmt.Fprintf(b, "%s raised by a child's rule or by a value object, so declared "+
+			"beside the type that raises them rather than in `internal/domain`: `domain` "+
+			"imports both packages, so holding one there would be an import cycle, not a "+
+			"style choice.\n\n",
 			strings.Join(moved, ", "))
+	}
+
+	// Same principle, for rules: one declared on a collection but enforced from
+	// the root. A reader who goes looking for it in the child's file and does
+	// not find it has to be told where it went, and why it could not stay.
+	var hoisted []string
+	for _, cl := range m.Clauses {
+		for _, r := range cl.Rules {
+			if r.Hoisted {
+				hoisted = append(hoisted, fmt.Sprintf("`%s` (on `%s`)", r.ID, r.Collection))
+			}
+		}
+	}
+	if len(hoisted) > 0 {
+		b.WriteString("### Rules enforced from the root\n\n")
+		fmt.Fprintf(b, "%s — declared on the collection, enforced in the aggregate's "+
+			"`BuildRules`. A rule that compares a record against the way it WAS needs the "+
+			"previous version, and an entry does not have one: the framework exposes the "+
+			"prior entries from the aggregate root. The check pairs each surviving entry "+
+			"with its former self%s, so a notification it raises is addressed to the "+
+			"collection rather than to one entry's field.\n\n",
+			strings.Join(hoisted, ", "), pairingNote(m, hoisted))
+	}
+
+	// A field that vanished from the API is the kind of thing a reader notices
+	// as a bug rather than as a decision, so the report says it was one.
+	if assigned := m.AssignedFields(); len(assigned) > 0 {
+		b.WriteString("### Fields the server fills\n\n")
+		for _, f := range assigned {
+			source := "the caller's own identifier (`Identity().Subject`)"
+			if f.AssignedFrom == "identity-claim" {
+				source = fmt.Sprintf("the `%s` claim of the caller's token", f.Claim)
+			}
+			fmt.Fprintf(b, "- **`%s`** — written on insert from %s. It is **absent from every "+
+				"write request and command**: a client cannot set it, and an update does not "+
+				"touch it. Confirm the callers are authenticated on the insert route — with no "+
+				"identity the field stays empty, and nothing else will say so.\n", f.Name, source)
+		}
+		b.WriteString("\n")
+	}
+
+	// A collection this spec exposes but does not own: the reader has to know
+	// which half is theirs before they go looking for a file that is not here.
+	var mounted []ir.Child
+	for _, c := range m.Children {
+		if c.Mounted {
+			mounted = append(mounted, c)
+		}
+	}
+	if len(mounted) > 0 {
+		b.WriteString("### Collections of the shared identity\n\n")
+		for _, c := range mounted {
+			fmt.Fprintf(b, "- **`%s`** (`%s`) — this role EXPOSES it; the role that declares "+
+				"the identity owns it. No table was created, no entry type or input DTO was "+
+				"written, and none of it is this spec's to change: adding a field to the "+
+				"collection means adding it THERE, and restating it here. What this run "+
+				"generated is the surface — the routes under `%s`, their commands and their "+
+				"wire types, named `%s…` so they cannot collide with the other role's.\n",
+				c.Name, c.Table, "/"+m.Entity.PluralSnake+"/:id/"+c.Segment, c.OpBase)
+		}
+		b.WriteString("\n")
 	}
 
 	b.WriteString("## What to check\n\n")
@@ -503,4 +595,35 @@ func factSignature(f ir.Fact) string {
 		parts = append(parts, p.Name+" "+p.GoType)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// pairingNote names how entries are matched to their former selves, because it
+// is the one assumption of a hoisted rule a reviewer can disagree with: a
+// collection replaced wholesale hands back entries with no id, so sameness has
+// to be the business identity the spec declared.
+func pairingNote(m *ir.Model, hoisted []string) string {
+	perChild, replace := false, false
+	for _, c := range m.Children {
+		for _, cl := range m.Clauses {
+			for _, r := range cl.Rules {
+				if !r.Hoisted || r.Collection != c.Name {
+					continue
+				}
+				if c.PerChild {
+					perChild = true
+				} else {
+					replace = true
+				}
+			}
+		}
+	}
+	switch {
+	case perChild && replace:
+		return " — by id where the collection is edited one entry at a time, by business identity where it is replaced wholesale"
+	case perChild:
+		return " by id"
+	case replace:
+		return " by the business identity the spec declared, because a wholesale replace returns entries with no id"
+	}
+	return ""
 }

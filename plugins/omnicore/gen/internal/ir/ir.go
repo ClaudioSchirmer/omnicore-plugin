@@ -100,6 +100,9 @@ type Field struct {
 	Unique         *Unique
 	Runtime        bool
 	Claim          string
+	// AssignedFrom names where the server reads this field's value when the
+	// client is not allowed to send it. Empty for an ordinary field.
+	AssignedFrom   string
 	LivesOn        string
 	// Facet names the 1:1 facet a field is stored in, when it is not stored on
 	// its owner's own table. The Go type carries it like any other field — the
@@ -144,6 +147,11 @@ type Rule struct {
 	Collection string
 	GroupBy    []string
 	Cap        int
+	// Hoisted records that this rule was declared on a COLLECTION and moved to
+	// the root, because only the root can see what the entries were before the
+	// write. The report says so: a rule that runs somewhere other than where it
+	// was written is worth a line rather than a surprise.
+	Hoisted bool
 	// SkipWhen makes the rule stand down instead of firing: "empty" when the
 	// subject carries no value, "null" when the pointer is nil. It is what tells
 	// "you may leave this out, but if you fill it in it must be valid" apart from
@@ -277,16 +285,22 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	attachChildFacets(m)
 	// After the facets are folded in, not before: a rule on a facet field of a
 	// child has to find that field.
+	var hoisted []Clause
 	for i := range m.Children {
-		m.Children[i].Clauses = resolveClausesFor(s.Children[i].Rules, m.Children[i].Fields)
+		entry, up := splitByScope(s.Children[i].Rules)
+		m.Children[i].Clauses = resolveClausesFor(entry, m.Children[i].Fields)
+		m.Children[i].ManualRules = resolveManualRules(s.Children[i].Rules)
+		m.Children[i].HasHookFile = len(m.Children[i].ManualRules) > 0
+		hoisted = append(hoisted, hoistToRoot(up, &m.Children[i])...)
 	}
 	m.Notifications = resolveNotifications(s)
 	placeNotifications(s, m)
 	m.ValueObjects = resolveValueObjects(s)
 	m.Service = resolveService(s, m)
 	m.Clauses = resolveClauses(s, m)
+	m.Clauses = mergeClauses(m.Clauses, hoisted)
 	m.Clauses = appendUniqueClauses(m)
-	m.ManualRules = resolveManualRules(s)
+	m.ManualRules = resolveManualRules(s.Rules)
 	m.HasHookFile = len(m.ManualRules) > 0
 	m.PatchExcludes = map[string]bool{}
 	for _, name := range s.Update.PatchExcludes {
@@ -370,6 +384,7 @@ func resolveField(entity string, f spec.Field) Field {
 		Nullable: f.Nullable, Length: f.Length,
 		JSONName: naming.Camel(f.Name), LabelKey: label,
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
+		AssignedFrom: f.AssignedFrom,
 		LivesOn: f.LivesOn,
 	}
 	if f.Unique != nil {
@@ -411,8 +426,23 @@ var gateOrder = map[string]int{
 }
 
 func resolveClauses(s *spec.Spec, m *Model) []Clause {
+	return resolveClauseSet(s.Rules, func(n string) *Field { return lookupField(m, n) })
+}
+
+// resolveClauseSet turns declared rules into the clauses an emitter writes.
+//
+// There is ONE of these, deliberately. The root and a collection used to have a
+// resolver each, and the collection's was a copy that had fallen behind: it
+// never carried Transitions, GroupBy, Cap, SkipWhen, AdminField or OwnerField.
+// A `transition` declared inside children[] therefore validated, generated its
+// notification and its translations, and emitted a clause with no edges — no
+// error, no refusal, nothing in the report, and an author who found it by
+// reading the generated file and seeing an empty IfUpdate. Two copies of one
+// mapping is how that happens; the lookup is the only part that legitimately
+// differs, so it is the only part that is a parameter.
+func resolveClauseSet(rs spec.Rules, lookup func(string) *Field) []Clause {
 	byGate := map[string][]Rule{}
-	for _, r := range s.Rules.List {
+	for _, r := range rs.List {
 		rule := Rule{
 			ID: r.ID, Kind: r.Kind, Operator: r.Operator,
 			Min: r.Min, Max: r.Max, Notification: r.Notification,
@@ -428,18 +458,18 @@ func resolveClauses(s *spec.Spec, m *Model) []Clause {
 			}
 		}
 		for _, fn := range r.Fields {
-			if f := lookupField(m, fn); f != nil {
+			if f := lookup(fn); f != nil {
 				rule.Fields = append(rule.Fields, *f)
 			}
 		}
 		if r.Other != "" {
-			rule.Other = lookupField(m, r.Other)
+			rule.Other = lookup(r.Other)
 		}
 		if r.AdminField != "" {
-			rule.AdminField = lookupField(m, r.AdminField)
+			rule.AdminField = lookup(r.AdminField)
 		}
 		if r.OwnerField != "" {
-			rule.OwnerField = lookupField(m, r.OwnerField)
+			rule.OwnerField = lookup(r.OwnerField)
 		}
 		if rule.AttachTo == "" && len(rule.Fields) > 0 {
 			rule.AttachTo = rule.Fields[0].Name
@@ -460,9 +490,9 @@ func resolveClauses(s *spec.Spec, m *Model) []Clause {
 	return out
 }
 
-func resolveManualRules(s *spec.Spec) []ManualRule {
+func resolveManualRules(rs spec.Rules) []ManualRule {
 	var out []ManualRule
-	for _, m := range s.Rules.Manual {
+	for _, m := range rs.Manual {
 		var gates []string
 		for _, sc := range m.Scope {
 			gates = append(gates, gateOf(sc))
@@ -998,8 +1028,36 @@ type Child struct {
 	// DuplicateNotification is what an ADD raises when the entry is already
 	// there by business identity. It only exists per-child: an atomic replace
 	// has nothing to collide with.
+	// Mounted says this collection belongs to a shared identity that ANOTHER
+	// role already declared: this spec exposes it, it does not create it. The
+	// table, the schema, the entry type and its input DTO all exist already —
+	// what is missing on this side is the surface, which is what a role that
+	// cannot reach the identity's collection is really missing.
+	Mounted bool
+	// OpBase names the types THIS spec generates for the collection's per-entry
+	// operations. It is the collection's own name when the entity owns it, and
+	// the entity's name in front of it when the collection is mounted: two roles
+	// over one identity generate two sets of commands into one Go package, and
+	// AddPhotoCommand can only mean one of them.
+	//
+	// The shapes that do NOT depend on the owner — the entry type, its input DTO,
+	// its result and its wire rows — keep the collection's own name and are
+	// generated once, by the role that declares it.
+	OpBase string
+	// Projector is the function that reads the collection back off THIS entity.
+	// It takes the owner's type, so unlike the entry shapes it cannot be shared
+	// between two roles over one identity — it is qualified for the same reason
+	// OpBase is.
+	Projector string
+
 	DuplicateNotification string
 	Clauses               []Clause
+	// ManualRules are the invariants declared on THIS collection that the
+	// language could not express. They were parsed and then dropped on the
+	// floor: no hook, no report line, no trace. Now they reach a hook of the
+	// child's own, called from its BuildRules.
+	ManualRules []ManualRule
+	HasHookFile bool
 	Segment               string // the WIRE name of the collection
 	DocSegment            string // the key the projection actually stores it under
 }
@@ -1029,6 +1087,8 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			Description:  c.Description, OwnedBy: c.OwnedBy,
 			ArchivedAt: c.ArchivedAt,
 			InputType:  c.Name + "Input", AddMethod: "Add" + c.Name,
+			Mounted:               c.OwnedBy == "base" && s.Storage.Base != nil && s.Storage.Base.Reuse,
+			OpBase:                c.Name,
 			PerChild:              c.EditStrategy == "per-child",
 			ChangeMethod:          "Change" + c.Name + "ByID",
 			RemoveMethod:          "Remove" + c.Name + "ByID",
@@ -1038,6 +1098,11 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			// DTO's field must be the name itself.
 			Segment:    naming.Camel(c.Plural),
 			DocSegment: c.Plural,
+		}
+		ch.Projector = "project" + ch.GoPlural
+		if ch.Mounted {
+			ch.OpBase = m.Entity.Pascal + c.Name
+			ch.Projector = "project" + m.Entity.Pascal + ch.GoPlural
 		}
 		for _, f := range c.Fields {
 			ch.Fields = append(ch.Fields, resolveField(c.Name, f))
@@ -1071,44 +1136,92 @@ func resolveSiblings(s *spec.Spec, m *Model) []Sibling {
 
 // resolveClausesFor compiles a rule set against an arbitrary field scope, so a
 // child's rules are built exactly like the root's.
-func resolveClausesFor(rs spec.Rules, scope []Field) []Clause {
-	byGate := map[string][]Rule{}
+// needsPreviousVersion are the kinds that compare a record against the way it
+// was before this write.
+//
+// They cannot run where the author declares them. A collection's BuildRules is
+// handed ONE entry, and an entry has no previous version: domain.Old is defined
+// over Entity, and an aggregate child is not one — the framework exposes the
+// prior entries from the ROOT instead, via the aggregate root the ghost carries.
+//
+// So the rule stays declared where it belongs, on the field it is about, and
+// the generator emits it where it can work: at the root, pairing the entries
+// that survived with the ones that were there. That is the same treatment a
+// notification gets when the package it was declared in cannot hold it.
+var needsPreviousVersion = map[string]string{
+	"transition": "childTransition",
+	"immutable":  "childImmutable",
+}
+
+// splitByScope separates what a single entry can decide from what only the
+// aggregate can.
+func splitByScope(rs spec.Rules) (entry spec.Rules, up spec.Rules) {
+	entry.Manual = rs.Manual
 	for _, r := range rs.List {
-		rule := Rule{
-			ID: r.ID, Kind: r.Kind, Operator: r.Operator,
-			Min: r.Min, Max: r.Max, Notification: r.Notification,
-			AttachTo: r.AttachTo, EchoValue: r.EchoValue, Description: r.Description,
+		if _, hoist := needsPreviousVersion[r.Kind]; hoist {
+			up.List = append(up.List, r)
+			continue
 		}
-		for _, fn := range r.Fields {
-			for _, f := range scope {
-				if f.Name == fn {
-					rule.Fields = append(rule.Fields, f)
-				}
-			}
-		}
-		if r.Other != "" {
-			for i := range scope {
-				if scope[i].Name == r.Other {
-					rule.Other = &scope[i]
-				}
-			}
-		}
-		if rule.AttachTo == "" && len(rule.Fields) > 0 {
-			rule.AttachTo = rule.Fields[0].Name
-		}
-		for _, sc := range r.Scope {
-			g := gateOf(sc)
-			byGate[g] = append(byGate[g], rule)
+		entry.List = append(entry.List, r)
+	}
+	return entry, up
+}
+
+// hoistToRoot rewrites a collection's rule as a root clause over that
+// collection, keeping the field it names so the check still reads the entry.
+func hoistToRoot(rs spec.Rules, c *Child) []Clause {
+	if len(rs.List) == 0 {
+		return nil
+	}
+	clauses := resolveClausesFor(rs, c.Fields)
+	for i := range clauses {
+		for j := range clauses[i].Rules {
+			r := &clauses[i].Rules[j]
+			r.Kind = needsPreviousVersion[r.Kind]
+			r.Collection = c.Name
+			r.Hoisted = true
+			// The notification is addressed to the collection, because that is
+			// the path the caller sees: the entry's own field name would resolve
+			// against the root, where no such field exists.
+			r.AttachTo = c.GoPlural
 		}
 	}
-	var out []Clause
-	for gate, rules := range byGate {
-		out = append(out, Clause{Gate: gate, Rules: rules})
+	return clauses
+}
+
+// mergeClauses folds hoisted clauses into the root's, by gate: two clauses on
+// the same verb would emit two blocks that run in an order nobody declared.
+func mergeClauses(into, extra []Clause) []Clause {
+	for _, e := range extra {
+		merged := false
+		for i := range into {
+			if into[i].Gate == e.Gate {
+				into[i].Rules = append(into[i].Rules, e.Rules...)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			into = append(into, e)
+		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return gateOrder[out[i].Gate] < gateOrder[out[j].Gate]
+	sort.SliceStable(into, func(i, j int) bool {
+		return gateOrder[into[i].Gate] < gateOrder[into[j].Gate]
 	})
-	return out
+	return into
+}
+
+// resolveClausesFor is the collection's entry into the shared resolver: the
+// scope is the child's own fields plus any facet declared inside it.
+func resolveClausesFor(rs spec.Rules, scope []Field) []Clause {
+	return resolveClauseSet(rs, func(n string) *Field {
+		for i := range scope {
+			if scope[i].Name == n {
+				return &scope[i]
+			}
+		}
+		return nil
+	})
 }
 
 // AllOwnerFields is the root's own columns plus every sibling facet: together
@@ -1323,11 +1436,42 @@ func resolveSurfaces(s *spec.Spec) Surfaces {
 // permission nobody notices until someone uses it.
 func (m *Model) PatchableFields() []Field {
 	var out []Field
-	for _, f := range m.AllOwnerFields() {
+	for _, f := range m.WritableFields() {
 		if m.PatchExcludes[f.Name] {
 			continue
 		}
 		out = append(out, f)
+	}
+	return out
+}
+
+// WritableFields are the ones a CLIENT may send.
+//
+// A field the server assigns from the caller's identity is not one of them, and
+// it is left OUT of the request rather than accepted and ignored: a request
+// type that carries a field the server overwrites tells the caller they have a
+// say in it. They do not — and the alternative was writing the assignment by
+// hand in the insert mapper and then fixing the generated test that asserted
+// the field came from the body.
+func (m *Model) WritableFields() []Field {
+	var out []Field
+	for _, f := range m.AllOwnerFields() {
+		if f.AssignedFrom != "" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// AssignedFields are the ones the server fills from the identity, in spec
+// order. Only an insert writes them.
+func (m *Model) AssignedFields() []Field {
+	var out []Field
+	for _, f := range m.AllOwnerFields() {
+		if f.AssignedFrom != "" {
+			out = append(out, f)
+		}
 	}
 	return out
 }
@@ -1401,6 +1545,11 @@ func (m *Model) HasNotificationsIn(pkg string) bool {
 // A notification raised from BOTH sides lives in aggregatevos too, and the
 // root's reference is qualified: that direction of import exists, the other
 // does not.
+//
+// A value object raises its own, and the same reasoning puts those in vos: the
+// type that names it is declared there, and vos imports neither of the other
+// two. Left in domain, it produced the identical failure — "undefined" inside a
+// generated file — for the identical reason.
 func placeNotifications(s *spec.Spec, m *Model) {
 	raisedByChild := map[string]bool{}
 	for _, c := range s.Children {
@@ -1415,8 +1564,23 @@ func placeNotifications(s *spec.Spec, m *Model) {
 			}
 		}
 	}
+	raisedByVO := map[string]bool{}
+	for _, vo := range s.ValueObjects {
+		for _, n := range []string{vo.Notification, vo.UnknownNotification} {
+			if n != "" {
+				raisedByVO[n] = true
+			}
+		}
+	}
 	for i := range m.Notifications {
-		if raisedByChild[m.Notifications[i].Name] && m.Notifications[i].Package == "domain" {
+		if m.Notifications[i].Package != "domain" {
+			continue
+		}
+		switch {
+		case raisedByVO[m.Notifications[i].Name]:
+			m.Notifications[i].Package = "vos"
+			m.Notifications[i].Moved = true
+		case raisedByChild[m.Notifications[i].Name]:
 			m.Notifications[i].Package = "aggregatevos"
 			m.Notifications[i].Moved = true
 		}

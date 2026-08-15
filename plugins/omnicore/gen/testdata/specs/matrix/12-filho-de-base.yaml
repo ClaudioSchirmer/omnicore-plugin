@@ -27,6 +27,11 @@ delete: {root: soft}
 rules:
   list:
     - {id: doc-obrigatorio, kind: required, scope: [insert], fields: [Documento], notification: RequiredFieldNotification}
+notifications:
+  - name: TituloJaExisteNotification
+    semantic: conflict
+    description: Titulo ja consta na pessoa.
+    text: {ptbr: "Esse título já consta.", eng: "That degree is already there.", esp: "Ese título ya consta.", fra: "Ce titre figure déjà.", deu: "Dieser Titel ist bereits vorhanden.", ita: "Questo titolo è già presente.", nld: "Die titel staat er al."}
 read:
   backing: relational
   view: {name: bibliotecarios, version: 1}
@@ -44,7 +49,13 @@ children:
     parentColumn: pessoa_bib_id
     description: Titulos academicos da pessoa.
     ownedBy: base
-    editStrategy: atomic-replace
+    # per-child sobre uma coleção da IDENTIDADE: as três rotas de entrada única
+    # penduram no papel, e a tabela pertence à base. É a metade "dona" do par
+    # com o caso 20, que monta esta mesma coleção no outro papel.
+    editStrategy: per-child
+    duplicateNotification: TituloJaExisteNotification
     businessIdentity: [Nome]
+    softRemove: true
+    archivedAt: deleted_at
     fields:
       - {name: Nome, type: string, column: nome, length: 80, example: Mestrado, description: Nome do titulo.}

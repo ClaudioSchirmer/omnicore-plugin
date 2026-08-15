@@ -3,6 +3,7 @@ package spec
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -11,10 +12,17 @@ type Options struct {
 	// LangFallback downgrades "missing translation" from blocker to warning and
 	// lets the emitter mark the gaps. Never silent: the report lists every one.
 	LangFallback bool
-	// ExistingVOs are the value objects the project already declares. Declaring
-	// one of them again is refused: a second copy of a rule is a rule that can
-	// disagree with itself, and reuse is what the spec is for.
+	// ExistingVOs are the value objects the project already declares — all of
+	// them, whoever wrote them. Declaring one again is refused: a second copy of
+	// a rule is a rule that can disagree with itself, and reuse is what the spec
+	// is for.
 	ExistingVOs []string
+	// VOOwner says which entity's spec generated each one ("" = hand-written).
+	// It separates the two questions the inventory answers: REFERENCING a value
+	// object is open to everybody, REDECLARING one is refused to everybody
+	// except the entity that already owns it — whose own re-run must not be
+	// refused the file it wrote last time.
+	VOOwner map[string]string
 	// Neighbours are the names the project's OTHER specs already claim. A
 	// collision here is a boot abort, so it is refused while the author is still
 	// in the file rather than discovered by starting the service.
@@ -27,6 +35,25 @@ type Neighbour struct {
 	Entity   string
 	ViewName string
 	Route    string
+	// Children is what that spec declares its collections to be, so a role that
+	// MOUNTS one can be checked against the declaration instead of trusted to
+	// have restated it correctly.
+	Children []NeighbourChild
+}
+
+// NeighbourChild is one collection of a neighbouring spec.
+type NeighbourChild struct {
+	Name    string
+	Table   string
+	OwnedBy string
+	Fields  []NeighbourField
+}
+
+// NeighbourField is one field of it, in the spellings that must match.
+type NeighbourField struct {
+	Name   string
+	Column string
+	Type   string
 }
 
 // Validate checks a spec against the language's closed vocabularies AND against
@@ -334,6 +361,41 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 		return
 	}
 
+	if f.AssignedFrom != "" {
+		if isChild {
+			ps.BlockerFix(where+".assignedFrom",
+				"an entry of a collection is not assigned from the caller's identity",
+				"the field that records who acted belongs to the root, which is where "+
+					"the write is addressed")
+		}
+		if !AssignedFrom.Has(f.AssignedFrom) {
+			ps.BlockerFix(where+".assignedFrom",
+				fmt.Sprintf("%q is not a source the server can read", f.AssignedFrom),
+				"one of: "+AssignedFrom.String())
+		}
+		if f.AssignedFrom == "identity-claim" && f.Claim == "" {
+			ps.BlockerFix(where+".claim",
+				"the field is filled from a claim but does not say which",
+				"name it, e.g. claim: tenant_id — there is no convention to fall back on")
+		}
+		if f.AssignedFrom == "identity-subject" && f.Claim != "" {
+			ps.BlockerFix(where+".claim",
+				"the subject is not a claim, so naming one says two different things",
+				"drop claim, or use assignedFrom: identity-claim")
+		}
+		if f.Type != "string" {
+			ps.BlockerFix(where+".type",
+				"an identity is text, so the field that records one is text",
+				"set type: string")
+		}
+		if f.Nullable {
+			ps.BlockerFix(where+".nullable",
+				"a server-assigned field is always written, so it is never null",
+				"drop nullable — an anonymous caller is a matter for the permission, "+
+					"not for the column")
+		}
+	}
+
 	if f.Column == "" {
 		ps.Blockerf(where, "the column name is required")
 	} else if !columnRe.MatchString(f.Column) {
@@ -385,10 +447,20 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 				if len(opt.ExistingVOs) > 0 {
 					known = strings.Join(opt.ExistingVOs, ", ")
 				}
+				fix := fmt.Sprintf("declare it under valueObjects (kind: raw or enum), or "+
+					"correct the name — known here: %s", known)
+				// A notification named as a value object is a specific mistake
+				// with a specific cause: they share the vos package, and an
+				// inventory that once listed them made them look like the
+				// candidates. Name it rather than let the author try the next
+				// one on the list.
+				if strings.HasSuffix(f.VO.Ref, "Notification") {
+					fix = fmt.Sprintf("%q is a notification, not a value object — a "+
+						"notification is what a rule RAISES; a value object is what a field "+
+						"IS. %s", f.VO.Ref, fix)
+				}
 				ps.BlockerFix(where+".vo.ref",
-					fmt.Sprintf("the project declares no value object named %q", f.VO.Ref),
-					fmt.Sprintf("declare it under valueObjects (kind: raw or enum), or "+
-						"correct the name — known here: %s", known))
+					fmt.Sprintf("the project declares no value object named %q", f.VO.Ref), fix)
 			}
 		}
 		if (f.VO.Kind == "raw" || f.VO.Kind == "enum") && f.VO.Ref == "" {
@@ -495,7 +567,7 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 			ps.BlockerFix(where, fmt.Sprintf("%q is not a usable Go type name", vo.Name), "use PascalCase")
 		} else if seen[vo.Name] {
 			ps.Blockerf(where, "the value object %q is declared twice", vo.Name)
-		} else if existing[vo.Name] {
+		} else if existing[vo.Name] && opt.VOOwner[vo.Name] != s.Entity {
 			ps.BlockerFix(where,
 				fmt.Sprintf("the project already declares a value object named %q", vo.Name),
 				fmt.Sprintf("reuse it instead — on the field write vo: {kind: reuse, ref: %s}; "+
@@ -652,11 +724,14 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 				"only a shared-base model has a base to own children",
 				"use ownedBy: root")
 		}
+		// A base-owned collection on a role that REUSES the base is MOUNTED: the
+		// table, the schema and the entry type belong to the role that declared
+		// the identity, and this spec only puts the collection on its own
+		// surface. It used to be refused outright, which conflated writing the
+		// storage with exposing it — and the cost of that refusal was every
+		// route, command, request and test for the collection written by hand.
 		if c.OwnedBy == "base" && s.Storage.Base != nil && s.Storage.Base.Reuse {
-			ps.BlockerFix(where+".ownedBy",
-				"this role reuses an existing shared base, so it does not write the base's schema",
-				"the collection has to be declared where the base is declared — add it to the "+
-					"spec of the role that owns the base, or make it a role collection (ownedBy: role)")
+			validateMountedChild(s, c, where, ps, opt)
 		}
 		if c.OwnedBy == "role" && s.Storage.Kind != "sharedbase-role" {
 			ps.BlockerFix(where+".ownedBy",
@@ -881,7 +956,41 @@ var frameworkNotifications = map[string]bool{
 func validateRules(s *Spec, ps *Problems) {
 	validateRuleSet(s, s.Rules, ruleScopeOfRoot(s), "rules", ps)
 	for i, c := range s.Children {
-		validateRuleSet(s, c.Rules, ruleScopeOfChild(s, c), fmt.Sprintf("children[%d].rules", i), ps)
+		where := fmt.Sprintf("children[%d].rules", i)
+		validateRuleSet(s, c.Rules, ruleScopeOfChild(s, c), where, ps)
+		validateAggregateWideKinds(c, where, ps)
+	}
+}
+
+// aggregateWideKinds ask what the AGGREGATE holds, not what one entry says: a
+// collection to count, a caller to compare against the row's owner. A rule
+// declared inside children[] runs scoped to a single entry, which has neither.
+//
+// They were accepted here and emitted nothing — the emitter received no model
+// and wrote no clause, silently. The kinds are refused by name instead, because
+// the fix is never "drop it": it is to declare the same rule at the root, where
+// the collection is in scope, and the message says so.
+var aggregateWideKinds = map[string]string{
+	"childDuplicate": "it compares the entries of a collection with each other, so it is " +
+		"declared at the root naming the collection: rules.list[].fields: [%s]",
+	"groupCap": "it counts the rows of a collection, so it is declared at the root " +
+		"naming the collection: rules.list[].fields: [%s]",
+	"ownerCheck": "it compares the CALLER against the row's owner, and the owner is a " +
+		"field of the entity — declare it at the root",
+}
+
+func validateAggregateWideKinds(c Child, where string, ps *Problems) {
+	for i, r := range c.Rules.List {
+		fix, ok := aggregateWideKinds[r.Kind]
+		if !ok {
+			continue
+		}
+		if strings.Contains(fix, "%s") {
+			fix = fmt.Sprintf(fix, orUnnamed(c.Plural))
+		}
+		ps.BlockerFix(fmt.Sprintf("%s.list[%d] (%s).kind", where, i, orUnnamed(r.ID)),
+			fmt.Sprintf("%q asks about the whole collection, and a rule declared here "+
+				"sees one entry", r.Kind), fix)
 	}
 }
 
@@ -1780,4 +1889,87 @@ func orUnnamed(s string) string {
 		return "unnamed"
 	}
 	return s
+}
+
+// validateMountedChild checks a collection this role EXPOSES but does not own.
+//
+// The role that declared the shared identity also declared its collections, and
+// this spec restates the shape so its own DTOs, projection and routes can be
+// built from it. Two statements of one table can disagree, and the disagreement
+// is not loud: both specs generate, both compile, and the second role's
+// projection reads a document key the first never writes. So the declaration is
+// found and compared, field by field.
+//
+// A missing declaration is refused outright rather than assumed: generating the
+// surface for a table nobody creates produces routes that 500 on first use.
+func validateMountedChild(s *Spec, c Child, where string, ps *Problems, opt Options) {
+	var owner *Neighbour
+	var declared *NeighbourChild
+	for i := range opt.Neighbours {
+		if opt.Neighbours[i].Entity == s.Entity {
+			continue // this spec's previous version, not a neighbour
+		}
+		for j := range opt.Neighbours[i].Children {
+			if opt.Neighbours[i].Children[j].Table == c.Table {
+				owner, declared = &opt.Neighbours[i], &opt.Neighbours[i].Children[j]
+				break
+			}
+		}
+	}
+	if declared == nil {
+		ps.BlockerFix(where,
+			fmt.Sprintf("no spec in this project declares the collection stored in %q", c.Table),
+			"this role reuses an existing identity, so it can EXPOSE one of that "+
+				"identity's collections but cannot create one — declare it in the spec "+
+				"that owns the base, or make it a role collection (ownedBy: role)")
+		return
+	}
+	if declared.OwnedBy != "base" {
+		ps.BlockerFix(where+".ownedBy",
+			fmt.Sprintf("%s declares that collection as %q, so it belongs to that role and not to the identity",
+				owner.Entity, declared.OwnedBy),
+			"a collection only two roles can share is one the IDENTITY owns — change "+
+				"it there first, or give this role a collection of its own")
+	}
+	if declared.Name != c.Name {
+		ps.BlockerFix(where+".name",
+			fmt.Sprintf("%s calls the same collection %q", owner.Entity, declared.Name),
+			"use the same name: the entry type is declared once, by that spec, and "+
+				"this one refers to it")
+	}
+	byName := map[string]NeighbourField{}
+	for _, f := range declared.Fields {
+		byName[f.Name] = f
+	}
+	for i, f := range c.Fields {
+		w := fmt.Sprintf("%s.fields[%d] (%s)", where, i, orUnnamed(f.Name))
+		d, ok := byName[f.Name]
+		if !ok {
+			ps.BlockerFix(w,
+				fmt.Sprintf("%s does not declare this field on the collection it owns", owner.Entity),
+				"the table is created there, so a field only this spec knows about is a "+
+					"column that does not exist — add it to "+owner.Path+" first")
+			continue
+		}
+		if d.Column != f.Column || d.Type != f.Type {
+			ps.BlockerFix(w,
+				fmt.Sprintf("%s declares it as %s %s, this spec as %s %s",
+					owner.Entity, d.Column, d.Type, f.Column, f.Type),
+				"one table, one shape — the two specs have to agree, and "+owner.Path+
+					" is the one that creates it")
+		}
+		delete(byName, f.Name)
+	}
+	if len(byName) > 0 {
+		var missing []string
+		for name := range byName {
+			missing = append(missing, name)
+		}
+		sort.Strings(missing)
+		ps.BlockerFix(where+".fields",
+			fmt.Sprintf("%s declares fields this spec does not restate: %s",
+				owner.Entity, strings.Join(missing, ", ")),
+			"the collection is projected as ONE document segment, so a field left out "+
+				"here is a field this role's readers never see — restate all of them")
+	}
 }
