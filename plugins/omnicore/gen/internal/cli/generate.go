@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/compat"
@@ -54,6 +55,14 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	proj, err := discover.Find(opt.ProjectDir)
 	if err != nil {
 		return err
+	}
+	// The same refusal check makes: without a dialect this used to proceed and
+	// emit ZERO migration files, with the report claiming nothing was skipped.
+	if len(proj.Dialects) == 0 {
+		return fmt.Errorf("no relational dialect could be discovered — the generator " +
+			"reads relational.dialect from the microservice*.yaml profiles and the " +
+			"migrations/<dialect>/ folders that hold SQL; without a target it cannot " +
+			"write migrations")
 	}
 
 	s, err := spec.Load(opt.SpecPath)
@@ -226,10 +235,12 @@ func Adopt(w io.Writer, projectDir, path, why string) error {
 		}
 	}
 	// The owning entity is found by looking for the file, so the caller does
-	// not have to name it.
+	// not have to name it. Names are walked in order so a file two entities
+	// share (a registration) is attributed the same way on every run, instead
+	// of by map luck.
 	entity := ""
-	for name, e := range lock.Entities {
-		if _, ok := e.Files[rel]; ok {
+	for _, name := range sortedEntityNames(lock) {
+		if _, ok := lock.Entities[name].Files[rel]; ok {
 			entity = name
 			break
 		}
@@ -265,7 +276,9 @@ func Doctor(w io.Writer, projectDir string) error {
 		return nil
 	}
 
-	for name, e := range lock.Entities {
+	// Sorted, so two runs of doctor tell the same story in the same order.
+	for _, name := range sortedEntityNames(lock) {
+		e := lock.Entities[name]
 		fmt.Fprintf(w, "%s (spec %s, framework %s)\n", name, e.Spec, orNone(e.Framework))
 		specPath := filepath.Join(proj.Root, e.Spec)
 		if b, err := os.ReadFile(specPath); err == nil {
@@ -277,7 +290,13 @@ func Doctor(w io.Writer, projectDir string) error {
 			fmt.Fprintf(w, "  ! the spec is missing at %s\n", e.Spec)
 		}
 
-		for path, rec := range e.Files {
+		var paths []string
+		for path := range e.Files {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			rec := e.Files[path]
 			content, err := os.ReadFile(filepath.Join(proj.Root, path))
 			switch {
 			case err != nil:
@@ -307,6 +326,15 @@ func Doctor(w io.Writer, projectDir string) error {
 		}
 	}
 	return nil
+}
+
+func sortedEntityNames(lock *fsplan.Lock) []string {
+	out := make([]string, 0, len(lock.Entities))
+	for name := range lock.Entities {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // decideMigrations answers "does this run write DDL?".

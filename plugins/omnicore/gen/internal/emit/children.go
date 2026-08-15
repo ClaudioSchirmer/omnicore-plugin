@@ -155,7 +155,14 @@ func emitBusinessIdentity(s *src, c ir.Child) {
 	s.L("\t}")
 	var conds []string
 	for _, f := range c.Identity {
-		conds = append(conds, fmt.Sprintf("c.%s == o.%s", f.Name, f.Name))
+		if f.Nullable {
+			// Pointer identity is never the question here: the incoming entry
+			// and the stored one are distinct allocations, so `==` on the
+			// pointers made every re-sent entry read as a different one.
+			conds = append(conds, pointerEq("c."+f.Name, "o."+f.Name))
+		} else {
+			conds = append(conds, fmt.Sprintf("c.%s == o.%s", f.Name, f.Name))
+		}
 	}
 	s.L("\treturn %s", strings.Join(conds, " &&\n\t\t"))
 	s.L("}")

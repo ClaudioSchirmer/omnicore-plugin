@@ -268,22 +268,37 @@ func stubZero(t string) string {
 }
 
 func emitRuleCases(s *src, m *ir.Model) {
+	// A rule scoped to more than one gate appears in one clause PER gate, and
+	// the test it drives is named after the rule alone — so without this set a
+	// `scope: [insert, update]` rule declared the same Test function twice and
+	// the file did not compile.
+	seen := map[string]bool{}
 	for _, clause := range m.Clauses {
 		for _, rule := range clause.Rules {
-			emitRuleCase(s, m, clause.Gate, rule)
+			emitRuleCase(s, m, clause.Gate, rule, seen)
 		}
 	}
 }
 
-func emitRuleCase(s *src, m *ir.Model, gate string, rule ir.Rule) {
+func emitRuleCase(s *src, m *ir.Model, gate string, rule ir.Rule, seen map[string]bool) {
 	if len(rule.Fields) == 0 {
 		return
 	}
 	f := rule.Fields[0]
+	once := func(name string) bool {
+		if seen[name] {
+			return false
+		}
+		seen[name] = true
+		return true
+	}
 
 	switch rule.Kind {
 	case "required":
 		if f.SpecType == "bool" {
+			return
+		}
+		if !once(fmt.Sprintf("Test%s_%s_IsRequired", m.Entity.Pascal, f.Name)) {
 			return
 		}
 		s.Doc(fmt.Sprintf("%s is required, so an empty one must be refused.", f.Name))
@@ -301,14 +316,17 @@ func emitRuleCase(s *src, m *ir.Model, gate string, rule ir.Rule) {
 		s.Blank()
 
 	case "range":
-		if rule.Max != nil {
+		if rule.Max != nil && once(fmt.Sprintf("Test%s_%s_AboveBound", m.Entity.Pascal, f.Name)) {
 			emitBoundCase(s, m, rule, f, "Above", overMax(f, *rule.Max))
 		}
-		if rule.Min != nil {
+		if rule.Min != nil && once(fmt.Sprintf("Test%s_%s_BelowBound", m.Entity.Pascal, f.Name)) {
 			emitBoundCase(s, m, rule, f, "Below", underMin(f, *rule.Min))
 		}
 
 	case "immutable":
+		if !once(fmt.Sprintf("Test%s_%s_IsImmutable", m.Entity.Pascal, f.Name)) {
+			return
+		}
 		// The rule compares against the pre-write snapshot, which only exists on
 		// the update path — asserting it through an insert would prove nothing.
 		s.Doc(fmt.Sprintf("%s cannot change once set.", f.Name),
@@ -332,6 +350,9 @@ func emitRuleCase(s *src, m *ir.Model, gate string, rule ir.Rule) {
 
 	case "comparison":
 		if rule.Other == nil {
+			return
+		}
+		if !once(fmt.Sprintf("Test%s_%s_Comparison", m.Entity.Pascal, f.Name)) {
 			return
 		}
 		s.Doc(fmt.Sprintf("%s must stay %s %s.", f.Name, rule.Operator, rule.Other.Name))
@@ -442,7 +463,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.Blank()
 	}
 
-	if op := m.Op("patch"); op != nil {
+	if op := m.Op("patch"); op != nil && len(m.PatchableFields()) > 0 {
 		s.Doc("A partial update must leave absent fields alone.",
 			"",
 			"This is the whole contract of the verb: sending nothing must not blank "+
@@ -451,12 +472,17 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\tctx := &configuration.AppContext{}")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 		first := m.PatchableFields()[0]
-		s.L("\te.%s = %s", first.Name, entitySample(first))
+		// The sample is HOISTED so the assertion compares against the very
+		// value that was assigned. Minting the sample twice compared two
+		// distinct pointers whenever the field is nullable, and the test
+		// failed against a correct mapper.
+		s.L("\torig := %s", entitySample(first))
+		s.L("\te.%s = orig", first.Name)
 		s.L("\tc := &%s{} // nothing sent", op.CommandType)
 		s.L("\tif err := c.ApplyPartiallyTo(ctx, e); err != nil {")
 		s.L("\t\tt.Fatalf(%s, err)", quote("ApplyPartiallyTo: %v"))
 		s.L("\t}")
-		s.L("\tif e.%s != %s {", first.Name, entitySample(first))
+		s.L("\tif e.%s != orig {", first.Name)
 		s.L("\t\tt.Error(\"an absent field was overwritten\")")
 		s.L("\t}")
 		s.L("}")
@@ -673,7 +699,13 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 		s.L("func Test%sRefusesEachWay(t *testing.T) {", vo.Name)
 		s.L("\tctx := domain.NewNotificationContext(%s)", quote(vo.Name))
 		s.L("\tfor what, v := range map[string]%s{", vo.Name)
-		s.L("\t\t%s: %s(%s),", quote("empty"), vo.Name, emptyFor(vo))
+		// The zero is asserted only when the rule actually refuses it: a string
+		// backing always does, an int backing only when 0 is out of range —
+		// asserting it unconditionally failed the test against a correct value
+		// object whose range legitimately admits 0.
+		if rejectsZero(vo) {
+			s.L("\t\t%s: %s(%s),", quote("empty"), vo.Name, emptyFor(vo))
+		}
 		if vo.MaxLength > 0 {
 			s.L("\t\t%s: %s(%s),", quote("too long"), vo.Name, tooLongFor(vo))
 		}
@@ -782,7 +814,14 @@ func literalFor(f ir.Field) string {
 		}
 		return "1"
 	case "id":
-		return "domain.ID{}"
+		// A real constructor call, deterministic and non-zero: the bare
+		// composite literal `domain.ID{}` is a parse error inside an
+		// if-condition, and a zero id fails any required rule the fixture
+		// is supposed to satisfy.
+		if f.Example != "" {
+			return fmt.Sprintf("domain.NewID(%s)", quote(f.Example))
+		}
+		return `domain.NewID("00000000-0000-0000-0000-000000000001")`
 	default:
 		return "1"
 	}
@@ -809,22 +848,33 @@ func zeroValue(f ir.Field) string {
 	}
 }
 
+// alternateValue is a value guaranteed to differ from literalFor's sample, in
+// the field's own entity type. It mirrors entitySample's wrapping exactly —
+// handling the value-object and nullable layers for strings only, as this once
+// did, emitted a bare time.Date into a *time.Time field and a 99 into a
+// pointer, an id or a bool.
 func alternateValue(f ir.Field) string {
+	var base string
 	switch f.SpecType {
 	case "string":
-		v := quote("changed-value")
-		if f.VOKind != "" {
-			v = fmt.Sprintf("%s(%s)", f.BaseEntityType, v)
-		}
-		if f.Nullable {
-			return "func() " + f.EntityType + " { v := " + v + "; return &v }()"
-		}
-		return v
+		base = quote("changed-value")
 	case "time":
-		return "time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)"
+		base = "time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)"
+	case "bool":
+		// literalFor answers true unless the example says otherwise.
+		base = "false"
+	case "id":
+		base = `domain.NewID("00000000-0000-0000-0000-000000000002")`
 	default:
-		return "99"
+		base = "99"
 	}
+	if f.VOKind != "" {
+		base = fmt.Sprintf("%s(%s)", f.BaseEntityType, base)
+	}
+	if f.Nullable {
+		return "func() " + f.EntityType + " { v := " + f.BaseEntityType + "(" + base + "); return &v }()"
+	}
+	return base
 }
 
 func overMax(f ir.Field, max float64) string {
@@ -860,8 +910,18 @@ func violatingComparison(f, other ir.Field, op string) string {
 	}
 }
 
+// invalidSample is a value the value object is GUARANTEED to reject. For a
+// numeric backing that means one step past a declared bound — the old fixed -1
+// was a legitimate value for any rule whose range starts below zero, and the
+// generated test failed against a correct generator.
 func invalidSample(vo ir.ValueObject) string {
 	if vo.GoBacking == "int" {
+		if vo.Min != nil {
+			return fmt.Sprintf("%d", int(*vo.Min)-1)
+		}
+		if vo.Max != nil {
+			return fmt.Sprintf("%d", int(*vo.Max)+1)
+		}
 		return "-1"
 	}
 	return quote("!!not-valid!!")
@@ -953,13 +1013,16 @@ func emitSchemaTests(m *ir.Model) (fsplan.File, error) {
 				"collection under and the field a read DTO must carry — so a change here "+
 				"changes the document shape rather than a label.")
 		s.L("func Test%sCollectionsKeepTheirNames(t *testing.T) {", m.Entity.Pascal)
-		s.L("\tfor got, want := range map[string]string{")
+		// A slice, not a map keyed by the answered name: two collections that
+		// wrongly answered the SAME name would collapse into one entry and the
+		// collision would pass.
+		s.L("\tfor _, tc := range []struct{ got, want string }{")
 		for _, c := range m.Children {
-			s.L("\t\taggregatevos.%s{}.CollectionName(): %s,", c.Name, quote(c.Plural))
+			s.L("\t\t{aggregatevos.%s{}.CollectionName(), %s},", c.Name, quote(c.Plural))
 		}
 		s.L("\t} {")
-		s.L("\t\tif got != want {")
-		s.L("\t\t\tt.Errorf(%s, got, want)", quote("a collection answers %q, the spec says %q"))
+		s.L("\t\tif tc.got != tc.want {")
+		s.L("\t\t\tt.Errorf(%s, tc.got, tc.want)", quote("a collection answers %q, the spec says %q"))
 		s.L("\t\t}")
 		s.L("\t}")
 		s.L("}")
@@ -1043,6 +1106,9 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 		s.L("}")
 		s.Blank()
 
+		// Same dedup as the root's emitRuleCases: a rule scoped to two gates
+		// sits in two clauses and would declare its test twice.
+		seenChild := map[string]bool{}
 		for _, clause := range c.Clauses {
 			for _, rule := range clause.Rules {
 				if rule.Kind != "required" || len(rule.Fields) == 0 {
@@ -1052,6 +1118,11 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 				if f.SpecType == "bool" {
 					continue
 				}
+				name := fmt.Sprintf("Test%s%s_%s_IsRequired", m.Entity.Pascal, c.Name, f.Name)
+				if seenChild[name] {
+					continue
+				}
+				seenChild[name] = true
 				s.Doc(fmt.Sprintf("%s.%s is required.", c.Name, f.Name))
 				s.L("func Test%s%s_%s_IsRequired(t *testing.T) {", m.Entity.Pascal, c.Name, f.Name)
 				s.L("\tctx, r := rulesFor%s%s()", m.Entity.Pascal, c.Name)
@@ -1181,6 +1252,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 	s.L("\t%s", quote("testing"))
 	s.L("\t%s", quote("time"))
 	s.Blank()
+	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\tfwqueries %s", quote(fwImport("application/queries")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
 	s.L(")")
@@ -1504,17 +1576,27 @@ func emitNotificationSemantics(s *src, m *ir.Model) {
 			"forbidden is 403. A wrong one still compiles and still returns a "+
 			"rejection — just the kind a client handles differently.")
 	s.L("func Test%sNotificationSemantics(t *testing.T) {", m.Entity.Pascal)
-	s.L("\tfor got, want := range map[domain.NotificationSemantic]domain.NotificationSemantic{")
 	// EVERY declared notification, whatever package it lives in. Filtering to
 	// the domain package left the ones a value object or a collection raises
 	// untested — and those are the rejections a caller meets most, because they
 	// fire on the shape of what was sent.
+	//
+	// A SLICE, not a map keyed by the actual semantic: most notifications share
+	// "validation", so keying by the answer collapsed the entries onto each
+	// other and only the last notification per status was ever checked.
+	s.L("\tfor _, tc := range []struct {")
+	s.L("\t\tname string")
+	s.L("\t\tgot  domain.NotificationSemantic")
+	s.L("\t\twant domain.NotificationSemantic")
+	s.L("\t}{")
 	for _, n := range m.Notifications {
-		s.L("\t\t%s{}.Semantic(): %s,", notificationRef(m, n), semanticConst(n.Semantic))
+		s.L("\t\t{%s, %s{}.Semantic(), %s},",
+			quote(n.Name), notificationRef(m, n), semanticConst(n.Semantic))
 	}
 	s.L("\t} {")
-	s.L("\t\tif got != want {")
-	s.L("\t\t\tt.Errorf(%s, got, want)", quote("a notification answers %v, the spec says %v"))
+	s.L("\t\tif tc.got != tc.want {")
+	s.L("\t\t\tt.Errorf(%s, tc.name, tc.got, tc.want)",
+		quote("%s answers %v, the spec says %v"))
 	s.L("\t\t}")
 	s.L("\t}")
 	s.L("}")
@@ -1528,6 +1610,21 @@ func emptyFor(vo ir.ValueObject) string {
 		return "0"
 	}
 	return quote("")
+}
+
+// rejectsZero answers whether the value object's own rule refuses its backing's
+// zero — the condition for asserting the "empty" case at all.
+func rejectsZero(vo ir.ValueObject) bool {
+	if vo.GoBacking != "int" {
+		return true // a raw string value object always refuses ""
+	}
+	if vo.Min != nil && *vo.Min > 0 {
+		return true
+	}
+	if vo.Max != nil && *vo.Max < 0 {
+		return true
+	}
+	return false
 }
 
 // tooLongFor builds a value one character past the declared ceiling.

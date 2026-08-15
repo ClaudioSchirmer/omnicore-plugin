@@ -40,6 +40,15 @@ func Parse(raw []byte, path string) (*Spec, error) {
 		}
 		return nil, translateDecodeError(err, path)
 	}
+	// One spec per file. A second YAML document (a stray `---` paste) used to be
+	// silently dropped, which reads as "accepted" while half the file is gone.
+	var extra any
+	if err := dec.Decode(&extra); err == nil {
+		return nil, fmt.Errorf("%s: the file contains more than one YAML document — "+
+			"a spec is one document; remove the --- and merge, or split the files", path)
+	} else if !errors.Is(err, io.EOF) {
+		return nil, translateDecodeError(err, path)
+	}
 	s.SourcePath = path
 	return &s, nil
 }

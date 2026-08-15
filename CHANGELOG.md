@@ -7,6 +7,14 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold-entity teaches the no-file-names rule at WRITE time, not at lint time.** The
+  1c self-lint kept catching the same 1b violation — task files enumerating generated file
+  names instead of tables/operations/types — and every run paid a rewrite pass for it. The
+  task-file template now carries the ✗/✓ example right where the enumerations are typed,
+  and 1c states that a clean grep is the expected outcome, not a fix-up round.
+
 ### Added
 
 - **`assignedFrom` — a persisted field the SERVER fills from the caller's identity.**
@@ -54,6 +62,93 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Fixed
 
+- **`owner-only`/`tenant` with a runtime owner field generated a service with NO row
+  scoping.** The validator's own fix text recommended "a runtime-only field fed from the
+  caller's identity"; a runtime field has no column, the lowering carried the emptiness
+  through, and the emitter quietly skipped the filter — spec green, report saying
+  "owner-only", every permission holder reading every row. The shape is now refused: the
+  owner/tenant field must be persisted (`assignedFrom`), the fix text says so, and the
+  emitter panics rather than skips if the invariant is ever violated again.
+- **The first regeneration on a later day rewrote every owned file.** The header's
+  keep-the-date comparison tested the new content against itself-with-the-old-date, which
+  only agreed when the dates were already equal — so "regeneration is a no-op" held within
+  one day and broke across days, tree-wide. It now compares against the bytes on disk,
+  modulo checksum and date, and the golden lanes pin both directions.
+- **Two valid spec shapes produced a tree that did not build, one of them past a green
+  `check`.** A write-only entity with a domain service lost the comma between `repo` and
+  `svc` in its feature literal (generation aborted on the parse error); GraphQL with
+  mutations only and no `read:` block emitted `f.view` on a struct with no such field
+  (`check` said yes, `go build` said no). Both are fixed and both are matrix cases now.
+- **MySQL's `active-only` unique typed the shadow column as the ID type.** The generated
+  column that materialises "unique among the active rows" was `BINARY(16)` whatever the
+  real column was, so any active VARCHAR value longer than 16 bytes failed at INSERT —
+  after the DDL applied cleanly. The shadow column now carries the constrained column's
+  own type.
+- **Nullable fields broke half the emitters that touched them.** A nullable state field
+  made `transition` emit an invalid indirect (written silently); `immutable` on a nullable
+  collection field compared pointer identity, so every update of the aggregate was
+  rejected forever; a nullable `businessIdentity` field made every re-sent entry read as a
+  different one (wholesale replace archived and re-inserted the collection on every PUT);
+  the generated patch test compared two freshly minted pointers and failed against a
+  correct mapper; `groupCap`'s `only` dereferenced without a nil guard. Comparisons are
+  now pointer-safe end to end, `transition` and `groupBy` refuse nullable subjects with a
+  modelling fix, and a nullable-everything matrix case pins all of it.
+- **A writable `type: id` field aborted generation, and `required` on one emitted a
+  method that does not exist.** The generated tests spelled a composite literal in an
+  if-condition (a parse error that killed the whole run) and the emptiness check called
+  `IsZero()` where `domain.ID` answers `IsEmpty()`. Test literals now use
+  `domain.NewID(…)` and the check calls the method that exists.
+- **Six spellings the language accepted and nothing implemented are now refused, by
+  name.** `livesOn: sibling:<x>` (the column landed on the ROOT table while the spec said
+  facet), `unique` on a collection or facet field (no index, no precheck, no report line),
+  `unique` on a base-lived field (DDL against a column the role's table does not have),
+  listing filters on a collection's fields (silently dropped from the request type),
+  `read.byParams.filters[].required` and `delete.children` (read by nobody). Each refusal
+  names the working alternative; `explain keys` marks them REFUSED.
+- **`service-precheck+constraint` silently degraded to constraint-only.** Without a
+  domain service carrying an `exists` fact filtered by the unique field, the precheck
+  half was skipped and the report still printed the enforce string as declared. The
+  coupling is now validated — and the sharedbase example itself was missing the fact.
+- **`check` and `generate` disagreed in both directions.** `check` never read the lock,
+  so a projected-shape change without a version bump answered `canGenerate: true` and was
+  refused one command later; `generate` never applied the zero-dialects refusal, so it
+  proceeded and emitted no migration files with the report claiming nothing was skipped.
+  Both judgements now run in both commands.
+- **The documented `adopt <path> -why '…'` spelling always died.** The CLI's flag
+  splitter did not know `-why` takes a value ("flag needs an argument", exit 2); only
+  `-why=…` worked. The splitter's list also named a flag that no longer exists.
+- **Transition states were never checked against the enum.** A typo'd state validated,
+  generated, and silently never fired; an int-backed enum emitted a string-keyed map
+  indexed by an int. States must now be member values of a string-backed enum declared in
+  the same spec, and a raw value object's constraint families are cross-checked against
+  its backing (`minLength` on an int and `min` on a string were compile errors; `regex`
+  on an int was an int→rune conversion that validated garbage silently).
+- **Assorted refusals that used to be silence**: duplicate field names/columns in
+  collections and facets, duplicate collection plurals, a facet field shadowing its
+  node's field, reserved words in base/child/facet table names and managed columns, two
+  spec files declaring one entity (the neighbour dedup was by entity name, so the copy
+  passed every collision check), `runtime: true` on a collection field (a DDL column with
+  an empty name), `unique` on a bool, `active-only` without an archive column (a plain
+  unique that permanently reserved archived values), an owner check against a
+  non-string or nullable field, `patchExcludes` covering every field (a generator
+  panic), an undeclared notification named by `unique`/VO/duplicate keys (an undefined
+  type at build), and a second YAML document in a spec file (silently dropped).
+- **Smaller emitter lies.** The gen-report's target shape described tables the migrations
+  would never create (facet lifecycle columns, the root's archive stamp on children,
+  facet-owned fields, mounted collections listed as yours to create, a separate-fk role's
+  link column missing); per-child OpenAPI summaries interpolated the Go type ("a
+  appdomain.Person"); the PTBR catalog was hardcoded as the description's language
+  regardless of `language:`; the CSV delimiter was pasted as a raw rune (a quote aborted
+  generation); a role keeping every column on the base emitted a schema chain with a
+  dangling dot; `doctor`/`adopt` walked lock maps in random order; the notification-
+  semantics test was keyed by the ANSWERED semantic, so colliding entries collapsed and a
+  wrong pairing could hide; a hand comment with a brace could derail the catalog merge;
+  hand-written grouped `type (…)` blocks were invisible to the reuse inventory; and the
+  composition-root merge could double the `Translations:` key or silently skip a root
+  with a single-statement import.
+- **Every key of the language now carries its doc.** `explain keys` derives from the
+  spec struct's leading comments; 179 of 193 fields had none (or had it in a trailing
+  position the renderer never reads). All 269 derived key paths render documentation.
 - **Labels for the fields of a collection or a facet were never translated.** The generator
   emits a `labelKey` tag on them and only ever registered the ROOT's keys in the seven
   catalogs, so those resolved to nothing and the raw Go identifier reached the end user —

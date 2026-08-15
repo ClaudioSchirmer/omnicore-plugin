@@ -266,9 +266,14 @@ func splitPositional(args []string) (positional, flags []string) {
 
 // takesValue reports whether a flag consumes the token after it. Booleans do
 // not, and treating one as if it did would swallow the entity name.
+//
+// Every value-taking flag of every subcommand that goes through splitPositional
+// must be here: one missing entry means the documented two-token spelling
+// (`-why '…'`) dies with "flag needs an argument" while `-why=…` works — which
+// is exactly what happened to adopt.
 func takesValue(flag string) bool {
 	switch strings.TrimLeft(flag, "-") {
-	case "project", "out", "spec", "force-paths", "migrations":
+	case "project", "out", "spec", "why", "migrations":
 		return true
 	}
 	return false

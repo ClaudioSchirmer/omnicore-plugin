@@ -462,6 +462,13 @@ default; a dev who wants it out will say so.
   - the **`conventions/<layer>.md`** to apply,
   - the **acceptance check** (what "done" means for this layer).
 
+  Phrase every enumeration as THINGS, not files, **as you type it** — the 1c lint greps
+  these files for `.go`/`.sql`/`000N_`, and every hit costs a rewrite pass of a file you
+  just wrote:
+  - ✗ `0007_create_students.up.sql` · `student_commands.go` · `student_routes.go`
+  - ✓ table `students` (columns, constraints, FK order) · operations insert/patch/archive
+    on `/students` · "naming/granularity per `service-layout.html`"
+
 **Task files are PROSE ONLY — no code sketches.** A code sketch invites copy-paste in
 Phase 2 no matter how loudly it's labeled a draft, and its guessed signatures are pure
 drift risk; the real code is derived from the routed `/docs` at execution time. If a
@@ -492,10 +499,11 @@ BEFORE presenting, SELF-LINT the plan mechanically** — run against your own ta
 
     grep -nE '[a-z0-9_]+\.(go|sql)|000[0-9]_' scaffold-entity/<entity>/task_*.md
 
-Every hit naming a TO-BE-GENERATED file (a command/query/DTO/routes `.go`, a `000N_*.sql`
-pair) is a 1b violation — replace it with the WHAT it was trying to say (the table, the
-operation, the type) + "naming/granularity per `service-layout.html`", and only then
-present. (Hits that reference EXISTING files to edit — `wire.go`, `notifications.go` — or
+If 1b was written as things (tables, operations, types), this finds nothing and costs one
+grep — that is the expected outcome, not a fix-up round. Every hit naming a TO-BE-GENERATED
+file (a command/query/DTO/routes `.go`, a `000N_*.sql` pair) is a 1b violation — replace it
+with the WHAT it was trying to say (the table, the operation, the type) + "naming/granularity
+per `service-layout.html`", and only then present. (Hits that reference EXISTING files to edit — `wire.go`, `notifications.go` — or
 doc/convention filenames are fine.) Then **STOP and
 present the plan to the dev for approval before executing a single task.** Open the gate
 message with the loud status line — `⏸️ PAUSED at the plan gate — no code generated yet;

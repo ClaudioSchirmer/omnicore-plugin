@@ -8,6 +8,9 @@ import (
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/compat"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/discover"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/emit"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/spec"
 )
 
@@ -110,6 +113,33 @@ func Check(w io.Writer, opt CheckOptions) (CheckResult, error) {
 	// build yet" while the spec still has real errors buries the real errors.
 	if !problems.HasBlockers() {
 		appendFindings(&res, spec.CheckCoverage(s))
+	}
+
+	// The lock holds what generate will judge the spec AGAINST — the projected
+	// view shape of the last run. check never read it, so a shape change with a
+	// stale version answered "canGenerate: true" here and was refused by
+	// generate one command later, which breaks this JSON's claim of being the
+	// only authority.
+	if len(res.Blockers) == 0 {
+		if lock, err := fsplan.LoadLock(proj.Root); err != nil {
+			res.Blockers = append(res.Blockers, Finding{Where: "lock", Message: err.Error()})
+		} else if model, err := ir.Resolve(s, proj); err != nil {
+			res.Blockers = append(res.Blockers, Finding{Where: "spec", Message: err.Error()})
+		} else {
+			view := fsplan.ViewState{
+				Shape:   fsplan.Hash([]byte(emit.ViewShape(model))),
+				Version: model.Read.Version,
+			}
+			if was, changed := lock.ViewShapeChangedWithoutBump(model.Entity.Pascal, view); changed {
+				res.Blockers = append(res.Blockers, Finding{
+					Where: "read.view.version",
+					Message: fmt.Sprintf("the read view %q projects a different shape than "+
+						"the last generation, and the version is still %d — the framework "+
+						"refuses to boot on that", model.Read.ViewName, was),
+					Fix: fmt.Sprintf("bump read.view.version to %d", was+1),
+				})
+			}
+		}
 	}
 
 	res.CanGenerate = len(res.Blockers) == 0

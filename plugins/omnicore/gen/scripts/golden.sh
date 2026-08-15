@@ -393,7 +393,7 @@ fi
 # everything answers, nothing is current. That exact shape (a stale binary
 # answering happily) already cost this gate a day, so it is checked rather than
 # assumed.
-say "the launcher"
+echo "── the launcher"
 LAUNCHER="$GEN_DIR/../bin/omnicore-gen"
 if [[ -x "$LAUNCHER" ]]; then
   LDATA=$(mktemp -d)
@@ -433,7 +433,7 @@ fi
 # claim, so it lives in scripts/coverage_report.py rather than in a pipeline
 # here — get -coverpkg or the block merge wrong and the answer moves by an order
 # of magnitude, in either direction.
-say "coverage of the generated code"
+echo "── coverage of the generated code"
 if [[ -d "$WORK/internal" ]] && command -v python3 >/dev/null 2>&1; then
   if (cd "$WORK" && GOWORK=off go test -tags "$ENGINE_TAGS" -coverpkg=./internal/... \
         -coverprofile=/tmp/gen-cov.out ./internal/... >/tmp/gen-cov.log 2>&1); then
@@ -464,7 +464,7 @@ fi
 # validates but generates a tree that does not BUILD is worse than none: it is
 # authoritative-looking, someone copies its shape, and the failure lands on them.
 # Case 18 IS the shared-identity example, byte for byte.
-say "the coverage matrix"
+echo "── the coverage matrix"
 MATRIX_DIR="$GEN_DIR/testdata/specs/matrix"
 for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   name=$(basename "$spec" .yaml)

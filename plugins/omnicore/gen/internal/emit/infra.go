@@ -66,52 +66,73 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 	s.L("func %sSchema() *core.TableSchema {", m.Entity.Pascal)
 	s.L("\treturn core.NewTableSchema[*appdomain.%s](%s).", m.Entity.Pascal, quote(m.Table))
 	s.L("\t\tID(%s).", quote("id"))
-	s.L("\t\tRevision(%s).", quote(m.Managed.Revision))
-	if m.IsRole() {
-		s.L("\t\t// The shared identity. The registry keys it by TABLE, so every role")
-		s.L("\t\t// declaring the same base behaves as one — but two declarations that")
-		s.L("\t\t// DISAGREE about it abort the boot.")
-		s.L("\t\tSharedBase(%s(), %s).", m.Base.FuncName, quote(baseLinkColumn(m)))
+
+	// EVERY call after Revision goes through this list, so the LAST one — and
+	// only the last — drops the trailing dot. Splitting the chain across ad-hoc
+	// s.L calls left a dangling dot (a parse error) the moment the tail of the
+	// chain happened to be empty: a role keeping every column on the base, with
+	// no timestamps of its own.
+	type call struct {
+		pre  []string // comment lines above the call
+		text string   // the call itself; may span lines
 	}
-	// The chain is built as a list so the LAST call carries no trailing dot.
-	// Emitting a filler call to absorb it was a guess at a method that does not
-	// exist — and it only ever showed up on an entity with no managed columns.
-	var chain []string
-	for _, f := range roleColumns(m) {
-		chain = append(chain, fmt.Sprintf("Field(%s, %s)", quote(f.Name), quote(f.Column)))
+	var chain []call
+	chain = append(chain, call{text: fmt.Sprintf("Revision(%s)", quote(m.Managed.Revision))})
+	if m.IsRole() {
+		chain = append(chain, call{
+			pre: []string{
+				"// The shared identity. The registry keys it by TABLE, so every role",
+				"// declaring the same base behaves as one — but two declarations that",
+				"// DISAGREE about it abort the boot.",
+			},
+			text: fmt.Sprintf("SharedBase(%s(), %s)", m.Base.FuncName, quote(baseLinkColumn(m))),
+		})
 	}
 	for _, sib := range m.SiblingsOn("") {
-		s.L("\t\t// The %s facet: its own table, sharing this row's key. Every column is", sib.Name)
-		s.L("\t\t// nullable and the row only exists when at least one has a value.")
-		s.L("\t\tSibling(core.NewSiblingSchema[*appdomain.%s](%s).", m.Entity.Pascal, quote(sib.Table))
+		var b strings.Builder
+		fmt.Fprintf(&b, "Sibling(core.NewSiblingSchema[*appdomain.%s](%s).",
+			m.Entity.Pascal, quote(sib.Table))
 		for i, f := range sib.Fields {
 			sep := "."
 			if i == len(sib.Fields)-1 {
-				sep = ")."
+				sep = ")"
 			}
-			s.L("\t\t\tField(%s, %s)%s", quote(f.Name), quote(f.Column), sep)
+			fmt.Fprintf(&b, "\n\t\t\tField(%s, %s)%s", quote(f.Name), quote(f.Column), sep)
 		}
+		chain = append(chain, call{
+			pre: []string{
+				fmt.Sprintf("// The %s facet: its own table, sharing this row's key. Every column is", sib.Name),
+				"// nullable and the row only exists when at least one has a value.",
+			},
+			text: b.String(),
+		})
 	}
 	// Only the collections this role owns. A base-owned one is declared by the
 	// shared identity's schema instead — that declaration is what makes it
 	// visible to every other role over the same identity.
 	for _, c := range m.RoleChildren() {
-		s.L("\t\tChild(%sSchema()).", c.Name)
+		chain = append(chain, call{text: fmt.Sprintf("Child(%sSchema())", c.Name)})
+	}
+	for _, f := range roleColumns(m) {
+		chain = append(chain, call{text: fmt.Sprintf("Field(%s, %s)", quote(f.Name), quote(f.Column))})
 	}
 	if m.Managed.ArchivedAt != "" {
-		chain = append(chain, fmt.Sprintf("DeletedAt(%s)", quote(m.Managed.ArchivedAt)))
+		chain = append(chain, call{text: fmt.Sprintf("DeletedAt(%s)", quote(m.Managed.ArchivedAt))})
 	}
 	if m.Managed.CreatedAt != "" {
-		chain = append(chain, fmt.Sprintf("CreatedAt(%s)", quote(m.Managed.CreatedAt)))
+		chain = append(chain, call{text: fmt.Sprintf("CreatedAt(%s)", quote(m.Managed.CreatedAt))})
 	}
 	if m.Managed.UpdatedAt != "" {
-		chain = append(chain, fmt.Sprintf("UpdatedAt(%s)", quote(m.Managed.UpdatedAt)))
+		chain = append(chain, call{text: fmt.Sprintf("UpdatedAt(%s)", quote(m.Managed.UpdatedAt))})
 	}
-	for i, call := range chain {
+	for i, c := range chain {
+		for _, p := range c.pre {
+			s.L("\t\t%s", p)
+		}
 		if i == len(chain)-1 {
-			s.L("\t\t%s", call)
+			s.L("\t\t%s", c.text)
 		} else {
-			s.L("\t\t%s.", call)
+			s.L("\t\t%s.", c.text)
 		}
 	}
 	s.L("}")

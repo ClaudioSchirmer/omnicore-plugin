@@ -58,7 +58,7 @@ func emitBootstrap(m *ir.Model) ([]fsplan.File, error) {
 			s.L("\treturn &%s{repo: repo,%s view: appviews.%sView()}", feature, svcField(m), m.Entity.Pascal)
 		}
 	} else {
-		s.L("\treturn &%s{repo: repo%s}", feature, svcField(m))
+		s.L("\treturn &%s{repo: repo,%s}", feature, svcField(m))
 	}
 	s.L("}")
 	s.Blank()
@@ -90,7 +90,11 @@ func emitBootstrap(m *ir.Model) ([]fsplan.File, error) {
 				"root.",
 		)
 		s.L("func (f *%s) MountGraphQL(reg *fwgraphql.Registry, d bootstrap.Deps) {", feature)
-		s.L("\tappweb.Mount%sGraphQL(reg, f.repo,%s f.view, d)", m.Entity.PluralPascal, mountSvcArg(m))
+		if m.Read.Enabled {
+			s.L("\tappweb.Mount%sGraphQL(reg, f.repo,%s f.view, d)", m.Entity.PluralPascal, mountSvcArg(m))
+		} else {
+			s.L("\tappweb.Mount%sGraphQL(reg, f.repo,%s nil, d)", m.Entity.PluralPascal, mountSvcArg(m))
+		}
 		s.L("}")
 	}
 

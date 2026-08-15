@@ -124,6 +124,16 @@ func findMapClose(src string) int {
 			}
 			continue
 		}
+		// A hand-added // comment may carry an unbalanced brace; counting it
+		// either never closed the scan (and the merge silently dropped its
+		// entries) or shifted the insertion point into the comment.
+		if c == '/' && i+1 < len(src) && src[i+1] == '/' {
+			if nl := strings.IndexByte(src[i:], '\n'); nl >= 0 {
+				i += nl
+				continue
+			}
+			break
+		}
 		switch c {
 		case '"', '`':
 			inString, quoteChar = true, c

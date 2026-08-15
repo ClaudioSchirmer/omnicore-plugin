@@ -208,7 +208,7 @@ func catalogEntries(m *ir.Model) map[string][]MapEntry {
 		// because nothing reports it: the export succeeds, the data is right,
 		// and the heading is an internal name.
 		for _, f := range labelledFields(m) {
-			entries = append(entries, MapEntry{Key: f.LabelKey, Value: labelText(f, lang)})
+			entries = append(entries, MapEntry{Key: f.LabelKey, Value: labelText(f, lang, m.Language)})
 		}
 		out[lang] = entries
 	}
@@ -246,11 +246,38 @@ func labelledFields(m *ir.Model) []ir.Field {
 // labelText uses the field's description when the spec's own language matches
 // the catalog, and falls back to the field name otherwise — a placeholder a
 // translator can find, never a wrong translation presented as right.
-func labelText(f ir.Field, lang string) string {
-	if f.Description != "" && lang == "ptbr" {
+//
+// The match is against the SPEC's declared language, not a hardcoded catalog:
+// pinning it to ptbr put an English description into the Portuguese catalog as
+// if it were Portuguese — the exact wrong-translation-presented-as-right this
+// function exists to avoid.
+func labelText(f ir.Field, lang, specLang string) string {
+	if f.Description != "" && lang == catalogOf(specLang) {
 		return strings.TrimSuffix(firstLine(f.Description), ".")
 	}
 	return spaceOut(f.Name)
+}
+
+// catalogOf maps a spec's free-form language declaration onto the framework's
+// catalog code, or "" when it matches none.
+func catalogOf(specLang string) string {
+	switch strings.ToLower(strings.ReplaceAll(specLang, "-", "")) {
+	case "pt", "ptbr", "ptpt":
+		return "ptbr"
+	case "en", "eng", "enus", "engb":
+		return "eng"
+	case "es", "esp":
+		return "esp"
+	case "fr", "fra":
+		return "fra"
+	case "de", "deu":
+		return "deu"
+	case "it", "ita":
+		return "ita"
+	case "nl", "nld":
+		return "nld"
+	}
+	return ""
 }
 
 func spaceOut(name string) string {

@@ -620,30 +620,33 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		opName := c.OpBase // qualified when the collection is mounted from a shared identity
 		idParam := lowerFirst(c.Name) + "Id"
 		perm := updatePermission(m)
+		// The Go type string is for the CODE positions below; the OpenAPI
+		// summaries are read by an API consumer, who got "a appdomain.Person".
+		human := m.Entity.Pascal
 
 		for _, op := range []perChildOp{
 			{
 				verb: "Add", method: "fiber.MethodPost", path: "/:id/" + seg,
 				request: "Add" + opName + "Request", response: "Add" + opName + "Response",
 				result: "Add" + opName + "Result", status: "fiber.StatusCreated",
-				summary: fmt.Sprintf("Add one %s to a %s", c.Name, entity),
+				summary: fmt.Sprintf("Add one %s to %s %s", c.Name, articleFor(human), human),
 				doc: fmt.Sprintf("Adds ONE entry to the %s collection of an existing %s, "+
 					"in the owner's transaction. 404 when the owner is not there. The "+
 					"response carries the entry AS STORED, including the id the server "+
 					"minted for it — that id is how the caller addresses it afterwards.",
-					c.Segment, entity),
+					c.Segment, human),
 			},
 			{
 				verb: "Change", method: "fiber.MethodPut", path: "/:id/" + seg + "/:" + idParam,
 				request: "Change" + opName + "Request", response: "Change" + opName + "Response",
 				result: "Change" + opName + "Result", status: "fiber.StatusOK",
-				summary: fmt.Sprintf("Replace one %s of a %s", c.Name, entity),
+				summary: fmt.Sprintf("Replace one %s of %s %s", c.Name, articleFor(human), human),
 				doc: fmt.Sprintf("Full replacement of ONE entry, keeping its id — the row " +
 					"is updated rather than removed and re-added, so the audit trail reads " +
 					"as a change. 404 when the owner is not there, and 404 when the owner " +
 					"exists but holds no entry with that id."),
 			},
-			removeOp(c, entity, seg, idParam, opName),
+			removeOp(c, human, seg, idParam, opName),
 		} {
 			hv := "h" + op.verb + opName
 			sv := "s" + op.verb + opName
@@ -711,7 +714,7 @@ func removeOp(c ir.Child, entity, seg, idParam, opName string) perChildOp {
 			path:    "/:id/" + seg + "/:" + idParam + "/archive",
 			request: "Remove" + opName + "Request", response: "Remove" + opName + "Response",
 			result: "Remove" + opName + "Result", status: "fiber.StatusOK",
-			summary: fmt.Sprintf("Archive one %s of a %s", c.Name, entity),
+			summary: fmt.Sprintf("Archive one %s of %s %s", c.Name, articleFor(entity), entity),
 			doc: "Archives ONE entry: the row stays, stamped, and stops being " +
 				"returned — reversible, which is why this is not a DELETE. 404 when the " +
 				"owner is not there, and 404 when it holds no entry with that id.",
@@ -722,7 +725,7 @@ func removeOp(c ir.Child, entity, seg, idParam, opName string) perChildOp {
 		path:    "/:id/" + seg + "/:" + idParam,
 		request: "Remove" + opName + "Request", response: "Remove" + opName + "Response",
 		result: "Remove" + opName + "Result", status: "fiber.StatusOK",
-		summary: fmt.Sprintf("Remove one %s from a %s", c.Name, entity),
+		summary: fmt.Sprintf("Remove one %s from %s %s", c.Name, articleFor(entity), entity),
 		doc: "Removes ONE entry for good: this child declares no archive column, " +
 			"so there is nothing to bring back. 404 when the owner is not there, and " +
 			"404 when it holds no entry with that id.",

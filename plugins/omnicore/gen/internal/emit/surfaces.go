@@ -35,7 +35,10 @@ func emitExports(s *src, m *ir.Model) {
 		s.L("\t\tview,")
 		s.L("\t\td.Export,")
 		s.L("\t\t%s,", handler)
-		s.L("\t\texport.WithDelimiter('%s'))", m.Surfaces.CSVDelimiter)
+		// %q of the rune, not a raw '%s': a quote or a backslash as the
+		// delimiter passed validation ("one character") and emitted a literal
+		// that did not parse.
+		s.L("\t\texport.WithDelimiter(%q))", firstRune(m.Surfaces.CSVDelimiter))
 		s.L("\tfwopenapi.Mount(d.OpenAPIRegistry, app, fiber.MethodGet, %s,",
 			quote("/"+m.Entity.PluralSnake+".csv"))
 		s.L("\t\tcsvH, csvSpec,")
@@ -82,6 +85,15 @@ func exportDescription(m *ir.Model, format string) string {
 // Not a second implementation: the handler, the DTOs and the permission are the
 // same objects. That is what keeps the two surfaces from drifting — a rule
 // added to a command reaches both, because there is only one command.
+// firstRune is the delimiter as a rune — validation guarantees exactly one
+// character, but a defensive default beats an index panic in an emitter.
+func firstRune(s string) rune {
+	for _, r := range s {
+		return r
+	}
+	return ','
+}
+
 func emitGraphQL(m *ir.Model) (*src, bool) {
 	if !m.Surfaces.GraphQL {
 		return nil, false

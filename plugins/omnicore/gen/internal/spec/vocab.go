@@ -160,7 +160,7 @@ func Vocabularies() []Vocabulary {
 			"base = the collection belongs to the shared identity and outlives this role."},
 		{"children[].editStrategy", EditStrategies,
 			"atomic-replace = the root's update swaps the whole collection; per-child = its own endpoints."},
-		{"children[].delete", DeleteChild,
+		{"delete.children", DeleteChild,
 			"soft = the entry is archived and can come back; hard = the row is gone."},
 		{"modes", Modes,
 			"the verbs the entity has at all; an absent one is not routed."},
@@ -227,5 +227,15 @@ func RefusedKeys() map[string]string {
 		"children[].rules.manual[].actionName": "describe the condition in the description instead",
 		"children[].fields[].assignedFrom": "an entry of a collection has no identity of its " +
 			"own to be assigned from — the field that records who acted belongs to the root",
+		"siblings[].fields[].assignedFrom": "a facet's field is written with the facet — the " +
+			"field that records who acted belongs to the root",
+		"read.byParams.filters[].required": "a mandatory filter is not generated; the " +
+			"endpoint would serve the parameter as optional",
+		"delete.children": "nothing reads a blanket delete semantic for the collections — " +
+			"removal is declared per child, with children[].softRemove",
+		"children[].fields[].unique": "uniqueness of a collection entry is not generated — " +
+			"declare it on a root field, or use businessIdentity for same-entry detection",
+		"siblings[].fields[].unique": "uniqueness of a facet's field is not generated — " +
+			"declare it on a root field",
 	}
 }

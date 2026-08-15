@@ -93,7 +93,9 @@ a clause the framework dispatches by verb.
   length          min and/or max characters. Text only.
   range           min and/or max value. Numbers and dates.
   comparison      one field against another (other + operator), nil-safe.
-  transition      an enum may only move along declared edges.
+  transition      an enum may only move along declared edges. The field is a
+                  non-nullable, string-backed enum declared in THIS spec, and
+                  every state named in the map is one of its member values.
   requiredIf      required when another field has a value (see skipWhen).
   groupCap        at most N rows per key. Needs a service fact to count them.
   childDuplicate  two entries of a collection share a business identity.

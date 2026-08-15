@@ -37,6 +37,15 @@ func TestRedeclaringIsRefusedButReRunningIsNot(t *testing.T) {
 			MinLength: 2, MaxLength: 2,
 			Notification: "UnknownUFNotification",
 		}}
+		s.Notifications = []Notification{{
+			Name: "UnknownUFNotification", Semantic: "validation", Package: "vos",
+			Text: Texts{
+				PTBR: "UF desconhecida.", ENG: "Unknown state code.",
+				ESP: "Estado desconocido.", FRA: "État inconnu.",
+				DEU: "Unbekanntes Bundesland.", ITA: "Stato sconosciuto.",
+				NLD: "Onbekende provincie.",
+			},
+		}}
 		s.Fields[0].VO = &FieldVO{Kind: "raw", Ref: "UF"}
 		return Validate(s, Options{
 			ExistingVOs: []string{"UF"},

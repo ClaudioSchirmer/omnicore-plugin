@@ -93,12 +93,17 @@ func ApplyHeaderWith(comment string, content []byte, meta Meta, previous []byte)
 
 	// Keep the previous date when the file is otherwise identical: a date that
 	// moves on every run turns every regeneration into a diff.
+	//
+	// "Otherwise identical" is judged against the bytes ON DISK, with both the
+	// checksum and the date blanked out of each side. Comparing the new content
+	// against itself-with-the-old-date — which this once did — only ever agreed
+	// when the two dates were already equal, so the first regeneration on a
+	// later day rewrote every owned file for nothing.
 	if len(previous) > 0 {
 		if prevDate := recordedDate(comment, string(previous)); prevDate != "" {
-			withPrevDate := ownedHeader(comment, withDate(meta, prevDate), blankChecksum) + body
-			if normalize(stripChecksum(comment, withPrevDate)) ==
-				normalize(stripChecksum(comment, candidate)) {
-				candidate = withPrevDate
+			if normalize(stripDate(comment, stripChecksum(comment, string(previous)))) ==
+				normalize(stripDate(comment, stripChecksum(comment, candidate))) {
+				candidate = ownedHeader(comment, withDate(meta, prevDate), blankChecksum) + body
 			}
 		}
 	}
@@ -146,6 +151,12 @@ func digest(comment, s string) string {
 
 func stripChecksum(comment, s string) string {
 	return checksumLineRe(comment).ReplaceAllString(s, checksumPrefixFor(comment)+blankChecksum)
+}
+
+// stripDate blanks the date line the same way stripChecksum blanks the digest,
+// so two versions of a file can be compared modulo the day they were written.
+func stripDate(comment, s string) string {
+	return dateLineRe(comment).ReplaceAllString(s, comment+" generated:  0000-00-00")
 }
 
 func normalize(s string) string { return strings.ReplaceAll(s, "\r\n", "\n") }

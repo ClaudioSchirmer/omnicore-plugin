@@ -308,7 +308,8 @@ func upSQL(m *ir.Model, d dialect) string {
 		if c.Scope == "active-only" && m.Managed.ArchivedAt != "" {
 			fmt.Fprintf(&b, "%s Scoped to the ACTIVE rows: an archived row releases the value, so it\n", d.Comment)
 			fmt.Fprintf(&b, "%s can be taken again while the old row stays as history.\n", d.Comment)
-			writeActiveOnlyUnique(&b, c.Table, uniqueName(c), c.Columns[0], m.Managed.ArchivedAt, d)
+			writeActiveOnlyUnique(&b, c.Table, uniqueName(c), c.Columns[0],
+				constraintColumnType(m, c, d), m.Managed.ArchivedAt, d)
 			continue
 		}
 		fmt.Fprintf(&b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",
@@ -359,7 +360,15 @@ func downSQL(m *ir.Model, d dialect) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "-- Rollback of %s.\n", m.Table)
 	b.WriteString("-- Idempotent on purpose: an up that failed halfway leaves some objects\n")
-	b.WriteString("-- created and others not, so the down must tolerate what is absent.\n\n")
+	b.WriteString("-- created and others not, so the down must tolerate what is absent.\n")
+	if d.Name == "oracle" {
+		// The spelling below parses from 23ai on; stating the floor here beats
+		// an ORA-00933 with no pointer on an older server.
+		b.WriteString("-- Oracle 23ai or newer: DROP TABLE IF EXISTS is not parsed by 19c/21c —\n")
+		b.WriteString("-- on those, replace each line with the classic PL/SQL EXECUTE IMMEDIATE\n")
+		b.WriteString("-- guard (catching SQLCODE -942).\n")
+	}
+	b.WriteString("\n")
 
 	// The indexes are NOT dropped separately: dropping the table takes them with
 	// it on every engine, and the standalone DROP INDEX spelling differs enough
@@ -557,7 +566,20 @@ func writeRoleUniqueness(b *strings.Builder, m *ir.Model, d dialect) {
 
 	fmt.Fprintf(b, "%s one ACTIVE role row per identity. Archived rows are excluded, so the\n", d.Comment)
 	fmt.Fprintf(b, "%s identity can hold this role again later while the old rows stay as history.\n", d.Comment)
-	writeActiveOnlyUnique(b, m.Table, name, col, m.Managed.ArchivedAt, d)
+	writeActiveOnlyUnique(b, m.Table, name, col, d.ID, m.Managed.ArchivedAt, d)
+}
+
+// constraintColumnType answers the engine type of the column a unique
+// constraint covers, so MySQL's generated shadow column can mirror it exactly.
+func constraintColumnType(m *ir.Model, c ir.Constraint, d dialect) string {
+	for _, f := range m.Fields {
+		if f.Column == c.Columns[0] {
+			return d.Column(f)
+		}
+	}
+	// The constraint was resolved from m.Fields, so this is unreachable — but
+	// an id-typed fallback beats a panic inside a migration writer.
+	return d.ID
 }
 
 // writeActiveOnlyUnique spells "unique among the rows that are not archived" in
@@ -567,7 +589,13 @@ func writeRoleUniqueness(b *strings.Builder, m *ir.Model, d dialect) {
 // not fail loudly — it produces an index that is either too strict (an archived
 // row keeps blocking the value forever) or absent. So the four live together,
 // where they can be compared.
-func writeActiveOnlyUnique(b *strings.Builder, table, name, col, archived string, d dialect) {
+//
+// colType is the SQL type of the constrained column ON THIS ENGINE. Only MySQL
+// reads it — its spelling materialises the condition as a generated column, and
+// that column must carry the value's own type. It used to be hard-wired to the
+// id type, which applied cleanly and then rejected any active VARCHAR value
+// longer than 16 bytes at INSERT.
+func writeActiveOnlyUnique(b *strings.Builder, table, name, col, colType, archived string, d dialect) {
 	switch d.Name {
 	case "postgres", "sqlite", "sqlserver":
 		fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (%s) WHERE %s IS NULL;\n",
@@ -589,7 +617,7 @@ func writeActiveOnlyUnique(b *strings.Builder, table, name, col, archived string
 		fmt.Fprintf(b, "%s mirrors the value while active and turns NULL once archived, and NULLs\n", d.Comment)
 		fmt.Fprintf(b, "%s do not collide with each other.\n", d.Comment)
 		fmt.Fprintf(b, "ALTER TABLE %s ADD COLUMN %s %s GENERATED ALWAYS AS (CASE WHEN %s IS NULL THEN %s END) STORED;\n",
-			d.Quote(table), d.Quote("active_"+col), d.ID, d.Quote(archived), d.Quote(col))
+			d.Quote(table), d.Quote("active_"+col), colType, d.Quote(archived), d.Quote(col))
 		fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",
 			d.Quote(name), d.Quote(table), d.Quote("active_"+col))
 	}

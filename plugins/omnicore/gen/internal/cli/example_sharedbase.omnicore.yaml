@@ -372,6 +372,18 @@ notifications:
 service:
   required: true
   facts:
+    # The precheck half of Matricula's unique (service-precheck+constraint,
+    # above) asks THIS fact: an exists filtered by the unique field, with
+    # excludeSelf so an update does not collide with itself. Declaring the
+    # enforcement without a fact like this one is refused — the precheck
+    # would otherwise silently not be generated.
+    - name: MatriculaJaExiste
+      kind: exists
+      description: Já existe um professor ativo com esta matrícula.
+      field: Matricula
+      filters: [Matricula]
+      excludeSelf: true
+      activeOnly: true
     - name: TurmasAtivasDaMatricula
       kind: count
       description: Quantas turmas ativas a matrícula já tem.

@@ -71,36 +71,98 @@ type TargetColumn struct {
 }
 
 // TargetShape describes every table the model needs.
+//
+// It must say EXACTLY what the migration writers create — it is the hand-off an
+// author writes an ALTER from when `--migrations=no` or the entity already
+// exists, so any drift here becomes someone's wrong schema. Each block below
+// mirrors its writer in migrations.go by name; change them together.
 func TargetShape(m *ir.Model) []TargetTable {
 	var out []TargetTable
 
 	if m.IsRole() && !m.Base.Reuse {
+		// Mirrors writeBaseTable, natural-key unique index included.
 		out = append(out, TargetTable{
 			Name: m.Base.Table, Purpose: "the shared identity",
 			Columns: columnsOf(m.BaseFields(), m, true),
+			Indexes: []TargetIndex{{
+				Name:    m.Base.Table + "_" + naturalColumn(m) + "_key",
+				Columns: []string{naturalColumn(m)}, Unique: true,
+				Note: "the natural key — the identity's own key derives from it, " +
+					"so it is UNIQUE and NOT NULL",
+			}},
 		})
 	}
-	out = append(out, TargetTable{
+	// Mirrors upSQL's root table, link column included for a separate-fk role.
+	root := TargetTable{
 		Name: m.Table, Purpose: "the aggregate root",
 		Columns: columnsOf(roleFieldsOf(m), m, true),
 		Indexes: indexesOf(m),
-	})
+	}
+	if m.IsRole() && m.Base.Link == "separate-fk" {
+		root.Columns = append(root.Columns[:1], append([]TargetColumn{{
+			Name: baseLinkColumn(m), Type: "id", Note: "link to the shared identity",
+		}}, root.Columns[1:]...)...)
+	}
+	out = append(out, root)
 	for _, sib := range m.Siblings {
+		// Mirrors writeSiblingTable: every column nullable, NO lifecycle columns
+		// — the facet's row exists only while at least one value does.
 		out = append(out, TargetTable{
 			Name: sib.Table, Purpose: "the " + sib.Name + " facet (1:1, shares the owner key)",
-			Columns: columnsOf(sib.Fields, m, false),
+			Columns: siblingColumnsOf(sib),
 		})
 	}
 	for _, c := range m.Children {
-		cols := columnsOf(c.Fields, m, false)
-		// After the primary key, not before it: the table reads the way it is created.
-		cols = append(cols[:1], append([]TargetColumn{{
-			Name: parentColumn(c), Type: "id", Note: "foreign key to " + m.Table,
-		}}, cols[1:]...)...)
+		if c.Mounted {
+			// The identity's collection: another spec creates it; listing it here
+			// would tell an author to CREATE a table that already exists.
+			continue
+		}
 		out = append(out, TargetTable{
 			Name: c.Table, Purpose: "the " + c.Segment + " collection (1:N)",
-			Columns: cols,
+			Columns: childColumnsOf(m, c),
 		})
+	}
+	return out
+}
+
+// siblingColumnsOf mirrors writeSiblingTable: shared key, every declared column
+// nullable, nothing managed.
+func siblingColumnsOf(sib ir.Sibling) []TargetColumn {
+	out := []TargetColumn{{Name: "id", Type: "id", Note: "primary key, shared with the owner row"}}
+	for _, f := range sib.Fields {
+		out = append(out, TargetColumn{
+			Name: f.Column, Type: f.SpecType, Length: f.Length, Nullable: true,
+		})
+	}
+	return out
+}
+
+// childColumnsOf mirrors writeChildTable: facet-owned fields live on the
+// facet's table, the archive stamp is the CHILD's own, and there is no
+// revision — an entry rides the aggregate's.
+func childColumnsOf(m *ir.Model, c ir.Child) []TargetColumn {
+	out := []TargetColumn{
+		{Name: "id", Type: "id", Note: "primary key"},
+		{Name: parentColumn(c), Type: "id", Note: "foreign key to " + childOwnerTable(m, c)},
+	}
+	for _, f := range c.Fields {
+		if f.Facet != "" {
+			continue
+		}
+		out = append(out, TargetColumn{
+			Name: f.Column, Type: f.SpecType, Length: f.Length, Nullable: f.Nullable,
+		})
+	}
+	if c.ArchivedAt != "" {
+		out = append(out, TargetColumn{Name: c.ArchivedAt, Type: "time",
+			Nullable: true, Note: "archive stamp"})
+	}
+	if m.Managed.CreatedAt != "" {
+		out = append(out, TargetColumn{Name: m.Managed.CreatedAt, Type: "time"})
+	}
+	if m.Managed.UpdatedAt != "" {
+		out = append(out, TargetColumn{Name: m.Managed.UpdatedAt, Type: "time"})
 	}
 	return out
 }
@@ -342,7 +404,9 @@ func zeroCheck(f ir.Field, receiver string) string {
 	case "time":
 		return fmt.Sprintf("%s.IsZero()", ref)
 	case "id":
-		return fmt.Sprintf("%s.IsZero()", ref)
+		// domain.ID answers IsEmpty, not IsZero — the latter compiled against
+		// nothing and surfaced only when a required rule landed on an id field.
+		return fmt.Sprintf("%s.IsEmpty()", ref)
 	case "bool":
 		// A false boolean is a value, not an absence; "required" cannot mean
 		// anything else for it.

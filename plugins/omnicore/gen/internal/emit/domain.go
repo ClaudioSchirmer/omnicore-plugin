@@ -279,6 +279,21 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 	}
 }
 
+// pointerNeq renders "the two pointers do not carry the same value": nil and
+// nil are the same, nil and set differ, set and set compare the pointed-at
+// values. It is inlined into the generated file because the framework
+// deliberately carries no helper for it — an earlier version emitted a
+// `domain.SamePointer` that existed nowhere, and the file did not compile.
+func pointerNeq(a, b string) string {
+	return fmt.Sprintf("(%s == nil) != (%s == nil) || (%s != nil && *%s != *%s)", a, b, a, a, b)
+}
+
+// pointerEq is the affirmative twin of pointerNeq, parenthesised so it can be
+// joined with && by a caller.
+func pointerEq(a, b string) string {
+	return fmt.Sprintf("((%s == nil) == (%s == nil) && (%s == nil || *%s == *%s))", a, b, a, a, b)
+}
+
 // emitImmutable compares against the pre-write snapshot.
 //
 // The nil guard is not defensive noise: on an insert there is no previous
@@ -288,7 +303,7 @@ func emitImmutable(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	for _, f := range rule.Fields {
 		cmp := fmt.Sprintf("old.%s != %s.%s", f.Name, recv, f.Name)
 		if f.Nullable {
-			cmp = fmt.Sprintf("!domain.SamePointer(old.%s, %s.%s)", f.Name, recv, f.Name)
+			cmp = pointerNeq("old."+f.Name, fmt.Sprintf("%s.%s", recv, f.Name))
 		}
 		s.L("\t\t\tif %s {", cmp)
 		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
@@ -594,16 +609,23 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 // notEmpty gates the probe on there being a value to look up — asking the
 // database about an empty string is a query that can only waste a round trip.
 func notEmpty(f ir.Field, recv string) string {
+	ref := recv + "." + f.Name
+	if f.Nullable {
+		return ref + " != nil"
+	}
 	switch f.SpecType {
 	case "string":
-		if f.VOKind != "" {
-			return recv + "." + f.Name + " != \"\""
-		}
-		return recv + "." + f.Name + " != \"\""
+		return ref + " != \"\""
 	case "time":
-		return "!" + recv + "." + f.Name + ".IsZero()"
+		return "!" + ref + ".IsZero()"
+	case "id":
+		return "!" + ref + ".IsEmpty()"
+	case "bool":
+		// A flag always carries a value; validation refuses unique on one, so
+		// this is only reachable defensively.
+		return "true"
 	default:
-		return recv + "." + f.Name + " != 0"
+		return ref + " != 0"
 	}
 }
 
@@ -798,14 +820,13 @@ func emitTransition(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	if len(rule.Fields) == 0 || len(rule.Transitions) == 0 {
 		return
 	}
+	// Validation refuses a nullable state, so the reads below never need a nil
+	// guard — an absent state is modelled as an explicit enum member instead.
 	f := rule.Fields[0]
 	ref := recv + "." + f.Name
 	value := ref
 	if f.VOKind != "" {
 		value = ref + ".Value()"
-	}
-	if f.Nullable {
-		value = "*" + value
 	}
 
 	s.L("\t\t// The allowed moves. A state not listed here can only stay where it is,")
@@ -814,9 +835,6 @@ func emitTransition(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	oldValue := "old." + f.Name
 	if f.VOKind != "" {
 		oldValue += ".Value()"
-	}
-	if f.Nullable {
-		oldValue = "*" + oldValue
 	}
 	s.L("\t\t\tallowed := map[%s][]%s{", transitionKeyType(f), transitionKeyType(f))
 	for _, from := range sortedKeys(rule.Transitions) {
@@ -886,14 +904,13 @@ func emitChildTransition(s *src, m *ir.Model, rule ir.Rule) {
 	if c == nil || len(rule.Fields) == 0 || len(rule.Transitions) == 0 {
 		return
 	}
+	// Validation refuses a nullable state (see emitTransition), so no nil
+	// handling is needed here either.
 	f := rule.Fields[0]
 	read := func(recv string) string {
 		v := recv + "." + f.Name
 		if f.VOKind != "" {
 			v += ".Value()"
-		}
-		if f.Nullable {
-			v = "*" + v
 		}
 		return v
 	}
@@ -937,7 +954,15 @@ func emitChildImmutable(s *src, m *ir.Model, rule ir.Rule) {
 	}
 	f := rule.Fields[0]
 	emitChildPairing(s, c, func(cur, old string) {
-		s.L("\t\t\t\t\tif %s.%s != %s.%s {", old, f.Name, cur, f.Name)
+		// Same contract as the root's emitImmutable: a nullable field compares
+		// by pointed-at value. `!=` on two pointers compares identity, and the
+		// ghost and the incoming entry are always distinct allocations — so the
+		// plain comparison rejected every update that merely carried the value.
+		cmp := fmt.Sprintf("%s.%s != %s.%s", old, f.Name, cur, f.Name)
+		if f.Nullable {
+			cmp = pointerNeq(fmt.Sprintf("%s.%s", old, f.Name), fmt.Sprintf("%s.%s", cur, f.Name))
+		}
+		s.L("\t\t\t\t\tif %s {", cmp)
 		s.L("\t\t\t\t\t\tr.AddNotification(%s, %s)",
 			quote(rule.AttachTo), notifIn(m, rule.Notification))
 		s.L("\t\t\t\t\t}")
@@ -1000,7 +1025,7 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 		if rule.OnlyField != nil {
 			s.L("%s// Only the entries this rule is about: %s == %s.",
 				indent, rule.OnlyField.Name, quote(rule.OnlyEquals))
-			s.L("%sif %s == %s {", indent, onlyValueExpr(rule), quote(rule.OnlyEquals))
+			s.L("%sif %s {", indent, onlyCondition(rule))
 			s.L("%s\t%s", indent, body)
 			s.L("%s}", indent)
 			return
@@ -1041,17 +1066,24 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t}")
 }
 
-// onlyValueExpr reads the restricted field off one entry, unwrapping a value
+// onlyCondition renders the whole match test for one entry, unwrapping a value
 // object so the comparison is against the stored value rather than the type.
-func onlyValueExpr(rule ir.Rule) string {
-	ref := "item." + rule.OnlyField.Name
-	if rule.OnlyField.VOKind != "" {
-		ref += ".Value()"
+// A nullable field gets a nil guard: an entry without the value simply does
+// not match, it does not panic the rule.
+func onlyCondition(rule ir.Rule) string {
+	f := rule.OnlyField
+	ref := "item." + f.Name
+	val := ref
+	if f.VOKind != "" {
+		val = ref + ".Value()"
 	}
-	if rule.OnlyField.Nullable {
-		ref = "*" + ref
+	if f.Nullable {
+		if f.VOKind == "" {
+			val = "*" + ref
+		}
+		return fmt.Sprintf("%s != nil && %s == %s", ref, val, quote(rule.OnlyEquals))
 	}
-	return ref
+	return fmt.Sprintf("%s == %s", val, quote(rule.OnlyEquals))
 }
 
 // groupKeyExpr renders one grouping field as text, which is what makes a
@@ -1061,10 +1093,8 @@ func groupKeyExpr(c *ir.Child, name string) string {
 		if f.Name != name {
 			continue
 		}
+		// Validation refuses a nullable grouping key, so no nil handling here.
 		ref := "item." + f.Name
-		if f.Nullable {
-			ref = "*" + ref
-		}
 		switch {
 		case f.VOKind != "":
 			return ref + ".Value()"

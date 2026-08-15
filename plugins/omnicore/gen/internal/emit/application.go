@@ -523,7 +523,10 @@ func emitRowScoping(s *src, m *ir.Model, target string) {
 	switch m.Authz.DataAccess {
 	case "owner-only":
 		if m.Authz.OwnerColumn == "" {
-			return
+			// Validation refuses a runtime owner field, so an empty column here
+			// is generator inconsistency, and returning quietly would ship a
+			// service that says owner-only and serves everything. Refuse loudly.
+			panic("owner-only with no owner column: validation should have refused this spec")
 		}
 		s.L("\t// Callers see only their own rows. Filter is a map keyed by the Go")
 		s.L("\t// field path, and the scope is FORCED: a value the caller sent for this")
@@ -539,7 +542,10 @@ func emitRowScoping(s *src, m *ir.Model, target string) {
 		s.L("\t}")
 	case "tenant":
 		if m.Authz.TenantColumn == "" {
-			return
+			// Same contract as owner-only above: this shape is refused at
+			// validation, and shipping a tenant service with no tenant filter
+			// is the one thing this function exists to prevent.
+			panic("tenant with no tenant column: validation should have refused this spec")
 		}
 		s.L("\t// Callers see only their tenant's rows. The scope is FORCED: a value")
 		s.L("\t// the caller sent for this field is overwritten, never merged.")

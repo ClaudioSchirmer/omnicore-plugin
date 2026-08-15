@@ -581,6 +581,9 @@ func renderCompat(b *strings.Builder, in Input) {
 	}
 	fmt.Fprintf(b, "go vet -tags '%s' ./...\ngo test -tags '%s' ./... -count=1\n", engines[0], engines[0])
 	b.WriteString("```\n\n")
+	b.WriteString("A service that builds with a transport tag (kafka, nats) needs it IN " +
+		"ADDITION to the engine tag on every command above — an engine tag alone may " +
+		"not select a buildable configuration there.\n\n")
 	b.WriteString("Then exercise the endpoints end to end — a green build proves the code " +
 		"compiles, not that the entity works.\n")
 }

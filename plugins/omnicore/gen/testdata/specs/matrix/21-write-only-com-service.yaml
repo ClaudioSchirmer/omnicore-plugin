@@ -1,0 +1,39 @@
+# Eixo: entidade write-only COM domain service — o feature do bootstrap monta
+# repo+svc sem view, a forma que já saiu sem vírgula e não parseava.
+specVersion: 1
+entity: Auditoria
+plural: Auditorias
+language: pt-BR
+storage:
+  kind: flat
+  table: auditorias
+  description: Registros de auditoria — escritos, nunca lidos por esta API.
+  managed: {revision: revision, createdAt: created_at}
+fields:
+  - {name: Acao, type: string, column: acao, length: 80, livesOn: root, example: matricula.criada, description: Ação registrada.}
+  - {name: Chave, type: string, column: chave, length: 40, livesOn: root, example: "abc-1", description: Chave única do registro.,
+     unique: {enforce: service-precheck+constraint, notification: ChaveDuplicadaNotification}}
+modes: [insert]
+rules:
+  list:
+    - {id: acao-obrigatoria, kind: required, scope: [insert], fields: [Acao], notification: RequiredFieldNotification}
+notifications:
+  - name: ChaveDuplicadaNotification
+    semantic: conflict
+    text:
+      ptbr: Já existe um registro com esta chave.
+      eng: A record with this key already exists.
+      esp: Ya existe un registro con esta clave.
+      fra: Un enregistrement avec cette clé existe déjà.
+      deu: Ein Eintrag mit diesem Schlüssel existiert bereits.
+      ita: Esiste già un record con questa chiave.
+      nld: Er bestaat al een record met deze sleutel.
+surfaces: {rest: true}
+authz:
+  resource: auditoria
+  dataAccess: anyone-with-permission
+  permissions: {insert: "auditoria:escrever"}
+service:
+  required: true
+  facts:
+    - {name: ChaveExiste, kind: exists, field: Chave, filters: [Chave], excludeSelf: true, description: Já existe registro com esta chave.}

@@ -159,6 +159,13 @@ Three things to get right, because they are the ones that cost a migration later
   `/<entity>/:id/<collection>[/:entryId]`, a duplicate answer on ADD (declare
   `duplicateNotification`) and a 404 for an entry that is not there. Per-child needs
   `businessIdentity`: it is what "the same entry" means.
+- **`unique.enforce: service-precheck+constraint` is a pair, and the fact is your half.**
+  The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
+  `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
+  refused — the build used to accept the string and silently emit only the constraint.
+- **A state machine wants a closed, PRESENT state.** `transition` requires a non-nullable,
+  string-backed enum declared in the same spec, and every state in the map must be one of
+  its member values. "No state yet" is an explicit member, never a nullable field.
 - **A cap counts what you tell it to count.** `groupCap` takes `cap` plus, optionally,
   `groupBy` (a cap per key) and `only: {field: X, equals: v}` (count only the entries that
   match). "At most 3 proposals under review" is `cap: 3` + `only`, with no `groupBy` — with

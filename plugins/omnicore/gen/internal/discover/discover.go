@@ -259,9 +259,14 @@ func runGo(dir string, args ...string) (string, error) {
 }
 
 var (
-	voTypeRe   = regexp.MustCompile(`(?m)^type\s+([A-Z][A-Za-z0-9]*)\s`)
-	voValueRe  = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*Value\s*\(`)
-	voEntityRe = regexp.MustCompile(`(?m)^//\s*entity:\s*([A-Za-z0-9_]+)`)
+	voTypeRe  = regexp.MustCompile(`(?m)^type\s+([A-Z][A-Za-z0-9]*)\s`)
+	voValueRe = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*Value\s*\(`)
+	// Hand-written files may group declarations — `type ( CPF string; UF string )`
+	// — which the anchored form above never matches, so those types vanished
+	// from the inventory and a legitimate reuse was refused as unknown.
+	voGroupRe     = regexp.MustCompile(`(?ms)^type\s*\(\n(.*?)^\)`)
+	voGroupNameRe = regexp.MustCompile(`(?m)^\s*([A-Z][A-Za-z0-9]*)\s`)
+	voEntityRe    = regexp.MustCompile(`(?m)^//\s*entity:\s*([A-Za-z0-9_]+)`)
 )
 
 // discoverVOs reads internal/domain/vos and reports what is a value OBJECT,
@@ -307,8 +312,16 @@ func discoverVOs(root string) ([]string, map[string]string) {
 				by = string(m[1])
 			}
 		}
+		var declared []string
 		for _, m := range voTypeRe.FindAllSubmatch(b, -1) {
-			name := string(m[1])
+			declared = append(declared, string(m[1]))
+		}
+		for _, g := range voGroupRe.FindAllSubmatch(b, -1) {
+			for _, m := range voGroupNameRe.FindAllSubmatch(g[1], -1) {
+				declared = append(declared, string(m[1]))
+			}
+		}
+		for _, name := range declared {
 			if !hasValue[name] {
 				continue
 			}

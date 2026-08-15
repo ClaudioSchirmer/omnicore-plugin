@@ -69,13 +69,19 @@ func growWiring(src string) (string, error) {
 	}
 	at := loc[1]
 
-	block := "\n\t\t// The seven catalogs. The framework requires them as soon as a\n" +
-		"\t\t// feature exists, so they arrive with the first entity.\n" +
-		"\t\tTranslations: []translation.Module{\n" +
-		"\t\t\tapptrans.PTBR(), apptrans.ENG(), apptrans.ESP(), apptrans.FRA(),\n" +
-		"\t\t\tapptrans.DEU(), apptrans.ITA(), apptrans.NLD(),\n" +
-		"\t\t},\n" +
-		"\t\tFeatures: []bootstrap.Feature{},\n"
+	block := "\n\t\tFeatures: []bootstrap.Feature{},\n"
+	// Translations come along ONLY when the Wiring does not carry them yet: a
+	// hand-refactored root that already lists its catalogs (but has no Features
+	// field) would otherwise get the key a second time — a compile error blamed
+	// on a file the author wrote.
+	if !strings.Contains(src, "Translations:") {
+		block = "\n\t\t// The seven catalogs. The framework requires them as soon as a\n" +
+			"\t\t// feature exists, so they arrive with the first entity.\n" +
+			"\t\tTranslations: []translation.Module{\n" +
+			"\t\t\tapptrans.PTBR(), apptrans.ENG(), apptrans.ESP(), apptrans.FRA(),\n" +
+			"\t\t\tapptrans.DEU(), apptrans.ITA(), apptrans.NLD(),\n" +
+			"\t\t},\n" + block
+	}
 	return src[:at] + block + src[at:], nil
 }
 
@@ -159,6 +165,14 @@ func matchBrace(src string, open int) int {
 			}
 			continue
 		}
+		// Same rule as findMapClose: a // comment's braces are not structure.
+		if c == '/' && i+1 < len(src) && src[i+1] == '/' {
+			if nl := strings.IndexByte(src[i:], '\n'); nl >= 0 {
+				i += nl
+				continue
+			}
+			break
+		}
 		switch c {
 		case '"', '`':
 			inString, quote = true, c
@@ -180,18 +194,32 @@ func ensureWireImports(src string, m *ir.Model) string {
 		{"", "github.com/ClaudioSchirmer/omnicore/application/translation"},
 		{"apptrans", m.ImportPath("internal/application/translations")},
 	}
+	var missing []string
 	for _, imp := range needed {
 		if strings.Contains(src, `"`+imp.path+`"`) {
 			continue
 		}
-		line := "\t\"" + imp.path + "\"\n"
 		if imp.alias != "" {
-			line = "\t" + imp.alias + " \"" + imp.path + "\"\n"
+			missing = append(missing, "\t"+imp.alias+" \""+imp.path+"\"\n")
+		} else {
+			missing = append(missing, "\t\""+imp.path+"\"\n")
 		}
-		if i := strings.Index(src, "import (\n"); i >= 0 {
-			at := i + len("import (\n")
-			src = src[:at] + line + src[at:]
-		}
+	}
+	if len(missing) == 0 {
+		return src
+	}
+	if i := strings.Index(src, "import (\n"); i >= 0 {
+		at := i + len("import (\n")
+		return src[:at] + strings.Join(missing, "") + src[at:]
+	}
+	// No parenthesised block — a root with a single `import "x"` statement, or
+	// none at all. Open a block after the package clause; silently doing
+	// nothing here handed Finalize a file referencing packages it never
+	// imported, with the error pointing at the merge rather than the cause.
+	if loc := packageClauseRe.FindStringIndex(src); loc != nil {
+		return src[:loc[1]] + "\nimport (\n" + strings.Join(missing, "") + ")\n" + src[loc[1]:]
 	}
 	return src
 }
+
+var packageClauseRe = regexp.MustCompile(`(?m)^package\s+\w+\r?\n`)
