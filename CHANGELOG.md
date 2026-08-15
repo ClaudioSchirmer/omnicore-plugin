@@ -59,6 +59,29 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Added
 
+- **The generator maintains its own declarations in the SHARED files, and can now tell them
+  apart from yours.** `notifications.go` and the seven catalogs belong to every entity, so
+  the generator only ever inserted into them — and therefore never updated a declaration it
+  had written itself. That is how a notification which gained a `tvars` entry stopped a
+  package compiling: the rules emitted for it write `N{Max: "50"}` and the struct on disk
+  had no such field, with the compiler pointing at the rule rather than at the declaration.
+  The file still has no header and no checksum — nothing seals a file five entities write
+  to — so the LOCK now records a hash per declaration and per message, and each one is
+  answered separately:
+  - recorded hash matches what is on disk → the text is still the generator's own, and a
+    spec that moved moves it. Only that declaration is rewritten; everything around it,
+    including every other entity's, is untouched.
+  - it differs → somebody edited it. Left exactly as it is, and NAMED IN THE REPORT, with
+    the note that a stale declaration is what breaks the build while a stale message only
+    reads oddly.
+  - no record at all → left alone and reported too. Not knowing who wrote something is not
+    a licence to overwrite it, and that is every tree generated before this change.
+
+  Inserting is unchanged, which is the part that was never the problem. A translator's
+  improved wording still survives regeneration — it simply survives by being recognised
+  rather than by the generator refusing to look. Hashes are whitespace-normalised, so
+  gofmt realigning a struct when a longer field arrives is not read as an edit.
+
 - **A declared fact can now be ENFORCED declaratively: `rules.list[].kind: factRange`.**
   The generator wrote the query and stopped there — the port answered a number and nothing
   compared it, so every limit over rows in the table was a hand-written clause in the manual

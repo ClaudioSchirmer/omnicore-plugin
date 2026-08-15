@@ -129,6 +129,17 @@ type LockEntity struct {
 	// tool that just wrote the change.
 	ViewShape   string `json:"viewShape,omitempty"`
 	ViewVersion int    `json:"viewVersion,omitempty"`
+	// Registrations records what this entity last wrote INTO a shared file,
+	// keyed by path and then by declaration name, as a hash of the text.
+	//
+	// A registration file has no header and no checksum of its own — it belongs
+	// to every entity in the project, so there is no single run that could seal
+	// it. This is the same answer applied one declaration at a time: matching
+	// what was recorded means the text on disk is still the generator's own and
+	// may be replaced; differing means somebody edited it, and it is theirs.
+	// Absent means the declaration predates this record and is left alone,
+	// because "I do not know who wrote this" is not a licence to overwrite it.
+	Registrations map[string]map[string]string `json:"registrations,omitempty"`
 }
 
 type LockFile struct {
@@ -152,6 +163,14 @@ type LockFile struct {
 	// giving: the next person to meet this file is usually not the one who
 	// edited it, and "adopted" alone does not say whether the reason still holds.
 	Why string `json:"why,omitempty"`
+}
+
+// RegistrationsOf is what the named entity last wrote into the shared files.
+func (l *Lock) RegistrationsOf(entity string) map[string]map[string]string {
+	if l == nil {
+		return nil
+	}
+	return l.Entities[entity].Registrations
 }
 
 func LoadLock(root string) (*Lock, error) {
@@ -267,6 +286,14 @@ func Plan(root string, entity string, files []File, lock *Lock, force map[string
 // stores the hash of what is actually ON DISK — recording the hash of content
 // that was refused would make the next run believe the file matched.
 func Apply(root, entity, specPath, specHash, framework string, ordinals map[string]int, view ViewState, decisions []Decision, lock *Lock) error {
+	return ApplyWith(root, entity, specPath, specHash, framework, ordinals, view, decisions, nil, lock)
+}
+
+// ApplyWith is Apply plus the per-declaration hashes this run wrote into the
+// shared registration files. They are recorded even when nothing else changed:
+// the record is what lets the NEXT run tell its own text apart from a hand edit,
+// and a run that merely CONFIRMED a declaration still knows it is the author.
+func ApplyWith(root, entity, specPath, specHash, framework string, ordinals map[string]int, view ViewState, decisions []Decision, registrations map[string]map[string]string, lock *Lock) error {
 	entry, ok := lock.Entities[entity]
 	if !ok {
 		entry = LockEntity{Files: map[string]LockFile{}}
@@ -278,6 +305,9 @@ func Apply(root, entity, specPath, specHash, framework string, ordinals map[stri
 	entry.ViewShape, entry.ViewVersion = view.Shape, view.Version
 	if ordinals != nil {
 		entry.Ordinals = ordinals
+	}
+	if registrations != nil {
+		entry.Registrations = registrations
 	}
 
 	for _, d := range decisions {

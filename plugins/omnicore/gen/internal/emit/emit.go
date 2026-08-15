@@ -27,6 +27,15 @@ type Result struct {
 	// placeholder, so the report can list them instead of letting an
 	// untranslated string look finished.
 	MissingTranslations []string
+	// StaleRegistrations names what a shared registration file already declares
+	// with content that no longer matches this spec. The generator does not
+	// rewrite those files — they carry other entities' declarations and edits
+	// that are not its to discard — so the only honest thing left is to say so.
+	StaleRegistrations []string
+	// Registrations is what this run wrote into the shared files, hashed per
+	// declaration, for the lock to record. It is how the NEXT run tells its own
+	// text apart from a hand edit.
+	Registrations map[string]map[string]string
 	// TargetTables carries the shape the model now requires. It is always
 	// resolved, because the reader who needs it is not the one creating the
 	// tables — it is the one holding a migration that was written on an EARLIER
@@ -235,12 +244,14 @@ func All(m *ir.Model, root string, meta FileMeta) (*Result, error) {
 	res.Files = append(res.Files, mig...)
 	res.TargetTables = TargetShape(m)
 
-	regs, missing, err := emitRegistrations(m, root)
+	regs, missing, stale, written, err := emitRegistrations(m, root, meta.PriorRegistrations)
 	if err != nil {
 		return nil, err
 	}
 	res.Files = append(res.Files, regs...)
 	res.MissingTranslations = missing
+	res.StaleRegistrations = stale
+	res.Registrations = written
 
 	sealFiles(res.Files, root, meta)
 	return res, nil
@@ -251,6 +262,10 @@ type FileMeta struct {
 	Spec   string
 	Entity string
 	Date   string
+	// PriorRegistrations is what THIS entity last wrote into the shared files,
+	// from the lock: path → declaration → hash. It is what lets a merge replace
+	// its own text and keep its hands off everything else.
+	PriorRegistrations map[string]map[string]string
 }
 
 // sealFiles is the single place a header is attached.

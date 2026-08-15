@@ -118,9 +118,10 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	}
 
 	result, err := emit.All(model, proj.Root, emit.FileMeta{
-		Spec:   specRel,
-		Entity: model.Entity.Pascal,
-		Date:   opt.Now().Format("2006-01-02"),
+		Spec:               specRel,
+		Entity:             model.Entity.Pascal,
+		Date:               opt.Now().Format("2006-01-02"),
+		PriorRegistrations: lock.RegistrationsOf(model.Entity.Pascal),
 	})
 	if err != nil {
 		return err
@@ -142,8 +143,9 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	}
 
 	specBytes, _ := os.ReadFile(opt.SpecPath)
-	if err := fsplan.Apply(proj.Root, model.Entity.Pascal, specRel,
-		fsplan.Hash(specBytes), proj.FrameworkVersion, model.Ordinal, view, decisions, lock); err != nil {
+	if err := fsplan.ApplyWith(proj.Root, model.Entity.Pascal, specRel,
+		fsplan.Hash(specBytes), proj.FrameworkVersion, model.Ordinal, view, decisions,
+		result.Registrations, lock); err != nil {
 		return err
 	}
 
@@ -155,6 +157,7 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	md := report.Render(report.Input{
 		Model: model, SpecPath: specRel, Decisions: decisions,
 		MissingTranslations: result.MissingTranslations,
+		StaleRegistrations:  result.StaleRegistrations,
 		MigrationsKept:      migrationsKept,
 		TargetTables:        result.TargetTables,
 		Orphans:             orphans,

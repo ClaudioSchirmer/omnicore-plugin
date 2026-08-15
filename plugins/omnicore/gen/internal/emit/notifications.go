@@ -18,9 +18,22 @@ import (
 // These belong to the whole service, not to this entity, so they are MERGED:
 // what is already there survives untouched, including wording a translator
 // improved by hand.
-func emitRegistrations(m *ir.Model, root string) ([]fsplan.File, []string, error) {
+func emitRegistrations(m *ir.Model, root string, prior map[string]map[string]string) ([]fsplan.File, []string, []string, map[string]map[string]string, error) {
 	var files []fsplan.File
 	var missingTranslations []string
+	var staleRegistrations []string
+	written := map[string]map[string]string{}
+	priorFor := func(rel string) map[string]string {
+		if prior == nil {
+			return nil
+		}
+		return prior[rel]
+	}
+	record := func(rel string, w map[string]string) {
+		if len(w) > 0 {
+			written[rel] = w
+		}
+	}
 
 	// One registration file per package, by necessity rather than taste: the
 	// domain package imports vos, so a notification a value object raises cannot
@@ -30,29 +43,36 @@ func emitRegistrations(m *ir.Model, root string) ([]fsplan.File, []string, error
 		{"vos", "internal/domain/vos"},
 		{"aggregatevos", "internal/domain/aggregatevos"},
 	} {
-		f, err := mergeNotifications(m, root, pkg.name, pkg.dir)
+		rel := pkg.dir + "/notifications.go"
+		f, stale, w, err := mergeNotifications(m, root, pkg.name, pkg.dir, priorFor(rel))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		if f != nil {
 			files = append(files, *f)
 		}
+		staleRegistrations = append(staleRegistrations, stale...)
+		record(rel, w)
 	}
 
 	entries := catalogEntries(m)
 	for _, c := range catalogs {
-		f, added, err := mergeCatalog(m, root, c.Code, c.Type, c.Ctor, c.LangConst, entries[c.Code])
+		rel := "internal/application/translations/" + c.Code + ".go"
+		f, added, stale, w, err := mergeCatalog(m, root, c.Code, c.Type, c.Ctor, c.LangConst,
+			entries[c.Code], priorFor(rel))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		if f != nil {
 			files = append(files, *f)
 		}
 		_ = added
+		staleRegistrations = append(staleRegistrations, stale...)
+		record(rel, w)
 	}
 
 	if f, err := mergeWire(m, root); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	} else if f != nil {
 		files = append(files, *f)
 	}
@@ -64,10 +84,11 @@ func emitRegistrations(m *ir.Model, root string) ([]fsplan.File, []string, error
 		}
 	}
 	sort.Strings(missingTranslations)
-	return files, missingTranslations, nil
+	sort.Strings(staleRegistrations)
+	return files, missingTranslations, staleRegistrations, written, nil
 }
 
-func mergeNotifications(m *ir.Model, root, pkg, dir string) (*fsplan.File, error) {
+func mergeNotifications(m *ir.Model, root, pkg, dir string, prior map[string]string) (*fsplan.File, []string, map[string]string, error) {
 	var decls []TypeDecl
 	for _, n := range m.Notifications {
 		if n.Package != pkg {
@@ -80,30 +101,43 @@ func mergeNotifications(m *ir.Model, root, pkg, dir string) (*fsplan.File, error
 		})
 	}
 	if len(decls) == 0 {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 
 	rel := dir + "/notifications.go"
 	existing, err := os.ReadFile(filepath.Join(root, rel))
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return nil, err
+			return nil, nil, nil, err
 		}
 		existing = []byte(notificationsSkeleton(pkg))
 	}
 
-	merged, changed := MergeTypeDecls(string(existing), decls)
+	merged, changed, stale, written := MergeTypeDecls(string(existing), decls, prior)
+	// The stale list travels even when NOTHING was written: a declaration that
+	// drifted is exactly the case where there is nothing to add, and returning
+	// early on "no change" is how it would go unsaid.
 	if !changed && err == nil {
-		return nil, nil
+		return nil, staleIn(rel, stale), written, nil
 	}
 	out, ferr := gofile.Finalize([]byte(merged))
 	if ferr != nil {
-		return nil, fmt.Errorf("%s: %w", rel, ferr)
+		return nil, nil, nil, fmt.Errorf("%s: %w", rel, ferr)
 	}
 	return &fsplan.File{
 		Path: rel, Class: fsplan.Registration, Content: out,
 		Describes: fmt.Sprintf("%d notification declaration(s)", len(decls)),
-	}, nil
+	}, staleIn(rel, stale), written, nil
+}
+
+// staleIn labels each drifted name with the file it sits in, because the reader
+// of the report has to open one of several shared files to fix it.
+func staleIn(rel string, names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, n+" — "+rel)
+	}
+	return out
 }
 
 func notificationDoc(n ir.Notification) string {
@@ -169,7 +203,10 @@ func notificationsSkeleton(pkg string) string {
 		"Notifications raised by this package's types.",
 		"",
 		"This file is a registration site: omnicore-gen appends the declarations an "+
-			"entity needs and never rewrites what is already here.",
+			"entity needs, and maintains the ones IT wrote — it records a hash of each, "+
+			"so a declaration you changed is recognised as yours and left alone (the "+
+			"report names it instead). Nothing here is ever rewritten wholesale: this "+
+			"file belongs to every entity in the project.",
 	)
 	s.Doc("",
 		"It lives beside the types that raise it: the domain package imports vos, so "+
@@ -291,28 +328,28 @@ func spaceOut(name string) string {
 	return b.String()
 }
 
-func mergeCatalog(m *ir.Model, root, code, typeName, ctor, langConst string, entries []MapEntry) (*fsplan.File, []string, error) {
+func mergeCatalog(m *ir.Model, root, code, typeName, ctor, langConst string, entries []MapEntry, prior map[string]string) (*fsplan.File, []string, []string, map[string]string, error) {
 	rel := "internal/application/translations/" + code + ".go"
 	existing, err := os.ReadFile(filepath.Join(root, rel))
 	created := false
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		existing = []byte(catalogSkeleton(code, typeName, ctor, langConst))
 		created = true
 	}
 
-	merged, changed, added := MergeMapEntries(string(existing), entries)
+	merged, changed, added, stale, written := MergeMapEntries(string(existing), entries, prior)
 	if !changed && !created {
-		return nil, nil, nil
+		return nil, nil, staleIn(rel, stale), written, nil
 	}
 	out, ferr := gofile.Finalize([]byte(merged))
 	if ferr != nil {
-		return nil, nil, fmt.Errorf("%s: %w", rel, ferr)
+		return nil, nil, nil, nil, fmt.Errorf("%s: %w", rel, ferr)
 	}
 	return &fsplan.File{
 		Path: rel, Class: fsplan.Registration, Content: out,
 		Describes: fmt.Sprintf("%d %s translation key(s)", len(added), strings.ToUpper(code)),
-	}, added, nil
+	}, added, staleIn(rel, stale), written, nil
 }

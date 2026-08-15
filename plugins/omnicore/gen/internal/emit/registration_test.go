@@ -17,9 +17,9 @@ import (
 // exercised. That is the whole reason the host is vendored rather than borrowed.
 func TestMergeIntoEmptyCatalog(t *testing.T) {
 	src := catalogSkeleton("ptbr", "ptbr", "PTBR", "LangPTBR")
-	out, changed, added := MergeMapEntries(src, []MapEntry{
+	out, changed, added, _, _ := MergeMapEntries(src, []MapEntry{
 		{Key: "SomeNotification", Value: "Alguma mensagem."},
-	})
+	}, nil)
 	if !changed || len(added) != 1 {
 		t.Fatalf("the entry was not inserted (changed=%v added=%v)", changed, added)
 	}
@@ -33,8 +33,8 @@ func TestMergeIntoEmptyCatalog(t *testing.T) {
 
 func TestMergeIntoPopulatedCatalog(t *testing.T) {
 	src := catalogSkeleton("eng", "eng", "ENG", "LangENG")
-	src, _, _ = MergeMapEntries(src, []MapEntry{{Key: "First", Value: "one"}})
-	out, changed, added := MergeMapEntries(src, []MapEntry{{Key: "Second", Value: "two"}})
+	src, _, _, _, _ = MergeMapEntries(src, []MapEntry{{Key: "First", Value: "one"}}, nil)
+	out, changed, added, _, _ := MergeMapEntries(src, []MapEntry{{Key: "Second", Value: "two"}}, nil)
 	if !changed || len(added) != 1 {
 		t.Fatalf("the second entry was not inserted")
 	}
@@ -51,8 +51,8 @@ func TestMergeIntoPopulatedCatalog(t *testing.T) {
 func TestMergeIsIdempotent(t *testing.T) {
 	src := catalogSkeleton("esp", "esp", "ESP", "LangES")
 	entries := []MapEntry{{Key: "Key", Value: "valor"}}
-	once, _, _ := MergeMapEntries(src, entries)
-	twice, changed, _ := MergeMapEntries(once, entries)
+	once, _, _, _, _ := MergeMapEntries(src, entries, nil)
+	twice, changed, _, _, _ := MergeMapEntries(once, entries, nil)
 	if changed {
 		t.Error("re-merging the same key should change nothing")
 	}
@@ -65,10 +65,10 @@ func TestMergeIsIdempotent(t *testing.T) {
 // a generated string, and silently reverting that is the worst kind of help.
 func TestMergeNeverOverwritesExistingWording(t *testing.T) {
 	src := catalogSkeleton("fra", "fra", "FRA", "LangFR")
-	src, _, _ = MergeMapEntries(src, []MapEntry{{Key: "Msg", Value: "generated"}})
+	src, _, _, _, _ = MergeMapEntries(src, []MapEntry{{Key: "Msg", Value: "generated"}}, nil)
 	src = strings.Replace(src, `"generated"`, `"rewritten by a human"`, 1)
 
-	out, changed, _ := MergeMapEntries(src, []MapEntry{{Key: "Msg", Value: "generated"}})
+	out, changed, _, _, _ := MergeMapEntries(src, []MapEntry{{Key: "Msg", Value: "generated"}}, nil)
 	if changed {
 		t.Error("an existing key must be left alone")
 	}

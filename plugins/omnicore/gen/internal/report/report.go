@@ -25,6 +25,9 @@ type Input struct {
 	SpecPath            string
 	Decisions           []fsplan.Decision
 	MissingTranslations []string
+	// StaleRegistrations names what a shared registration file declares with
+	// content that no longer matches this spec.
+	StaleRegistrations []string
 	Orphans             []string
 	MigrationsKept      []string
 	TargetTables        []emit.TargetTable
@@ -155,6 +158,27 @@ func renderTodo(b *strings.Builder, in Input) {
 			fmt.Fprintf(b, "- %s\n", t)
 		}
 		b.WriteString("\n")
+	}
+
+	if len(in.StaleRegistrations) > 0 {
+		empty = false
+		b.WriteString("### Yours in a shared file, and out of step with the spec\n\n")
+		b.WriteString("The notification declarations and the seven translation catalogs are " +
+			"shared by every entity of the project. The generator maintains what IT wrote " +
+			"there — it records a hash of each declaration and each message, so a spec that " +
+			"moves takes its own text with it. These did NOT match what it recorded, which " +
+			"means somebody edited them, or they predate that record. Either way they are " +
+			"not the generator's to overwrite, so they were left exactly as they are:\n\n")
+		for _, t := range in.StaleRegistrations {
+			fmt.Fprintf(b, "- %s\n", t)
+		}
+		b.WriteString("\nA notification DECLARATION on this list can stop the package " +
+			"compiling, and the error will not point here: if the spec gave it a `tvars` " +
+			"entry, the rules emitted for it now write `N{Max: \"50\"}` and the struct has no " +
+			"such field — add it, and it goes away. A translation on this list is cosmetic " +
+			"by comparison: the end user simply reads the older wording. If your version is " +
+			"the better one, put it in the spec; the two will then agree and it drops off " +
+			"this list.\n\n")
 	}
 
 	if empty {
