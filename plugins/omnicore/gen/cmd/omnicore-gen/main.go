@@ -38,9 +38,10 @@ Common flags:
   -json             machine-readable output
   -lang-fallback    emit marked placeholders for missing translations instead of refusing
   -force-unsupported  generate against a framework older than this build targets
-  -migrations yes|no  write DDL. The generator writes migrations for a CREATE only;
-                      evolving an existing schema is not something it does, and the
-                      report says so with the shape the model now needs.
+
+Migrations are written ONCE, named *_manual.sql, and never rewritten — the
+generator creates a schema, it does not evolve one. A later change is a new
+numbered pair, written by whoever knows where the first one has run.
 
 This generator targets framework ` + compat.Supported + `.x
 `
@@ -162,9 +163,6 @@ func runGenerate(args []string) {
 	forceUnsupported := fs.Bool("force-unsupported", false, "generate against an older framework")
 	dryRun := fs.Bool("dry-run", false, "show what would happen, write nothing")
 	force := fs.String("force", "", "comma-separated paths to overwrite even if hand-edited")
-	migrations := fs.String("migrations", "",
-		"write DDL: yes | no. Default writes it only for a CREATE — an entity this "+
-			"generator has not produced before")
 	_ = fs.Parse(args)
 
 	resolved, err := resolveSpecPath(*specPath, *project)
@@ -187,7 +185,6 @@ func runGenerate(args []string) {
 		ForceUnsupported: *forceUnsupported,
 		DryRun:           *dryRun,
 		Force:            forced,
-		Migrations:       *migrations,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -273,7 +270,7 @@ func splitPositional(args []string) (positional, flags []string) {
 // is exactly what happened to adopt.
 func takesValue(flag string) bool {
 	switch strings.TrimLeft(flag, "-") {
-	case "project", "out", "spec", "why", "migrations":
+	case "project", "out", "spec", "why":
 		return true
 	}
 	return false

@@ -27,8 +27,11 @@ const (
 	// Owned: written in full by the generator, hashed. A hand edit means the
 	// next run refuses it rather than discarding the edit.
 	Owned Class = "owned"
-	// Hook: written once if absent, then never touched and never hashed. This
-	// is where hand-written business rules live.
+	// Hook: written once if absent, then never touched and never hashed. Two
+	// very different things live here for the same reason — the file's content
+	// is the author's from the moment it exists. Hand-written business rules are
+	// one; a MIGRATION is the other, because its effect outlives the file and a
+	// rewrite would change what the file claims without changing the database.
 	Hook Class = "hook"
 	// Registration: a shared file the generator inserts into and removes from,
 	// never rewrites. wire.go, the notification files, the translation catalogs.
@@ -75,6 +78,24 @@ type Decision struct {
 // exactly as designed, so it must not be reported as a failure or invite the
 // destructive --force.
 func (d Decision) Expected() bool { return d.Action == KeptHook }
+
+// The two hook kinds are told apart by their path, so a reader is never handed
+// a reason written for the other one. A migration that already exists is not
+// "where your rules live"; a rules file that does not exist yet is not "the
+// tables were created".
+func keptHookReason(path string) string {
+	if IsMigration(path) {
+		return "created once and never rewritten — a migration that ran cannot be taken back by editing it"
+	}
+	return "hand-written rules live here, by design"
+}
+
+func createHookReason(path string) string {
+	if IsMigration(path) {
+		return "the tables, written once; from now on it is yours and a change is a NEW numbered pair"
+	}
+	return "created empty for the rules the spec could not express"
+}
 
 // ---------------------------------------------------------------- lock
 
@@ -186,12 +207,10 @@ func Plan(root string, entity string, files []File, lock *Lock, force map[string
 		switch f.Class {
 		case Hook:
 			if exists {
-				out = append(out, Decision{File: f, Action: KeptHook,
-					Reason: "hand-written rules live here, by design"})
+				out = append(out, Decision{File: f, Action: KeptHook, Reason: keptHookReason(f.Path)})
 				continue
 			}
-			out = append(out, Decision{File: f, Action: Create,
-				Reason: "created empty for the rules the spec could not express"})
+			out = append(out, Decision{File: f, Action: Create, Reason: createHookReason(f.Path)})
 
 		case Registration:
 			// Merging is the caller's job (it needs to know the file's syntax);
@@ -267,10 +286,14 @@ func Apply(root, entity, specPath, specHash, framework string, ordinals map[stri
 			}
 			if d.File.Class == Owned {
 				entry.Files[d.File.Path] = LockFile{Class: Owned, Hash: Hash(d.File.Content)}
+			} else {
+				delete(entry.Files, d.File.Path)
 			}
 		case Unchanged:
 			if d.File.Class == Owned {
 				entry.Files[d.File.Path] = LockFile{Class: Owned, Hash: Hash(d.File.Content)}
+			} else {
+				delete(entry.Files, d.File.Path)
 			}
 		case RefusedEdited:
 			// Deliberately untouched. The recorded hash stays as the last thing
@@ -278,6 +301,19 @@ func Apply(root, entity, specPath, specHash, framework string, ordinals map[stri
 			// and keeps being refused until it is adopted or explicitly forced.
 		case KeptHook:
 			// Never hashed: the author owns it outright.
+			//
+			// The delete is what lets a file CHANGE class between builds without
+			// leaving a lie behind. Migrations became hooks after projects had
+			// been generated with them as owned, and a stale owned record would
+			// have kept `doctor` verifying a checksum on a file the author is now
+			// invited to edit — reporting a hand edit as drift, on the one
+			// command whose whole job is telling the truth about drift.
+			//
+			// An ADOPTED owned file also lands here, and its record must stay:
+			// that record IS the adoption.
+			if d.File.Class != Owned {
+				delete(entry.Files, d.File.Path)
+			}
 		}
 	}
 
@@ -336,13 +372,13 @@ func Orphans(entity string, files []File, lock *Lock) []string {
 	return out
 }
 
-// IsAppliedMigration reports whether an orphan is a migration file.
+// IsMigration reports whether a path is one of the SQL pairs.
 //
 // A migration that ran in ANY environment is recorded in the framework's
-// tracking table, so deleting the file does not undo it: the right move is to
-// restore it and write a new migration that drops what it created. The
-// generator therefore refuses to delete these silently.
-func IsAppliedMigration(path string) bool {
+// tracking table, so deleting or rewriting the file does not undo it. That one
+// fact is why migrations are hooks, and why an orphaned one is never presented
+// as something to clean up.
+func IsMigration(path string) bool {
 	return strings.HasPrefix(filepath.ToSlash(path), "migrations/") &&
 		strings.HasSuffix(path, ".sql")
 }

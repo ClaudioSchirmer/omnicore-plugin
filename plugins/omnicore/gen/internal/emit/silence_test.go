@@ -66,7 +66,7 @@ func emitAll(t *testing.T, m *ir.Model) []fsplan.File {
 	root := t.TempDir()
 	res, err := All(m, root, FileMeta{
 		Spec: "specs/x.omnicore.yaml", Entity: m.Entity.Pascal,
-		Date: "2026-01-01", WriteMigrations: true,
+		Date: "2026-01-01",
 	})
 	if err != nil {
 		t.Fatalf("%s: emitting: %v", m.Entity.Pascal, err)

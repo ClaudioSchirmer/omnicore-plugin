@@ -200,15 +200,31 @@ func explainOwnership() string {
                 overwrites your work. Use --force=<path> to deliberately discard
                 an edit, one path at a time.
 
-  hook          the two "manual" escapes, named after the yaml keys that ask for
-                them: <entity>_rules_manual.go (rules.manual) and
-                <entity>_service_manual.go (a fact whose kind is manual).
-                Written once when missing, then never touched and never hashed —
-                which is what keeps regeneration routine.
+  hook          written once when missing, then never touched and never hashed —
+                which is what keeps regeneration routine. Everything named
+                *_manual is one, and there are three:
 
-                They are NOT equally quiet, and the header of each says which it
-                is: unwritten rules leave invariants unenforced and the service
-                runs on; an unwritten fact panics the moment a rule asks.
+                  <entity>_rules_manual.go     rules.manual — an invariant the
+                                               DSL cannot express
+                  <entity>_service_manual.go   a fact whose kind is manual
+                  NNNN_<entity>_manual.sql     the migration pair
+
+                The two Go ones are NOT equally quiet, and the header of each
+                says which it is: unwritten rules leave invariants unenforced and
+                the service runs on; an unwritten fact panics the moment a rule
+                asks.
+
+                The MIGRATION is a hook for a different reason, and it is the
+                sharpest one here: its effect outlives the file. Once it has run
+                anywhere, the framework's tracking table records it as applied,
+                so rewriting the file would change what the file CLAIMS without
+                changing a single table — a service that boots green and fails on
+                the first query touching the change. So the generator creates a
+                schema and never evolves one: it writes the pair once, and a
+                later change is a NEW numbered pair, written by whoever knows
+                where the first one has been. The report prints the shape the
+                regenerated code expects, so that comparison is possible without
+                re-deriving it from the spec.
 
   registration  wire.go, the notification files, the seven translation catalogs.
                 Inserted into and removed from, never rewritten.

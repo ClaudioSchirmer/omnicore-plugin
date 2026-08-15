@@ -2,6 +2,8 @@ package emit
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
@@ -15,32 +17,85 @@ import (
 // no twin, even a no-op one. And it must be idempotent: an up that failed
 // halfway leaves some objects created and others not, so the down has to
 // tolerate what is not there.
-func emitMigrations(m *ir.Model) ([]fsplan.File, error) {
+//
+// # Why a migration is a HOOK and not an owned file
+//
+// This is the one output the generator writes ONCE and then never touches
+// again, and the `_manual` in its name says so at a glance.
+//
+// The reason is that a migration is the only artefact here whose effect
+// outlives the file. Every other generated file is a claim about the code, and
+// rewriting it is free — the compiler checks the result. A migration is a claim
+// about a DATABASE the generator cannot see. Once it has run anywhere, the
+// framework's tracking table records it as applied, and rewriting the file
+// changes nothing in that database while making it say something else: a
+// service that boots green and fails on the first query touching the change.
+//
+// So the generator does not diff schemas, does not write an ALTER, and does not
+// decide whether the original ran. It creates once, hands the file over, and
+// gets out of the way. A later change to the shape is a NEW numbered pair,
+// written by whoever knows where the first one has been.
+func emitMigrations(m *ir.Model, root string) ([]fsplan.File, error) {
 	var out []fsplan.File
 	for _, dialect := range m.Dialects {
 		d, ok := dialects[dialect]
 		if !ok {
 			return nil, fmt.Errorf("no column mapping for dialect %q", dialect)
 		}
-		ordinal := m.Ordinal[dialect]
-		base := fmt.Sprintf("migrations/%s/%04d_%s", dialect, ordinal, m.Entity.Snake)
+		base := migrationBase(m, dialect, root)
 
 		out = append(out,
 			fsplan.File{
-				Path:      base + ".up.sql",
-				Class:     fsplan.Owned,
-				Content:   []byte(upSQL(m, d)),
-				Describes: fmt.Sprintf("the %s table on %s", m.Table, dialect),
+				Path:        base + ".up.sql",
+				Class:       fsplan.Hook,
+				Content:     []byte(upSQL(m, d)),
+				Describes:   fmt.Sprintf("the %s table on %s", m.Table, dialect),
+				Consequence: migrationConsequence,
 			},
 			fsplan.File{
-				Path:      base + ".down.sql",
-				Class:     fsplan.Owned,
-				Content:   []byte(downSQL(m, d)),
-				Describes: fmt.Sprintf("the rollback of %s on %s", m.Table, dialect),
+				Path:        base + ".down.sql",
+				Class:       fsplan.Hook,
+				Content:     []byte(downSQL(m, d)),
+				Describes:   fmt.Sprintf("the rollback of %s on %s", m.Table, dialect),
+				Consequence: migrationConsequence,
 			},
 		)
 	}
 	return out, nil
+}
+
+// migrationConsequence is the header a reader meets INSIDE the file, so the
+// rule survives being found without the report.
+const migrationConsequence = "This pair was created once and is now yours. The generator " +
+	"will not rewrite it, and you should not either once it has run anywhere: the " +
+	"framework records an applied migration in its tracking table, so editing the file " +
+	"changes the file and not the database. To change the shape, add a NEW numbered pair " +
+	"in this folder — and remember that adding a NOT NULL column to a table that already " +
+	"has rows needs a default, and that a rename done as drop-then-add takes the data with it."
+
+// migrationBase resolves the path stem, preferring a pair that is ALREADY on
+// disk over the name this build would choose.
+//
+// It exists because the name gained its `_manual` suffix after projects had
+// been generated without it. Ignoring that would not be a cosmetic mismatch:
+// the older pair would go unrecognised, a second pair creating the SAME tables
+// would be written beside it, and the service would run both.
+func migrationBase(m *ir.Model, dialect, root string) string {
+	ordinal := m.Ordinal[dialect]
+	stem := fmt.Sprintf("migrations/%s/%04d_%s", dialect, ordinal, m.Entity.Snake)
+	preferred := stem + "_manual"
+	if exists(root, preferred+".up.sql") {
+		return preferred
+	}
+	if exists(root, stem+".up.sql") {
+		return stem
+	}
+	return preferred
+}
+
+func exists(root, rel string) bool {
+	_, err := os.Stat(filepath.Join(root, rel))
+	return err == nil
 }
 
 // dialect carries everything that differs per engine. Keeping it as data rather

@@ -26,13 +26,6 @@ type GenerateOptions struct {
 	ForceUnsupported bool
 	DryRun           bool
 	Force            map[string]bool
-	// Migrations is "yes", "no", or empty for the safe default.
-	//
-	// Empty means: write DDL only when this entity has never been generated —
-	// that is, only for a CREATE. The generator does not know whether a
-	// migration already ran somewhere, and rewriting one that did leaves the
-	// database and the code disagreeing with nothing to detect it.
-	Migrations string
 	// Clock is injectable so the golden gate can pin the date and still assert
 	// that a regeneration changes nothing.
 	Clock func() time.Time
@@ -124,14 +117,10 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 		specRel = opt.SpecPath
 	}
 
-	_, alreadyGenerated := lock.Entities[model.Entity.Pascal]
-	writeMigrations := decideMigrations(opt.Migrations, alreadyGenerated)
-
 	result, err := emit.All(model, proj.Root, emit.FileMeta{
-		Spec:            specRel,
-		Entity:          model.Entity.Pascal,
-		Date:            opt.Now().Format("2006-01-02"),
-		WriteMigrations: writeMigrations,
+		Spec:   specRel,
+		Entity: model.Entity.Pascal,
+		Date:   opt.Now().Format("2006-01-02"),
 	})
 	if err != nil {
 		return err
@@ -142,6 +131,7 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 		return err
 	}
 	orphans := fsplan.Orphans(model.Entity.Pascal, result.Files, lock)
+	migrationsKept := keptMigrations(decisions)
 
 	if opt.DryRun {
 		fmt.Fprintf(w, "Dry run — nothing was written.\n\n")
@@ -165,9 +155,8 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	md := report.Render(report.Input{
 		Model: model, SpecPath: specRel, Decisions: decisions,
 		MissingTranslations: result.MissingTranslations,
-		MigrationsSkipped:   result.MigrationsSkipped,
+		MigrationsKept:      migrationsKept,
 		TargetTables:        result.TargetTables,
-		AlreadyGenerated:    alreadyGenerated,
 		Orphans:             orphans,
 		CompatLevel:         string(verdict.Level),
 		CompatMessage:       verdict.Message,
@@ -337,20 +326,19 @@ func sortedEntityNames(lock *fsplan.Lock) []string {
 	return out
 }
 
-// decideMigrations answers "does this run write DDL?".
+// keptMigrations names the SQL pairs this run found already on disk and left
+// alone. An empty result means the tables were created by THIS run.
 //
-// The default is the only inference the generator makes, and it is about
-// ITSELF, not about the world: it knows whether it has created this entity
-// before. It does not know, and never will, whether the migration was applied
-// anywhere — so the moment this stops being a CREATE, the decision passes to
-// whoever does know.
-func decideMigrations(flag string, alreadyGenerated bool) bool {
-	switch flag {
-	case "yes":
-		return true
-	case "no":
-		return false
-	default:
-		return !alreadyGenerated
+// The distinction is what the report needs: a migration just written needs no
+// commentary, while one written earlier may have run somewhere since, and the
+// reader has to be told that the shape below is what the code now expects —
+// not what their database necessarily holds.
+func keptMigrations(decisions []fsplan.Decision) []string {
+	var out []string
+	for _, d := range decisions {
+		if d.Action == fsplan.KeptHook && fsplan.IsMigration(d.File.Path) {
+			out = append(out, d.File.Path)
+		}
 	}
+	return out
 }

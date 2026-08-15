@@ -204,22 +204,124 @@ func TestAdoptRejectsUnknownFile(t *testing.T) {
 	}
 }
 
-func TestOrphansAndMigrationGuard(t *testing.T) {
+func TestOrphansListsWhatTheSpecStoppedProducing(t *testing.T) {
 	lock := &Lock{Version: 1, Entities: map[string]LockEntity{
 		"E": {Files: map[string]LockFile{
-			"internal/domain/e.go":              {Class: Owned},
-			"migrations/postgres/0003_e.up.sql": {Class: Owned},
+			"internal/domain/e.go":    {Class: Owned},
+			"internal/domain/gone.go": {Class: Owned},
 		}},
 	}}
 	orph := Orphans("E", []File{ownedFile("internal/domain/e.go", "")}, lock)
-	if len(orph) != 1 || orph[0] != "migrations/postgres/0003_e.up.sql" {
+	if len(orph) != 1 || orph[0] != "internal/domain/gone.go" {
 		t.Fatalf("unexpected orphans: %v", orph)
 	}
-	if !IsAppliedMigration(orph[0]) {
-		t.Error("a migration orphan must be flagged — deleting the file does not undo the migration")
+	if !IsMigration("migrations/postgres/0003_e_manual.up.sql") {
+		t.Error("a path under migrations/ ending in .sql is a migration")
 	}
-	if IsAppliedMigration("internal/domain/e.go") {
+	if IsMigration("internal/domain/e.go") {
 		t.Error("a Go file is not a migration")
+	}
+}
+
+// hookFile builds a file the generator writes once, the way migrations are now
+// planned.
+func hookFile(path, content string) File {
+	return File{Path: path, Class: Hook, Content: []byte(content)}
+}
+
+// TestMigrationIsWrittenOnceAndNeverAgain pins the whole posture: the SQL is
+// created on the first run, kept untouched on every later one, and NEVER
+// recorded in the lock — so it can no longer be reported as an orphan the way
+// it was when a regeneration silently stopped emitting it.
+func TestMigrationIsWrittenOnceAndNeverAgain(t *testing.T) {
+	root := t.TempDir()
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{}}
+	path := "migrations/sqlite/0001_e_manual.up.sql"
+
+	files := []File{hookFile(path, "CREATE TABLE es (id BLOB);\n")}
+	d, _ := Plan(root, "E", files, lock, nil)
+	if d[0].Action != Create {
+		t.Fatalf("first run must create the migration, got %s", d[0].Action)
+	}
+	if err := Apply(root, "E", "s.yaml", "h", "v0.49.0", map[string]int{"sqlite": 1}, ViewState{}, d, lock); err != nil {
+		t.Fatal(err)
+	}
+	if _, recorded := lock.Entities["E"].Files[path]; recorded {
+		t.Error("a migration must not enter the lock — it is the author's from the moment it exists")
+	}
+
+	// A second run resolving a DIFFERENT body must still leave the file alone:
+	// the one on disk may already have run somewhere.
+	changed := []File{hookFile(path, "CREATE TABLE es (id BLOB, extra INTEGER);\n")}
+	d2, _ := Plan(root, "E", changed, lock, nil)
+	if d2[0].Action != KeptHook {
+		t.Fatalf("a migration that exists must be kept, got %s", d2[0].Action)
+	}
+	if err := Apply(root, "E", "s.yaml", "h", "v0.49.0", map[string]int{"sqlite": 1}, ViewState{}, d2, lock); err != nil {
+		t.Fatal(err)
+	}
+	on, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(on), "extra") {
+		t.Error("the migration on disk was rewritten — its effect outlives the file, so it must not be")
+	}
+	if orph := Orphans("E", changed, lock); len(orph) != 0 {
+		t.Errorf("a migration can never be an orphan, got %v", orph)
+	}
+	if !strings.Contains(d2[0].Reason, "never rewritten") {
+		t.Errorf("the reason must explain the posture, got %q", d2[0].Reason)
+	}
+}
+
+// TestApplyDropsARecordWhenAFileChangesClass covers the transition migrations
+// themselves went through. A path recorded as owned by an older build, now
+// planned as a hook, must LOSE its record: leaving it would keep `doctor`
+// verifying a checksum on a file the author is now invited to edit, and report
+// every edit as drift.
+func TestApplyDropsARecordWhenAFileChangesClass(t *testing.T) {
+	root := t.TempDir()
+	path := "migrations/sqlite/0001_e.up.sql"
+	writeSealed(t, root, path, "CREATE TABLE es (id BLOB);\n")
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{
+		"E": {Files: map[string]LockFile{path: {Class: Owned, Hash: "stale"}}},
+	}}
+
+	d, _ := Plan(root, "E", []File{hookFile(path, "whatever")}, lock, nil)
+	if d[0].Action != KeptHook {
+		t.Fatalf("expected the existing file to be kept, got %s", d[0].Action)
+	}
+	if err := Apply(root, "E", "s.yaml", "h", "v0.49.0", nil, ViewState{}, d, lock); err != nil {
+		t.Fatal(err)
+	}
+	if _, recorded := lock.Entities["E"].Files[path]; recorded {
+		t.Error("a reclassified file must not stay in the lock as owned")
+	}
+}
+
+// TestApplyKeepsAnAdoptedRecord guards the one KeptHook that MUST survive: an
+// adopted owned file, whose record is the adoption itself.
+func TestApplyKeepsAnAdoptedRecord(t *testing.T) {
+	root := t.TempDir()
+	path := "internal/domain/e.go"
+	writeSealed(t, root, path, "package domain\n")
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{
+		"E": {Files: map[string]LockFile{
+			path: {Class: Owned, Hash: "h", AdjustedFor: "v0.49.0", Why: "a framework fix"},
+		}},
+	}}
+
+	d, _ := Plan(root, "E", []File{ownedFile(path, "package domain // regenerated\n")}, lock, nil)
+	if d[0].Action != KeptHook {
+		t.Fatalf("an adopted file must be kept, got %s", d[0].Action)
+	}
+	if err := Apply(root, "E", "s.yaml", "h", "v0.49.0", nil, ViewState{}, d, lock); err != nil {
+		t.Fatal(err)
+	}
+	rec, recorded := lock.Entities["E"].Files[path]
+	if !recorded || rec.AdjustedFor != "v0.49.0" {
+		t.Error("the adoption record must survive — it is the only thing that makes the edit deliberate")
 	}
 }
 

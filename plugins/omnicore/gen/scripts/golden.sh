@@ -373,7 +373,10 @@ EOSQL" 2>&1)
 ddl_lane oracle apply_oracle "$ORACLE_CONTAINER"
 
 if command -v sqlite3 >/dev/null 2>&1; then
-  UP_LITE=$(ls "$WORK"/migrations/sqlite/*_student.up.sql 2>/dev/null | head -1)
+  # The stem carries a _manual suffix: migrations are written once and handed
+  # over, so the name says so. Globbing the exact old name silently found
+  # nothing and reported it as rejected DDL.
+  UP_LITE=$(ls "$WORK"/migrations/sqlite/*_student*.up.sql 2>/dev/null | head -1)
   DOWN_LITE=${UP_LITE%.up.sql}.down.sql
   DB=$(mktemp -u).db
   if [[ -n "$UP_LITE" ]] && sqlite3 "$DB" < "$UP_LITE" 2>/dev/null; then ok "sqlite: up applies"; else bad "sqlite: up rejected"; fi

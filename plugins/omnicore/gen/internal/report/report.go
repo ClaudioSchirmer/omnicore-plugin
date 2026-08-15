@@ -26,9 +26,8 @@ type Input struct {
 	Decisions           []fsplan.Decision
 	MissingTranslations []string
 	Orphans             []string
-	MigrationsSkipped   bool
+	MigrationsKept      []string
 	TargetTables        []emit.TargetTable
-	AlreadyGenerated    bool
 	CompatLevel         string
 	CompatMessage       string
 	FrameworkPinned     string
@@ -141,7 +140,7 @@ func renderTodo(b *strings.Builder, in Input) {
 			"plausible answer skips the rule this exists to enforce.\n\n")
 	}
 
-	if in.MigrationsSkipped {
+	if len(in.MigrationsKept) > 0 {
 		empty = false
 		renderMigrationHandoff(b, in)
 	}
@@ -164,34 +163,42 @@ func renderTodo(b *strings.Builder, in Input) {
 	}
 }
 
-// renderMigrationHandoff is the whole point of skipping the DDL: the person or
-// agent who now owns it has to be told plainly, with enough to act on.
+// renderMigrationHandoff speaks to the reader holding a migration that an
+// EARLIER run created — the only case where the code and the database can have
+// drifted apart without anyone being told.
 //
 // It sits in "what still needs implementing" rather than in a footnote because
-// it is the one gap here that a database will not forgive.
+// it is the one gap here that a database will not forgive. And it never asks
+// for an `ALTER`: writing one is a decision about live data, which is the
+// author's, and a generator that guessed at it would be guessing about
+// environments it cannot see.
 func renderMigrationHandoff(b *strings.Builder, in Input) {
 	m := in.Model
-	b.WriteString("### The migration — yours to write\n\n")
+	b.WriteString("### The migration — already yours\n\n")
 
-	if in.AlreadyGenerated {
-		b.WriteString("**No DDL was written.** This entity already existed, so this run was " +
-			"not a creation — and creating is the only thing this generator does to a " +
-			"database.\n\n")
-		b.WriteString("It does not evolve a schema, and that is a deliberate limit rather " +
-			"than a missing feature. It cannot see your staging or production databases, " +
-			"so it cannot know whether the original migration already ran. Rewriting one " +
-			"that did would leave the tables as they were, the file claiming otherwise, " +
-			"and the framework's tracking table reporting nothing pending — a service " +
-			"that boots green and fails on the first query touching the change.\n\n")
-		b.WriteString("**So writing the `ALTER` is yours.** The Go code below was " +
-			"regenerated and already expects the shape in the table that follows, so until " +
-			"the database matches it, the two disagree.\n\n")
-	} else {
-		b.WriteString("**No DDL was written**, because this run was told not to " +
-			"(`--migrations=no`). The Go code expects the shape below.\n\n")
+	b.WriteString("The SQL for this entity was written on an earlier run and **was not " +
+		"touched**:\n\n")
+	for _, p := range in.MigrationsKept {
+		fmt.Fprintf(b, "- `%s`\n", p)
 	}
+	b.WriteString("\nThat is permanent, and it is the same posture as the `_manual` rule " +
+		"files: created once, never regenerated. A migration is the only thing here whose " +
+		"effect outlives the file — once it has run anywhere, the framework's tracking " +
+		"table records it as applied, so rewriting the file would change what the file " +
+		"CLAIMS without changing a single table. A service that boots green and fails on " +
+		"the first query touching the change is the outcome being avoided.\n\n")
 
-	fmt.Fprintf(b, "Target shape for `%s`:\n\n", m.Table)
+	b.WriteString("**If the shape below no longer matches what that migration created, " +
+		"the fix is a NEW numbered pair in the same folder** — never an edit to one that " +
+		"may have run. Two things are worth being deliberate about, because they are where " +
+		"data is lost: adding a NOT NULL column to a table that already has rows fails " +
+		"unless it carries a default, and a rename done as drop-then-add takes the data " +
+		"with it.\n\n")
+
+	b.WriteString("If nothing about the storage changed this run, there is nothing to do " +
+		"here — read the shape as confirmation, not as a task.\n\n")
+
+	fmt.Fprintf(b, "The shape the regenerated code expects, for `%s`:\n\n", m.Table)
 	for _, t := range in.TargetTables {
 		fmt.Fprintf(b, "**`%s`** — %s\n\n", t.Name, t.Purpose)
 		b.WriteString("| Column | Type | Null | Note |\n|---|---|---|---|\n")
@@ -231,19 +238,13 @@ func renderMigrationHandoff(b *strings.Builder, in Input) {
 	}
 
 	dialects := strings.Join(m.Dialects, ", ")
-	fmt.Fprintf(b, "Write one migration pair per dialect this service targets (%s), "+
-		"numbered after the highest existing one. Every `.up.sql` needs its `.down.sql` "+
-		"or the service refuses to boot.\n\n", dialects)
+	fmt.Fprintf(b, "A new pair goes in every dialect this service targets (%s), numbered "+
+		"after the highest existing one. Every `.up.sql` needs its `.down.sql` or the "+
+		"service refuses to boot.\n\n", dialects)
 
-	b.WriteString("Two things worth being deliberate about, because they are where data " +
-		"is lost: adding a NOT NULL column to a table that already has rows fails unless " +
-		"it carries a default, and a rename done as drop-then-add takes the data with " +
-		"it.\n\n")
-
-	b.WriteString("If this entity has not shipped anywhere yet and you would rather the " +
-		"generator just rewrite the original migration, re-run it with " +
-		"`--migrations=yes`. That REWRITES the existing file in place, so it is only " +
-		"safe while you are still the only one who has run it.\n\n")
+	b.WriteString("If this entity has NOT shipped anywhere yet — you are still the only " +
+		"one who ever ran it — deleting the pair above and regenerating writes it fresh " +
+		"from the current spec. That is safe exactly while that is true, and never after.\n\n")
 }
 
 // renderCheck is section B: the decisions that cost a full regeneration if wrong.
@@ -503,12 +504,7 @@ func renderGenerated(b *strings.Builder, in Input) {
 	if len(in.Orphans) > 0 {
 		b.WriteString("**No longer generated** — the spec changed and these are left over:\n\n")
 		for _, o := range in.Orphans {
-			note := ""
-			if fsplan.IsAppliedMigration(o) {
-				note = " — **not deleted**: if this migration ran in any environment, " +
-					"removing the file does not undo it. Write a new migration that drops what it created."
-			}
-			fmt.Fprintf(b, "- `%s`%s\n", o, note)
+			fmt.Fprintf(b, "- `%s`\n", o)
 		}
 		b.WriteString("\n")
 	}

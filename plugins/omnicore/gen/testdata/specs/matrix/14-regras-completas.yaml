@@ -15,6 +15,10 @@ fields:
   - {name: Motivo, type: string, column: motivo, length: 120, nullable: true, livesOn: root, example: Reforma, description: "Motivo, obrigatorio quando ha observacao."}
   - {name: Observacao, type: string, column: observacao, length: 200, nullable: true, livesOn: root, example: Sala interditada, description: Observacao livre.}
   - {name: Capacidade, type: int, column: capacidade, livesOn: root, example: "30", description: Número máximo de alunos.}
+  # An OPTIONAL numeric with echoValue on its range rule. The combination is
+  # here on purpose: it is the one the corpus lacked, and the gap let a bug ship
+  # where the echoed value came back as a pointer address instead of the number.
+  - {name: NotaMedia, type: int, column: nota_media, nullable: true, livesOn: root, example: "8", description: "Nota média da turma, ausente até a avaliação."}
 children:
   - name: Aula
     plural: Aulas
@@ -94,6 +98,14 @@ rules:
       max: 60
       notification: CapacidadeInvalidaNotification
       echoValue: true
+    - id: nota-media-valida
+      kind: range
+      scope: [insertOrUpdate]
+      fields: [NotaMedia]
+      min: 0
+      max: 10
+      notification: NotaMediaInvalidaNotification
+      echoValue: true
 notifications:
   - name: SituacaoTurmaInvalidaNotification
     package: vos
@@ -116,6 +128,10 @@ notifications:
     semantic: validation
     tvars: [min, max]
     text: {ptbr: "A capacidade deve ficar entre {min} e {max}.", eng: "Capacity must be between {min} and {max}.", esp: "La capacidad debe estar entre {min} y {max}.", fra: "La capacité doit être comprise entre {min} et {max}.", deu: "Die Kapazität muss zwischen {min} und {max} liegen.", ita: "La capacità deve essere compresa tra {min} e {max}.", nld: "De capaciteit moet tussen {min} en {max} liggen."}
+  - name: NotaMediaInvalidaNotification
+    semantic: validation
+    description: Nota media fora do intervalo.
+    text: {ptbr: "A nota média deve ficar entre 0 e 10.", eng: "The average grade must be between 0 and 10.", esp: "La nota media debe estar entre 0 y 10.", fra: "La note moyenne doit être comprise entre 0 et 10.", deu: "Die Durchschnittsnote muss zwischen 0 und 10 liegen.", ita: "La media deve essere compresa tra 0 e 10.", nld: "Het gemiddelde cijfer moet tussen 0 en 10 liggen."}
 read:
   backing: relational
   view: {name: turmas_r, version: 1}

@@ -27,11 +27,11 @@ type Result struct {
 	// placeholder, so the report can list them instead of letting an
 	// untranslated string look finished.
 	MissingTranslations []string
-	// MigrationsSkipped records that this run wrote no DDL, and TargetTables
-	// carries the shape the model now requires — so whoever writes the ALTER has
-	// the target without reconstructing it from the spec by hand.
-	MigrationsSkipped bool
-	TargetTables      []TargetTable
+	// TargetTables carries the shape the model now requires. It is always
+	// resolved, because the reader who needs it is not the one creating the
+	// tables — it is the one holding a migration that was written on an EARLIER
+	// run and has to decide whether the shape still matches.
+	TargetTables []TargetTable
 }
 
 // TargetTable is the shape one table must have for the generated code to work.
@@ -217,12 +217,6 @@ func All(m *ir.Model, root string, meta FileMeta) (*Result, error) {
 		emitBootstrap,
 		emitTests,
 	}
-	if meta.WriteMigrations {
-		steps = append(steps, emitMigrations)
-	} else {
-		res.MigrationsSkipped = true
-		res.TargetTables = TargetShape(m)
-	}
 	for _, step := range steps {
 		fs, err := step(m)
 		if err != nil {
@@ -230,6 +224,16 @@ func All(m *ir.Model, root string, meta FileMeta) (*Result, error) {
 		}
 		res.Files = append(res.Files, fs...)
 	}
+
+	// Migrations are planned like everything else and then never rewritten —
+	// the hook class is what enforces "created once". They take the project root
+	// because the pair they must not duplicate is the one already on disk.
+	mig, err := emitMigrations(m, root)
+	if err != nil {
+		return nil, err
+	}
+	res.Files = append(res.Files, mig...)
+	res.TargetTables = TargetShape(m)
 
 	regs, missing, err := emitRegistrations(m, root)
 	if err != nil {
@@ -247,18 +251,6 @@ type FileMeta struct {
 	Spec   string
 	Entity string
 	Date   string
-	// WriteMigrations says whether THIS run writes DDL.
-	//
-	// The generator only ever writes a CREATE. It does not diff the previous
-	// shape, does not decide what an ALTER should say, and above all does not
-	// guess whether a migration already ran somewhere — it cannot see staging or
-	// production, and a tool that guesses about those is a tool that rewrites a
-	// migration someone already applied.
-	//
-	// So the decision belongs to the caller, who knows. Defaulting it off for an
-	// entity that already exists is not cleverness: it is the generator noticing
-	// it has created this once already, which is the one thing it does know.
-	WriteMigrations bool
 }
 
 // sealFiles is the single place a header is attached.
