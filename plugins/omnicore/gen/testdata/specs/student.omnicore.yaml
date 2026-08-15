@@ -140,6 +140,21 @@ rules:
       notification: GradeOutOfRangeNotification
       echoValue: true
 
+    # A cap with NEITHER groupBy NOR only: the limit is on the size of the
+    # collection itself. It is here because it is the one groupCap shape whose
+    # emitted code has nothing to say about an individual entry, and a counting
+    # loop that never mentions the entry it ranges over does not compile. This
+    # tree is built, so the fixture is what keeps that path honest.
+    - id: at-most-four-guardians
+      kind: groupCap
+      scope: [insertOrUpdate]
+      fields: [Guardian]
+      cap: 4
+      description: >-
+        Um aluno não pode ter mais de 4 responsáveis: o teto é sobre o tamanho
+        da coleção inteira, sem agrupamento e sem restrição.
+      notification: TooManyGuardiansNotification
+
   manual:
     - id: enrollment-window
       description: >-
@@ -184,6 +199,17 @@ notifications:
       deu: Die Note muss zwischen {min} und {max} liegen.
       ita: Il voto deve essere compreso tra {min} e {max}.
       nld: Het cijfer moet tussen {min} en {max} liggen.
+
+  - name: TooManyGuardiansNotification
+    semantic: validation
+    text:
+      ptbr: Um aluno pode ter no máximo 4 responsáveis.
+      eng: A student may have at most 4 guardians.
+      esp: Un alumno puede tener como máximo 4 responsables.
+      fra: Un élève ne peut avoir plus de 4 responsables.
+      deu: Ein Schüler darf höchstens 4 Erziehungsberechtigte haben.
+      ita: Uno studente può avere al massimo 4 tutori.
+      nld: Een leerling mag maximaal 4 voogden hebben.
 
   - name: InvalidEmailNotification
     package: vos

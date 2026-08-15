@@ -28,15 +28,28 @@ func TestDiscoverVOsSeesGeneratedOnesAndNotNotifications(t *testing.T) {
 		}
 	}
 
-	write("uf.go", "// "+generatedBanner+"-plugin-gen. DO NOT EDIT.\n"+`//
+	write("uf.go", "// "+generatedBanner+"-gen. DO NOT EDIT.\n"+`//
 // entity:     RentalListing
-// spec:       specs/rental_listing.omnicore.yaml
+// spec:       omnicore-gen/rental_listing.omnicore.yaml
 
 package vos
 
 type UF string
 
 func (v UF) Value() string { return string(v) }
+`)
+	// A second generated one, so the inventory is exercised past the first hit
+	// — and it is named URL on purpose: notifications.go below carries an
+	// InvalidURLNotification, and telling the two apart is the whole trap.
+	write("url.go", "// "+generatedBanner+"-gen. DO NOT EDIT.\n"+`//
+// entity:     RentalListing
+// spec:       omnicore-gen/rental_listing.omnicore.yaml
+
+package vos
+
+type URL string
+
+func (v URL) Value() string { return string(v) }
 `)
 	// Hand-written, and a value object all the same: ownership decides who may
 	// rewrite the file, never whether the type exists.
@@ -59,7 +72,7 @@ type InvalidURLNotification struct{}
 
 	names, owner := discoverVOs(dir)
 
-	want := []string{"CPF", "UF"}
+	want := []string{"CPF", "UF", "URL"}
 	if len(names) != len(want) {
 		t.Fatalf("inventory = %v, want %v", names, want)
 	}

@@ -1,7 +1,7 @@
 # omnicore-plugin — repo rules
 
 The Claude Code plugin for the omnicore framework: 15 `/omnicore:*` skills under
-`plugins/omnicore/skills/`, plus **omnicore-plugin-gen** — the spec-driven code
+`plugins/omnicore/skills/`, plus **omnicore-gen** — the spec-driven code
 generator — as Go source under `plugins/omnicore/gen/`, launched by
 `plugins/omnicore/bin/omnicore-gen` (on the session PATH).
 
@@ -32,7 +32,7 @@ with it. What to update, and which parts the build already catches:
 | what the build refuses | `RefusedKeys()`, so `explain keys` marks it | ✅ shared with the example test |
 | a capability | the `Cap*` name in `internal/spec/coverage.go` — it is what `explain coverage` prints | ✅ manifest test |
 | anything an author must SEE to use | one of the two examples (`explain example [flat|sharedbase]`) | ✅ every key must appear in one |
-| how an author should WORK | `skills/omnicore-plugin-gen/SKILL.md` | ❌ **discipline only** |
+| how an author should WORK | `skills/omnicore-gen/SKILL.md` | ❌ **discipline only** |
 | what a reviewer must CHECK | `internal/report` — the gen-report is the hand-off | ❌ **discipline only** |
 
 The last two rows are the ones that rot, precisely because nothing fails when

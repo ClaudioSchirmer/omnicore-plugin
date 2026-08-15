@@ -59,7 +59,7 @@ absent facet means "remove it"). Hence:
 > database, the handler the only variable: partial left `Helena` in place, full cleared it
 > and kept the children.
 >
-> **`omnicore-plugin-gen` emits this automatically** for any root-attached facet when
+> **`omnicore-gen` emits this automatically** for any root-attached facet when
 > GraphQL is on — `clear<Facet>Of<Entity>`, its command, and its tests. On the manual path
 > it is yours to write; either way, surface the coupling in the spec so the dev sees that
 > the contract closes on both surfaces.

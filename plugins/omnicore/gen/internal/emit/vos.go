@@ -89,6 +89,14 @@ func emitRawVO(m *ir.Model, vo ir.ValueObject) (fsplan.File, error) {
 		fmt.Sprintf("the %s value object", vo.Name), s)
 }
 
+// emitRawChecks writes the checks a raw value object performs on itself.
+//
+// The rejected value is echoed as `v` — the value object itself, NOT a
+// conversion back to its backing type. AddNotification renders whatever it is
+// given through fmt.Sprint, and a value object is a named type over string,
+// int or float64 that declares no String(), so it already prints as the value
+// it carries. `string(v)` and `int(v)` produced the identical text and only
+// read as if the framework needed the help.
 func emitRawChecks(s *src, vo ir.ValueObject) {
 	notif := vo.Notification + "{}"
 
@@ -107,13 +115,13 @@ func emitRawChecks(s *src, vo ir.ValueObject) {
 			conds = append(conds, fmt.Sprintf("len(v) > %d", vo.MaxLength))
 		}
 		s.L("\tif %s {", strings.Join(conds, " || "))
-		s.L("\t\tctx.AddNotification(fieldName, %s, %s(v))", notif, vo.GoBacking)
+		s.L("\t\tctx.AddNotification(fieldName, %s, v)", notif)
 		s.L("\t\treturn false")
 		s.L("\t}")
 	}
 	if vo.Regex != "" {
 		s.L("\tif !%sPattern.MatchString(string(v)) {", naming.Camel(vo.Name))
-		s.L("\t\tctx.AddNotification(fieldName, %s, string(v))", notif)
+		s.L("\t\tctx.AddNotification(fieldName, %s, v)", notif)
 		s.L("\t\treturn false")
 		s.L("\t}")
 	}
@@ -126,7 +134,7 @@ func emitRawChecks(s *src, vo ir.ValueObject) {
 			conds = append(conds, fmt.Sprintf("v > %s", numberIn(*vo.Max, vo.GoBacking)))
 		}
 		s.L("\tif %s {", strings.Join(conds, " || "))
-		s.L("\t\tctx.AddNotification(fieldName, %s, %s(v))", notif, vo.GoBacking)
+		s.L("\t\tctx.AddNotification(fieldName, %s, v)", notif)
 		s.L("\t\treturn false")
 		s.L("\t}")
 	}

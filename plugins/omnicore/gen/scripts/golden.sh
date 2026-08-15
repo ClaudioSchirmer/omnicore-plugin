@@ -66,12 +66,12 @@ if [[ ! -d "$HOST" ]]; then
 fi
 rm -rf "$WORK"; mkdir -p "$WORK"
 cp -R "$HOST/." "$WORK/"
-mkdir -p "$WORK/specs"
-for f in $FIXTURES; do cp "$f" "$WORK/specs/"; done
-SPEC="$WORK/specs/$(basename "$PRIMARY_FIXTURE")"
+mkdir -p "$WORK/omnicore-gen"
+for f in $FIXTURES; do cp "$f" "$WORK/omnicore-gen/"; done
+SPEC="$WORK/omnicore-gen/$(basename "$PRIMARY_FIXTURE")"
 
 for f in $FIXTURES; do
-  target="$WORK/specs/$(basename "$f")"
+  target="$WORK/omnicore-gen/$(basename "$f")"
   if (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$target" -project "$WORK" >/tmp/gg-gen.log 2>&1); then
     ok "generate $(basename "$f" .omnicore.yaml)"
   else
@@ -116,9 +116,9 @@ fi
 echo "── the mongo-backed shape"
 rm -rf "$WORK_MONGO"; mkdir -p "$WORK_MONGO"
 cp -R "$HOST/." "$WORK_MONGO/"
-mkdir -p "$WORK_MONGO/specs"; cp "$MONGO_FIXTURE" "$WORK_MONGO/specs/"
+mkdir -p "$WORK_MONGO/omnicore-gen"; cp "$MONGO_FIXTURE" "$WORK_MONGO/omnicore-gen/"
 if (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
-      -spec "$WORK_MONGO/specs/$(basename "$MONGO_FIXTURE")" -project "$WORK_MONGO" \
+      -spec "$WORK_MONGO/omnicore-gen/$(basename "$MONGO_FIXTURE")" -project "$WORK_MONGO" \
       >/tmp/gg-mongo.log 2>&1); then
   ok "generate $(basename "$MONGO_FIXTURE" .omnicore.yaml)"
 else
@@ -135,7 +135,7 @@ echo "  (not booted: a mongo-backed view needs a Mongo, and the boot host is inf
 echo "── regeneration"
 BEFORE=$(cd "$WORK" && find internal bootstrap migrations -type f | sort | while read -r f; do SUM "$f"; done | SUM)
 for f in $FIXTURES; do
-  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$WORK/specs/$(basename "$f")" -project "$WORK" >/tmp/gg-regen.log 2>&1)
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$WORK/omnicore-gen/$(basename "$f")" -project "$WORK" >/tmp/gg-regen.log 2>&1)
 done
 AFTER=$(cd "$WORK" && find internal bootstrap migrations -type f | sort | while read -r f; do SUM "$f"; done | SUM)
 if [[ "$BEFORE" == "$AFTER" ]]; then
@@ -477,15 +477,15 @@ for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   esac
   work="/tmp/omnicore-gen-matrix/$name"
   rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"
-  mkdir -p "$work/specs"; cp "$spec" "$work/specs/"
+  mkdir -p "$work/omnicore-gen"; cp "$spec" "$work/omnicore-gen/"
 
   if ! (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
-        -spec "$work/specs/$(basename "$spec")" -project "$work" >"$work/gen.log" 2>&1); then
+        -spec "$work/omnicore-gen/$(basename "$spec")" -project "$work" >"$work/gen.log" 2>&1); then
     bad "$name: generate — $(tail -3 "$work/gen.log" | tr '\n' ' ')"
     continue
   fi
 
-  UNFMT=$(cd "$work" && gofmt -l $(grep -rl "omnicore-plugin-gen" --include='*.go' . 2>/dev/null) 2>/dev/null)
+  UNFMT=$(cd "$work" && gofmt -l $(grep -rl "omnicore-gen" --include='*.go' . 2>/dev/null) 2>/dev/null)
   if [[ -n "$UNFMT" ]]; then bad "$name: gofmt — $UNFMT"; continue; fi
 
   if ! (cd "$work" && GOWORK=off go build -tags "$ENGINE_TAGS" ./... >"$work/build.log" 2>&1); then
@@ -507,10 +507,10 @@ done
 # because it is the only case whose input is another case's OUTPUT: reuse: true
 # means the base schema is expected to be there already.
 work="/tmp/omnicore-gen-matrix/reuse"
-rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"; mkdir -p "$work/specs"
-cp "$MATRIX_DIR/06-sharedbase-sharedpk.yaml" "$MATRIX_DIR/16-reuso-de-base.yaml" "$work/specs/"
+rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"; mkdir -p "$work/omnicore-gen"
+cp "$MATRIX_DIR/06-sharedbase-sharedpk.yaml" "$MATRIX_DIR/16-reuso-de-base.yaml" "$work/omnicore-gen/"
 reuse_ok=1
-for f in "$work"/specs/*.yaml; do
+for f in "$work"/omnicore-gen/*.yaml; do
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$f" -project "$work" \
      >>"$work/gen.log" 2>&1) || reuse_ok=0
 done
@@ -531,11 +531,11 @@ fi
 # is checked against the spec that declares it, which is found by the
 # *.omnicore.yaml convention a real project always follows.
 work="/tmp/omnicore-gen-matrix/mounted"
-rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"; mkdir -p "$work/specs"
-cp "$MATRIX_DIR/12-filho-de-base.yaml" "$work/specs/bibliotecario.omnicore.yaml"
-cp "$MATRIX_DIR/20-filho-de-base-montado.yaml" "$work/specs/estagiario_bib.omnicore.yaml"
+rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"; mkdir -p "$work/omnicore-gen"
+cp "$MATRIX_DIR/12-filho-de-base.yaml" "$work/omnicore-gen/bibliotecario.omnicore.yaml"
+cp "$MATRIX_DIR/20-filho-de-base-montado.yaml" "$work/omnicore-gen/estagiario_bib.omnicore.yaml"
 mounted_ok=1
-for f in "$work/specs/bibliotecario.omnicore.yaml" "$work/specs/estagiario_bib.omnicore.yaml"; do
+for f in "$work/omnicore-gen/bibliotecario.omnicore.yaml" "$work/omnicore-gen/estagiario_bib.omnicore.yaml"; do
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$f" -project "$work" \
      >>"$work/gen.log" 2>&1) || mounted_ok=0
 done

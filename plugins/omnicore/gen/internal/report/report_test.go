@@ -20,7 +20,7 @@ import (
 func TestStorageLineTellsTheTruth(t *testing.T) {
 	flat := Render(Input{Model: &ir.Model{
 		Entity: ir.Names{Pascal: "Sala"}, Table: "salas",
-	}, SpecPath: "specs/sala.omnicore.yaml"})
+	}, SpecPath: "omnicore-gen/sala.omnicore.yaml"})
 	if !strings.Contains(flat, "| Storage | flat table `salas` |") {
 		t.Errorf("a flat entity is not described as flat:\n%s", storageLine(flat))
 	}
@@ -28,7 +28,7 @@ func TestStorageLineTellsTheTruth(t *testing.T) {
 	role := Render(Input{Model: &ir.Model{
 		Entity: ir.Names{Pascal: "Professor"}, Table: "professores",
 		Base: &ir.Base{Table: "pessoas", Link: "separate-fk", NaturalKey: "Documento"},
-	}, SpecPath: "specs/professor.omnicore.yaml"})
+	}, SpecPath: "omnicore-gen/professor.omnicore.yaml"})
 	line := storageLine(role)
 	for _, want := range []string{"role `professores`", "`pessoas`", "separate-fk", "Documento"} {
 		if !strings.Contains(line, want) {
@@ -62,7 +62,7 @@ func TestUniqueLineCarriesTheScope(t *testing.T) {
 					Scope: scope,
 				},
 			}},
-		}, SpecPath: "specs/anuncio.omnicore.yaml"})
+		}, SpecPath: "omnicore-gen/anuncio.omnicore.yaml"})
 
 		line := lineWith(out, "| Unique |")
 		if !strings.Contains(line, want) {

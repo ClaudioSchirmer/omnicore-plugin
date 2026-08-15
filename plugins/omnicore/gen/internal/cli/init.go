@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/discover"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/layout"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
@@ -41,7 +42,7 @@ func Init(w io.Writer, opt InitOptions) error {
 
 	path := opt.Out
 	if path == "" {
-		path = filepath.Join(proj.Root, "specs", naming.Snake(opt.Entity)+".omnicore.yaml")
+		path = layout.SpecIn(proj.Root, naming.Snake(opt.Entity))
 	}
 	if _, err := os.Stat(path); err == nil && !opt.Force {
 		return fmt.Errorf("%s already exists — edit it, or pass -force to start over "+

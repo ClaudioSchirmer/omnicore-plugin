@@ -537,7 +537,7 @@ Present it like this, verbatim in substance:
 
 > ⏸️ **How should this be generated?** Two options, and only these two:
 >
-> **1. `omnicore-plugin-gen` + review by me** *(recommended)*
+> **1. `omnicore-gen` + review by me** *(recommended)*
 > The generator writes the whole mechanical tree from one spec file — domain, application,
 > web, infra, migrations, wiring, translations and its own tests — in **seconds**, and at a
 > **fraction of the tokens** the manual path costs. What it cannot express, I implement by
@@ -558,12 +558,12 @@ Two rules about this gate:
 - **It is not a formality and it has no default.** Ask, then wait. If the dev answers
   anything other than 1 or 2, ask again rather than picking for them.
 - **Nothing about the generator's spec YAML happens before the answer.** That file
-  (`specs/<entity>.omnicore.yaml` — not this skill's `spec.md`, which is the MODEL and was
+  (`omnicore-gen/<entity>.omnicore.yaml` — not this skill's `spec.md`, which is the MODEL and was
   already approved at 1a) is large and dense, and writing one the dev never asked for is
   exactly the waste this gate exists to prevent. On option 2 it is never written at all.
 
 **If the dev chooses 1 (codegen):** read
-`${CLAUDE_PLUGIN_ROOT}/skills/omnicore-plugin-gen/SKILL.md` **now** — not before, and not
+`${CLAUDE_PLUGIN_ROOT}/skills/omnicore-gen/SKILL.md` **now** — not before, and not
 from memory — and follow it end to end. The approved model and the `task_<layer>.md` files
 you just wrote become the REVIEW CHECKLIST: they say what each layer must contain, which is
 exactly what you check the generated tree against. The Final verify gate below still
@@ -577,7 +577,7 @@ this entity — the choice was made.
 
 An existing working dir means a previous or interrupted run. Do NOT restart from scratch and
 do NOT overwrite an approved plan. **Record the 1d choice in `spec.md` the moment it is
-made** (`Generation: omnicore-plugin-gen` or `Generation: manual`) — a resumed run reads it
+made** (`Generation: omnicore-gen` or `Generation: manual`) — a resumed run reads it
 and does not ask again, and asking twice invites a different answer half-way through one
 entity. Check `spec.md` first: `Status: APPROVED` → resume from
 the first **pending** task in `tasks.md` (the per-layer doc reads still apply);

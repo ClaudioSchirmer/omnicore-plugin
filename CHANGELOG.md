@@ -9,6 +9,21 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Changed
 
+- **Everything the generator reads or writes about a service now lives in one directory,
+  `omnicore-gen/`.** It was in three places: the spec in a generic `specs/`, its report
+  beside it, and the lock loose at the project root as a dotfile. A reader had to already
+  know which tool each belonged to — `specs/` claims a name any other tool could want —
+  and the one file whose loss actually costs something was the one hidden from `ls`.
+  - `omnicore-gen/<entity>.omnicore.yaml` — the spec, and what `init` writes by default
+  - `omnicore-gen/<entity>.gen-report.md` — the hand-off, still written beside its spec
+  - `omnicore-gen/lock.json` — was `.omnicore-gen.lock`. Visible now, and no longer
+    repeating the name of the directory holding it.
+
+  `-spec` still takes any path, so nothing forces the convention on a caller who means
+  otherwise; it is the DEFAULT that moved, along with where sibling specs are looked for.
+  The four call sites that resolved these paths now read them from one `internal/layout`,
+  because a layout spelled out four times is a layout that moves three times.
+
 - **A migration is written ONCE and never regenerated — it is a hook, named
   `NNNN_<entity>_manual.sql`, exactly like the `_manual` rule files.** It is the only output
   whose effect outlives the file: once it has run anywhere, the framework's tracking table
@@ -89,6 +104,24 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Fixed
 
+- **A `groupCap` with neither `groupBy` nor `only` generated a tree that did not compile,
+  past a green `check`.** That shape is the cap on the collection's own SIZE — "at most 30
+  photos" — and the validator accepts it deliberately (it asks only that the author say so
+  in `description:`). The emitter still wrote the general counting loop, whose body in that
+  one case is nothing but `n++`: `for _, item := range items { n++ }` never mentions the
+  entry it ranges over, and Go refuses `declared and not used: item`. The count is now
+  `len(items)` when there is no restriction to apply, and the loop is emitted only when
+  `only` gives it something to test. The path escaped every gate because no fixture used
+  it — all three matrix specs pair the cap with a key or a filter — so `student` (a tree
+  the golden gate BUILDS, not just resolves) now carries a bare cap.
+- **A value object echoed the rejected value through a conversion that has done nothing
+  since framework v0.49.1.** `IsValid` emitted `ctx.AddNotification(fieldName, N{}, int(v))`
+  / `string(v)`; `AddNotification` renders its variadic with `fmt.Sprint`, and a value
+  object is a named type over `string`/`int`/`float64` declaring no `String()`, so it
+  already prints as the value it carries. The conversion produced identical text and read
+  as if the framework needed the help. The generator requires v0.49.1 or later, which is
+  the release that made a pointer of any type dereference correctly, so nothing about what
+  the caller sees changes.
 - **`owner-only`/`tenant` with a runtime owner field generated a service with NO row
   scoping.** The validator's own fix text recommended "a runtime-only field fed from the
   caller's identity"; a runtime field has no column, the lowering carried the emptiness
@@ -227,8 +260,8 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   the repository by default — the result was committed and the decisions behind it were
   not. They are documents the project follows, and a resumed run reads them to know what
   is already done. The line is gone, and the rule is now stated ONCE for everything the
-  tooling writes — the working dirs of all eight skills, `specs/*.omnicore.yaml`, the
-  gen-report, `.omnicore-gen.lock` and the QA suite — in
+  tooling writes — the working dirs of all eight skills, `omnicore-gen/*.omnicore.yaml`, the
+  gen-report, `omnicore-gen/lock.json` and the QA suite — in
   `shared/generated-documents.md`, which the nine skills that write into a project point
   at. It carries the test for the other direction too: if running a command would
   reproduce it byte for byte it may be ignored, and a decision never would.
@@ -257,7 +290,7 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Added
 
-- **`omnicore-plugin-gen`, a spec-driven code generator, ships with the plugin** — Go
+- **`omnicore-gen`, a spec-driven code generator, ships with the plugin** — Go
   source under `plugins/omnicore/gen/` with a launcher in `plugins/omnicore/bin/`, which
   Claude Code puts on the session PATH, so it is a bare `omnicore-gen` command. It writes
   a whole entity — domain, application, web, infra, migrations, wiring, the seven
@@ -267,7 +300,7 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   is treated: nothing generated half-way (every spec key is consumed or refused BY NAME),
   a green spec compiles and boots, boot-traps are static errors, self-sufficient, and it
   owns whole files (the escapes are two named write-once hook files).
-- **`/omnicore:omnicore-plugin-gen`** — the skill that drives it: learn the language from
+- **`/omnicore:omnicore-gen`** — the skill that drives it: learn the language from
   the binary's own `explain`, write the spec from the approved model, check, generate,
   read the report, implement what was refused, review, and prove it with build + vet +
   tests + a real boot.
@@ -276,7 +309,7 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 - **`scaffold-entity` gained a mandatory generation gateway (1d)**, presented with the
   plan gate as the last stop before any code exists. Two options and no default:
-  generate with `omnicore-plugin-gen` and have the agent review it (recommended — seconds,
+  generate with `omnicore-gen` and have the agent review it (recommended — seconds,
   far fewer tokens, complex rules and their tests still written by hand), or generate file
   by file as before. The answer is recorded in `spec.md` so a resumed run does not ask
   again. **Nothing about the generator's spec YAML is written before the answer** — that

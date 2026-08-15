@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/gofile"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/layout"
 )
 
 // Class is how the generator relates to a file.
@@ -99,7 +100,10 @@ func createHookReason(path string) string {
 
 // ---------------------------------------------------------------- lock
 
-const LockName = ".omnicore-gen.lock"
+// LockName is the lock as a reader sees it in a message: the path inside the
+// service, not the bare file name, because "lock.json" on its own does not say
+// which of a project's tools it belongs to.
+const LockName = layout.Dir + "/" + layout.LockName
 
 type Lock struct {
 	Version  int                   `json:"version"`
@@ -151,8 +155,7 @@ type LockFile struct {
 }
 
 func LoadLock(root string) (*Lock, error) {
-	path := filepath.Join(root, LockName)
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(layout.LockIn(root))
 	if os.IsNotExist(err) {
 		return &Lock{Version: 1, Entities: map[string]LockEntity{}}, nil
 	}
@@ -176,7 +179,10 @@ func (l *Lock) Save(root string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, LockName), append(b, '\n'), 0o644)
+	if err := os.MkdirAll(layout.DirIn(root), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(layout.LockIn(root), append(b, '\n'), 0o644)
 }
 
 // Hash normalises line endings before hashing.

@@ -1,13 +1,13 @@
 ---
-name: omnicore-plugin-gen
+name: omnicore-gen
 description: >-
-  omnicore: drive omnicore-plugin-gen, the spec-driven code generator, to produce a
+  omnicore: drive omnicore-gen, the spec-driven code generator, to produce a
   complete entity from one YAML file — then review it, implement what the generator
   refused, and prove it. Read this ONLY after the dev has chosen the codegen path at
   scaffold-entity's generation gateway; it is not a standalone entry point.
 ---
 
-# omnicore-plugin-gen
+# omnicore-gen
 
 The generator writes the mechanical 1,600–3,400 lines of an entity from a spec. You keep
 what actually needs judgement: the MODEL (already approved before you got here), the
@@ -170,7 +170,10 @@ Three things to get right, because they are the ones that cost a migration later
   `groupBy` (a cap per key) and `only: {field: X, equals: v}` (count only the entries that
   match). "At most 3 proposals under review" is `cap: 3` + `only`, with no `groupBy` — with
   a `groupBy: [Status]` and no `only` the same cap lands on accepted and rejected too, a
-  rule nobody declared and nothing reports.
+  rule nobody declared and nothing reports. With NEITHER, the cap is on the size of the
+  collection itself ("at most 30 photos") — a real rule, and also what you get by
+  forgetting the restriction you meant, which is why it is accepted only when
+  `description:` says out loud that the whole collection is the subject.
 - **Rules on a collection are declared on the collection.** `children[].rules` takes the
   same DSL the root does, including `transition` and `skipWhen`, plus `rules.manual` with
   a hook of its own (`aggregatevos/<child>_rules_manual.go`). Two kinds are refused there
@@ -196,7 +199,7 @@ Three things to get right, because they are the ones that cost a migration later
 
 ## Step 3 — check, and read the refusals as instructions
 
-    omnicore-gen check -spec specs/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen check -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
 
 Every blocker names the key, what is wrong, and the fix. Fix the SPEC. The two verdicts
 that are not about your YAML:
@@ -232,7 +235,7 @@ panics the moment a rule asks for it. Implement both before you call the entity 
 
 ## Step 5 — generate
 
-    omnicore-gen generate -spec specs/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen generate -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
 
 It prints created / updated / unchanged / kept-as-is. **`kept as-is` is two different
 things, and the run tells them apart** — read the report rather than the count:
@@ -255,7 +258,7 @@ would answer has one permanent answer.
 
 ## Step 6 — read the report. It is the handover, not a log
 
-`specs/<entity>.gen-report.md` is written every run and is the list of what YOU still owe:
+`omnicore-gen/<entity>.gen-report.md` is written every run and is the list of what YOU still owe:
 
 - **What still needs implementing** — every manual rule and manual fact, by id, with the
   description you wrote and the file it landed in. Missing translations too, if any were

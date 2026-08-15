@@ -1036,6 +1036,21 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 	if len(rule.GroupBy) == 0 {
 		// No grouping: the cap is on the collection as a whole, which is what
 		// "at most N of these" means when no key is named.
+		//
+		// With no restriction either, the count IS the collection's length, and
+		// it has to be written that way: a loop whose body is only "n++" never
+		// mentions the entry it ranges over, and Go refuses "declared and not
+		// used: item". That combination — no groupBy, no only — is a rule the
+		// validator deliberately accepts ("at most 30 photos"), so the emitter
+		// owes it code that compiles.
+		if rule.OnlyField == nil {
+			s.L("\t\t\tif len(items) > %d {", rule.Cap)
+			s.L("\t\t\t\tr.AddNotification(%s, %s)",
+				quote(c.GoPlural), notifIn(m, rule.Notification))
+			s.L("\t\t\t}")
+			s.L("\t\t}")
+			return
+		}
 		s.L("\t\t\tn := 0")
 		s.L("\t\t\tfor _, item := range items {")
 		countOne("\t\t\t\t", "n++")

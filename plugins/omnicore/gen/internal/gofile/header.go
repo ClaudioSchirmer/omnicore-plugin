@@ -28,7 +28,7 @@ import (
 // time is a file that regenerates into a diff forever — the no-op regeneration
 // stops being a no-op, and the guarantee that a spec and its output are in step
 // becomes unverifiable. So the date advances only when the CONTENT changed.
-const generatedBy = "omnicore-plugin-gen"
+const generatedBy = "omnicore-gen"
 
 // Meta is what the header states.
 type Meta struct {

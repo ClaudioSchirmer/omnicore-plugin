@@ -12,9 +12,9 @@ Not just prose — anything the tooling writes that a human or a later run READS
 | | |
 |---|---|
 | `scaffold-service/`, `scaffold-entity/<entity>/`, `evolve-entity/<entity>/`, `remove-entity/<entity>/`, `scaffold-view/<view>/`, `evolve-view/<view>/`, `implement/<capability>/`, `scaffold-system/<map>/` | the approved model (`spec.md`) and the plan + status (`tasks.md`, `task_<layer>.md`) |
-| `specs/<entity>.omnicore.yaml` | the generator's source of truth — the code is derived FROM it, so losing it inverts the dependency |
-| `specs/<entity>.gen-report.md` | what still needs implementing and what to check; the hand-off |
-| `.omnicore-gen.lock` | which files the generator owns, their hashes, the migration ordinals it already spent, and any adopted edit — without it a regeneration re-allocates ordinals and forgets every refusal |
+| `omnicore-gen/<entity>.omnicore.yaml` | the generator's source of truth — the code is derived FROM it, so losing it inverts the dependency |
+| `omnicore-gen/<entity>.gen-report.md` | what still needs implementing and what to check; the hand-off |
+| `omnicore-gen/lock.json` | which files the generator owns, their hashes, the migration ordinals it already spent, and any adopted edit — without it a regeneration re-allocates ordinals and forgets every refusal |
 | `qa/*.sh` | the contract suite; it IS the proof the service keeps its promises |
 
 ## Why, in the order it bites

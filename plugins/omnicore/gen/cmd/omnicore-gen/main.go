@@ -13,10 +13,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/cli"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/compat"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/layout"
 )
 
 const usage = `omnicore-gen — generate an omnicore entity from a spec
@@ -33,7 +35,7 @@ Commands:
   explain [topic]   document the spec language, offline
 
 Common flags:
-  -spec <path>      the spec file (default: the only *.omnicore.yaml under ./specs)
+  -spec <path>      the spec file (default: the only *.omnicore.yaml under ./omnicore-gen)
   -project <dir>    the service root (default: the current directory)
   -json             machine-readable output
   -lang-fallback    emit marked placeholders for missing translations instead of refusing
@@ -132,21 +134,22 @@ func resolveSpecPath(given, project string) (string, error) {
 		}
 		return given, nil
 	}
-	dir := project + "/specs"
+	dir := filepath.Join(project, layout.Dir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", fmt.Errorf("no -spec given and no specs/ directory at %s — "+
-			"pass -spec <path>, or put the spec in specs/<entity>.omnicore.yaml", project)
+		return "", fmt.Errorf("no -spec given and no %s/ directory at %s — "+
+			"pass -spec <path>, or put the spec in %s/<entity>%s",
+			layout.Dir, project, layout.Dir, layout.SpecSuffix)
 	}
 	var found []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".omnicore.yaml") {
-			found = append(found, dir+"/"+e.Name())
+		if !e.IsDir() && strings.HasSuffix(e.Name(), layout.SpecSuffix) {
+			found = append(found, filepath.Join(dir, e.Name()))
 		}
 	}
 	switch len(found) {
 	case 0:
-		return "", fmt.Errorf("no *.omnicore.yaml found in %s", dir)
+		return "", fmt.Errorf("no *%s found in %s", layout.SpecSuffix, dir)
 	case 1:
 		return found[0], nil
 	default:
@@ -195,7 +198,7 @@ func runInit(args []string) {
 	positional, flags := splitPositional(args)
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	project := fs.String("project", ".", "the service root")
-	out := fs.String("out", "", "where to write (default: specs/<entity>.omnicore.yaml)")
+	out := fs.String("out", "", "where to write (default: "+layout.Dir+"/<entity>"+layout.SpecSuffix+")")
 	force := fs.Bool("force", false, "overwrite an existing spec")
 	_ = fs.Parse(flags)
 	if len(positional) < 1 {

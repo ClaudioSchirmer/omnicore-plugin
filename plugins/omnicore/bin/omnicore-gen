@@ -27,7 +27,7 @@ fi
 
 # The build lands in the plugin's DATA dir, which survives plugin updates, and falls
 # back to a temp dir when the variable is not set (running from a checkout).
-CACHE="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/omnicore-plugin-gen}"
+CACHE="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/omnicore-gen}"
 mkdir -p "$CACHE"
 
 # The binary is keyed by the plugin root, and that is what makes an UPDATE safe.

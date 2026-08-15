@@ -7,7 +7,7 @@ import (
 
 func metaOn(date string) Meta {
 	return Meta{
-		Describes: "a test file", Spec: "specs/x.omnicore.yaml",
+		Describes: "a test file", Spec: "omnicore-gen/x.omnicore.yaml",
 		Entity: "X", Date: date,
 	}
 }

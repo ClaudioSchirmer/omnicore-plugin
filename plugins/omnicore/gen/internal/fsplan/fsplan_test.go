@@ -25,7 +25,7 @@ func write(t *testing.T, root, rel, content string) {
 // would exercise a shape that never reaches disk.
 func ownedFile(path, content string) File {
 	sealed := gofile.ApplyHeader([]byte(content), gofile.Meta{
-		Describes: "test file", Spec: "specs/x.omnicore.yaml",
+		Describes: "test file", Spec: "omnicore-gen/x.omnicore.yaml",
 		Entity: "X", Date: "2026-01-01",
 	}, nil)
 	return File{Path: path, Class: Owned, Content: sealed}
