@@ -24,6 +24,9 @@ write-side aggregate loader, available on every posture;
 `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` owns that split — route such
 a request to `/omnicore:implement`, never refuse it.)
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **Docs-first, version-agnostic — no code in this skill, by design.** The

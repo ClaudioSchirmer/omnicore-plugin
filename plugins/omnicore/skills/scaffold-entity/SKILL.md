@@ -15,6 +15,9 @@ composing** — never by copying code. That is why this is a skill and not a tem
 generator: it writes the entity from understanding, so it works from scratch and cannot
 drift.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **Understand, don't mimic.** The `/docs` describe how the framework WORKS — read them to
@@ -444,8 +447,11 @@ lightly ("a possible outcome, not a problem; switchable later without rework") a
 dir in the project root:
 **`scaffold-entity/<entity>/`** (e.g. `scaffold-entity/student/`). Not a hidden/UUID dir,
 not your scratch dir — the dev must be able to open and read it. **Do NOT delete it on
-success** — leave the plan + per-layer tasks in place for the dev to inspect (add
-`scaffold-entity/` to `.gitignore` if they don't want it committed; that's their call).
+success** — leave the plan + per-layer tasks in place, and **do not add it to
+`.gitignore`**. It is not scratch: `spec.md` is the approved model and the `task_*.md`
+are what the entity was built from, so it is what a reviewer reads to see what was
+decided and what a resumed run reads to know what is already done. Committing it is the
+default; a dev who wants it out will say so.
 - **`tasks.md`** — the CONTROL: the ordered layer list, a status per layer (pending/done),
   and a pointer to the APPROVED `spec.md` (the model authority — don't restate it).
 - **One `task_<layer>.md` per layer** to generate (domain, application, web, infra,

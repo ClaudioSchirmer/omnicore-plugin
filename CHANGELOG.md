@@ -9,6 +9,19 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Fixed
 
+- **`scaffold-service` shipped a `.gitignore` that hid the reasoning, and only two of the
+  eight working dirs had any rule at all.** The generated file
+  listed the `scaffold-service/` and `scaffold-entity/` working dirs, so the approved
+  model (`spec.md`) and the per-layer plan the service was built from were excluded from
+  the repository by default — the result was committed and the decisions behind it were
+  not. They are documents the project follows, and a resumed run reads them to know what
+  is already done. The line is gone, and the rule is now stated ONCE for everything the
+  tooling writes — the working dirs of all eight skills, `specs/*.omnicore.yaml`, the
+  gen-report, `.omnicore-gen.lock` and the QA suite — in
+  `shared/generated-documents.md`, which the nine skills that write into a project point
+  at. It carries the test for the other direction too: if running a command would
+  reproduce it byte for byte it may be ignored, and a decision never would.
+
 - **`scaffold-entity/conventions/siblings.md` prescribed an idiom that does not work.**
   For clearing a 1:1 facet on GraphQL it called for a "mini-PATCH mutation" whose
   `ApplyPartiallyTo` assigns nil. The framework's sibling write reads an all-nil facet as

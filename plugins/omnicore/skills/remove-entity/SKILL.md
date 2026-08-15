@@ -15,6 +15,9 @@ translations, stale views) and without collateral damage (a shared base another 
 still uses, a composed view of ANOTHER entity that embeds this one). Inventory first,
 approve, then delete — never the reverse.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles
 
 - **Nothing is deleted before the plan is approved.** The full footprint is inventoried

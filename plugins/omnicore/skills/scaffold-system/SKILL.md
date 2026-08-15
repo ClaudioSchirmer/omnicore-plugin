@@ -19,6 +19,9 @@ aggregates is the known failure mode (heavy context → copy instead of read, qu
 fatigue → self-answered high-risk slots); the approved map + one-entity-at-a-time
 delegation is the antidote, and the reason this is a skill.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **Two altitudes, strictly separated.** SYSTEM altitude (this skill): aggregate

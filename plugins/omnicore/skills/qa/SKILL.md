@@ -18,6 +18,9 @@ surfaces), derives what the PINNED framework therefore promises, and generates a
 executable contract suite that exercises those promises against the real running
 service — then runs it and reports GREEN/RED honestly.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **The contract comes from the PIN's docs, never from this skill.** Which verbs an

@@ -16,6 +16,9 @@ touches the migration, the TableSchema, the DTOs, the labelKey + all seven trans
 catalogs, the view `Version(N)`, and the OpenAPI surface — **they move together or the
 service breaks in silence**. That lockstep is the whole reason this is a skill.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **Docs-first, version-agnostic — same anti-drift doctrine as `scaffold-entity`.** The
