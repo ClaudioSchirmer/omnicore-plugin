@@ -43,7 +43,7 @@ Migrations are written ONCE, named *_manual.sql, and never rewritten — the
 generator creates a schema, it does not evolve one. A later change is a new
 numbered pair, written by whoever knows where the first one has run.
 
-This generator targets framework ` + compat.Supported + `.x
+This generator requires framework ` + compat.Supported + ` or later
 `
 
 func main() {
@@ -60,7 +60,7 @@ func main() {
 	case "explain":
 		runExplain(args)
 	case "version":
-		fmt.Printf("omnicore-gen (ships with the omnicore plugin) — targets framework %s.x\n", compat.Supported)
+		fmt.Printf("omnicore-gen (ships with the omnicore plugin) — requires framework %s or later\n", compat.Supported)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	case "generate":

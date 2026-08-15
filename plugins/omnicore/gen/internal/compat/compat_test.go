@@ -10,7 +10,8 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"same line", "v0.49.0", false, Exact, false},
+		{"below the required patch", "v0.49.0", false, Behind, true},
+		{"the required patch", "v0.49.1", false, Exact, false},
 		{"same line, later patch", "v0.49.9", false, Exact, false},
 		{"framework moved ahead", "v0.51.1", false, Ahead, false},
 		{"project is older", "v0.48.0", false, Behind, true},

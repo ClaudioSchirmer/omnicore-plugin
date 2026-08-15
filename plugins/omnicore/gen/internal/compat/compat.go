@@ -17,7 +17,7 @@ import (
 // Supported is the framework version this build targets and is proven against
 // by the golden gate. Moving it is a deliberate act paired with reviewing the
 // emitters — never a silent bump.
-const Supported = "v0.49"
+const Supported = "v0.49.1"
 
 // Level is the verdict.
 type Level string
@@ -58,8 +58,8 @@ func Evaluate(pinned string, localCheckout bool) Verdict {
 		return v
 	}
 
-	pMaj, pMin, okP := parseLine(pinned)
-	sMaj, sMin, okS := parseLine(Supported)
+	pMaj, pMin, pPatch, okP := parseLine(pinned)
+	sMaj, sMin, sPatch, okS := parseLine(Supported)
 	if !okP || !okS {
 		v.Level = Unknown
 		v.Message = fmt.Sprintf("could not read the framework version %q; generating anyway", pinned)
@@ -67,13 +67,13 @@ func Evaluate(pinned string, localCheckout bool) Verdict {
 	}
 
 	switch {
-	case pMaj == sMaj && pMin == sMin:
+	case pMaj == sMaj && pMin == sMin && pPatch >= sPatch:
 		v.Level = Exact
-		v.Message = fmt.Sprintf("framework %s matches the supported line %s.x", pinned, Supported)
+		v.Message = fmt.Sprintf("framework %s meets the required %s", pinned, Supported)
 	case pMaj > sMaj || (pMaj == sMaj && pMin > sMin):
 		v.Level = Ahead
 		v.Message = fmt.Sprintf(
-			"the project pins framework %s, ahead of the %s.x this generator targets. "+
+			"the project pins framework %s, ahead of the %s this generator targets. "+
 				"Generating anyway. Read the changelog of the pinned version and ask two "+
 				"questions: was there a breaking change, and does it touch what the generator "+
 				"emits? Then build — go vet and go build settle it faster than reading can. "+
@@ -85,7 +85,7 @@ func Evaluate(pinned string, localCheckout bool) Verdict {
 		v.Level = Behind
 		v.Blocks = true
 		v.Message = fmt.Sprintf(
-			"the project pins framework %s, older than the %s.x this generator targets. "+
+			"the project pins framework %s, older than the %s this generator requires. "+
 				"Going backwards the gap is usually an API that does not exist yet rather "+
 				"than one that moved, so the reliable fix is to upgrade the framework "+
 				"(/omnicore:upgrade). Pass --force-unsupported to generate anyway and judge "+
@@ -95,24 +95,29 @@ func Evaluate(pinned string, localCheckout bool) Verdict {
 	return v
 }
 
-// parseLine reads the major.minor of a vX.Y.Z tag; the patch is irrelevant to
-// the supported line.
-func parseLine(v string) (major, minor int, ok bool) {
+// parseLine reads the major.minor.patch of a vX.Y.Z tag. A missing patch reads
+// as 0.
+func parseLine(v string) (major, minor, patch int, ok bool) {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	if i := strings.IndexAny(v, "-+"); i >= 0 {
 		v = v[:i]
 	}
 	parts := strings.Split(v, ".")
 	if len(parts) < 2 {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	major, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	minor, err = strconv.Atoi(parts[1])
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
-	return major, minor, true
+	if len(parts) > 2 {
+		if patch, err = strconv.Atoi(parts[2]); err != nil {
+			return 0, 0, 0, false
+		}
+	}
+	return major, minor, patch, true
 }

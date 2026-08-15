@@ -306,10 +306,8 @@ func emitImmutable(s *src, rule ir.Rule, recv string, m *ir.Model) {
 			cmp = pointerNeq("old."+f.Name, fmt.Sprintf("%s.%s", recv, f.Name))
 		}
 		s.L("\t\t\tif %s {", cmp)
-		// Unguarded on purpose: this fires when the two versions DIFFER, and
-		// either side may be nil — a value cleared, or one set for the first time.
 		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifIn(m, rule.Notification), echoArgUnguardedOn(rule, f, recv))
+			quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
 		s.L("\t\t\t}")
 	}
 	s.L("\t\t}")
@@ -485,38 +483,9 @@ var frameworkNotifications = map[string]bool{
 }
 
 // echoArg passes the rejected value back so the caller sees what was refused.
-//
-// It DEREFERENCES an optional field, and that is not redundant with the
-// framework doing the same. The framework learned to unwrap a pointer in
-// v0.49.1; this generator's supported line is v0.49, so v0.49.0 is still a
-// perfectly valid pin — and there, a bare pointer reaches the caller as
-// "value":"0xc000180dda". Emitting the dereference makes the generated code say
-// the value on EVERY version of the line it claims to support, which is the
-// generator's job rather than the pin's.
-//
-// Only callers that have already PROVEN the field is present may use this: a
-// nil guard, a zero check, a comparison guard. The unguarded sites use
-// echoArgUnguardedOn.
 func echoArg(rule ir.Rule, f ir.Field) string { return echoArgOn(rule, f, "e") }
 
 func echoArgOn(rule ir.Rule, f ir.Field, recv string) string {
-	if !rule.EchoValue {
-		return ""
-	}
-	return ", " + deref(f, recv)
-}
-
-// echoArgUnguardedOn is the echo for a rule that fires precisely when the value
-// may be ABSENT, so there is nothing to dereference:
-//
-//   - requiredIf — it fires BECAUSE the field is missing;
-//   - immutable — it fires when the two versions differ, and either side may be
-//     nil (a value cleared, or one set for the first time).
-//
-// Dereferencing there would panic on the exact input the rule exists to catch.
-// The pointer is passed as-is and a nil renders as the empty string, which
-// omitempty then drops — the caller is never told the server refused "nothing".
-func echoArgUnguardedOn(rule ir.Rule, f ir.Field, recv string) string {
 	if !rule.EchoValue {
 		return ""
 	}
@@ -834,10 +803,8 @@ func emitRequiredIf(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	s.L("\t\tif %s {", presentCheck(*rule.Other, recv))
 	for _, f := range rule.Fields {
 		s.L("\t\t\tif %s {", zeroCheck(f, recv))
-		// Unguarded on purpose: this fires BECAUSE the field is missing, so
-		// there is nothing to dereference.
 		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifIn(m, rule.Notification), echoArgUnguardedOn(rule, f, recv))
+			quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
 		s.L("\t\t\t}")
 	}
 	s.L("\t\t}")
