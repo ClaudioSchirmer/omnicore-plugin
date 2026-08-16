@@ -1,0 +1,31 @@
+# Eixo: authz Layer 2 — cada um só enxerga as próprias linhas.
+specVersion: 1
+entity: Anotacao
+plural: Anotacoes
+language: pt-BR
+storage:
+  kind: flat
+  table: anotacoes
+  description: Anotações privadas de cada usuário.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: Texto, type: string, column: texto, length: 1000, livesOn: root, example: Lembrar da reunião, description: Conteúdo da anotação.}
+  # O dono NÃO vem do corpo: com owner-only, deixar o cliente escolher o dono é
+  # deixar qualquer um criar anotação no nome de outro. assignedFrom tira o campo
+  # de todo DTO de escrita e o preenche da identidade autenticada.
+  - {name: DonoEmail, type: string, column: dono_email, length: 160, livesOn: root, assignedFrom: identity-subject, example: ana@escola.br, description: E-mail do dono da anotação.}
+modes: [display, insert, update]
+update: {shape: patch}
+read:
+  backing: relational
+  view: {name: anotacoes, version: 1}
+  byId: true
+  byParams:
+    filters: [{field: Texto, ops: [contains, icontains]}]
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: anotacao
+  dataAccess: owner-only
+  ownerField: DonoEmail
+  permissions: {insert: "anotacao:escrever", patch: "anotacao:escrever", read: "anotacao:ler"}

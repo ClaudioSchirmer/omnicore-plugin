@@ -1,0 +1,29 @@
+# Zero-infra profile: SQLite, no broker, no Mongo.
+#
+# This is what lets the boot lane run anywhere — including CI with no services
+# at all. A gate that needs five containers to say anything is a gate that gets
+# skipped.
+service: omnicore-gen-golden-host
+http:
+  addr: "${HTTP_ADDR::18080}"
+  requestTimeoutSeconds: 30
+relational:
+  dialect: "${REL_DIALECT:sqlite}"
+  dsn: "${DATABASE_URL:file:./golden.db}"
+migrations:
+  dir: "${MIGRATIONS_DIR:./migrations/sqlite}"
+  autoRun: true
+query:
+  maxLimit: 100
+  maxExportRows: 5000
+openapi:
+  uiPath: /docs
+  rootRedirect: true
+auth:
+  mode: disabled
+  auditClaims: []
+audit:
+  destinations:
+    - slog
+shutdown:
+  drainTimeoutSeconds: 5

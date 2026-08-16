@@ -326,8 +326,15 @@ applies only when any high-risk slot would otherwise be filled by you.
    service stage), and a placeholder would steal the `0001` slot the first entity is
    promised.
 7. **`.gitignore`** — binaries, `go.work*`, `.env*`, OS/editor files, `devops/` local
-   data dirs, the `scaffold-service/` + `scaffold-entity/` working dirs (commented,
-   the dev's call).
+   data dirs. **The `scaffold-service/` and `scaffold-entity/` working dirs are NOT
+   ignored, and must not be added.** They are not scratch: they hold the APPROVED model
+   (`spec.md`) and the per-layer plan the service was built from — the document a
+   reviewer reads to see what was decided, and the one a resumed run reads to know what
+   is already done. Ignoring them throws away the reasoning and keeps only the result.
+   A dev who wants them out says so; the default is to keep them, and this file does not
+   ship the line that removes them. The full rule — every document this tooling writes,
+   and the test for what may be ignored — is
+   `${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`.
 8. **`devops/docker-compose.yml` + `devops/debezium/application.properties`** — from
    `templates/docker-bench.md` + `templates/cdc-relay.md`, instantiated for the ONE
    chosen dialect × transport combination, names/ports from the spec. Validate the

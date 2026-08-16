@@ -21,6 +21,7 @@ Marking convention inside the filled spec:
 Status: DRAFT            <!-- flip to APPROVED only after the dev's explicit ok -->
 Approved: <pending>      <!-- who/when -->
 Language: <x>            <!-- working language for human-facing text (descriptions, COMMENTs, examples) — detected from the user's own words (invocation args count, even one word); edit to override -->
+Generation: <pending>    <!-- omnicore-gen | manual — the dev's answer at gate 1d; written the moment they answer, so a resumed run does not ask again -->
 
 ## 1. Storage model                                    [high-risk — confirm]
 - Kind: flat | sharedbase-role — <pick> (proposed; alternative: <other> — <one-line why>)
@@ -116,7 +117,10 @@ archive (+ unarchive). Root AND per-child.
 ## 8. Update shape                                      [required]
 PATCH | PUT | both — default PATCH. **COUPLING: if §4 has a sibling, include PUT** (PATCH
 can't assign null; the ROOT's PUT with the facet all-null is what clears the sibling row —
-a sibling NEVER gets its own endpoint; `siblings.md`).
+a sibling NEVER gets its own REST endpoint; `siblings.md`). **With GraphQL: yes there is
+one exception** — omitted and null are indistinguishable there, so clearing needs a
+bodyless intent mutation dispatched through the FULL update handler (`siblings.md`; the
+generator emits it).
 
 ## 9. Surfaces & reads                       [required — never an endpoint unasked]
 - REST: yes/no · GraphQL: yes/no · gRPC: via `/omnicore:implement` (after this run) ·

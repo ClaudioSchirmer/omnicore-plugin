@@ -1,0 +1,146 @@
+# The generator's gate.
+#
+# A generator that drifts emits code that does not compile, and that is worse
+# than having no generator: the failure lands on whoever used it, not on whoever
+# broke it. So this runs on every pull request touching the generator.
+#
+# It needs nothing outside this repository. The service it generates into is
+# vendored under the generator's testdata/host and runs on SQLite with no broker and no
+# Mongo, so the whole generate → build → test → boot half gates unconditionally.
+# Only the DDL lanes for the four SQL engines need services, and they say so.
+name: omnicore-gen
+
+on:
+  pull_request:
+    paths: ['plugins/omnicore/gen/**', '.github/workflows/gen.yml']
+  push:
+    branches: [main]
+    paths: ['plugins/omnicore/gen/**', '.github/workflows/gen.yml']
+
+jobs:
+  gate:
+    name: generate · build · test · boot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # The HOST's floor, not the generator's. The generator itself compiles
+          # on an older Go — a deliberately low floor, so more people can run it
+          # — but the gate BUILDS a service that imports the framework, and the
+          # framework's floor is higher. Reading the lower one installs a
+          # toolchain that cannot build what this job exists to build.
+          go-version-file: plugins/omnicore/gen/testdata/host/go.mod
+          cache-dependency-path: plugins/omnicore/gen/go.sum
+
+      - name: the generator itself is formatted
+        working-directory: plugins/omnicore/gen
+        # A generator that emits gofmt-clean code had better be gofmt-clean.
+        run: |
+          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: vet
+        working-directory: plugins/omnicore/gen
+        run: go vet ./...
+
+      - name: unit tests
+        working-directory: plugins/omnicore/gen
+        run: go test ./... -count=1
+
+      - name: the behavioural gate
+        working-directory: plugins/omnicore/gen
+        # No docker here, so the SQL-engine DDL lanes skip themselves and say so.
+        # Everything that does not need a server still gates: generation,
+        # formatting, build, vet, the generated tests, idempotent regeneration,
+        # refusal without clobbering, and a real boot answering a real request.
+        run: ./scripts/golden.sh
+
+  ddl:
+    name: DDL against real engines
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: omnicore
+          POSTGRES_PASSWORD: omnicore
+          POSTGRES_DB: users_db
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U omnicore"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: users_db
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -proot"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: plugins/omnicore/gen/testdata/host/go.mod
+          cache-dependency-path: plugins/omnicore/gen/go.sum
+
+      - name: emit the migrations
+        working-directory: plugins/omnicore/gen
+        run: |
+          set -e
+          WORK=/tmp/ddl-host
+          rm -rf "$WORK"; mkdir -p "$WORK"
+          cp -R testdata/host/. "$WORK/"
+          mkdir -p "$WORK/specs"
+          cp testdata/specs/student.omnicore.yaml testdata/specs/teacher.omnicore.yaml "$WORK/specs/"
+          for f in "$WORK"/specs/*.omnicore.yaml; do
+            go run ./cmd/omnicore-gen generate -spec "$f" -project "$WORK"
+          done
+
+      - name: postgres accepts the DDL
+        env:
+          PGPASSWORD: omnicore
+        # Applied then rolled back then rolled back again: the second down proves
+        # the rollback tolerates a partially-applied up, which is the state a
+        # failed migration actually leaves behind.
+        run: |
+          set -e
+          for f in /tmp/ddl-host/migrations/postgres/*.up.sql; do
+            psql -h 127.0.0.1 -U omnicore -d users_db -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          for f in $(ls -r /tmp/ddl-host/migrations/postgres/*.down.sql); do
+            psql -h 127.0.0.1 -U omnicore -d users_db -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          for f in $(ls -r /tmp/ddl-host/migrations/postgres/*.down.sql); do
+            psql -h 127.0.0.1 -U omnicore -d users_db -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: mysql accepts the DDL
+        run: |
+          set -e
+          for f in /tmp/ddl-host/migrations/mysql/*.up.sql; do
+            mysql -h 127.0.0.1 -P 3306 -uroot -proot users_db < "$f"
+          done
+          for f in $(ls -r /tmp/ddl-host/migrations/mysql/*.down.sql); do
+            mysql -h 127.0.0.1 -P 3306 -uroot -proot users_db < "$f"
+          done
+          for f in $(ls -r /tmp/ddl-host/migrations/mysql/*.down.sql); do
+            mysql -h 127.0.0.1 -P 3306 -uroot -proot users_db < "$f"
+          done
+
+      - name: sqlite accepts the DDL
+        run: |
+          set -e
+          DB=$(mktemp -u).db
+          for f in /tmp/ddl-host/migrations/sqlite/*.up.sql; do sqlite3 "$DB" < "$f"; done
+          for f in $(ls -r /tmp/ddl-host/migrations/sqlite/*.down.sql); do sqlite3 "$DB" < "$f"; done
+
+      # SQL Server and Oracle are deliberately absent: their images cost minutes
+      # per run, and a gate slow enough to be ignored protects nothing. Their DDL
+      # is covered by scripts/golden.sh against the generator's OWN local bench
+      # (plugins/omnicore/gen/devops/docker-compose.yml, `--profile heavy`) — a
+      # limit worth stating rather than hiding behind a green tick.

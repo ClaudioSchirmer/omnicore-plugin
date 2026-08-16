@@ -15,6 +15,9 @@ composing** — never by copying code. That is why this is a skill and not a tem
 generator: it writes the entity from understanding, so it works from scratch and cannot
 drift.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **Understand, don't mimic.** The `/docs` describe how the framework WORKS — read them to
@@ -444,8 +447,11 @@ lightly ("a possible outcome, not a problem; switchable later without rework") a
 dir in the project root:
 **`scaffold-entity/<entity>/`** (e.g. `scaffold-entity/student/`). Not a hidden/UUID dir,
 not your scratch dir — the dev must be able to open and read it. **Do NOT delete it on
-success** — leave the plan + per-layer tasks in place for the dev to inspect (add
-`scaffold-entity/` to `.gitignore` if they don't want it committed; that's their call).
+success** — leave the plan + per-layer tasks in place, and **do not add it to
+`.gitignore`**. It is not scratch: `spec.md` is the approved model and the `task_*.md`
+are what the entity was built from, so it is what a reviewer reads to see what was
+decided and what a resumed run reads to know what is already done. Committing it is the
+default; a dev who wants it out will say so.
 - **`tasks.md`** — the CONTROL: the ordered layer list, a status per layer (pending/done),
   and a pointer to the APPROVED `spec.md` (the model authority — don't restate it).
 - **One `task_<layer>.md` per layer** to generate (domain, application, web, infra,
@@ -455,6 +461,13 @@ success** — leave the plan + per-layer tasks in place for the dev to inspect (
   - the **EXACT `/docs` sections to READ** for this layer (from Knowledge routing),
   - the **`conventions/<layer>.md`** to apply,
   - the **acceptance check** (what "done" means for this layer).
+
+  Phrase every enumeration as THINGS, not files, **as you type it** — the 1c lint greps
+  these files for `.go`/`.sql`/`000N_`, and every hit costs a rewrite pass of a file you
+  just wrote:
+  - ✗ `0007_create_students.up.sql` · `student_commands.go` · `student_routes.go`
+  - ✓ table `students` (columns, constraints, FK order) · operations insert/patch/archive
+    on `/students` · "naming/granularity per `service-layout.html`"
 
 **Task files are PROSE ONLY — no code sketches.** A code sketch invites copy-paste in
 Phase 2 no matter how loudly it's labeled a draft, and its guessed signatures are pure
@@ -486,10 +499,11 @@ BEFORE presenting, SELF-LINT the plan mechanically** — run against your own ta
 
     grep -nE '[a-z0-9_]+\.(go|sql)|000[0-9]_' scaffold-entity/<entity>/task_*.md
 
-Every hit naming a TO-BE-GENERATED file (a command/query/DTO/routes `.go`, a `000N_*.sql`
-pair) is a 1b violation — replace it with the WHAT it was trying to say (the table, the
-operation, the type) + "naming/granularity per `service-layout.html`", and only then
-present. (Hits that reference EXISTING files to edit — `wire.go`, `notifications.go` — or
+If 1b was written as things (tables, operations, types), this finds nothing and costs one
+grep — that is the expected outcome, not a fix-up round. Every hit naming a TO-BE-GENERATED
+file (a command/query/DTO/routes `.go`, a `000N_*.sql` pair) is a 1b violation — replace it
+with the WHAT it was trying to say (the table, the operation, the type) + "naming/granularity
+per `service-layout.html`", and only then present. (Hits that reference EXISTING files to edit — `wire.go`, `notifications.go` — or
 doc/convention filenames are fine.) Then **STOP and
 present the plan to the dev for approval before executing a single task.** Open the gate
 message with the loud status line — `⏸️ PAUSED at the plan gate — no code generated yet;
@@ -508,10 +522,72 @@ a separate gate whenever the model carries a variant delta or anything the dev h
 
 This front-loads the thinking into a plan, so execution runs in focused, isolated stages.
 
+**1d. Generation gateway — MANDATORY, and the LAST thing before any code exists.**
+
+WHAT to build is settled; HOW it gets built is still open, and that is the dev's call, not
+yours. Ask it as a real choice with exactly TWO options, and do not proceed on silence.
+
+**Present it in the SAME message as 1c**, right under the plan summary: the dev is already
+being asked "is this right?", and splitting that into two consecutive stops buys nothing.
+Their reply of **1** or **2** then carries both answers — the plan is approved AND the path
+is chosen. (A dev who replies "go" without picking has answered 1c and not 1d: ask 1d
+again, alone.)
+
+Present it like this, verbatim in substance:
+
+> ⏸️ **How should this be generated?** Two options, and only these two:
+>
+> **1. `omnicore-gen` (beta) + review by me**
+> The generator writes the whole mechanical tree from one spec file — domain, application,
+> web, infra, migrations, wiring, translations and its own tests — in **seconds**, and at a
+> **fraction of the tokens** the manual path costs. What it cannot express, I implement by
+> hand: the complex business rules land in a hook file it never touches, and the final
+> tests for those are mine to write. I then review the output against the plan you just
+> approved, read the generator's report, and prove it with build + vet + tests + a real
+> boot.
+> **Beta**: it is still being improved round by round, and `scaffold-entity` is so far the
+> only skill that uses it. Its gate covers a lot, and it can still hit a case nobody has
+> hit yet — usually a spec that validates and produces something that does not compile.
+> When that happens I say so, work around it, and it gets fixed upstream; the review and
+> the proof steps above are exactly what catch it.
+>
+> **2. Manually, file by file, by me**
+> I generate every file myself, layer by layer, reading the pinned `/docs` before each
+> one. Slower and far more tokens, and the same review discipline applies — but nothing
+> depends on the generator being present or on the spec language covering your model.
+>
+> Reply **1** or **2**.
+
+Two rules about this gate:
+
+- **It is not a formality and it has no default, and neither option is marked
+  recommended.** While the generator is in beta the two paths are presented on their
+  merits — speed and token cost against not depending on the generator — and the dev
+  chooses. Ask, then wait. If the dev answers anything other than 1 or 2, ask again
+  rather than picking for them.
+- **Nothing about the generator's spec YAML happens before the answer.** That file
+  (`omnicore-gen/<entity>.omnicore.yaml` — not this skill's `spec.md`, which is the MODEL and was
+  already approved at 1a) is large and dense, and writing one the dev never asked for is
+  exactly the waste this gate exists to prevent. On option 2 it is never written at all.
+
+**If the dev chooses 1 (codegen):** read
+`${CLAUDE_PLUGIN_ROOT}/skills/omnicore-gen/SKILL.md` **now** — not before, and not
+from memory — and follow it end to end. The approved model and the `task_<layer>.md` files
+you just wrote become the REVIEW CHECKLIST: they say what each layer must contain, which is
+exactly what you check the generated tree against. The Final verify gate below still
+applies unchanged — the generator does not exempt the entity from it.
+
+**If the dev chooses 2 (manual):** proceed to Phases 2…N exactly as written. Do not read
+the generator skill, do not write a spec YAML, and do not mention the generator again for
+this entity — the choice was made.
+
 ## Re-entry — `scaffold-entity/<entity>/` already exists
 
 An existing working dir means a previous or interrupted run. Do NOT restart from scratch and
-do NOT overwrite an approved plan. Check `spec.md` first: `Status: APPROVED` → resume from
+do NOT overwrite an approved plan. **Record the 1d choice in `spec.md` the moment it is
+made** (`Generation: omnicore-gen` or `Generation: manual`) — a resumed run reads it
+and does not ask again, and asking twice invites a different answer half-way through one
+entity. Check `spec.md` first: `Status: APPROVED` → resume from
 the first **pending** task in `tasks.md` (the per-layer doc reads still apply);
 `Status: DRAFT` or any `⚠️ OPEN` slot → resume Phase 1 at the spec gate. If the dev asks to
 REDO one layer, re-open just that `task_<layer>.md`, regenerate that layer, and re-run the

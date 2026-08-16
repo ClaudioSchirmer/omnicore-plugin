@@ -16,6 +16,9 @@ Change a read model without breaking its evolution contract: the projected shape
 that is the boundary that keeps this skill safe. The moment the change needs data the
 sources don't carry, STOP: that slice is `evolve-entity`'s job first.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **Docs-first, version-agnostic — no code in this skill, by design.** The

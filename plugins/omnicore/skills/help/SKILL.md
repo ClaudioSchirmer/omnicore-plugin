@@ -1,10 +1,13 @@
 ---
 name: help
 description: >-
-  omnicore: conversational guide to the omnicore framework — answer a developer's
-  questions about how it works, docs-first. Use when the dev wants to
-  understand, learn, or ask how omnicore does something (a concept, an API,
-  a behavior, "how do I…", "why does…", "where is…"). Read-only: it explains,
+  omnicore: conversational guide to the omnicore framework AND to the plugin's own
+  spec-driven generator — answer a developer's questions about how either works,
+  docs-first. Use when the dev wants to understand, learn, or ask how omnicore does
+  something (a concept, an API, a behavior, "how do I…", "why does…", "where is…"),
+  or what the omnicore-gen spec language can express (its keys, its rule DSL, what it
+  refuses) — which lives in this plugin and is answered from the generator's own
+  `explain`, never from the framework docs. Read-only: it explains,
   it never scaffolds, generates, or changes anything. Works with a pinned
   project (answers scoped to ITS omnicore version), inside the framework repo,
   or with no project at all (published docs of the latest release).
@@ -32,6 +35,39 @@ commands beyond reading docs and code.
   routed doc section. Only when the docs genuinely don't cover the question do
   you drop to reading the framework source — and when you do, tell the dev
   "the docs don't cover this; reading the code, …" and cite `file:line`.
+- **The GENERATOR is the PLUGIN's, and the framework docs say nothing about it.**
+  `omnicore-gen` — its spec language, its keys, its rules DSL, what it emits and
+  what it refuses — ships inside this plugin, not inside the framework module.
+  There is no `/docs` section for it and there never will be: routing a question
+  about it through the Documentation Map finds nothing, and answering from memory
+  is how a key that does not exist gets recommended. Its documentation is the
+  BINARY, which derives it from the language definition itself and therefore
+  cannot be stale:
+
+      omnicore-gen explain keys        # every key the language HAS
+      omnicore-gen explain vocabulary  # every closed key and what each choice decides
+      omnicore-gen explain rules       # what the rule DSL can express
+      omnicore-gen explain coverage    # what THIS build emits, and what it refuses
+      omnicore-gen explain example [flat|sharedbase]   # a whole spec that validates
+
+  Run the topic that owns the question, quote it, and say that is where it came
+  from — the same discipline as citing a doc section. It is offline and instant,
+  and it needs a Go toolchain; if it is unavailable, say so rather than
+  approximating the language from memory.
+
+  **Tell the two apart before answering, because the wording rarely does.** "How
+  do I cap a collection per key?" is the framework if the dev is writing Go
+  (`BuildRules`, the aggregate), and the generator if they are writing YAML
+  (`rules.list[].kind: groupCap`). When it is ambiguous, ask which one they are
+  editing. A question about a *`.omnicore.yaml`* is always the generator's.
+
+  Two more things worth saying out loud when it comes up: the generator is in
+  BETA and still moving, so its answer today may be wider tomorrow; and it does
+  not cover everything the framework does — `explain coverage` is the only honest
+  list, and what it refuses is refused BY NAME with the alternative. To RUN one of
+  its commands, that is `/omnicore:gen`; to create an entity with it,
+  `/omnicore:scaffold-entity`. You explain, as always — you do not run them.
+
 - **Never guess — verify.** Every claim about a signature, default, or behavior
   is backed by a doc section or a code read you actually did this turn. If you
   are unsure, say so and go read, rather than presenting inference as fact.
@@ -59,7 +95,9 @@ commands beyond reading docs and code.
   end-to-end, at `qa`;** to SEE the app running, at `run`; if something is BROKEN
   ("why doesn't it work?"), that's
   `doctor` — this skill explains how the framework works, not why a service
-  misbehaves. You describe how those work; you don't run them from here.
+  misbehaves; **to RUN a generator command against a project that already exists
+  (`doctor` for drift, `check`, `adopt`), at `gen`.** You describe how those work;
+  you don't run them from here.
 - **Match the depth to the question.** A quick "what is X" gets a short prose
   answer + the section to read next. A "how does the whole write path work"
   gets the mechanism, in order, with the sections that own each step.

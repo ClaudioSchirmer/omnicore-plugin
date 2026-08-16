@@ -1,0 +1,121 @@
+---
+name: gen
+description: >-
+  omnicore: run one omnicore-gen command against an existing project and read the answer —
+  doctor (drift between the spec, the lock and the files on disk), check, explain, adopt,
+  init. Use when the dev asks for a generator command by name or asks whether a generated
+  tree is still in step with its spec. Creating or regenerating an ENTITY is not this
+  skill's job: that is /omnicore:scaffold-entity, which owns the model and plan gates.
+---
+
+# gen
+
+The generator is a CLI, and most of its commands are useful on their own, long after the
+entity was created. This skill is the door to them: **run one command, read its answer, act
+on it.** It is short on purpose — there is no flow here, no gates, no spec authoring.
+
+**What this skill is NOT.** Writing a spec and generating an entity is
+`/omnicore:scaffold-entity`, which decides the model with the dev and only then reaches the
+generator. Do not use `generate` here to create an entity that does not exist yet: the
+model gate is where the thinking happens, and skipping it produces a tree nobody agreed to.
+
+## The command
+
+`omnicore-gen` is on PATH — the plugin ships it in `bin/`, which Claude Code adds to the
+session's PATH. Always point it at the service:
+
+    omnicore-gen <command> -project <service-dir>
+
+It builds itself from source on first use, so a **Go toolchain on PATH** is the only
+external requirement. `needs a Go toolchain` or `this plugin install is incomplete` means
+the generator is unavailable — say so plainly rather than approximating it by hand.
+
+**Read the words, not the exit code.** `doctor` exits 0 whether or not it found anything;
+only `check` uses its exit status as a verdict (`0` fine, `1` refused, `2` you called it
+wrong). Quote what the tool said to the dev.
+
+The project must be one the generator wrote into — it looks for `omnicore-gen/lock.json`.
+If the dev is in the wrong directory, that is what "No generated entity is recorded in this
+project" means; it is not a diagnosis of the project.
+
+## `doctor` — is the tree still in step with its spec?
+
+    omnicore-gen doctor -project <service-dir>
+
+Read-only, offline, instant. It reports, per entity:
+
+| Line | What it means | What to do |
+|---|---|---|
+| `<Entity> (spec …, framework …)` and nothing under it | everything the lock records is intact | nothing |
+| `! the spec changed since the last generation` | the YAML moved and the code did not | regenerate through `/omnicore:scaffold-entity`, or ask the dev if the spec edit was intentional |
+| `! <path> was edited by hand — regeneration will refuse it` | an owned file's checksum no longer matches | move the change into the spec; if it genuinely cannot be expressed, `adopt` it deliberately |
+| `! <path> is gone` | a file the lock records is missing | regenerate; if it was deleted on purpose, the spec is what should say so |
+| `! the spec is missing at <path>` | the source of truth was moved or deleted | find it or restore it — the code is derived FROM it, so this inverts the dependency |
+| `· <path> carries a hand edit adopted at <version>` | a deliberate exception, with its reason | nothing, but read the reason: it says whether it still holds |
+
+An adopted file also prints *"it no longer tracks the spec: emitter improvements will not
+reach it"*. That is the cost of every adoption and it is worth repeating to the dev when
+one shows up — a file adopted for a reason that has since been fixed upstream is a file
+frozen for nothing.
+
+This is also the first thing to run when a generated service misbehaves in a way that
+smells structural — a symbol that should exist and does not, a rule that should fire and
+does not. It is cheaper than reading the tree, and it answers a question nothing else asks.
+
+## `check` — is this spec generatable?
+
+    omnicore-gen check -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen check -project <service-dir> -json      # machine-readable status
+
+Validates without writing anything. Every blocker names the key, what is wrong and the fix.
+Two verdicts are not about the YAML: framework `behind` (the project pins an older line
+than this build targets — upgrade with `/omnicore:upgrade`, do not force past it) and
+framework `ahead`/`unknown` (never blocks).
+
+With `-json`, `canGenerate` is the contract — read that, not the exit code.
+
+## `explain` — the spec language, offline
+
+    omnicore-gen explain <topic>
+    # coverage, example [flat|sharedbase], keys, names, ownership, rules, vocabulary
+
+Answer a "can the generator express X?" question from `explain`, never from memory. The
+generator's vocabulary is deliberately narrower than the framework's API, and `explain
+coverage` is the only honest list of what this build emits and what it refuses. **Most of
+what looks like a missing capability is a key whose name nobody guessed** — that is exactly
+why `explain keys` exists.
+
+## `adopt` — keep a hand edit through regeneration
+
+    omnicore-gen adopt <path> -project <service-dir> -why 'what the spec could not express'
+
+The escape hatch, and a lossy one: the file stops tracking the spec forever, so every later
+emitter improvement lands everywhere except there. Before running it, ask what the edit
+does and whether the spec can express it — if it can, changing the spec is strictly better.
+`-why` is optional and worth insisting on: the next person to meet the file is not the one
+who edited it, and `doctor` prints that line back.
+
+## `init` — a commented spec template
+
+    omnicore-gen init <Entity> -project <service-dir>
+
+Writes `omnicore-gen/<entity>.omnicore.yaml`, pre-filled from what the project already
+states (dialects, whether there is a Mongo, which value objects exist). Useful on its own
+to SHOW the shape of a spec. If the dev is starting a real entity, hand them to
+`/omnicore:scaffold-entity` instead — the template is the easy part; the model is not.
+
+## `generate` — only for an entity that already exists
+
+Regenerating after a spec change is legitimate and this skill may do it, on one condition:
+`doctor` must already know the entity. Then read the report it points at
+(`omnicore-gen/<entity>.gen-report.md`) and prove the tree with build + vet + tests.
+
+If the entity is NOT in the lock, stop and hand over to `/omnicore:scaffold-entity`. A
+first generation without the model gate is the one thing this skill must not do.
+
+## The generator is beta
+
+It is still improved round by round. Its gate covers a lot and it can still meet a case
+nobody has met — usually a spec that validates and produces something that does not
+compile. If that happens, say so plainly, quote the compiler, and report it upstream rather
+than patching a generated file by hand: patching it is how a tree stops tracking its spec.

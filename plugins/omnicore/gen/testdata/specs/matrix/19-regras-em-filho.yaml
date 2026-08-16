@@ -1,0 +1,123 @@
+# Eixos: regras NAO-triviais dentro de uma colecao — transition com skipWhen,
+# comparison entre dois campos do filho, e uma regra manual da propria colecao.
+#
+# A matriz so exercitava `required` e `length` dentro de children[], que por
+# acaso eram as duas unicas especies que sobreviviam ao resolvedor do filho.
+# Tudo o mais era descartado em silencio: a clausula saia vazia, o build
+# passava, os testes passavam e o relatorio nao dizia nada.
+specVersion: 1
+entity: PedidoRF
+plural: PedidosRF
+language: pt-BR
+storage:
+  kind: flat
+  table: pedidos_rf
+  description: Pedidos com seus itens e o andamento de cada item.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Numero, type: string, column: numero, length: 20, livesOn: root, example: "PED-2026-001", description: Número do pedido.}
+children:
+  - name: ItemRF
+    plural: ItensRF
+    table: pedido_rf_itens
+    parentColumn: pedido_rf_id
+    description: Itens do pedido.
+    ownedBy: root
+    editStrategy: per-child
+    duplicateNotification: ItemJaExisteNotification
+    businessIdentity: [Sku]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - {name: Sku, type: string, column: sku, length: 20, example: "SKU-9", description: Código do item.}
+      - {name: Status, type: string, column: status, length: 20, vo: {kind: enum, ref: StatusItemRF}, example: separando, description: Andamento do item.}
+      - {name: Solicitado, type: int, column: solicitado, example: "10", description: Quantidade pedida.}
+      - {name: Separado, type: int, column: separado, example: "4", description: Quantidade já separada.}
+    rules:
+      list:
+        - {id: sku-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Sku], notification: CampoObrigatorioNotification}
+        # A especie que sumia: sem as arestas, a clausula emitida permitia
+        # QUALQUER movimento — o oposto do que o spec declara.
+        - id: status-anda-para-frente
+          kind: transition
+          scope: [update]
+          fields: [Status]
+          skipWhen: empty
+          transitions:
+            separando: [separado, cancelado]
+            separado: [enviado, cancelado]
+            enviado: []
+            cancelado: []
+          notification: TransicaoDeStatusInvalidaNotification
+        - id: separado-nao-passa-do-solicitado
+          kind: comparison
+          scope: [insertOrUpdate]
+          fields: [Separado]
+          other: Solicitado
+          operator: lte
+          notification: SeparadoAcimaDoSolicitadoNotification
+      manual:
+        - id: cancelado-exige-motivo-registrado
+          scope: [update]
+          description: >-
+            Um item só pode ir para `cancelado` se houver motivo registrado no
+            sistema de atendimento — a consulta é externa ao agregado, então a
+            regra não cabe na linguagem do spec.
+          notification: CancelamentoSemMotivoNotification
+          attachTo: Status
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+delete: {root: soft}
+rules:
+  list:
+    - {id: numero-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Numero], notification: CampoObrigatorioNotification}
+notifications:
+  - name: CampoObrigatorioNotification
+    semantic: validation
+    description: Campo obrigatorio nao preenchido.
+    text: {ptbr: "Este campo é obrigatório.", eng: "This field is required.", esp: "Este campo es obligatorio.", fra: "Ce champ est obligatoire.", deu: "Dieses Feld ist erforderlich.", ita: "Questo campo è obbligatorio.", nld: "Dit veld is verplicht."}
+  - name: ItemJaExisteNotification
+    semantic: conflict
+    description: Item ja consta no pedido.
+    text: {ptbr: "Esse item já consta no pedido.", eng: "That item is already on the order.", esp: "Ese artículo ya consta en el pedido.", fra: "Cet article figure déjà sur la commande.", deu: "Dieser Posten ist bereits vorhanden.", ita: "Questo articolo è già presente.", nld: "Dat item staat er al op."}
+  - name: TransicaoDeStatusInvalidaNotification
+    semantic: validation
+    description: Movimento de status nao permitido.
+    text: {ptbr: "O item não pode ir para esse status a partir do atual.", eng: "The item cannot move to that status from its current one.", esp: "El artículo no puede pasar a ese estado desde el actual.", fra: "L'article ne peut pas passer à ce statut depuis l'actuel.", deu: "Der Posten kann von seinem aktuellen Status nicht dorthin wechseln.", ita: "L'articolo non può passare a quello stato dall'attuale.", nld: "Het item kan vanuit de huidige status niet naar die status."}
+  - name: SeparadoAcimaDoSolicitadoNotification
+    semantic: validation
+    description: Quantidade separada maior que a solicitada.
+    text: {ptbr: "A quantidade separada não pode passar da solicitada.", eng: "The picked quantity cannot exceed the requested one.", esp: "La cantidad separada no puede superar la solicitada.", fra: "La quantité préparée ne peut pas dépasser celle demandée.", deu: "Die kommissionierte Menge darf die angeforderte nicht übersteigen.", ita: "La quantità prelevata non può superare quella richiesta.", nld: "De verzamelde hoeveelheid mag de gevraagde niet overschrijden."}
+  - name: StatusItemInvalidoNotification
+    semantic: validation
+    description: Status fora do conjunto conhecido.
+    text: {ptbr: "Status de item desconhecido.", eng: "Unknown item status.", esp: "Estado de artículo desconocido.", fra: "Statut d'article inconnu.", deu: "Unbekannter Postenstatus.", ita: "Stato articolo sconosciuto.", nld: "Onbekende itemstatus."}
+  - name: CancelamentoSemMotivoNotification
+    semantic: validation
+    description: Cancelamento sem motivo registrado.
+    text: {ptbr: "O cancelamento exige um motivo registrado.", eng: "A cancellation needs a recorded reason.", esp: "La cancelación exige un motivo registrado.", fra: "Une annulation exige un motif enregistré.", deu: "Eine Stornierung erfordert einen erfassten Grund.", ita: "L'annullamento richiede un motivo registrato.", nld: "Een annulering vereist een geregistreerde reden."}
+valueObjects:
+  - name: StatusItemRF
+    kind: enum
+    backing: string
+    description: Andamento de um item do pedido.
+    unknownNotification: StatusItemInvalidoNotification
+    members:
+      - {name: Separando, value: separando}
+      - {name: Separado, value: separado}
+      - {name: Enviado, value: enviado}
+      - {name: Cancelado, value: cancelado}
+read:
+  backing: relational
+  view: {name: pedidos_rf, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Numero, ops: [eq, contains]}
+    controls: {pagination: true, fields: true}
+surfaces:
+  rest: true
+authz:
+  resource: pedidorf
+  dataAccess: anyone-with-permission
+  permissions: {insert: "pedidorf:escrever", update: "pedidorf:escrever", patch: "pedidorf:escrever", archive: "pedidorf:arquivar", unarchive: "pedidorf:arquivar", read: "pedidorf:ler"}

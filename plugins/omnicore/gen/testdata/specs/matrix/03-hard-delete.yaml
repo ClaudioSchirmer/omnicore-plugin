@@ -1,0 +1,24 @@
+# Eixo: delete duro, sem arquivamento — DELETE é purga, e o spec tem que dizer.
+specVersion: 1
+entity: Rascunho
+plural: Rascunhos
+language: pt-BR
+storage:
+  kind: flat
+  table: rascunhos
+  description: Rascunhos temporários, descartáveis.
+  managed: {revision: revision}
+fields:
+  - {name: Titulo, type: string, column: titulo, length: 120, livesOn: root, example: Ideia, description: Título do rascunho.}
+modes: [display, insert, update, delete]
+update: {shape: put}
+delete: {root: hard}
+read:
+  backing: relational
+  view: {name: rascunhos, version: 1}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: rascunho
+  dataAccess: anyone-with-permission
+  permissions: {insert: "rascunho:escrever", update: "rascunho:escrever", delete: "rascunho:apagar", read: "rascunho:ler"}

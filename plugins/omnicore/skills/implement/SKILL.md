@@ -25,6 +25,9 @@ instead of a static change→section table. That is why one generic skill works 
 grows with the framework for free: a new release documents a new capability, and this
 skill can already plan it.
 
+**Everything this run writes into the project is a document the project keeps —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 ## Core principles — read FIRST
 
 - **The pin's docs ARE the capability catalog.** Resolve `<omnicore-dir>` = `go list -m

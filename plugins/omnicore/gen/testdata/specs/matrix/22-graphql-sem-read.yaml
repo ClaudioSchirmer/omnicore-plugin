@@ -1,0 +1,24 @@
+# Eixo: GraphQL SEM lado de leitura — só mutations. O MountGraphQL do feature
+# precisa passar nil como view, a forma que já saiu como f.view e não compilava.
+specVersion: 1
+entity: Evento
+plural: Eventos
+language: pt-BR
+storage:
+  kind: flat
+  table: eventos
+  description: Eventos gravados via GraphQL, sem leitura REST.
+  managed: {revision: revision, createdAt: created_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 80, livesOn: root, example: abertura, description: Nome do evento.}
+modes: [insert]
+rules:
+  list:
+    - {id: nome-obrigatorio, kind: required, scope: [insert], fields: [Nome], notification: RequiredFieldNotification}
+surfaces:
+  rest: true
+  graphql: {enabled: true, mutations: [insert]}
+authz:
+  resource: evento
+  dataAccess: anyone-with-permission
+  permissions: {insert: "evento:escrever"}

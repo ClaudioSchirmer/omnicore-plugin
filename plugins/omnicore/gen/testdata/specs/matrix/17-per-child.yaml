@@ -1,0 +1,118 @@
+# Eixos: coleção 1:N com regras próprias, sibling anexado ao ROOT, PUT+PATCH,
+# e um filho cuja identidade de negócio é composta por dois campos.
+specVersion: 1
+entity: TurmaPC
+plural: TurmasPC
+language: pt-BR
+storage:
+  kind: flat
+  table: turmas_pc
+  description: Turmas com sua grade de aulas.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "3B-2026", description: Código da turma.}
+  - {name: Capacidade, type: int, column: capacidade, livesOn: root, example: "30", description: Número máximo de alunos.}
+children:
+  - name: Aula
+    plural: Aulas
+    table: turma_pc_aulas
+    parentColumn: turma_pc_id
+    description: Aulas da grade da turma.
+    ownedBy: root
+    editStrategy: per-child
+    duplicateNotification: AulaJaExisteNotification
+    businessIdentity: [DiaSemana, Horario]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - {name: DiaSemana, type: string, column: dia_semana, length: 15, example: segunda, description: Dia da semana.}
+      - {name: Horario, type: string, column: horario, length: 5, example: "08:00", description: Horário de início.}
+      - {name: Disciplina, type: string, column: disciplina, length: 80, example: Matemática, description: Disciplina ministrada.}
+      - {name: Sala, type: string, column: sala, length: 10, nullable: true, example: "A-101", description: "Sala, quando definida."}
+    rules:
+      list:
+        - {id: disciplina-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Disciplina], notification: RequiredFieldNotification}
+        - {id: dia-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [DiaSemana], notification: RequiredFieldNotification}
+        # Notificação PRÓPRIA levantada pela regra de um FILHO. O tipo tem de
+        # nascer em aggregatevos: domain importa aggregatevos, entao declara-lo
+        # em domain nao compila e nao ha import que resolva.
+        - id: horario-tem-formato
+          kind: length
+          scope: [insertOrUpdate]
+          fields: [Horario]
+          min: 5
+          max: 5
+          notification: HorarioInvalidoNotification
+siblings:
+  - name: Coordenacao
+    table: turma_pc_coordenacoes
+    description: Dados do professor coordenador, quando houver.
+    attachTo: root
+    fields:
+      - {name: CoordenadorNome, type: string, column: coordenador_nome, length: 160, nullable: true, example: Helena Duarte, description: Nome do coordenador.}
+      - {name: CoordenadorEmail, type: string, column: coordenador_email, length: 160, nullable: true, example: helena@escola.br, description: E-mail do coordenador.}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+delete: {root: soft}
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    # Regras sobre campos do SIBLING. O facet e um recorte fisico da mesma
+    # entidade, entao seus campos entram no escopo das regras da raiz como
+    # qualquer outro — recusa-los empurrava invariantes que a DSL escreve para
+    # o arquivo escrito a mao.
+    - id: email-do-coordenador-exige-nome
+      kind: requiredIf
+      scope: [insertOrUpdate]
+      fields: [CoordenadorNome]
+      other: CoordenadorEmail
+      notification: RequiredFieldNotification
+    - id: nome-do-coordenador-tem-tamanho
+      kind: length
+      scope: [insertOrUpdate]
+      fields: [CoordenadorNome]
+      min: 3
+      skipWhen: "null"
+      notification: NomeCoordenadorInvalidoNotification
+    - id: capacidade-valida
+      kind: range
+      scope: [insertOrUpdate]
+      fields: [Capacidade]
+      min: 1
+      max: 60
+      notification: CapacidadeInvalidaNotification
+      echoValue: true
+notifications:
+  - name: HorarioInvalidoNotification
+    semantic: validation
+    description: Horario fora do formato HH:MM.
+    text: {ptbr: "O horario deve ter o formato HH:MM.", eng: "The time must look like HH:MM.", esp: "La hora debe tener el formato HH:MM.", fra: "L'heure doit avoir le format HH:MM.", deu: "Die Uhrzeit muss HH:MM lauten.", ita: "L'orario deve essere HH:MM.", nld: "De tijd moet HH:MM zijn."}
+  - name: AulaJaExisteNotification
+    semantic: conflict
+    description: Aula ja existe na turma.
+    text: {ptbr: "Essa aula ja consta na turma.", eng: "That lesson is already in the class.", esp: "Esa clase ya consta.", fra: "Ce cours figure deja.", deu: "Diese Stunde ist bereits vorhanden.", ita: "Questa lezione e gia presente.", nld: "Die les staat er al."}
+  - name: NomeCoordenadorInvalidoNotification
+    semantic: validation
+    description: Nome do coordenador fora do tamanho.
+    text: {ptbr: "O nome do coordenador e curto demais.", eng: "The coordinator name is too short.", esp: "El nombre del coordinador es demasiado corto.", fra: "Le nom du coordinateur est trop court.", deu: "Der Name des Koordinators ist zu kurz.", ita: "Il nome del coordinatore e troppo corto.", nld: "De naam van de coordinator is te kort."}
+  - name: CapacidadeInvalidaNotification
+    semantic: validation
+    tvars: [min, max]
+    text: {ptbr: "A capacidade deve ficar entre {min} e {max}.", eng: "Capacity must be between {min} and {max}.", esp: "La capacidad debe estar entre {min} y {max}.", fra: "La capacité doit être comprise entre {min} et {max}.", deu: "Die Kapazität muss zwischen {min} und {max} liegen.", ita: "La capacità deve essere compresa tra {min} e {max}.", nld: "De capaciteit moet tussen {min} en {max} liggen."}
+read:
+  backing: relational
+  view: {name: turmas_pc, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, contains]}
+      - {field: Capacidade, ops: [gte, lte]}
+    controls: {pagination: true, fields: true, onlyTotal: true, includeArchived: true}
+surfaces:
+  rest: true
+  graphql: {enabled: true, connection: true, mutations: [insert, update, archive, unarchive]}
+  exports: {csv: {delimiter: ";"}, xlsx: {sheet: Turmas}}
+authz:
+  resource: turmapc
+  dataAccess: anyone-with-permission
+  permissions: {insert: "turmapc:escrever", update: "turmapc:escrever", patch: "turmapc:escrever", archive: "turmapc:arquivar", unarchive: "turmapc:arquivar", read: "turmapc:ler"}

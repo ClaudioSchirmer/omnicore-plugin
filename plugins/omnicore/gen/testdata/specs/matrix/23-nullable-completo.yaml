@@ -1,0 +1,128 @@
+# Eixo: nullable em TODA posição que o emit trata diferente — campo raiz imutável,
+# primeiro campo patchável, identidade de negócio de coleção, campo de filho imutável,
+# restrição `only` em campo opcional, VO int cujo intervalo admite 0, e um campo id
+# gravável com regra required. Cada um já saiu quebrado de um jeito próprio.
+specVersion: 1
+entity: Reserva
+plural: Reservas
+language: pt-BR
+storage:
+  kind: flat
+  table: reservas
+  description: Reservas de sala — o eixo nullable do gerador.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Observacao, type: string, column: observacao, length: 200, livesOn: root, nullable: true,
+     example: "trazer projetor", description: "Observação livre — primeiro campo patchável, e opcional."}
+  - {name: Titulo, type: string, column: titulo, length: 120, livesOn: root,
+     example: "Aula de algoritmos", description: Título da reserva.}
+  - {name: Apelido, type: string, column: apelido, length: 60, livesOn: root, nullable: true,
+     example: "algas", description: Apelido curto — opcional e imutável depois de criado.}
+  - {name: SalaRef, type: id, column: sala_ref, livesOn: root,
+     example: "6f1e8bfa-6a30-4e39-9d54-000000000001", description: Referência da sala reservada.}
+  - {name: Prioridade, type: int, column: prioridade, livesOn: root,
+     vo: {kind: raw, ref: Prioridade}, example: "0",
+     description: Prioridade da reserva — 0 é um valor legítimo.}
+valueObjects:
+  - name: Prioridade
+    kind: raw
+    backing: int
+    min: 0
+    max: 10
+    notification: PrioridadeInvalidaNotification
+children:
+  - name: Convidado
+    plural: Convidados
+    editStrategy: atomic-replace
+    ownedBy: root
+    table: reserva_convidados
+    parentColumn: reserva_id
+    businessIdentity: [Email]
+    fields:
+      - {name: Email, type: string, column: email, length: 160,
+         example: "ana@escola.br", description: E-mail do convidado — identidade da entrada.}
+      - {name: Nome, type: string, column: nome, length: 120, nullable: true,
+         example: "Ana", description: Nome — opcional.}
+      - {name: Cracha, type: string, column: cracha, length: 20, nullable: true,
+         example: "V-0042", description: Crachá emitido — opcional e imutável depois de definido.}
+      - {name: Situacao, type: string, column: situacao, length: 20,
+         example: "confirmado", description: Situação do convite.}
+      - {name: Empresa, type: string, column: empresa, length: 120, nullable: true,
+         example: "Fundacao Alfa", description: "Empresa visitante — opcional, restringe o teto abaixo."}
+    rules:
+      list:
+        - {id: cracha-imutavel, kind: immutable, scope: [update], fields: [Cracha],
+         notification: CrachaImutavelNotification}
+modes: [display, insert, update]
+update:
+  shape: both
+rules:
+  list:
+    - {id: titulo-obrigatorio, kind: required, scope: [insert, update], fields: [Titulo],
+       notification: RequiredFieldNotification}
+    - {id: sala-obrigatoria, kind: required, scope: [insert, update], fields: [SalaRef],
+       notification: RequiredFieldNotification}
+    - {id: apelido-imutavel, kind: immutable, scope: [update], fields: [Apelido],
+       notification: ApelidoImutavelNotification}
+    - {id: teto-visitantes, kind: groupCap, scope: [insert, update], fields: [Convidado],
+       cap: 3, only: {field: Empresa, equals: "Fundacao Alfa"},
+       description: "No máximo 3 convidados da fundação parceira por reserva.",
+       notification: TetoVisitantesNotification}
+notifications:
+  - name: PrioridadeInvalidaNotification
+    semantic: validation
+    text:
+      ptbr: A prioridade deve estar entre 0 e 10.
+      eng: Priority must be between 0 and 10.
+      esp: La prioridad debe estar entre 0 y 10.
+      fra: La priorité doit être comprise entre 0 et 10.
+      deu: Die Priorität muss zwischen 0 und 10 liegen.
+      ita: La priorità deve essere compresa tra 0 e 10.
+      nld: De prioriteit moet tussen 0 en 10 liggen.
+  - name: ApelidoImutavelNotification
+    semantic: validation
+    text:
+      ptbr: O apelido não pode ser alterado depois de criado.
+      eng: The nickname cannot change once set.
+      esp: El apodo no puede cambiar una vez definido.
+      fra: Le surnom ne peut plus changer une fois défini.
+      deu: Der Spitzname kann nach dem Setzen nicht geändert werden.
+      ita: Il soprannome non può cambiare una volta impostato.
+      nld: De bijnaam kan niet meer wijzigen zodra die is ingesteld.
+  - name: CrachaImutavelNotification
+    semantic: validation
+    text:
+      ptbr: O crachá não pode ser alterado depois de emitido.
+      eng: The badge cannot change once issued.
+      esp: La credencial no puede cambiar una vez emitida.
+      fra: Le badge ne peut plus changer une fois émis.
+      deu: Der Ausweis kann nach der Ausgabe nicht geändert werden.
+      ita: Il badge non può cambiare una volta emesso.
+      nld: De badge kan niet meer wijzigen zodra die is uitgegeven.
+  - name: TetoVisitantesNotification
+    semantic: validation
+    text:
+      ptbr: A reserva já tem o máximo de convidados da fundação parceira.
+      eng: The booking already holds the partner foundation's guest limit.
+      esp: La reserva ya alcanzó el límite de invitados de la fundación asociada.
+      fra: La réservation a déjà atteint la limite d'invités de la fondation partenaire.
+      deu: Die Reservierung hat bereits das Gästelimit der Partnerstiftung erreicht.
+      ita: La prenotazione ha già raggiunto il limite di ospiti della fondazione partner.
+      nld: De reservering zit al aan het gastenlimiet van de partnerstichting.
+read:
+  backing: relational
+  view: {name: reservas, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Titulo, ops: [eq, contains]}
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: reserva
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: "reserva:escrever"
+    update: "reserva:escrever"
+    patch: "reserva:escrever"
+    read: "reserva:ler"

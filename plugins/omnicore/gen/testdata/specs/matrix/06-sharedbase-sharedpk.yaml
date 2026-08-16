@@ -1,0 +1,50 @@
+# Eixos: SharedBase com link shared-PK (o papel usa a MESMA chave da identidade),
+# reuso de VO já existente no projeto, e política de órfão "manter".
+specVersion: 1
+entity: Professor
+plural: Professores
+language: pt-BR
+storage:
+  kind: sharedbase-role
+  table: professores
+  description: Professores — papel docente sobre a identidade de pessoa.
+  base:
+    table: pessoas
+    schemaFunc: PessoaBase
+    description: Identidade de pessoa, compartilhada entre papéis.
+    naturalKey: Documento
+    link: shared-pk
+    orphanPolicy: keep
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "123.456.789-00", description: Documento — chave natural da identidade.}
+  - {name: NomeCompleto, type: string, column: nome_completo, length: 160, livesOn: base, example: Helena Duarte, description: Nome completo da pessoa.}
+  - {name: Titulacao, type: string, column: titulacao, length: 40, livesOn: role, example: Doutorado, description: Titulação acadêmica.}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: patch}
+delete: {root: soft}
+rules:
+  list:
+    - {id: doc-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Documento], notification: RequiredFieldNotification}
+    - id: doc-imutavel
+      kind: immutable
+      scope: [update]
+      fields: [Documento]
+      notification: DocumentoImutavelNotification
+      echoValue: true
+notifications:
+  - name: DocumentoImutavelNotification
+    semantic: validation
+    text: {ptbr: O documento não pode ser alterado., eng: The document cannot be changed., esp: El documento no se puede modificar., fra: Le document ne peut pas être modifié., deu: Das Dokument kann nicht geändert werden., ita: Il documento non può essere modificato., nld: Het document kan niet worden gewijzigd.}
+read:
+  backing: relational
+  view: {name: professores, version: 1}
+  byId: true
+  byParams:
+    filters: [{field: NomeCompleto, ops: [eq, contains]}]
+    controls: {pagination: true, includeArchived: true}
+surfaces: {rest: true}
+authz:
+  resource: professor
+  dataAccess: anyone-with-permission
+  permissions: {insert: "professor:escrever", patch: "professor:escrever", archive: "professor:arquivar", unarchive: "professor:arquivar", read: "professor:ler"}

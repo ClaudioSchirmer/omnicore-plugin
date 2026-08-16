@@ -1,0 +1,209 @@
+# Eixos: fatos POR GRUPO (GROUP BY no banco) em todas as suas formas, lado a
+# lado com o groupCap, que conta em Go.
+#
+# As duas coisas se parecem e respondem a perguntas diferentes, e essa é a razão
+# desta fixture existir:
+#
+#   * `groupCap` (regra) conta as entradas que ESTA ESCRITA carrega. O banco não
+#     as conhece ainda — nenhuma query pode responder por elas.
+#   * um fato com `groupBy` conta LINHAS DA TABELA, inclusive as de outros
+#     agregados, em um único SELECT. É o que substitui carregar as linhas e
+#     agrupá-las no Go.
+#
+# Ambas aparecem aqui de propósito: uma árvore que gera as duas prova que elas
+# convivem, e o dia em que uma passar a ser emitida como a outra o build cai.
+specVersion: 1
+entity: TurmaG
+plural: TurmasG
+language: pt-BR
+storage:
+  kind: flat
+  table: turmas_g
+  description: Turmas, com fatos agregados por grupo.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "3B-2026", description: Código da turma.}
+  - {name: Situacao, type: string, column: situacao, length: 20, livesOn: root, example: aberta, description: Situação da turma., vo: {kind: enum, ref: SituacaoTurmaG}}
+  - {name: Turno, type: string, column: turno, length: 20, livesOn: root, example: manha, description: Turno em que a turma acontece.}
+  - {name: Capacidade, type: int, column: capacidade, livesOn: root, example: "30", description: Número máximo de alunos.}
+  - {name: CreditosTotais, type: int64, column: creditos_totais, livesOn: root, example: "120", description: Créditos somados da grade.}
+  - {name: NotaMedia, type: float64, column: nota_media, livesOn: root, example: "8.5", description: Nota média da turma.}
+children:
+  - name: Aula
+    plural: Aulas
+    table: turma_g_aulas
+    parentColumn: turma_g_id
+    description: Aulas da grade da turma.
+    ownedBy: root
+    editStrategy: atomic-replace
+    businessIdentity: [DiaSemana, Horario]
+    fields:
+      - {name: DiaSemana, type: string, column: dia_semana, length: 15, example: segunda, description: Dia da semana.}
+      - {name: Horario, type: string, column: horario, length: 5, example: "08:00", description: Horário de início.}
+      - {name: Disciplina, type: string, column: disciplina, length: 80, example: Matemática, description: Disciplina ministrada.}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: put}
+delete: {root: soft}
+valueObjects:
+  - name: SituacaoTurmaG
+    kind: enum
+    backing: string
+    description: Situação da turma.
+    unknownNotification: SituacaoTurmaGInvalidaNotification
+    members:
+      - {name: Aberta, value: aberta}
+      - {name: Suspensa, value: suspensa}
+      - {name: Fechada, value: fechada}
+
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    # O teto em Go, sobre o que a escrita traz. Não existe query que responda
+    # por ele: as aulas ainda não estão na tabela quando a regra roda.
+    - id: no-maximo-duas-por-dia
+      kind: groupCap
+      scope: [insertOrUpdate]
+      fields: [Aula]
+      groupBy: [DiaSemana]
+      cap: 2
+      notification: DemasiadasAulasGNotification
+
+    # `factRange` é a outra metade de um fato: o fato responde o número, a regra
+    # diz o que o número pode ser, e o gerador escreve a chamada, a comparação e
+    # a notificação. Os três formatos de resposta aparecem aqui de propósito —
+    # cada um emite um corpo diferente e nenhum é alcançável pelos outros.
+
+    # 1. escalar simples (count): compara direto.
+    - id: teto-de-turmas
+      kind: factRange
+      scope: [insert]
+      fact: TotalDeTurmas
+      max: 500
+      attachTo: Codigo
+      notification: LimiteDeTurmasNotification
+      # O texto interpola {max}, preenchido a partir do MESMO limite que a
+      # comparação usa, e echoValue devolve o número que o serviço respondeu.
+      echoValue: true
+
+    # 2. escalar que carrega `found` (max): sobre nenhuma linha não há máximo, e
+    #    a regra fica de fora em vez de tratar o zero como resposta.
+    - id: capacidade-coerente
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: MaiorCapacidade
+      max: 200
+      attachTo: Capacidade
+      notification: CapacidadeIncoerenteNotification
+
+    # 3. agrupado: o banco já reduziu a tabela a uma linha por chave, e a regra
+    #    compara respostas em vez de contar linhas. É o groupCap acima, só que
+    #    sobre o que ESTÁ na tabela.
+    - id: teto-por-situacao
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: TurmasPorSituacao
+      max: 50
+      attachTo: Situacao
+      notification: DemasiadasTurmasNaSituacaoNotification
+      # No agrupado o eco é o valor do GRUPO que estourou; qual grupo foi vem
+      # do attachTo, que aqui é a própria chave.
+      echoValue: true
+
+service:
+  required: true
+  facts:
+    # ── sem groupBy: o escalar sobre TODAS as linhas que casam ────────────────
+    - name: CodigoJaExiste
+      kind: exists
+      description: Já existe uma turma ativa com este código.
+      filters: [Codigo]
+      excludeSelf: true
+      activeOnly: true
+    - name: TotalDeTurmas
+      kind: count
+      description: Quantas turmas existem ao todo.
+    # Um max sem grupo devolve (valor, bool): sobre nenhuma linha não existe
+    # máximo, e o zero sozinho passaria por um.
+    - name: MaiorCapacidade
+      kind: max
+      field: Capacidade
+      description: A maior capacidade em vigor.
+      activeOnly: true
+
+    # ── com groupBy: um SELECT, uma entrada por chave ─────────────────────────
+    - name: TurmasPorSituacao
+      kind: count
+      groupBy: [Situacao]
+      description: Quantas turmas em cada situação.
+      activeOnly: true
+    - name: CreditosPorTurno
+      kind: sum
+      field: CreditosTotais
+      groupBy: [Turno]
+      description: Créditos somados por turno.
+    - name: NotaMediaPorSituacao
+      kind: avg
+      field: NotaMedia
+      groupBy: [Situacao]
+      description: Nota média de cada situação.
+      activeOnly: true
+    - name: MenorNotaPorTurno
+      kind: min
+      field: NotaMedia
+      groupBy: [Turno]
+      description: A menor nota de cada turno.
+    # Chave COMPOSTA: duas colunas no GROUP BY, duas no tipo do grupo.
+    - name: MaiorCapacidadePorSituacaoETurno
+      kind: max
+      field: Capacidade
+      groupBy: [Situacao, Turno]
+      description: A maior capacidade de cada situação em cada turno.
+    # Agrupado E filtrado: o filtro vira parâmetro do método, o grupo continua
+    # sendo resolvido pelo banco.
+    - name: TurmasPorSituacaoNoTurno
+      kind: count
+      groupBy: [Situacao]
+      filters: [Turno]
+      description: Quantas turmas em cada situação, dentro de um turno.
+      activeOnly: true
+
+notifications:
+  - name: SituacaoTurmaGInvalidaNotification
+    package: vos
+    semantic: validation
+    description: Valor fora do conjunto.
+    text: {ptbr: "Situacao invalida.", eng: "Invalid state.", esp: "Estado invalido.", fra: "Etat invalide.", deu: "Ungueltiger Zustand.", ita: "Stato non valido.", nld: "Ongeldige staat."}
+  - name: LimiteDeTurmasNotification
+    semantic: validation
+    description: Teto de turmas da instituicao.
+    tvars: [max]
+    text: {ptbr: "A instituicao ja atingiu o limite de {max} turmas.", eng: "The institution has reached its limit of {max} classes.", esp: "La institucion alcanzo el limite de {max} clases.", fra: "L'etablissement a atteint sa limite de {max} classes.", deu: "Die Einrichtung hat ihr Limit von {max} Klassen erreicht.", ita: "L'istituto ha raggiunto il limite di {max} classi.", nld: "De instelling heeft haar limiet van {max} klassen bereikt."}
+  - name: CapacidadeIncoerenteNotification
+    semantic: validation
+    description: Capacidade acima do teto praticado.
+    text: {ptbr: "A capacidade excede o teto praticado.", eng: "The capacity exceeds the practised ceiling.", esp: "La capacidad excede el tope practicado.", fra: "La capacite depasse le plafond pratique.", deu: "Die Kapazitaet uebersteigt die uebliche Obergrenze.", ita: "La capacita supera il tetto praticato.", nld: "De capaciteit overschrijdt het gangbare plafond."}
+  - name: DemasiadasTurmasNaSituacaoNotification
+    semantic: validation
+    description: Excesso de turmas na mesma situacao.
+    tvars: [max]
+    text: {ptbr: "Cada situacao aceita no maximo {max} turmas.", eng: "Each state accepts at most {max} classes.", esp: "Cada estado acepta como maximo {max} clases.", fra: "Chaque etat accepte au plus {max} classes.", deu: "Jeder Zustand erlaubt hoechstens {max} Klassen.", ita: "Ogni stato accetta al massimo {max} classi.", nld: "Elke staat accepteert maximaal {max} klassen."}
+  - name: DemasiadasAulasGNotification
+    semantic: validation
+    description: Excesso de aulas no mesmo dia.
+    text: {ptbr: "Ha aulas demais no mesmo dia.", eng: "Too many lessons on the same day.", esp: "Demasiadas clases el mismo dia.", fra: "Trop de cours le meme jour.", deu: "Zu viele Stunden am selben Tag.", ita: "Troppe lezioni nello stesso giorno.", nld: "Te veel lessen op dezelfde dag."}
+
+read:
+  backing: relational
+  view: {name: turmas_g, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, contains]}
+      - {field: Turno, ops: [eq, in]}
+    controls: {pagination: true, includeArchived: true}
+surfaces:
+  rest: true
+authz:
+  resource: turma-g
+  dataAccess: anyone-with-permission
+  permissions: {insert: "turma-g:escrever", update: "turma-g:escrever", archive: "turma-g:arquivar", unarchive: "turma-g:arquivar", read: "turma-g:ler"}

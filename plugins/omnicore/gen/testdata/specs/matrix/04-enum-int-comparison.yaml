@@ -1,0 +1,81 @@
+# Eixos: VO enum com backing INT, regra comparison entre datas (nil-safe),
+# regra length, e patchExcludes.
+specVersion: 1
+entity: Contrato
+plural: Contratos
+language: pt-BR
+storage:
+  kind: flat
+  table: contratos
+  description: Contratos de prestação de serviço.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Numero, type: string, column: numero, length: 20, livesOn: root, example: "CT-2026-001", description: Número do contrato.}
+  - name: Nivel
+    type: int
+    column: nivel
+    livesOn: root
+    vo: {kind: enum, ref: NivelContrato}
+    example: "1"
+    description: Nível de prioridade do contrato.
+  - {name: Inicio, type: time, column: inicio, livesOn: root, example: "2026-01-01T00:00:00Z", description: Início da vigência.}
+  - {name: Fim, type: time, column: fim, livesOn: root, nullable: true, example: "2026-12-31T00:00:00Z", description: "Fim da vigência, quando houver."}
+  - {name: Observacao, type: string, column: observacao, length: 500, livesOn: root, nullable: true, example: Renovação automática, description: Observações livres.}
+valueObjects:
+  - name: NivelContrato
+    kind: enum
+    backing: int
+    description: Nível de prioridade, do menor para o maior.
+    unknownNotification: NivelDesconhecidoNotification
+    members:
+      - {name: Baixo, value: 1}
+      - {name: Medio, value: 2}
+      - {name: Alto,  value: 3}
+modes: [display, insert, update, archive, unarchive]
+update:
+  shape: patch
+  # O número identifica o contrato: não se muda por PATCH.
+  patchExcludes: [Numero]
+delete: {root: soft}
+rules:
+  list:
+    - {id: numero-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Numero], notification: RequiredFieldNotification}
+    - id: fim-depois-do-inicio
+      kind: comparison
+      scope: [insertOrUpdate]
+      fields: [Fim]
+      other: Inicio
+      operator: gte
+      notification: VigenciaInvertidaNotification
+      echoValue: true
+    - id: observacao-tamanho
+      kind: length
+      scope: [insertOrUpdate]
+      fields: [Observacao]
+      max: 500
+      notification: ObservacaoLongaNotification
+notifications:
+  - name: VigenciaInvertidaNotification
+    semantic: validation
+    text: {ptbr: O fim da vigência não pode ser anterior ao início., eng: The end of the term cannot precede its start., esp: El fin de la vigencia no puede ser anterior al inicio., fra: La fin ne peut pas précéder le début., deu: Das Ende darf nicht vor dem Beginn liegen., ita: La fine non può precedere l'inizio., nld: Het einde mag niet voor het begin liggen.}
+  - name: ObservacaoLongaNotification
+    semantic: validation
+    text: {ptbr: A observação excede o tamanho permitido., eng: The note exceeds the allowed length., esp: La observación excede la longitud permitida., fra: La note dépasse la longueur autorisée., deu: Die Notiz überschreitet die zulässige Länge., ita: La nota supera la lunghezza consentita., nld: De notitie overschrijdt de toegestane lengte.}
+  - name: NivelDesconhecidoNotification
+    package: vos
+    semantic: validation
+    text: {ptbr: Nível de contrato desconhecido., eng: Unknown contract level., esp: Nivel de contrato desconocido., fra: Niveau de contrat inconnu., deu: Unbekannte Vertragsstufe., ita: Livello di contratto sconosciuto., nld: Onbekend contractniveau.}
+read:
+  backing: relational
+  view: {name: contratos, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Numero, ops: [eq, contains]}
+      - {field: Nivel, ops: [eq, in]}
+    controls: {pagination: true, includeArchived: true}
+surfaces: {rest: true}
+authz:
+  resource: contrato
+  dataAccess: anyone-with-permission
+  permissions: {insert: "contrato:escrever", patch: "contrato:escrever", archive: "contrato:arquivar", unarchive: "contrato:arquivar", read: "contrato:ler"}

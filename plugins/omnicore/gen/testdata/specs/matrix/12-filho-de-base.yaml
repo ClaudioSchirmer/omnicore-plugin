@@ -1,0 +1,61 @@
+# Eixos: SharedBase separate-FK com unicidade unique-fk (0..1 linha, para sempre)
+# e política de órfão "apagar quando ninguém referencia".
+specVersion: 1
+entity: Bibliotecario
+plural: Bibliotecarios
+language: pt-BR
+storage:
+  kind: sharedbase-role
+  table: bibliotecarios
+  description: Bibliotecários — outro papel sobre a mesma identidade de pessoa.
+  base:
+    table: pessoas_bib
+    schemaFunc: PessoaBibBase
+    linkColumn: pessoa_bib_id
+    description: Identidade de pessoa.
+    naturalKey: Documento
+    link: separate-fk
+    rowUniqueness: unique-fk
+    orphanPolicy: delete-when-unreferenced
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "123.456.789-00", description: Documento — chave natural.}
+  - {name: Nome, type: string, column: nome, length: 160, livesOn: base, example: Carlos Lima, description: Nome da pessoa.}
+  - {name: Setor, type: string, column: setor, length: 40, livesOn: role, example: Acervo, description: Setor de atuação.}
+modes: [display, insert, archive, unarchive]
+delete: {root: soft}
+rules:
+  list:
+    - {id: doc-obrigatorio, kind: required, scope: [insert], fields: [Documento], notification: RequiredFieldNotification}
+notifications:
+  - name: TituloJaExisteNotification
+    semantic: conflict
+    description: Titulo ja consta na pessoa.
+    text: {ptbr: "Esse título já consta.", eng: "That degree is already there.", esp: "Ese título ya consta.", fra: "Ce titre figure déjà.", deu: "Dieser Titel ist bereits vorhanden.", ita: "Questo titolo è già presente.", nld: "Die titel staat er al."}
+read:
+  backing: relational
+  view: {name: bibliotecarios, version: 1}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: bibliotecario
+  dataAccess: anyone-with-permission
+  permissions: {insert: "bib:escrever", archive: "bib:arquivar", unarchive: "bib:arquivar", read: "bib:ler"}
+
+children:
+  - name: Titulo
+    plural: Titulos
+    table: pessoa_titulos
+    parentColumn: pessoa_bib_id
+    description: Titulos academicos da pessoa.
+    ownedBy: base
+    # per-child sobre uma coleção da IDENTIDADE: as três rotas de entrada única
+    # penduram no papel, e a tabela pertence à base. É a metade "dona" do par
+    # com o caso 20, que monta esta mesma coleção no outro papel.
+    editStrategy: per-child
+    duplicateNotification: TituloJaExisteNotification
+    businessIdentity: [Nome]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - {name: Nome, type: string, column: nome, length: 80, example: Mestrado, description: Nome do titulo.}
