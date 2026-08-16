@@ -177,6 +177,124 @@ func TestGofmtAlignmentIsNotAnEdit(t *testing.T) {
 	}
 }
 
+// TestADeclarationWithItsMethodsIsOneUnit is the shape that broke it in a real
+// project. A notification whose semantic is not `validation` is emitted as a
+// struct FOLLOWED BY its Semantic() method, and the two are one declaration as
+// far as this file is concerned. Reading back only the struct meant the text
+// never matched the hash recorded for the pair, so every conflict-semantic
+// notification read as hand-edited from its second regeneration onwards — six
+// of the twelve in the project where it was found.
+func TestADeclarationWithItsMethodsIsOneUnit(t *testing.T) {
+	withMethod := "type ConflictNotification struct {\n" +
+		"\tdomain.DomainNotificationBase\n" +
+		"}\n\n" +
+		"func (ConflictNotification) Semantic() domain.NotificationSemantic { return domain.SemanticConflict }"
+
+	first, _, _, written := MergeTypeDecls(notifSkeleton, []TypeDecl{
+		declOf("ConflictNotification", withMethod),
+	}, nil)
+
+	// Re-running the SAME spec must be a no-op — this is what failed.
+	second, changed, stale, _ := MergeTypeDecls(first, []TypeDecl{
+		declOf("ConflictNotification", withMethod),
+	}, written)
+	if changed || len(stale) != 0 {
+		t.Fatalf("an unchanged conflict notification must be neither rewritten nor reported "+
+			"(changed=%v stale=%v)", changed, stale)
+	}
+	if second != first {
+		t.Fatal("the file changed on a no-op run")
+	}
+
+	// And when the spec DOES move it, the method moves with the struct.
+	moved := strings.Replace(withMethod, "SemanticConflict", "SemanticStateConflict", 1)
+	out, changed, stale, _ := MergeTypeDecls(first, []TypeDecl{
+		declOf("ConflictNotification", moved),
+	}, written)
+	if !changed || len(stale) != 0 {
+		t.Fatalf("the semantic moved in the spec and should follow (changed=%v stale=%v)",
+			changed, stale)
+	}
+	if strings.Contains(out, "SemanticConflict {") || !strings.Contains(out, "SemanticStateConflict") {
+		t.Fatalf("the method was not updated with its type:\n%s", out)
+	}
+	if strings.Count(out, "func (ConflictNotification) Semantic()") != 1 {
+		t.Fatalf("the method was duplicated:\n%s", out)
+	}
+}
+
+// TestAMethodFurtherDownIsNotSwallowed guards the walk that absorbs methods: it
+// stops at the first declaration that is not this type's, so an unrelated
+// function between declarations keeps everything after it out of the range.
+func TestAMethodFurtherDownIsNotSwallowed(t *testing.T) {
+	src := notifSkeleton + "\n" + plainDecl + "\n\n" +
+		"type OtherNotification struct{ domain.DomainNotificationBase }\n\n" +
+		"func (OtherNotification) Semantic() domain.NotificationSemantic { return domain.SemanticConflict }\n"
+
+	start, end, ok := declRange(src, "LimitNotification")
+	if !ok {
+		t.Fatal("the declaration was not found")
+	}
+	if strings.Contains(src[start:end], "OtherNotification") {
+		t.Fatalf("the range swallowed the next declaration:\n%s", src[start:end])
+	}
+}
+
+// TestADeclarationANOTHEREntityWroteIsRecognised is the false positive found in
+// a real project: two roles over one identity both expose the same collection,
+// so both specs declare the notification about it. The first to run writes it
+// and records the hash under its own name; the second used to read text it had
+// never written and report a hand edit that never happened — every run, forever.
+func TestADeclarationANOTHEREntityWroteIsRecognised(t *testing.T) {
+	first, _, _, written := MergeTypeDecls(notifSkeleton, []TypeDecl{
+		declOf("SharedNotification", "type SharedNotification struct{ domain.DomainNotificationBase }"),
+	}, nil)
+
+	// The SECOND entity: same declaration, nothing of its own recorded yet.
+	out, changed, stale, mine := MergeTypeDeclsWith(first, []TypeDecl{
+		declOf("SharedNotification", "type SharedNotification struct{ domain.DomainNotificationBase }"),
+	}, nil, written)
+
+	if changed {
+		t.Fatal("the declaration already says what this spec says — nothing to write")
+	}
+	if len(stale) != 0 {
+		t.Fatalf("a declaration the generator wrote is not a hand edit, got %v", stale)
+	}
+	if out != first {
+		t.Fatal("the file was touched")
+	}
+	if mine["SharedNotification"] == "" {
+		t.Error("the second entity should record it too, so it can maintain it later")
+	}
+}
+
+// TestTwoSpecsDisagreeingOnOneDeclarationIsReported is the other half: recognised
+// as the generator's, but NOT this spec's text. Rewriting it would hand the same
+// declaration back and forth between two entities on every regeneration, so it is
+// left alone and named.
+func TestTwoSpecsDisagreeingOnOneDeclarationIsReported(t *testing.T) {
+	theirs := "type SharedNotification struct{ domain.DomainNotificationBase }"
+	first, _, _, written := MergeTypeDecls(notifSkeleton, []TypeDecl{
+		declOf("SharedNotification", theirs),
+	}, nil)
+
+	mineDecl := "type SharedNotification struct {\n\tdomain.DomainNotificationBase\n\tMax string `tvar:\"max\"`\n}"
+	out, changed, stale, _ := MergeTypeDeclsWith(first, []TypeDecl{
+		declOf("SharedNotification", mineDecl),
+	}, nil, written)
+
+	if changed {
+		t.Fatal("another entity's declaration must not be rewritten")
+	}
+	if len(stale) != 1 || !strings.Contains(stale[0], "another entity") {
+		t.Fatalf("the disagreement must be reported, and say why, got %v", stale)
+	}
+	if !strings.Contains(out, theirs) {
+		t.Fatal("the existing declaration was altered")
+	}
+}
+
 // ── the catalogs ─────────────────────────────────────────────────────────────
 
 // TestATranslatorsWordingSurvives is the same mechanism where it matters most:
@@ -184,13 +302,15 @@ func TestGofmtAlignmentIsNotAnEdit(t *testing.T) {
 // reverting it on the next regeneration would be the worst kind of helpful.
 func TestATranslatorsWordingSurvives(t *testing.T) {
 	src := catalogSkeleton("ptbr", "ptbr", "PTBR", "LangPTBR")
-	first, _, _, _, written := MergeMapEntries(src,
+	first, r1 := MergeMapEntries(src,
 		[]MapEntry{{Key: "LimitNotification", Value: "Limite atingido."}}, nil)
+	written := r1.Written
 
 	improved := strings.Replace(first, "Limite atingido.", "Você atingiu o limite.", 1)
 
-	out, changed, _, stale, _ := MergeMapEntries(improved,
+	out, r2 := MergeMapEntries(improved,
 		[]MapEntry{{Key: "LimitNotification", Value: "Limite atingido."}}, written)
+	changed, stale := r2.Changed, r2.Stale
 
 	if changed {
 		t.Fatal("a translator's wording must not be reverted")
@@ -207,11 +327,13 @@ func TestATranslatorsWordingSurvives(t *testing.T) {
 // still exactly what the generator wrote, so a spec that reworded it may move it.
 func TestSpecTextMovesWhenNobodyTouchedIt(t *testing.T) {
 	src := catalogSkeleton("ptbr", "ptbr", "PTBR", "LangPTBR")
-	first, _, _, _, written := MergeMapEntries(src,
+	first, r1 := MergeMapEntries(src,
 		[]MapEntry{{Key: "LimitNotification", Value: "Limite atingido."}}, nil)
+	written := r1.Written
 
-	out, changed, _, stale, now := MergeMapEntries(first,
+	out, r2 := MergeMapEntries(first,
 		[]MapEntry{{Key: "LimitNotification", Value: "Limite de {max} atingido."}}, written)
+	changed, stale, now := r2.Changed, r2.Stale, r2.Written
 
 	if !changed {
 		t.Fatal("text the generator itself wrote must follow the spec")
@@ -233,12 +355,13 @@ func TestSpecTextMovesWhenNobodyTouchedIt(t *testing.T) {
 // TestOtherKeysInTheCatalogAreUntouched — a catalog holds every entity's keys.
 func TestOtherKeysInTheCatalogAreUntouched(t *testing.T) {
 	src := catalogSkeleton("ptbr", "ptbr", "PTBR", "LangPTBR")
-	first, _, _, _, written := MergeMapEntries(src, []MapEntry{
+	first, r1 := MergeMapEntries(src, []MapEntry{
 		{Key: "LimitNotification", Value: "Limite atingido."},
 		{Key: "OtherEntityNotification", Value: "Outra coisa."},
 	}, nil)
+	written := r1.Written
 
-	out, _, _, _, _ := MergeMapEntries(first,
+	out, _ := MergeMapEntries(first,
 		[]MapEntry{{Key: "LimitNotification", Value: "Novo texto."}}, written)
 
 	if !strings.Contains(out, "Outra coisa.") {

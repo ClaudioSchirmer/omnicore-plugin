@@ -48,6 +48,24 @@ import (
 // that points at the rule rather than at the struct nobody updated. Naming it in
 // the report is what turns that into a one-line fix.
 func MergeTypeDecls(existing string, decls []TypeDecl, prior map[string]string) (string, bool, []string, map[string]string) {
+	return MergeTypeDeclsWith(existing, decls, prior, nil)
+}
+
+// MergeTypeDeclsWith adds what the OTHER entities of the project recorded for
+// the same file.
+//
+// A registration file is shared, and so are some of its declarations: two roles
+// over one identity raise the same notification about the collection they both
+// expose, and both specs declare it. The first one to run writes it and records
+// the hash under ITS name; the second finds text it never wrote, and without
+// this would report a hand edit that never happened — for a declaration the
+// generator itself produced, on every regeneration, forever.
+//
+// Recognising it is not the same as owning it: a declaration another entity
+// wrote is left alone. It is only reported when it disagrees with what THIS
+// spec says, which is a real thing to know — two specs describing one shared
+// notification differently.
+func MergeTypeDeclsWith(existing string, decls []TypeDecl, prior, foreign map[string]string) (string, bool, []string, map[string]string) {
 	changed := false
 	var stale []string
 	written := map[string]string{}
@@ -72,6 +90,12 @@ func MergeTypeDecls(existing string, decls []TypeDecl, prior map[string]string) 
 				out = replaced
 				written[d.Name] = HashText(d.Body)
 				changed = true
+			case foreign[d.Name] == HashText(onDisk):
+				// Another entity's, and it disagrees with this spec — otherwise
+				// the equality case above would have taken it. Reported, never
+				// touched: rewriting it here would hand the same declaration
+				// back and forth on every regeneration.
+				stale = append(stale, d.Name+" (declared by another entity too, and the two specs disagree)")
 			default:
 				stale = append(stale, d.Name)
 			}
@@ -123,32 +147,71 @@ func declText(src, name string) (string, bool) {
 	return src[start:end], true
 }
 
-// declRange locates one type declaration's source offsets, doc comment excluded.
+// declRange locates one declaration's source offsets, doc comment excluded.
+//
+// It spans the type AND the methods the generator writes with it. That is not a
+// refinement, it is the whole correctness of the comparison: a notification
+// whose semantic is not `validation` is emitted as a struct FOLLOWED BY its
+// Semantic() method, as one unit. Reading back only the struct produced a text
+// that could never match the hash recorded for the unit, so every such
+// declaration read as hand-edited on the second regeneration — and stayed that
+// way, because the mismatch is permanent.
 func declRange(src, name string) (int, int, bool) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", src, parser.SkipObjectResolution)
 	if err != nil {
 		return 0, 0, false
 	}
-	for _, decl := range f.Decls {
+	for i, decl := range f.Decls {
 		gd, ok := decl.(*ast.GenDecl)
 		if !ok || gd.Tok != token.TYPE {
 			continue
 		}
-		for _, spec := range gd.Specs {
-			ts, ok := spec.(*ast.TypeSpec)
-			if !ok || ts.Name == nil || ts.Name.Name != name {
-				continue
-			}
-			start := fset.Position(gd.TokPos).Offset
-			end := fset.Position(gd.End()).Offset
-			if start < 0 || end > len(src) || start >= end {
-				return 0, 0, false
-			}
-			return start, end, true
+		if !declares(gd, name) {
+			continue
 		}
+		start := fset.Position(gd.TokPos).Offset
+		end := fset.Position(gd.End()).Offset
+		// Absorb the methods that follow, while they belong to this type. The
+		// walk stops at the first declaration that does not, so a method
+		// someone added further down the file is never swallowed.
+		for _, next := range f.Decls[i+1:] {
+			fd, ok := next.(*ast.FuncDecl)
+			if !ok || !isMethodOf(fd, name) {
+				break
+			}
+			end = fset.Position(fd.End()).Offset
+		}
+		if start < 0 || end > len(src) || start >= end {
+			return 0, 0, false
+		}
+		return start, end, true
 	}
 	return 0, 0, false
+}
+
+func declares(gd *ast.GenDecl, name string) bool {
+	for _, spec := range gd.Specs {
+		ts, ok := spec.(*ast.TypeSpec)
+		if ok && ts.Name != nil && ts.Name.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// isMethodOf reports whether fd is a method on the named type, by value or by
+// pointer.
+func isMethodOf(fd *ast.FuncDecl, name string) bool {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		return false
+	}
+	t := fd.Recv.List[0].Type
+	if star, ok := t.(*ast.StarExpr); ok {
+		t = star.X
+	}
+	id, ok := t.(*ast.Ident)
+	return ok && id.Name == name
 }
 
 // normaliseDecl collapses whitespace so gofmt's alignment — which changes when a
@@ -180,13 +243,30 @@ func declaresType(src, name string) bool {
 // balance tipped further towards leaving them alone: a translator improving the
 // wording is the expected case, so this is a note in the report and never an
 // edit.
-func MergeMapEntries(existing string, entries []MapEntry, prior map[string]string) (string, bool, []string, []string, map[string]string) {
+// CatalogMerge is what one pass over a catalog did. It replaced five positional
+// returns: "added" and "updated" are different facts and the report says so, and
+// a caller reading them by position had already got one wrong.
+type CatalogMerge struct {
+	Changed bool
+	// Added are keys this entity did not have in the file before.
+	Added []string
+	// Updated are keys whose text the generator itself had written and the spec
+	// has since moved.
+	Updated []string
+	// Stale are keys somebody else's hand is on — reported, never touched.
+	Stale []string
+	// Written is the hash per key this run is responsible for, for the lock.
+	Written map[string]string
+}
+
+func MergeMapEntries(existing string, entries []MapEntry, prior map[string]string) (string, CatalogMerge) {
+	res := CatalogMerge{Written: map[string]string{}}
 	closing := findMapClose(existing)
 	if closing < 0 {
-		return existing, false, nil, nil, nil
+		return existing, res
 	}
 	var added, stale []string
-	written := map[string]string{}
+	written := res.Written
 	changed := false
 	var block strings.Builder
 	for _, e := range entries {
@@ -206,6 +286,7 @@ func MergeMapEntries(existing string, entries []MapEntry, prior map[string]strin
 				existing = replaced
 				closing = findMapClose(existing)
 				written[e.Key] = HashText(e.Value)
+				res.Updated = append(res.Updated, e.Key)
 				changed = true
 			default:
 				// Somebody rewrote this text. A translator improving the wording
@@ -219,17 +300,19 @@ func MergeMapEntries(existing string, entries []MapEntry, prior map[string]strin
 		added = append(added, e.Key)
 		written[e.Key] = HashText(e.Value)
 	}
+	res.Changed, res.Added, res.Stale = changed, added, stale
 	if block.Len() == 0 {
-		return existing, changed, added, stale, written
+		return existing, res
 	}
+	res.Changed = true
 	// An EMPTY catalog writes its literal on one line (`return map[string]string{}`),
 	// so the closing brace shares the line with the return. Inserting at the start
 	// of that line would put the entries BEFORE the return and produce a file that
 	// does not parse — which is exactly what a project with no catalogs yet gets.
 	if isSameLineClose(existing, closing) {
-		return existing[:closing] + "\n" + block.String() + "\t" + existing[closing:], true, added, stale, written
+		return existing[:closing] + "\n" + block.String() + "\t" + existing[closing:], res
 	}
-	return existing[:closing] + block.String() + existing[closing:], true, added, stale, written
+	return existing[:closing] + block.String() + existing[closing:], res
 }
 
 // mapValue reads back the text a catalog currently holds for a key.

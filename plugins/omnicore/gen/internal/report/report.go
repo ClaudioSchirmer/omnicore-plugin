@@ -19,6 +19,19 @@ import (
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
+// createdThisRun reports whether a hook file was written by THIS run, as opposed
+// to having been on disk already. A hook is never rewritten, so the two states
+// mean opposite things to the reader: one is work to start, the other is work to
+// verify.
+func createdThisRun(decisions []fsplan.Decision, path string) bool {
+	for _, d := range decisions {
+		if d.File.Path == path {
+			return d.Action == fsplan.Create
+		}
+	}
+	return false
+}
+
 // Input is everything the report describes.
 type Input struct {
 	Model               *ir.Model
@@ -102,9 +115,21 @@ func renderTodo(b *strings.Builder, in Input) {
 		}
 		empty = false
 		fmt.Fprintf(b, "### `%s`\n\n", h.path)
-		b.WriteString("The spec declared these invariants as ones it could not express. " +
-			"The file was created with a stub for each; the code is yours to write, and " +
-			"regeneration will never touch it." + h.scope + "\n\n")
+		// Created THIS run or already on disk? The generator knows, and saying
+		// the same sentence either way is how a report claims work is
+		// outstanding that somebody finished three runs ago. It still cannot say
+		// whether the bodies are written — it never reads inside a hook — so the
+		// second wording asks for a check rather than announcing completion.
+		if createdThisRun(in.Decisions, h.path) {
+			b.WriteString("The spec declared these invariants as ones it could not express. " +
+				"The file was just created, with a stub for each; the code is yours to write, " +
+				"and regeneration will never touch it." + h.scope + "\n\n")
+		} else {
+			b.WriteString("This file already exists and is YOURS — the generator did not open " +
+				"it and cannot tell whether these are implemented. It lists them so you can " +
+				"check the file still covers what the spec declares, which is where a rule " +
+				"added to the spec later goes unnoticed." + h.scope + "\n\n")
+		}
 		for _, r := range h.rules {
 			fmt.Fprintf(b, "**`%s`**\n\n", r.ID)
 			fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(r.Description, "\n", " "))
@@ -122,7 +147,11 @@ func renderTodo(b *strings.Builder, in Input) {
 				fmt.Fprintf(b, "- %s\n\n", strings.Join(facts, " · "))
 			}
 		}
-		fmt.Fprintf(b, "Its tests are yours too — the generator does not know what these rules mean.\n\n")
+		if createdThisRun(in.Decisions, h.path) {
+			fmt.Fprintf(b, "Its tests are yours too — the generator does not know what these rules mean.\n\n")
+		} else {
+			fmt.Fprintf(b, "The tests for them are yours too, and the same check applies.\n\n")
+		}
 	}
 
 	if manual := manualFacts(m); len(manual) > 0 {

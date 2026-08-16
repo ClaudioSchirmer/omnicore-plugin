@@ -244,7 +244,7 @@ func All(m *ir.Model, root string, meta FileMeta) (*Result, error) {
 	res.Files = append(res.Files, mig...)
 	res.TargetTables = TargetShape(m)
 
-	regs, missing, stale, written, err := emitRegistrations(m, root, meta.PriorRegistrations)
+	regs, missing, stale, written, err := emitRegistrations(m, root, meta.PriorRegistrations, meta.ForeignRegistrations)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +266,12 @@ type FileMeta struct {
 	// from the lock: path → declaration → hash. It is what lets a merge replace
 	// its own text and keep its hands off everything else.
 	PriorRegistrations map[string]map[string]string
+	// ForeignRegistrations is what the project's OTHER entities recorded for the
+	// same shared files. A declaration two specs both raise — the notification
+	// of a collection two roles expose — is written by whichever ran first and
+	// recorded under ITS name; without this the second reads text it never wrote
+	// and reports a hand edit that never happened.
+	ForeignRegistrations map[string]map[string]string
 }
 
 // sealFiles is the single place a header is attached.

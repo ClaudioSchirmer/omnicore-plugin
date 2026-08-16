@@ -252,6 +252,33 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Fixed
 
+- **Three defects in the shared-file bookkeeping, all found by reading a real project's
+  report against its own files.** They compounded: the report claimed work was outstanding
+  that had been done, and claimed a hand edit that never happened.
+  - **A notification whose semantic is not `validation` is emitted as a struct FOLLOWED BY
+    its `Semantic()` method — one unit — and only the struct was read back.** The hash
+    recorded for the pair could therefore never match, so every such declaration read as
+    hand-edited from its second regeneration onwards, permanently. Six of the twelve in the
+    project where it was found. The range now spans the type and the methods written with
+    it, stopping at the first declaration that is not the type's.
+  - **A declaration TWO entities declare was reported as a hand edit to the second one.**
+    Two roles over one identity raise the same notification about the collection they both
+    expose, so both specs declare it; the first to run wrote it and recorded the hash under
+    its own name. The merge now also consults what the project's other entities recorded:
+    recognised as the generator's, left alone (it is not this spec's to rewrite), and
+    reported only when the two specs actually disagree about it — which is a real thing to
+    know and was invisible before.
+  - **The report said "the file was created with a stub for each; the code is yours to
+    write" about a hook that had existed for three runs.** A hook is never rewritten, so
+    "created now" and "already on disk" mean opposite things to the reader: work to start
+    versus work to verify. The generator knows which — it plans the file either way — and
+    now says so. It still never opens the file, so the second wording asks for a check
+    rather than announcing completion.
+  - Also: a catalog rewritten to update a message was described as `0 translation key(s)`,
+    because the count only ever counted INSERTED keys. It now distinguishes new from
+    updated, through a named result instead of the fifth positional return that made the
+    mistake easy.
+
 - **The aggregating facts were broken in two ways, both past a green `check`.**
   `service.facts` has accepted `sum`, `avg`, `min` and `max` since they shipped, and no
   fixture had ever declared one.

@@ -18,7 +18,7 @@ import (
 // These belong to the whole service, not to this entity, so they are MERGED:
 // what is already there survives untouched, including wording a translator
 // improved by hand.
-func emitRegistrations(m *ir.Model, root string, prior map[string]map[string]string) ([]fsplan.File, []string, []string, map[string]map[string]string, error) {
+func emitRegistrations(m *ir.Model, root string, prior, foreign map[string]map[string]string) ([]fsplan.File, []string, []string, map[string]map[string]string, error) {
 	var files []fsplan.File
 	var missingTranslations []string
 	var staleRegistrations []string
@@ -28,6 +28,12 @@ func emitRegistrations(m *ir.Model, root string, prior map[string]map[string]str
 			return nil
 		}
 		return prior[rel]
+	}
+	foreignFor := func(rel string) map[string]string {
+		if foreign == nil {
+			return nil
+		}
+		return foreign[rel]
 	}
 	record := func(rel string, w map[string]string) {
 		if len(w) > 0 {
@@ -44,7 +50,7 @@ func emitRegistrations(m *ir.Model, root string, prior map[string]map[string]str
 		{"aggregatevos", "internal/domain/aggregatevos"},
 	} {
 		rel := pkg.dir + "/notifications.go"
-		f, stale, w, err := mergeNotifications(m, root, pkg.name, pkg.dir, priorFor(rel))
+		f, stale, w, err := mergeNotifications(m, root, pkg.name, pkg.dir, priorFor(rel), foreignFor(rel))
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -88,7 +94,7 @@ func emitRegistrations(m *ir.Model, root string, prior map[string]map[string]str
 	return files, missingTranslations, staleRegistrations, written, nil
 }
 
-func mergeNotifications(m *ir.Model, root, pkg, dir string, prior map[string]string) (*fsplan.File, []string, map[string]string, error) {
+func mergeNotifications(m *ir.Model, root, pkg, dir string, prior, foreign map[string]string) (*fsplan.File, []string, map[string]string, error) {
 	var decls []TypeDecl
 	for _, n := range m.Notifications {
 		if n.Package != pkg {
@@ -113,7 +119,7 @@ func mergeNotifications(m *ir.Model, root, pkg, dir string, prior map[string]str
 		existing = []byte(notificationsSkeleton(pkg))
 	}
 
-	merged, changed, stale, written := MergeTypeDecls(string(existing), decls, prior)
+	merged, changed, stale, written := MergeTypeDeclsWith(string(existing), decls, prior, foreign)
 	// The stale list travels even when NOTHING was written: a declaration that
 	// drifted is exactly the case where there is nothing to add, and returning
 	// early on "no change" is how it would go unsaid.
@@ -128,6 +134,24 @@ func mergeNotifications(m *ir.Model, root, pkg, dir string, prior map[string]str
 		Path: rel, Class: fsplan.Registration, Content: out,
 		Describes: fmt.Sprintf("%d notification declaration(s)", len(decls)),
 	}, staleIn(rel, stale), written, nil
+}
+
+// catalogDescribes says what actually happened to a catalog. Counting only the
+// INSERTED keys described a file that was rewritten to update a message as "0
+// translation key(s)" — a line that reads like nothing happened, in the report
+// whose job is saying what did.
+func catalogDescribes(code string, res CatalogMerge) string {
+	lang := strings.ToUpper(code)
+	added, updated := len(res.Added), len(res.Updated)
+	switch {
+	case added > 0 && updated > 0:
+		return fmt.Sprintf("%d new and %d updated %s translation key(s)", added, updated, lang)
+	case added > 0:
+		return fmt.Sprintf("%d %s translation key(s)", added, lang)
+	case updated > 0:
+		return fmt.Sprintf("%d updated %s translation key(s)", updated, lang)
+	}
+	return lang + " translation keys"
 }
 
 // staleIn labels each drifted name with the file it sits in, because the reader
@@ -340,9 +364,9 @@ func mergeCatalog(m *ir.Model, root, code, typeName, ctor, langConst string, ent
 		created = true
 	}
 
-	merged, changed, added, stale, written := MergeMapEntries(string(existing), entries, prior)
-	if !changed && !created {
-		return nil, nil, staleIn(rel, stale), written, nil
+	merged, res := MergeMapEntries(string(existing), entries, prior)
+	if !res.Changed && !created {
+		return nil, nil, staleIn(rel, res.Stale), res.Written, nil
 	}
 	out, ferr := gofile.Finalize([]byte(merged))
 	if ferr != nil {
@@ -350,6 +374,6 @@ func mergeCatalog(m *ir.Model, root, code, typeName, ctor, langConst string, ent
 	}
 	return &fsplan.File{
 		Path: rel, Class: fsplan.Registration, Content: out,
-		Describes: fmt.Sprintf("%d %s translation key(s)", len(added), strings.ToUpper(code)),
-	}, added, staleIn(rel, stale), written, nil
+		Describes: catalogDescribes(code, res),
+	}, res.Added, staleIn(rel, res.Stale), res.Written, nil
 }

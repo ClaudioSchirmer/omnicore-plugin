@@ -118,10 +118,11 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	}
 
 	result, err := emit.All(model, proj.Root, emit.FileMeta{
-		Spec:               specRel,
-		Entity:             model.Entity.Pascal,
-		Date:               opt.Now().Format("2006-01-02"),
-		PriorRegistrations: lock.RegistrationsOf(model.Entity.Pascal),
+		Spec:                 specRel,
+		Entity:               model.Entity.Pascal,
+		Date:                 opt.Now().Format("2006-01-02"),
+		PriorRegistrations:   lock.RegistrationsOf(model.Entity.Pascal),
+		ForeignRegistrations: lock.RegistrationsExcept(model.Entity.Pascal),
 	})
 	if err != nil {
 		return err

@@ -173,6 +173,35 @@ func (l *Lock) RegistrationsOf(entity string) map[string]map[string]string {
 	return l.Entities[entity].Registrations
 }
 
+// RegistrationsExcept is the union of what every OTHER entity recorded, so a
+// merge can recognise a shared declaration as the generator's own even when the
+// entity that wrote it is not the one running.
+//
+// A key claimed by two entities keeps the first hash seen; they are compared
+// against one text on disk, so at most one of them can match anyway.
+func (l *Lock) RegistrationsExcept(entity string) map[string]map[string]string {
+	if l == nil {
+		return nil
+	}
+	out := map[string]map[string]string{}
+	for name, e := range l.Entities {
+		if name == entity {
+			continue
+		}
+		for path, decls := range e.Registrations {
+			if out[path] == nil {
+				out[path] = map[string]string{}
+			}
+			for k, v := range decls {
+				if _, taken := out[path][k]; !taken {
+					out[path][k] = v
+				}
+			}
+		}
+	}
+	return out
+}
+
 func LoadLock(root string) (*Lock, error) {
 	b, err := os.ReadFile(layout.LockIn(root))
 	if os.IsNotExist(err) {
