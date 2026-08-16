@@ -7,10 +7,25 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
-## [0.19.0] — 2026-08-15
+## [0.18.0] — 2026-08-15
 
 ### Changed
 
+- **`scaffold-entity` gained a mandatory generation gateway (1d)**, presented with the
+  plan gate as the last stop before any code exists. Two options and no default:
+  generate with `omnicore-gen (beta)` and have the agent review it (seconds, far fewer
+  tokens, complex rules and their tests still written by hand), or generate file by file as
+  before. **Neither is marked recommended**: while the generator is in beta the two are
+  presented on their merits and the dev chooses without a nudge. The beta label carries the
+  one thing a dev needs to know with it — the generator's gate covers a lot and it can
+  still meet a case nobody has met, usually a spec that validates and produces something
+  that does not compile — and says what happens then: the agent says so, works around it,
+  and it is fixed upstream, which is exactly what the review and proof steps in that option
+  are for. The answer is recorded in `spec.md` so a resumed run does not ask
+  again. **Nothing about the generator's spec YAML is written before the answer** — that
+  is the waste the gate exists to prevent, and on the manual path it is never written at
+  all. Everything downstream of the gate — the plan, the conventions, the final verify —
+  is unchanged.
 - **A generated file carried its header twice.** Every one opened with the sealed header —
   banner, what the file is, entity, spec, date, checksum, and what happens if you edit it —
   and then a second block from the emitter saying the same three things in different words:
@@ -22,18 +37,6 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   descriptions that said MORE than their sealed counterpart (the schema and view tests
   explaining that a boot panic is a test failure, the translation coverage test, the facet
   clear command) were moved up into it rather than dropped.
-
-- **The generation gateway offers `omnicore-gen (beta)`, and says what beta means.** The
-  generator is still being improved round by round and `scaffold-entity` is so far the only
-  skill that reaches it, so the label on option 1 now carries that — followed by the one
-  thing a dev actually needs to know: its gate covers a lot and it can still meet a case
-  nobody has met, usually a spec that validates and produces something that does not
-  compile. The option also states what happens then, because the honest answer is
-  reassuring: the agent says so, works around it, and it is fixed upstream — and the review
-  and proof steps already in that option are exactly what catch it. **Neither option is
-  marked recommended any more**: while the generator is in beta the two paths are presented
-  on their merits — speed and token cost against not depending on the generator — and the
-  dev chooses without a nudge.
 
 - **Everything the generator reads or writes about a service now lives in one directory,
   `omnicore-gen/`.** It was in three places: the spec in a generic `specs/`, its report
@@ -73,6 +76,35 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   rather than by the generator refusing to look. Hashes are whitespace-normalised, so
   gofmt realigning a struct when a longer field arrives is not read as an edit.
 
+  Three defects in this bookkeeping were found by reading a real project's report
+  against its own files, and fixed before any of it shipped:
+
+    report against its own files.** They compounded: the report claimed work was outstanding
+    that had been done, and claimed a hand edit that never happened.
+    - **A notification whose semantic is not `validation` is emitted as a struct FOLLOWED BY
+      its `Semantic()` method — one unit — and only the struct was read back.** The hash
+      recorded for the pair could therefore never match, so every such declaration read as
+      hand-edited from its second regeneration onwards, permanently. Six of the twelve in the
+      project where it was found. The range now spans the type and the methods written with
+      it, stopping at the first declaration that is not the type's.
+    - **A declaration TWO entities declare was reported as a hand edit to the second one.**
+      Two roles over one identity raise the same notification about the collection they both
+      expose, so both specs declare it; the first to run wrote it and recorded the hash under
+      its own name. The merge now also consults what the project's other entities recorded:
+      recognised as the generator's, left alone (it is not this spec's to rewrite), and
+      reported only when the two specs actually disagree about it — which is a real thing to
+      know and was invisible before.
+    - **The report said "the file was created with a stub for each; the code is yours to
+      write" about a hook that had existed for three runs.** A hook is never rewritten, so
+      "created now" and "already on disk" mean opposite things to the reader: work to start
+      versus work to verify. The generator knows which — it plans the file either way — and
+      now says so. It still never opens the file, so the second wording asks for a check
+      rather than announcing completion.
+    - Also: a catalog rewritten to update a message was described as `0 translation key(s)`,
+      because the count only ever counted INSERTED keys. It now distinguishes new from
+      updated, through a named result instead of the fifth positional return that made the
+      mistake easy.
+
 - **A migration is written ONCE and never regenerated — it is a hook, named
   `NNNN_<entity>_manual.sql`, exactly like the `_manual` rule files.** It is the only output
   whose effect outlives the file: once it has run anywhere, the framework's tracking table
@@ -107,6 +139,165 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   and 1c states that a clean grep is the expected outcome, not a fix-up round.
 
 ### Added
+
+- **`omnicore-gen`, a spec-driven code generator, ships with the plugin** — Go
+  source under `plugins/omnicore/gen/` with a launcher in `plugins/omnicore/bin/`, which
+  Claude Code puts on the session PATH, so it is a bare `omnicore-gen` command. It writes
+  a whole entity — domain, application, web, infra, migrations, wiring, the seven
+  translation catalogs and its own tests — from one YAML spec, in seconds and at a
+  fraction of the tokens the file-by-file path costs. It needs no AI and no network: a
+  dev can run it by hand. Five invariants govern it, and each one changes how the output
+  is treated: nothing generated half-way (every spec key is consumed or refused BY NAME),
+  a green spec compiles and boots, boot-traps are static errors, self-sufficient, and it
+  owns whole files (the escapes are two named write-once hook files).
+
+  **Hardened before it shipped.** Everything below was found and fixed while the generator was being built, so none of it ever reached a project. It is recorded because each one documents a trap in the design — not because anybody suffered it:
+
+  - **A value object echoed the rejected value through a conversion that has done nothing
+    since framework v0.49.1.** `IsValid` emitted `ctx.AddNotification(fieldName, N{}, int(v))`
+    / `string(v)`; `AddNotification` renders its variadic with `fmt.Sprint`, and a value
+    object is a named type over `string`/`int`/`float64` declaring no `String()`, so it
+    already prints as the value it carries. The conversion produced identical text and read
+    as if the framework needed the help. The generator requires v0.49.1 or later, which is
+    the release that made a pointer of any type dereference correctly, so nothing about what
+    the caller sees changes.
+
+  - **The first regeneration on a later day rewrote every owned file.** The header's
+    keep-the-date comparison tested the new content against itself-with-the-old-date, which
+    only agreed when the dates were already equal — so "regeneration is a no-op" held within
+    one day and broke across days, tree-wide. It now compares against the bytes on disk,
+    modulo checksum and date, and the golden lanes pin both directions.
+
+  - **Two valid spec shapes produced a tree that did not build, one of them past a green
+    `check`.** A write-only entity with a domain service lost the comma between `repo` and
+    `svc` in its feature literal (generation aborted on the parse error); GraphQL with
+    mutations only and no `read:` block emitted `f.view` on a struct with no such field
+    (`check` said yes, `go build` said no). Both are fixed and both are matrix cases now.
+
+  - **MySQL's `active-only` unique typed the shadow column as the ID type.** The generated
+    column that materialises "unique among the active rows" was `BINARY(16)` whatever the
+    real column was, so any active VARCHAR value longer than 16 bytes failed at INSERT —
+    after the DDL applied cleanly. The shadow column now carries the constrained column's
+    own type.
+
+  - **Nullable fields broke half the emitters that touched them.** A nullable state field
+    made `transition` emit an invalid indirect (written silently); `immutable` on a nullable
+    collection field compared pointer identity, so every update of the aggregate was
+    rejected forever; a nullable `businessIdentity` field made every re-sent entry read as a
+    different one (wholesale replace archived and re-inserted the collection on every PUT);
+    the generated patch test compared two freshly minted pointers and failed against a
+    correct mapper; `groupCap`'s `only` dereferenced without a nil guard. Comparisons are
+    now pointer-safe end to end, `transition` and `groupBy` refuse nullable subjects with a
+    modelling fix, and a nullable-everything matrix case pins all of it.
+
+  - **A writable `type: id` field aborted generation, and `required` on one emitted a
+    method that does not exist.** The generated tests spelled a composite literal in an
+    if-condition (a parse error that killed the whole run) and the emptiness check called
+    `IsZero()` where `domain.ID` answers `IsEmpty()`. Test literals now use
+    `domain.NewID(…)` and the check calls the method that exists.
+
+  - **Six spellings the language accepted and nothing implemented are now refused, by
+    name.** `livesOn: sibling:<x>` (the column landed on the ROOT table while the spec said
+    facet), `unique` on a collection or facet field (no index, no precheck, no report line),
+    `unique` on a base-lived field (DDL against a column the role's table does not have),
+    listing filters on a collection's fields (silently dropped from the request type),
+    `read.byParams.filters[].required` and `delete.children` (read by nobody). Each refusal
+    names the working alternative; `explain keys` marks them REFUSED.
+
+  - **`service-precheck+constraint` silently degraded to constraint-only.** Without a
+    domain service carrying an `exists` fact filtered by the unique field, the precheck
+    half was skipped and the report still printed the enforce string as declared. The
+    coupling is now validated — and the sharedbase example itself was missing the fact.
+
+  - **`check` and `generate` disagreed in both directions.** `check` never read the lock,
+    so a projected-shape change without a version bump answered `canGenerate: true` and was
+    refused one command later; `generate` never applied the zero-dialects refusal, so it
+    proceeded and emitted no migration files with the report claiming nothing was skipped.
+    Both judgements now run in both commands.
+
+  - **The documented `adopt <path> -why '…'` spelling always died.** The CLI's flag
+    splitter did not know `-why` takes a value ("flag needs an argument", exit 2); only
+    `-why=…` worked. The splitter's list also named a flag that no longer exists.
+
+  - **Transition states were never checked against the enum.** A typo'd state validated,
+    generated, and silently never fired; an int-backed enum emitted a string-keyed map
+    indexed by an int. States must now be member values of a string-backed enum declared in
+    the same spec, and a raw value object's constraint families are cross-checked against
+    its backing (`minLength` on an int and `min` on a string were compile errors; `regex`
+    on an int was an int→rune conversion that validated garbage silently).
+
+  - **Assorted refusals that used to be silence**: duplicate field names/columns in
+    collections and facets, duplicate collection plurals, a facet field shadowing its
+    node's field, reserved words in base/child/facet table names and managed columns, two
+    spec files declaring one entity (the neighbour dedup was by entity name, so the copy
+    passed every collision check), `runtime: true` on a collection field (a DDL column with
+    an empty name), `unique` on a bool, `active-only` without an archive column (a plain
+    unique that permanently reserved archived values), an owner check against a
+    non-string or nullable field, `patchExcludes` covering every field (a generator
+    panic), an undeclared notification named by `unique`/VO/duplicate keys (an undefined
+    type at build), and a second YAML document in a spec file (silently dropped).
+
+  - **Smaller emitter lies.** The gen-report's target shape described tables the migrations
+    would never create (facet lifecycle columns, the root's archive stamp on children,
+    facet-owned fields, mounted collections listed as yours to create, a separate-fk role's
+    link column missing); per-child OpenAPI summaries interpolated the Go type ("a
+    appdomain.Person"); the PTBR catalog was hardcoded as the description's language
+    regardless of `language:`; the CSV delimiter was pasted as a raw rune (a quote aborted
+    generation); a role keeping every column on the base emitted a schema chain with a
+    dangling dot; `doctor`/`adopt` walked lock maps in random order; the notification-
+    semantics test was keyed by the ANSWERED semantic, so colliding entries collapsed and a
+    wrong pairing could hide; a hand comment with a brace could derail the catalog merge;
+    hand-written grouped `type (…)` blocks were invisible to the reuse inventory; and the
+    composition-root merge could double the `Translations:` key or silently skip a root
+    with a single-statement import.
+
+  - **Every key of the language now carries its doc.** `explain keys` derives from the
+    spec struct's leading comments; 179 of 193 fields had none (or had it in a trailing
+    position the renderer never reads). All 269 derived key paths render documentation.
+
+  - **Labels for the fields of a collection or a facet were never translated.** The generator
+    emits a `labelKey` tag on them and only ever registered the ROOT's keys in the seven
+    catalogs, so those resolved to nothing and the raw Go identifier reached the end user —
+    `ProposalProponentDocumentField` as a CSV column heading. Nothing reported it: the export
+    succeeded and the data was right.
+
+  - **`doctor` reported a hand edit nobody had made.** It judged by the hash the lock records
+    per entity, while `generate` judges by the checksum in the file's own header. A file two
+    entities legitimately share — the `vos` package doc — goes stale in the first one's record
+    the moment the second regenerates, so the one command whose whole job is to tell the truth
+    about drift invented some, and the fix it implied was `adopt`, which would have frozen a
+    current file out of every future improvement. It now asks the file, like `generate` does.
+
+  - **`vo: {kind: reuse}` could not see a single real value object.** The project inventory
+    skipped every generated file — so `UF`, `URL` and the enums a previous entity created were
+    invisible — and collected every exported type of the hand-written `notifications.go`, so
+    the answer to "which value objects does this project have?" was three NOTIFICATIONS. The
+    author of a second role over a shared base was told to reuse one of those, did, and
+    validation accepted it. The inventory now identifies a value object by its `Value()`
+    method and records who generated it: referencing one is open to everybody, redeclaring is
+    refused to everybody except the entity that already owns it, and a `ref` ending in
+    `Notification` is named as the confusion it is.
+
+  - **A value object's own notification was emitted into `domain`**, where the package that
+    declares the type cannot reach it: the tree did not compile, and the only clue was
+    "undefined" in a generated file. It is placed in `vos`, the same way a child-raised one is
+    placed in `aggregatevos`.
+
+  - **`comparison` between two non-nullable fields emitted `true && true`**, which `go vet`
+    rejects — so a generated project could fail its own checks.
+
+  - **The launcher could serve the PREVIOUS version after a plugin update.** The compiled
+    binary is cached in `${CLAUDE_PLUGIN_DATA}`, which survives updates by design, and the
+    freshness check was by mtime — only as trustworthy as whatever wrote the files. A
+    session could therefore run the old generator against the new skills, silently:
+    everything answers, nothing is current. The binary is now keyed by the plugin root,
+    which changes on every update, and older ones are removed. Gated: the golden simulates
+    an update with backdated sources and fails if the cached binary is reused.
+
+- **`/omnicore:omnicore-gen`** — the skill that drives it: learn the language from
+  the binary's own `explain`, write the spec from the approved model, check, generate,
+  read the report, implement what was refused, review, and prove it with build + vet +
+  tests + a real boot.
 
 - **`help` knows the generator is not the framework, and where to read about it.** The
   skill answers from the version-pinned `/docs`, and `omnicore-gen` has no section there —
@@ -198,6 +389,30 @@ is the commit bumping that field on `main`, tagged `v<version>`.
     key, grouped-and-filtered, alongside a `groupCap` in the same spec), by a grouped fact
     on the tree the gate BOOTS, and by a refusal test for each rejected shape.
 
+  The ungrouped kinds needed fixing on the way, and none of it ever shipped:
+
+    `service.facts` has accepted `sum`, `avg`, `min` and `max` since they shipped, and no
+    fixture had ever declared one.
+    - **Four of the six kind/type combinations did not compile.** The return type was taken
+      from the aggregated COLUMN and the framework function named by appending `Int` to the
+      kind, so `avg` over an `int64` emitted `read.AvgInt`, which has never existed — an
+      average is fractional even over an integer column, which is why the framework offers
+      only `Avg`. `sum` over a plain `int` returned a `float64` into an `int` signature;
+      `min`/`max` over a `time` or a `string` returned a `float64` into that type, and the
+      port did not even import `time`. The return type now follows the KIND — `avg` is always
+      `float64`, `sum`/`min`/`max` over any integer width is exact `int64` (narrowing a total
+      to the column's width is how one silently wraps) — and a non-numeric field is REFUSED,
+      naming the field and its type: the framework carries an aggregate as `CountAgg`,
+      `IntAgg` or `FloatAgg` and has no carrier for text, a timestamp or a boolean.
+    - **An empty set was reported as zero.** The framework pairs every aggregate with
+      `Found`, because SQL answers NULL over no rows: for a sum the zero IS the empty sum,
+      but for a minimum, a maximum or an average it is indistinguishable from a real result.
+      The port returned `Value` alone, so a rule asking "is the lowest grade below 5?" got a
+      yes from an empty table. Those three kinds now answer `(value, bool)`; `sum`, `count`
+      and `exists` are unchanged, and the generated stub answers `0, false`.
+
+    The example and the coverage matrix now declare an `avg` and a `max` over an integer
+    field, so both paths are generated, built and DDL'd by the gate rather than by a user.
 
 - **`assignedFrom` — a persisted field the SERVER fills from the caller's identity.**
   `assignedFrom: identity-subject` (or `identity-claim` with `claim:`) writes the field on
@@ -269,171 +484,6 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Fixed
 
-- **Three defects in the shared-file bookkeeping, all found by reading a real project's
-  report against its own files.** They compounded: the report claimed work was outstanding
-  that had been done, and claimed a hand edit that never happened.
-  - **A notification whose semantic is not `validation` is emitted as a struct FOLLOWED BY
-    its `Semantic()` method — one unit — and only the struct was read back.** The hash
-    recorded for the pair could therefore never match, so every such declaration read as
-    hand-edited from its second regeneration onwards, permanently. Six of the twelve in the
-    project where it was found. The range now spans the type and the methods written with
-    it, stopping at the first declaration that is not the type's.
-  - **A declaration TWO entities declare was reported as a hand edit to the second one.**
-    Two roles over one identity raise the same notification about the collection they both
-    expose, so both specs declare it; the first to run wrote it and recorded the hash under
-    its own name. The merge now also consults what the project's other entities recorded:
-    recognised as the generator's, left alone (it is not this spec's to rewrite), and
-    reported only when the two specs actually disagree about it — which is a real thing to
-    know and was invisible before.
-  - **The report said "the file was created with a stub for each; the code is yours to
-    write" about a hook that had existed for three runs.** A hook is never rewritten, so
-    "created now" and "already on disk" mean opposite things to the reader: work to start
-    versus work to verify. The generator knows which — it plans the file either way — and
-    now says so. It still never opens the file, so the second wording asks for a check
-    rather than announcing completion.
-  - Also: a catalog rewritten to update a message was described as `0 translation key(s)`,
-    because the count only ever counted INSERTED keys. It now distinguishes new from
-    updated, through a named result instead of the fifth positional return that made the
-    mistake easy.
-
-- **The aggregating facts were broken in two ways, both past a green `check`.**
-  `service.facts` has accepted `sum`, `avg`, `min` and `max` since they shipped, and no
-  fixture had ever declared one.
-  - **Four of the six kind/type combinations did not compile.** The return type was taken
-    from the aggregated COLUMN and the framework function named by appending `Int` to the
-    kind, so `avg` over an `int64` emitted `read.AvgInt`, which has never existed — an
-    average is fractional even over an integer column, which is why the framework offers
-    only `Avg`. `sum` over a plain `int` returned a `float64` into an `int` signature;
-    `min`/`max` over a `time` or a `string` returned a `float64` into that type, and the
-    port did not even import `time`. The return type now follows the KIND — `avg` is always
-    `float64`, `sum`/`min`/`max` over any integer width is exact `int64` (narrowing a total
-    to the column's width is how one silently wraps) — and a non-numeric field is REFUSED,
-    naming the field and its type: the framework carries an aggregate as `CountAgg`,
-    `IntAgg` or `FloatAgg` and has no carrier for text, a timestamp or a boolean.
-  - **An empty set was reported as zero.** The framework pairs every aggregate with
-    `Found`, because SQL answers NULL over no rows: for a sum the zero IS the empty sum,
-    but for a minimum, a maximum or an average it is indistinguishable from a real result.
-    The port returned `Value` alone, so a rule asking "is the lowest grade below 5?" got a
-    yes from an empty table. Those three kinds now answer `(value, bool)`; `sum`, `count`
-    and `exists` are unchanged, and the generated stub answers `0, false`.
-
-  The example and the coverage matrix now declare an `avg` and a `max` over an integer
-  field, so both paths are generated, built and DDL'd by the gate rather than by a user.
-
-- **A value object echoed the rejected value through a conversion that has done nothing
-  since framework v0.49.1.** `IsValid` emitted `ctx.AddNotification(fieldName, N{}, int(v))`
-  / `string(v)`; `AddNotification` renders its variadic with `fmt.Sprint`, and a value
-  object is a named type over `string`/`int`/`float64` declaring no `String()`, so it
-  already prints as the value it carries. The conversion produced identical text and read
-  as if the framework needed the help. The generator requires v0.49.1 or later, which is
-  the release that made a pointer of any type dereference correctly, so nothing about what
-  the caller sees changes.
-- **The first regeneration on a later day rewrote every owned file.** The header's
-  keep-the-date comparison tested the new content against itself-with-the-old-date, which
-  only agreed when the dates were already equal — so "regeneration is a no-op" held within
-  one day and broke across days, tree-wide. It now compares against the bytes on disk,
-  modulo checksum and date, and the golden lanes pin both directions.
-- **Two valid spec shapes produced a tree that did not build, one of them past a green
-  `check`.** A write-only entity with a domain service lost the comma between `repo` and
-  `svc` in its feature literal (generation aborted on the parse error); GraphQL with
-  mutations only and no `read:` block emitted `f.view` on a struct with no such field
-  (`check` said yes, `go build` said no). Both are fixed and both are matrix cases now.
-- **MySQL's `active-only` unique typed the shadow column as the ID type.** The generated
-  column that materialises "unique among the active rows" was `BINARY(16)` whatever the
-  real column was, so any active VARCHAR value longer than 16 bytes failed at INSERT —
-  after the DDL applied cleanly. The shadow column now carries the constrained column's
-  own type.
-- **Nullable fields broke half the emitters that touched them.** A nullable state field
-  made `transition` emit an invalid indirect (written silently); `immutable` on a nullable
-  collection field compared pointer identity, so every update of the aggregate was
-  rejected forever; a nullable `businessIdentity` field made every re-sent entry read as a
-  different one (wholesale replace archived and re-inserted the collection on every PUT);
-  the generated patch test compared two freshly minted pointers and failed against a
-  correct mapper; `groupCap`'s `only` dereferenced without a nil guard. Comparisons are
-  now pointer-safe end to end, `transition` and `groupBy` refuse nullable subjects with a
-  modelling fix, and a nullable-everything matrix case pins all of it.
-- **A writable `type: id` field aborted generation, and `required` on one emitted a
-  method that does not exist.** The generated tests spelled a composite literal in an
-  if-condition (a parse error that killed the whole run) and the emptiness check called
-  `IsZero()` where `domain.ID` answers `IsEmpty()`. Test literals now use
-  `domain.NewID(…)` and the check calls the method that exists.
-- **Six spellings the language accepted and nothing implemented are now refused, by
-  name.** `livesOn: sibling:<x>` (the column landed on the ROOT table while the spec said
-  facet), `unique` on a collection or facet field (no index, no precheck, no report line),
-  `unique` on a base-lived field (DDL against a column the role's table does not have),
-  listing filters on a collection's fields (silently dropped from the request type),
-  `read.byParams.filters[].required` and `delete.children` (read by nobody). Each refusal
-  names the working alternative; `explain keys` marks them REFUSED.
-- **`service-precheck+constraint` silently degraded to constraint-only.** Without a
-  domain service carrying an `exists` fact filtered by the unique field, the precheck
-  half was skipped and the report still printed the enforce string as declared. The
-  coupling is now validated — and the sharedbase example itself was missing the fact.
-- **`check` and `generate` disagreed in both directions.** `check` never read the lock,
-  so a projected-shape change without a version bump answered `canGenerate: true` and was
-  refused one command later; `generate` never applied the zero-dialects refusal, so it
-  proceeded and emitted no migration files with the report claiming nothing was skipped.
-  Both judgements now run in both commands.
-- **The documented `adopt <path> -why '…'` spelling always died.** The CLI's flag
-  splitter did not know `-why` takes a value ("flag needs an argument", exit 2); only
-  `-why=…` worked. The splitter's list also named a flag that no longer exists.
-- **Transition states were never checked against the enum.** A typo'd state validated,
-  generated, and silently never fired; an int-backed enum emitted a string-keyed map
-  indexed by an int. States must now be member values of a string-backed enum declared in
-  the same spec, and a raw value object's constraint families are cross-checked against
-  its backing (`minLength` on an int and `min` on a string were compile errors; `regex`
-  on an int was an int→rune conversion that validated garbage silently).
-- **Assorted refusals that used to be silence**: duplicate field names/columns in
-  collections and facets, duplicate collection plurals, a facet field shadowing its
-  node's field, reserved words in base/child/facet table names and managed columns, two
-  spec files declaring one entity (the neighbour dedup was by entity name, so the copy
-  passed every collision check), `runtime: true` on a collection field (a DDL column with
-  an empty name), `unique` on a bool, `active-only` without an archive column (a plain
-  unique that permanently reserved archived values), an owner check against a
-  non-string or nullable field, `patchExcludes` covering every field (a generator
-  panic), an undeclared notification named by `unique`/VO/duplicate keys (an undefined
-  type at build), and a second YAML document in a spec file (silently dropped).
-- **Smaller emitter lies.** The gen-report's target shape described tables the migrations
-  would never create (facet lifecycle columns, the root's archive stamp on children,
-  facet-owned fields, mounted collections listed as yours to create, a separate-fk role's
-  link column missing); per-child OpenAPI summaries interpolated the Go type ("a
-  appdomain.Person"); the PTBR catalog was hardcoded as the description's language
-  regardless of `language:`; the CSV delimiter was pasted as a raw rune (a quote aborted
-  generation); a role keeping every column on the base emitted a schema chain with a
-  dangling dot; `doctor`/`adopt` walked lock maps in random order; the notification-
-  semantics test was keyed by the ANSWERED semantic, so colliding entries collapsed and a
-  wrong pairing could hide; a hand comment with a brace could derail the catalog merge;
-  hand-written grouped `type (…)` blocks were invisible to the reuse inventory; and the
-  composition-root merge could double the `Translations:` key or silently skip a root
-  with a single-statement import.
-- **Every key of the language now carries its doc.** `explain keys` derives from the
-  spec struct's leading comments; 179 of 193 fields had none (or had it in a trailing
-  position the renderer never reads). All 269 derived key paths render documentation.
-- **Labels for the fields of a collection or a facet were never translated.** The generator
-  emits a `labelKey` tag on them and only ever registered the ROOT's keys in the seven
-  catalogs, so those resolved to nothing and the raw Go identifier reached the end user —
-  `ProposalProponentDocumentField` as a CSV column heading. Nothing reported it: the export
-  succeeded and the data was right.
-- **`doctor` reported a hand edit nobody had made.** It judged by the hash the lock records
-  per entity, while `generate` judges by the checksum in the file's own header. A file two
-  entities legitimately share — the `vos` package doc — goes stale in the first one's record
-  the moment the second regenerates, so the one command whose whole job is to tell the truth
-  about drift invented some, and the fix it implied was `adopt`, which would have frozen a
-  current file out of every future improvement. It now asks the file, like `generate` does.
-- **`vo: {kind: reuse}` could not see a single real value object.** The project inventory
-  skipped every generated file — so `UF`, `URL` and the enums a previous entity created were
-  invisible — and collected every exported type of the hand-written `notifications.go`, so
-  the answer to "which value objects does this project have?" was three NOTIFICATIONS. The
-  author of a second role over a shared base was told to reuse one of those, did, and
-  validation accepted it. The inventory now identifies a value object by its `Value()`
-  method and records who generated it: referencing one is open to everybody, redeclaring is
-  refused to everybody except the entity that already owns it, and a `ref` ending in
-  `Notification` is named as the confusion it is.
-- **A value object's own notification was emitted into `domain`**, where the package that
-  declares the type cannot reach it: the tree did not compile, and the only clue was
-  "undefined" in a generated file. It is placed in `vos`, the same way a child-raised one is
-  placed in `aggregatevos`.
-- **`comparison` between two non-nullable fields emitted `true && true`**, which `go vet`
-  rejects — so a generated project could fail its own checks.
 - **`scaffold-service` shipped a `.gitignore` that hid the reasoning, and only two of the
   eight working dirs had any rule at all.** The generated file
   listed the `scaffold-service/` and `scaffold-entity/` working dirs, so the approved
@@ -459,44 +509,6 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   that mutation now — `clear<Facet>Of<Entity>`, its command and its tests — for any
   root-attached facet when GraphQL is on, so the contract closes on both surfaces without
   anyone writing it by hand.
-- **The launcher could serve the PREVIOUS version after a plugin update.** The compiled
-  binary is cached in `${CLAUDE_PLUGIN_DATA}`, which survives updates by design, and the
-  freshness check was by mtime — only as trustworthy as whatever wrote the files. A
-  session could therefore run the old generator against the new skills, silently:
-  everything answers, nothing is current. The binary is now keyed by the plugin root,
-  which changes on every update, and older ones are removed. Gated: the golden simulates
-  an update with backdated sources and fails if the cached binary is reused.
-
-## [0.18.0] — 2026-08-13
-
-### Added
-
-- **`omnicore-gen`, a spec-driven code generator, ships with the plugin** — Go
-  source under `plugins/omnicore/gen/` with a launcher in `plugins/omnicore/bin/`, which
-  Claude Code puts on the session PATH, so it is a bare `omnicore-gen` command. It writes
-  a whole entity — domain, application, web, infra, migrations, wiring, the seven
-  translation catalogs and its own tests — from one YAML spec, in seconds and at a
-  fraction of the tokens the file-by-file path costs. It needs no AI and no network: a
-  dev can run it by hand. Five invariants govern it, and each one changes how the output
-  is treated: nothing generated half-way (every spec key is consumed or refused BY NAME),
-  a green spec compiles and boots, boot-traps are static errors, self-sufficient, and it
-  owns whole files (the escapes are two named write-once hook files).
-- **`/omnicore:omnicore-gen`** — the skill that drives it: learn the language from
-  the binary's own `explain`, write the spec from the approved model, check, generate,
-  read the report, implement what was refused, review, and prove it with build + vet +
-  tests + a real boot.
-
-### Changed
-
-- **`scaffold-entity` gained a mandatory generation gateway (1d)**, presented with the
-  plan gate as the last stop before any code exists. Two options and no default:
-  generate with `omnicore-gen` and have the agent review it (recommended — seconds,
-  far fewer tokens, complex rules and their tests still written by hand), or generate file
-  by file as before. The answer is recorded in `spec.md` so a resumed run does not ask
-  again. **Nothing about the generator's spec YAML is written before the answer** — that
-  is the waste the gate exists to prevent, and on the manual path it is never written at
-  all. Everything downstream of the gate — the plan, the conventions, the final verify —
-  is unchanged.
 
 ## [0.17.1] — 2026-08-07
 

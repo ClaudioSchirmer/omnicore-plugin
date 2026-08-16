@@ -38,6 +38,32 @@ with it. What to update, and which parts the build already catches:
 The last two rows are the ones that rot, precisely because nothing fails when
 they do. Treat them as part of the change, not as follow-up.
 
+## Cutting a release — the number comes from what is PUBLISHED
+
+**The top of `CHANGELOG.md` is not the released version.** A numbered section can sit
+there for weeks before it ships: the changelog is where the next release is ASSEMBLED.
+Reading it as history and bumping past it invents a version that skips a real one.
+
+Before writing any version number, find what is actually out there:
+
+    curl -s https://raw.githubusercontent.com/ClaudioSchirmer/omnicore-plugin/main/plugins/omnicore/.claude-plugin/plugin.json | grep version
+
+That `version` field IS the published one — it is what the skills' own self-check
+compares against. Git tags are NOT: they stop at `v0.8.4` and have not tracked releases
+since. Offline, or the answer is ambiguous → **ask the maintainer**. Do not infer.
+
+Then: the next version is the one after the PUBLISHED one. If `0.17.x` is out and the
+changelog already carries a `[0.18.0]` section, that section is the release being
+prepared — new work goes INTO it, and its date moves to the day it closes. There is no
+`[0.19.0]` until `0.18.0` has shipped.
+
+The second half of the same mistake, and the expensive one: **a defect fixed inside an
+unreleased section is not a `Fixed` entry.** Nobody received the broken version, so
+there is nothing to have been fixed from a reader's point of view — it belongs to the
+`Added`/`Changed` entry for the capability that contained it. Both halves happened here
+in one sitting: a `[0.19.0]` invented over an unshipped `[0.18.0]`, and 24 `Fixed`
+entries for a generator that had never left the repo.
+
 ## The gate
 
 `plugins/omnicore/gen/scripts/golden.sh` — generate → gofmt → vet → build → the
