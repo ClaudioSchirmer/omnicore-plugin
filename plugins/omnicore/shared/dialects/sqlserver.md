@@ -40,6 +40,20 @@ Boolean is `BIT`; money is an integer of minor units. Per-relay note: CDC depend
 SQL Server Agent plus per-database/per-table CDC enablement done AFTER the first app boot
 creates the outbox — that lives in `transport.html` / the bench templates, not here.
 
+## Column & table descriptions — they go in the catalogue
+
+An `MS_Description` extended property, which is what SSMS shows and what
+`sys.extended_properties` answers:
+
+    EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'…',
+      @level0type = N'SCHEMA', @level0name = @schema,
+      @level1type = N'TABLE',  @level1name = N'<table>',
+      @level2type = N'COLUMN', @level2name = N'<column>';   -- omit level2 for the table
+
+Take the schema from `DECLARE @schema sysname = SCHEMA_NAME();` at the top of the file rather
+than hardcoding `dbo`: a service whose tables live in its own schema fails every one of these
+otherwise. Double the apostrophes inside the text.
+
 ## Read side
 
 Full distributed CQRS is available: entity views project to MongoDB through the CDC

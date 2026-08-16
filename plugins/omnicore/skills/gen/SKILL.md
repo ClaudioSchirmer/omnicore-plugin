@@ -3,9 +3,10 @@ name: gen
 description: >-
   omnicore: run one omnicore-gen command against an existing project and read the answer —
   doctor (drift between the spec, the lock and the files on disk), check, explain, adopt,
-  init. Use when the dev asks for a generator command by name or asks whether a generated
-  tree is still in step with its spec. Creating or regenerating an ENTITY is not this
-  skill's job: that is /omnicore:scaffold-entity, which owns the model and plan gates.
+  init, prune (remove what an earlier shape of the spec left behind). Use when the dev asks for a generator command by name or asks whether a generated
+  tree is still in step with its spec. Creating or CHANGING an entity is not this skill's
+  job: that is /omnicore:scaffold-entity (model + plan gates) and /omnicore:evolve-entity
+  (impact map + the migration a regeneration never writes).
 ---
 
 # gen
@@ -18,6 +19,10 @@ on it.** It is short on purpose — there is no flow here, no gates, no spec aut
 `/omnicore:scaffold-entity`, which decides the model with the dev and only then reaches the
 generator. Do not use `generate` here to create an entity that does not exist yet: the
 model gate is where the thinking happens, and skipping it produces a tree nobody agreed to.
+**Nor is a real CHANGE to a generated entity this skill's job** — that is
+`/omnicore:evolve-entity`: an edited spec regenerates the code but never the database, and
+the migration pair, the orphans and the artifacts outside the generator's ownership are
+exactly what its impact map exists to carry.
 
 ## The command
 
@@ -47,9 +52,9 @@ Read-only, offline, instant. It reports, per entity:
 | Line | What it means | What to do |
 |---|---|---|
 | `<Entity> (spec …, framework …)` and nothing under it | everything the lock records is intact | nothing |
-| `! the spec changed since the last generation` | the YAML moved and the code did not | regenerate through `/omnicore:scaffold-entity`, or ask the dev if the spec edit was intentional |
+| `! the spec changed since the last generation` | the YAML moved and the code did not | regenerate through `/omnicore:evolve-entity` (it owns the migration that edit may imply), or ask the dev if the spec edit was intentional |
 | `! <path> was edited by hand — regeneration will refuse it` | an owned file's checksum no longer matches | move the change into the spec; if it genuinely cannot be expressed, `adopt` it deliberately |
-| `! <path> is gone` | a file the lock records is missing | regenerate; if it was deleted on purpose, the spec is what should say so |
+| `! <path> is gone` | a file the lock records is missing | regenerate; if it was deleted on purpose, `prune` is what stops the line repeating forever |
 | `! the spec is missing at <path>` | the source of truth was moved or deleted | find it or restore it — the code is derived FROM it, so this inverts the dependency |
 | `· <path> carries a hand edit adopted at <version>` | a deliberate exception, with its reason | nothing, but read the reason: it says whether it still holds |
 
@@ -85,6 +90,28 @@ coverage` is the only honest list of what this build emits and what it refuses. 
 what looks like a missing capability is a key whose name nobody guessed** — that is exactly
 why `explain keys` exists.
 
+## `prune` — remove what an earlier shape of the spec left behind
+
+    omnicore-gen prune -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen prune -spec … -project … -apply      # actually remove them
+
+**Dry by default.** It prints three lists and writes nothing until `-apply`: what it would
+REMOVE (orphaned Go files, notification declarations and translation keys the spec no
+longer declares), what it would FORGET in the lock (files already deleted by hand — the
+reason `doctor` reports `is gone` forever), and what it LEAVES ALONE with the reason.
+
+It is the answer to the one thing a shrinking spec used to hand a human with no tool:
+`generate` inserts and replaces but never deletes, so a removed field left its labelKey in
+all seven catalogs and a removed collection left files that still compiled and meant
+nothing. A dead translation key is invisible to `check`, to the compiler and to the tests.
+
+**What it will not touch**, and this is what makes it safe to run routinely: anything whose
+text no longer matches what the generator itself wrote (hand-edited), anything `adopt`ed,
+anything another entity of the project also declares, and **migrations** — a migration that
+ran cannot be taken back by deleting its file. Run `go build` and the tests after: a
+notification type removed while the code still references it is a compile error, which is
+the good kind.
+
 ## `adopt` — keep a hand edit through regeneration
 
     omnicore-gen adopt <path> -project <service-dir> -why 'what the spec could not express'
@@ -106,9 +133,16 @@ to SHOW the shape of a spec. If the dev is starting a real entity, hand them to
 
 ## `generate` — only for an entity that already exists
 
-Regenerating after a spec change is legitimate and this skill may do it, on one condition:
-`doctor` must already know the entity. Then read the report it points at
-(`omnicore-gen/<entity>.gen-report.md`) and prove the tree with build + vet + tests.
+Regenerating after a spec change is legitimate and this skill may do it, on two conditions:
+`doctor` must already know the entity, and the spec edit must be one that **cannot move a
+table** — a wording, a description, a permission string, a filter. Then read the report it
+points at (`omnicore-gen/<entity>.gen-report.md`) and prove the tree with build + vet +
+tests.
+
+If the edit touches the storage — a field, a nullability, a uniqueness, a child — stop:
+regenerating writes the code and NOT the migration, and a tree that boots green against a
+table that never moved fails on the first query touching the change. That is
+`/omnicore:evolve-entity`.
 
 If the entity is NOT in the lock, stop and hand over to `/omnicore:scaffold-entity`. A
 first generation without the model gate is the one thing this skill must not do.

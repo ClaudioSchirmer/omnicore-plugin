@@ -341,14 +341,17 @@ applies only when any high-risk slot would otherwise be filled by you.
    framework-facing values against `transport.html` (step 2) before writing. **SKIPPED
    entirely for SQLite** — no `devops/`, no compose, no relay (zero Docker).
 9. **Start wrappers — the set resolved in the spec (Phase 1 #7).** The one-command dev
-   loop: compose up + wait healthy, then `APP_PROFILE=dev go run -tags '<engine>
-   <transport>' ./bootstrap` (dev profile, always). ALWAYS write the host-native wrapper
+   loop: compose up + wait healthy, then `go build -tags '<engine> <transport>' -o
+   ./bin/<svc> ./bootstrap` and run THAT (dev profile, always; on bash, `exec` it).
+   **Never `go run` in a wrapper** — it runs the app as a child and does not forward
+   SIGTERM, so the wrapper cannot be drained and the verification boot below would prove
+   nothing; `bin/` is build output and belongs in `.gitignore`. ALWAYS write the host-native wrapper
    (`start.sh` on darwin|linux; `start.cmd` + `start.ps1` on windows); ALSO write the
    other platform's when #7 was accepted (`start.cmd` = zero-friction batch, `start.ps1`
    = robust PowerShell, `start.sh` = bash/WSL). Whatever ships stays in lockstep — same
    steps in every wrapper. Skipped (compose half) when the dev chose existing infra.
    **For SQLite, from `templates/sqlite-mvp.md`** — no compose, just
-   `CGO_ENABLED=0 APP_PROFILE=dev go run -tags sqlite ./bootstrap`.
+   `CGO_ENABLED=0 go build -tags sqlite -o ./bin/<svc> ./bootstrap` and run it.
 10. **Resolve deps:** `go mod tidy` **then** `GOFLAGS=-mod=mod go build -o /dev/null
     -tags '<engine> <transport>' ./bootstrap` (`-o` is required: the default output
     name `bootstrap` collides with the directory; on a Windows host the null sink is

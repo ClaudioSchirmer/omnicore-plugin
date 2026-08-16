@@ -87,7 +87,13 @@ validation by hand. The framework discovers every VO-typed field by reflection a
 validates it on every write, IDENTICALLY on a root AND on an aggregate value object (a
 `nil` pointer field is skipped as absent). So `BuildRules` carries ONLY the non-VO rules (a
 required plain `string`, a cross-field invariant); an Email/ZipCode/enum field has nothing
-to wire. To opt one out in a mode, `r.IgnoreValueObject("Field")` inside that mode's gate;
+to wire. **That includes PRESENCE — never add a required rule for a VO-typed field.** A
+string-backed raw VO reports an empty value as `RequiredFieldNotification` from inside its
+own `IsValid` (the canonical shape in `value-objects.html`), and an enum answers `""` with
+its unknown-member notification, since `""` is not a member. A required rule beside either
+one makes the caller receive the SAME complaint twice for one empty field — the failure a
+run here actually shipped. Presence on a VO field is the VO's job; `BuildRules` carries
+what the VO cannot see. To opt one out in a mode, `r.IgnoreValueObject("Field")` inside that mode's gate;
 to force a VO that is not a plain field (computed, in a slice), `r.ValidateValueObject(name,
 vo)`. Both on `*Rules`, root and child alike.
 
@@ -110,11 +116,19 @@ own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
   will NOT fire on an archive transition. `actionName` is a free-form label, never a verb
   selector. Full clause set: `rules-dsl.html`.
 - **`domain.Old(e)` is nil on Insert** — guard before dereferencing.
-- **One clause per mode is the DEFAULT — group by field, not by mode.** Repeating a mode
-  clause is legal (`IfInsertOrUpdate` just runs its closure each time — nothing is registered,
-  stored, or overwritten), but two scattered `IfInsertOrUpdate` blocks read as accidental
-  duplication. Keep all of a field's rules (required / immutable / unique) adjacent under a
-  single clause of each kind it needs.
+- **ONE clause per verb, holding every rule that runs on it. Not one clause per rule.**
+  This is the single most common readability failure in a hand-written `BuildRules`: two
+  rules that both run on insert, each wrapped in its own `IfInsert`. The result is a file of
+  near-identical wrappers where the reader has to diff the closures to find the rules, and
+  the framework runs the verb check once per block on every write.
+  Write the block once and put both rules inside it, separated by a blank line and a
+  `// ── <rule-id> ──` header — the same shape the codegen path's hook file is generated
+  with. It is what a reader expects: all of a verb's invariants in one place, in reading
+  order. Repeating a clause is *legal* (`IfInsertOrUpdate` just runs its closure each time —
+  nothing is registered, stored, or overwritten), which is precisely why nothing catches it
+  for you. Keep all of a field's rules (required / immutable / unique) adjacent inside the
+  block, and if one rule genuinely runs on two verbs, write it as a method on the entity and
+  call it from both clauses rather than pasting it twice.
 - **Never write code to dodge an automation.** When a rule must run only if a VO field has a
   value, remember the VO's own automatic check already raises the required — so gate the rule
   POSITIVELY on the value you want (`if a.Matricula != "" { …uniqueness… }`), never an early

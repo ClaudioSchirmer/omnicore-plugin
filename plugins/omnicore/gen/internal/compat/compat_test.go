@@ -3,6 +3,14 @@ package compat
 import "testing"
 
 func TestVerdicts(t *testing.T) {
+	// The fixtures below are written AGAINST a specific Supported value: which
+	// pin counts as behind, exact or ahead only means anything relative to it.
+	// So the value is asserted first — a bump that leaves this table behind
+	// would otherwise keep passing while testing the wrong three relations.
+	if Supported != "v0.51.0" {
+		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
+			"this guard; they only mean something relative to the supported line", Supported)
+	}
 	cases := []struct {
 		name   string
 		pin    string
@@ -10,10 +18,10 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"below the required patch", "v0.49.0", false, Behind, true},
-		{"the required patch", "v0.49.1", false, Exact, false},
-		{"same line, later patch", "v0.49.9", false, Exact, false},
-		{"framework moved ahead", "v0.51.1", false, Ahead, false},
+		{"the supported line", "v0.51.0", false, Exact, false},
+		{"same line, later patch", "v0.51.9", false, Exact, false},
+		{"framework moved ahead", "v0.52.1", false, Ahead, false},
+		{"project is one line older", "v0.50.9", false, Behind, true},
 		{"project is older", "v0.48.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},
 		{"devel", "(devel)", false, Unknown, false},

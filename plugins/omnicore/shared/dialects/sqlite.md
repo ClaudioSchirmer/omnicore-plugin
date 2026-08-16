@@ -48,6 +48,12 @@ SQLite supports Postgres-style partial indexes (since 3.8.0; the framework's own
 SQLite migrations use them): `CREATE UNIQUE INDEX ... ON <role>(<fk>) WHERE deleted_at IS
 NULL` — the same statement as Postgres. `table-schema.html` owns the per-dialect shapes.
 
+## Column & table descriptions — the ONE engine that cannot store them
+
+SQLite has no `COMMENT ON` and no catalogue slot for a description, so here — and only here —
+the description stays in the migration file as a `--` line above the column. Every other
+engine stores it in the database; do not carry this exception over to them.
+
 ## Read side — no Mongo, so no CDC-projected views
 
 SQLite has NO CDC source (Debezium cannot tail a SQLite file), so the read-side posture

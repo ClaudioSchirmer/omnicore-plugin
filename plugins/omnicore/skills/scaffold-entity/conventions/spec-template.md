@@ -115,9 +115,15 @@ archive (+ unarchive). Root AND per-child.
   earns its keep.
 
 ## 8. Update shape                                      [required]
-PATCH | PUT | both — default PATCH. **COUPLING: if §4 has a sibling, include PUT** (PATCH
-can't assign null; the ROOT's PUT with the facet all-null is what clears the sibling row —
-a sibling NEVER gets its own REST endpoint; `siblings.md`). **With GraphQL: yes there is
+PATCH | PUT | both — default PATCH. **INVARIANT, not a trade-off: if §4 has a sibling, the
+shape MUST include PUT.** PATCH cannot assign null, and the ROOT's PUT with the facet
+all-null is the ONLY thing that clears the sibling row — a sibling never gets its own REST
+endpoint (`siblings.md`). PATCH-only beside a facet is therefore not a deviation this spec
+may record as a conscious choice: it ships a facet a caller can grant and never revoke. The
+codegen path refuses it outright (`update.shape` is a hard blocker in `omnicore-gen check`,
+not a warning), and the manual path has no override either — if the dev wants PATCH-only,
+the answer is to drop the sibling and keep those fields nullable on the root, not to keep
+both. **With GraphQL: yes there is
 one exception** — omitted and null are indistinguishable there, so clearing needs a
 bodyless intent mutation dispatched through the FULL update handler (`siblings.md`; the
 generator emits it).

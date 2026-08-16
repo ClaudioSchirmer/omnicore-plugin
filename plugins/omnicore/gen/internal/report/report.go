@@ -216,6 +216,49 @@ func renderTodo(b *strings.Builder, in Input) {
 	}
 }
 
+// writeDescriptionNote says what a REWORDED description costs, and it depends on
+// the engines this service targets.
+//
+// The unconditional version of this paragraph was noise on a SQLite-only project:
+// there is no catalogue slot for a description there, so rewording one is a
+// provable no-op — and a warning that is wrong for the reader's project every
+// single run is a warning they learn to skip, including on the run where it
+// matters. Three shapes, because there are three truths: every target stores it,
+// none does, or some do and the paragraph has to name which.
+func writeDescriptionNote(b *strings.Builder, dialects []string) {
+	var stores, dont []string
+	for _, d := range dialects {
+		if d == "sqlite" {
+			dont = append(dont, d)
+			continue
+		}
+		stores = append(stores, d)
+	}
+
+	if len(stores) == 0 {
+		b.WriteString("**Rewording a `description:` costs nothing here.** SQLite has no " +
+			"catalogue slot for one, so a description lives only as a `--` line in the " +
+			"migration file — and that file is frozen. The reworded text reaches the " +
+			"generated Go source and stops there; there is no database state to update and " +
+			"no migration to write.\n\n")
+		return
+	}
+
+	fmt.Fprintf(b, "**A changed `description:` is a storage change too, on %s.** The "+
+		"description is stored IN the database — a COMMENT on postgres, mysql and oracle, "+
+		"an `MS_Description` extended property on sqlserver — so that someone holding a "+
+		"connection and not this repository can read it. The code regenerates from the "+
+		"spec; that catalogue entry does not. Rewording a description therefore needs a new "+
+		"pair carrying just the `COMMENT ON` / `sp_addextendedproperty` statements, or the "+
+		"database keeps answering with the old wording.",
+		strings.Join(stores, ", "))
+	if len(dont) > 0 {
+		b.WriteString(" On sqlite there is nothing to write: it has no catalogue slot for a " +
+			"description, so the same reword is a no-op for that engine alone.")
+	}
+	b.WriteString("\n\n")
+}
+
 // renderMigrationHandoff speaks to the reader holding a migration that an
 // EARLIER run created — the only case where the code and the database can have
 // drifted apart without anyone being told.
@@ -250,6 +293,8 @@ func renderMigrationHandoff(b *strings.Builder, in Input) {
 
 	b.WriteString("If nothing about the storage changed this run, there is nothing to do " +
 		"here — read the shape as confirmation, not as a task.\n\n")
+
+	writeDescriptionNote(b, m.Dialects)
 
 	fmt.Fprintf(b, "The shape the regenerated code expects, for `%s`:\n\n", m.Table)
 	for _, t := range in.TargetTables {
@@ -573,8 +618,11 @@ func renderNotGenerated(b *strings.Builder, in Input) {
 	b.WriteString("- the gRPC surface and its proto contract — `/omnicore:implement`\n")
 	b.WriteString("- integration events (publish/subscribe) — `/omnicore:implement`\n")
 	b.WriteString("- read models spanning more than this entity — `/omnicore:scaffold-view`\n")
-	b.WriteString("- changing this entity once it exists — still a manual edit; " +
-		"the generator creates, it does not evolve\n\n")
+	b.WriteString("- changing this entity once it exists — `/omnicore:evolve-entity`, " +
+		"which edits this spec and regenerates. The CODE comes back from the spec; the " +
+		"DATABASE never does — the migration a change needs is written by hand, and that " +
+		"skill's impact map is what carries it, along with the orphans a shrinking spec " +
+		"leaves and everything outside this generator's ownership\n\n")
 
 	if m.Read.ByParams {
 		var undeclared []string

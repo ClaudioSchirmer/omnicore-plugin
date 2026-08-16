@@ -55,6 +55,14 @@ func emitTests(m *ir.Model) ([]fsplan.File, error) {
 			return nil, err
 		}
 		out = append(out, ch)
+
+		if m.HasOwnedChildren() {
+			dto, err := emitChildInputTests(m)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, dto)
+		}
 	}
 	if len(m.Notifications) > 0 {
 		tr, err := emitTranslationTests(m)
@@ -96,7 +104,7 @@ func emitDomainTests(m *ir.Model) (fsplan.File, error) {
 	s.L("\t%s", quote("time"))
 	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
-	if m.HasNotificationsIn("aggregatevos") {
+	if m.HasNotificationsIn("aggregatevos") || len(m.Children) > 0 {
 		s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
 	}
 	s.L(")")
@@ -105,6 +113,7 @@ func emitDomainTests(m *ir.Model) (fsplan.File, error) {
 	emitTestHelpers(s, m)
 	emitServiceStub(s, m)
 	emitValidEntityBuilder(s, m)
+	emitAggregateContractTest(s, m)
 	emitNotificationSemantics(s, m)
 	emitRuleCases(s, m)
 
@@ -474,6 +483,8 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		}
 		s.L("}")
 		s.Blank()
+
+		emitFromEntityTest(s, m, op)
 	}
 
 	if op := m.Op("patch"); op != nil && len(m.PatchableFields()) > 0 {
@@ -530,6 +541,8 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		}
 		s.L("}")
 		s.Blank()
+
+		emitPartialResultTest(s, m, op)
 	}
 	s.L("var _ = time.Time{}")
 
@@ -1080,6 +1093,20 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 		s.Blank()
 		emitValidChildBuilder(s, m, c)
 
+		s.Doc(
+			fmt.Sprintf("%s's collection name is a PERSISTED key, so it is pinned here.", c.Name),
+			"",
+			"It is the segment the projection nests the collection under and the field a "+
+				"read DTO carries. Changing it is a data migration wearing a rename's "+
+				"clothes: the old documents keep the old key and nothing reads them back.")
+		s.L("func Test%s%s_CollectionNameIsTheDocumentKey(t *testing.T) {", m.Entity.Pascal, c.Name)
+		s.L("\tif got := (%s{}).CollectionName(); got != %s {", c.Name, quote(c.Plural))
+		s.L("\t\tt.Errorf(%s, got, %s)",
+			quote("the collection is written under %q, and the documents already say %q"), quote(c.Plural))
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
+
 		if len(c.Identity) > 0 {
 			s.Doc(
 				fmt.Sprintf("Two %s entries are the same one when their business identity matches.", c.Name),
@@ -1248,7 +1275,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 			ops = append(ops, op)
 		}
 	}
-	if len(ops) == 0 {
+	if len(ops) == 0 && !m.HasPerChildOps() {
 		return fsplan.File{}, nil
 	}
 
@@ -1371,6 +1398,8 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 		s.L("}")
 		s.Blank()
 	}
+
+	emitPerChildRequestTests(s, m)
 
 	return goFile("internal/web/requests/"+m.Entity.Snake+"_requests_test.go",
 		fsplan.Owned, "the request mapper tests", s)
@@ -1544,14 +1573,21 @@ func validSample(m *ir.Model, vo ir.ValueObject) string {
 	// the spec guarantees the rule accepts. Inventing one here would mean
 	// guessing at a regex, and a test that fails on a correct generator is worse
 	// than no test.
+	//
+	// The comparison is against the QUALIFIED name — a field records its VO as
+	// `vos.Email`, never as `Email`. Comparing the bare name matched nothing, so
+	// no string-backed value object ever got its accepts-a-valid-value test: the
+	// half that proves the rule does not reject everything, and the only caller
+	// of Value(). Both read as untested for as long as that stood.
+	want := "vos." + vo.Name
 	for _, f := range m.AllOwnerFields() {
-		if f.BaseEntityType == vo.Name && f.Example != "" {
+		if f.BaseEntityType == want && f.Example != "" {
 			return quote(f.Example)
 		}
 	}
 	for _, c := range m.Children {
 		for _, f := range c.Fields {
-			if f.BaseEntityType == vo.Name && f.Example != "" {
+			if f.BaseEntityType == want && f.Example != "" {
 				return quote(f.Example)
 			}
 		}
@@ -1905,4 +1941,368 @@ func childInputLiteral(m *ir.Model, c ir.Child, empty bool) string {
 	}
 	b.WriteString("}")
 	return b.String()
+}
+
+// emitAggregateContractTest covers the three methods the FRAMEWORK calls and no
+// rule test ever reaches: the declared child set, the service opt-in, and the
+// Add<Child> door.
+//
+// They were the largest untested surface of a generated entity, and none of
+// them fails loudly: AggregateChildren disagreeing with the schema is a bind
+// refusal at boot, RequiresService flipping to false hands the rules a nil
+// service, and an Add that does not reach the collection writes a root with no
+// children and no error. A test that calls them is the difference between
+// finding that here and finding it in a running service.
+func emitAggregateContractTest(s *src, m *ir.Model) {
+	if len(m.Children) == 0 && m.Service == nil {
+		return
+	}
+	s.Doc(
+		fmt.Sprintf("%s declares the aggregate contract the framework reads.", m.Entity.Pascal),
+		"",
+		"Nothing here is called by a rule, which is exactly why it is worth a test: "+
+			"the framework calls it, and a disagreement surfaces at boot or as a write "+
+			"that quietly saves nothing.")
+	s.L("func Test%sDeclaresItsAggregateContract(t *testing.T) {", m.Entity.Pascal)
+	s.L("\te := valid%s()", m.Entity.Pascal)
+	if len(m.Children) > 0 {
+		s.L("\tif got, want := len(e.AggregateChildren()), %d; got != want {", len(m.Children))
+		s.L("\t\tt.Errorf(%s, got, want)",
+			quote("the aggregate declares %d child collection(s), want %d — the schema binding compares this set"))
+		s.L("\t}")
+		for _, c := range m.Children {
+			if c.Mounted {
+				continue // the owner spec declares and tests it
+			}
+			s.L("\te.Add%s(aggregatevos.%s{})", c.Name, c.Name)
+			s.L("\tif got := len(domain.GetCurrentItemsOf[aggregatevos.%s](&e.AggregateRoot)); got != 1 {", c.Name)
+			s.L("\t\tt.Errorf(%s, got)",
+				quote("Add"+c.Name+" left the collection at %d entries — the write would save a root with no children"))
+			s.L("\t}")
+		}
+	}
+	if m.Service != nil {
+		s.L("\tif !e.RequiresService() {")
+		s.L("\t\tt.Error(%s)",
+			quote("the entity stopped requiring the domain service, and the rules that ask it would be handed a nil"))
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitFromEntityTest closes the OTHER half of the mapper: what the caller reads
+// back after the write.
+//
+// The insert test above proves the request reaches the entity. Nothing proved
+// the entity reaches the RESPONSE — and that direction has its own way of going
+// wrong, because it unwraps every value object and projects every collection. A
+// field dropped there is a write that succeeded and an answer that omits what
+// was just saved, which reads to the caller as data loss.
+func emitFromEntityTest(s *src, m *ir.Model, op *ir.Operation) {
+	if op.InputMethod != "ToEntity" {
+		return // the entity is not built here; emitPartialResultTest covers that shape
+	}
+	s.Doc(
+		"What was written reads back through the result mapper.",
+		"",
+		"The round trip is the point: the same command builds the entity and then "+
+			"projects it, so a field that survives one direction and not the other "+
+			"fails here rather than in a caller's response.")
+	s.L("func Test%sResultCarriesWhatWasWritten(t *testing.T) {", op.CommandType)
+	s.L("\tctx := &configuration.AppContext{}")
+	s.L("\tc := &%s{", op.CommandType)
+	for _, f := range m.WritableFields() {
+		s.L("\t\t%s: %s,", f.Name, wireSample(f))
+	}
+	for _, c := range m.Children {
+		s.L("\t\t%s: []dtos.%s{{", c.GoPlural, c.InputType)
+		for _, f := range c.Fields {
+			if f.Nullable {
+				continue
+			}
+			s.L("\t\t\t%s: %s,", f.Name, wireSample(f))
+		}
+		s.L("\t\t}},")
+	}
+	s.L("\t}")
+	s.L("\te, err := c.ToEntity(ctx)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("ToEntity: %v"))
+	s.L("\t}")
+	// An id is minted by the framework on write; the projection dereferences it,
+	// so the test has to stand one in or it panics on a nil.
+	s.L("\te.SetID(domain.NewRandomID())")
+	s.L("\tres, err := c.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	for _, f := range m.WritableFields() {
+		if f.Nullable {
+			continue
+		}
+		s.L("\tif res.%s != %s {", f.Name, wireSample(f))
+		s.L("\t\tt.Errorf(\"%s did not reach the result\")", f.Name)
+		s.L("\t}")
+	}
+	for _, c := range m.Children {
+		s.L("\tif len(res.%s) != 1 {", c.GoPlural)
+		s.L("\t\tt.Errorf(%s, len(res.%s))",
+			quote("the "+c.Plural+" collection reached the result with %d entries, want 1"), c.GoPlural)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitChildInputTests covers the wire→domain mapper of every collection entry.
+//
+// It is its own file for a reason that is easy to miss: coverage is measured
+// per PACKAGE, and `dtos` had no test of its own. The mapper was in fact
+// exercised — the insert test builds children through it — but every report read
+// it as 0%, so the one number a reviewer checks said "untested" about code that
+// was covered, and said nothing about the day it stops being. A test inside the
+// package answers both.
+//
+// What it asserts is the thing that goes wrong silently: a field added to the
+// collection and forgotten in the mapper. The entry is accepted, the write
+// succeeds, and the value is simply not there.
+func emitChildInputTests(m *ir.Model) (fsplan.File, error) {
+	s := &src{}
+	s.Blank()
+	s.L("package dtos")
+	s.Blank()
+	s.L("import (")
+	s.L("\t%s", quote("testing"))
+	if m.UsesVOsInChildren() {
+		s.L("\t%s", quote("time"))
+	}
+	s.L(")")
+	s.Blank()
+	if m.UsesVOsInChildren() {
+		s.L("var _ = time.Now")
+		s.Blank()
+	}
+
+	for _, c := range m.Children {
+		if c.Mounted {
+			// The input type belongs to the spec that DECLARES the identity's
+			// collection; this run only mounts a surface over it. Testing it here
+			// would put the same function name in the shared dtos package twice —
+			// once per role — and neither copy would be testing this spec's code.
+			continue
+		}
+		s.Doc(
+			fmt.Sprintf("A %s entry carries every field it was sent with.", c.Name),
+			"",
+			"A field added to the collection and forgotten in this mapper is accepted "+
+				"on the wire, saved without it, and reported nowhere.")
+		s.L("func Test%s%sInputCarriesEveryField(t *testing.T) {", m.Entity.Pascal, c.Name)
+		s.L("\tin := %s{", c.InputType)
+		for _, f := range c.Fields {
+			if f.Nullable {
+				continue
+			}
+			s.L("\t\t%s: %s,", f.Name, wireSample(f))
+		}
+		s.L("\t}")
+		s.L("\tgot := in.To%s()", c.Name)
+		for _, f := range c.Fields {
+			if f.Nullable {
+				continue
+			}
+			s.L("\tif %s != %s {", entityAsWire(f, "got"), wireSample(f))
+			s.L("\t\tt.Errorf(\"%s did not survive the mapper\")", f.Name)
+			s.L("\t}")
+		}
+		s.L("}")
+		s.Blank()
+	}
+
+	return goFile("internal/application/dtos/"+m.Entity.Snake+"_dtos_test.go", fsplan.Owned,
+		fmt.Sprintf("tests for the %d collection input mapper(s)", len(m.Children)), s)
+}
+
+// emitPartialResultTest is the result half for a command that MUTATES an entity
+// rather than building one — PATCH and PUT.
+//
+// Same reason as the insert twin: the response mapper unwraps the value objects
+// and projects the collections, and a field missing there is a write that
+// worked and an answer that does not show it. The construction differs only in
+// how the entity comes to exist.
+func emitPartialResultTest(s *src, m *ir.Model, op *ir.Operation) {
+	if op.InputMethod == "ToEntity" || len(m.PatchableFields()) == 0 {
+		return
+	}
+	s.Doc(
+		"What a partial update applied reads back through the result mapper.",
+		"",
+		"The verb's own test proves the fields reach the ENTITY. This one proves they "+
+			"reach the CALLER, which is a separate mapper with its own way of dropping "+
+			"one.")
+	s.L("func Test%sResultCarriesWhatWasApplied(t *testing.T) {", op.CommandType)
+	s.L("\tctx := &configuration.AppContext{}")
+	s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
+	s.L("\tc := &%s{", op.CommandType)
+	for _, f := range m.PatchableFields() {
+		if m.PatchExcludes[f.Name] {
+			continue
+		}
+		s.L("\t\t%s: %s,", f.Name, patchSample(f))
+	}
+	s.L("\t}")
+	s.L("\tif err := c.%s(ctx, e); err != nil {", op.InputMethod)
+	s.L("\t\tt.Fatalf(%s, err)", quote(op.InputMethod+": %v"))
+	s.L("\t}")
+	s.L("\te.SetID(domain.NewRandomID())")
+	s.L("\tres, err := c.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	for _, f := range m.PatchableFields() {
+		if m.PatchExcludes[f.Name] || f.Nullable {
+			continue
+		}
+		s.L("\tif res.%s != %s {", f.Name, literalFor(f))
+		s.L("\t\tt.Errorf(\"%s was applied and did not reach the result\")", f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitPerChildRequestTests covers the wire types of the per-entry verbs.
+//
+// They were the last generated file at zero: the whole Add/Change/Remove
+// surface of a collection — three requests, three responses, six mappers — with
+// nothing calling them. The command side has tests, and that is precisely what
+// made the gap invisible: the operation looked covered while the layer that
+// feeds it was not, and a field dropped HERE is a request that parses, a
+// command that runs and an entry saved without it.
+func emitPerChildRequestTests(s *src, m *ir.Model) {
+	for _, c := range m.Children {
+		if !c.PerChild {
+			continue
+		}
+		op := c.OpBase
+		fields := writableChildFields(c)
+		if len(fields) == 0 {
+			continue
+		}
+
+		s.Doc(
+			fmt.Sprintf("Add%sRequest carries the entry into its command.", op),
+			"",
+			"The body is the same entry shape the root's own body carries, so a field "+
+				"forgotten here is saved as missing on a request that answered 201.")
+		s.L("func TestAdd%sRequest_CarriesEveryField(t *testing.T) {", op)
+		s.L("\tr := Add%sRequest{%sRequest: %sRequest{", op, c.Name, c.Name)
+		for _, f := range fields {
+			s.L("\t\t%s: %s,", f.Name, wireSample(f))
+		}
+		s.L("\t}}")
+		s.L("\tcmd := r.ToCommand()")
+		for _, f := range fields {
+			s.L("\tif cmd.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+			s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
+			s.L("\t}")
+		}
+		s.L("}")
+		s.Blank()
+
+		s.Doc(
+			fmt.Sprintf("Change%sRequest names the entry AND carries the replacement.", op),
+			"",
+			"The id comes from the path and the body is a full replacement, so both "+
+				"halves have to arrive: an id that does not reach the command changes the "+
+				"wrong entry, or none.")
+		s.L("func TestChange%sRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
+		s.L("\tr := Change%sRequest{%sID: %s, %sRequest: %sRequest{", op, c.Name,
+			quote("01890000-0000-7000-8000-000000000000"), c.Name, c.Name)
+		for _, f := range fields {
+			s.L("\t\t%s: %s,", f.Name, wireSample(f))
+		}
+		s.L("\t}}")
+		s.L("\tcmd := r.ToCommand()")
+		// The command carries the id as the WIRE type — a string; the conversion to
+		// domain.ID happens further in. Comparing it as an ID would not compile.
+		s.L("\tif cmd.%sID != %s {", c.Name, quote("01890000-0000-7000-8000-000000000000"))
+		s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be replaced\")")
+		s.L("\t}")
+		for _, f := range fields {
+			s.L("\tif cmd.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+			s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
+			s.L("\t}")
+		}
+		s.L("}")
+		s.Blank()
+
+		s.Doc(
+			fmt.Sprintf("The %s responses carry the stored entry back to the caller.", op),
+			"",
+			"The entry comes back with the id the SERVER minted, which is how the caller "+
+				"addresses it afterwards — a response mapper that drops it answers 201 with "+
+				"nothing to act on.")
+		s.L("func TestAdd%sResponse_CarriesTheStoredEntry(t *testing.T) {", op)
+		s.L("	ownerID := domain.NewRandomID()")
+		s.L("	entryID := domain.NewRandomID()")
+		s.L("	res := Add%sResponse{}.FromResult(commands.Add%sResult{", op, op)
+		s.L("		%sID: ownerID,", m.Entity.Pascal)
+		// The ENTRY result type is the COLLECTION's own, never the qualified
+		// operation name: for a collection mounted from a shared identity, the
+		// entry type belongs to the spec that declares the identity, and
+		// `<Entity><Child>Result` names a type nothing declares.
+		s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+		for _, f := range fields {
+			s.L("			%s: %s,", f.Name, wireSample(f))
+		}
+		s.L("		},")
+		s.L("	})")
+		s.L("	if res.%sID != ownerID {", m.Entity.Pascal)
+		s.L("		t.Error(\"the owner id did not reach the response\")")
+		s.L("	}")
+		s.L("	if res.%s.ID != entryID {", c.Name)
+		s.L("		t.Error(\"the entry id the server minted did not reach the response\")")
+		s.L("	}")
+		for _, f := range fields {
+			s.L("	if res.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+			s.L("		t.Errorf(\"%s did not reach the response\")", f.Name)
+			s.L("	}")
+		}
+		s.L("}")
+		s.Blank()
+
+		s.Doc(fmt.Sprintf("Remove%s answers with the owner, which is all it has to carry.", op))
+		s.L("func TestRemove%sRequestAndResponse(t *testing.T) {", op)
+		s.L("	r := Remove%sRequest{%sID: %s}", op, c.Name,
+			quote("01890000-0000-7000-8000-000000000000"))
+		s.L("	if r.ToCommand().%sID != %s {", c.Name,
+			quote("01890000-0000-7000-8000-000000000000"))
+		s.L("		t.Error(\"the entry id did not reach the command, so the wrong entry would be removed\")")
+		s.L("	}")
+		s.L("	ownerID := domain.NewRandomID()")
+		// The composite literal is PARENTHESISED: at the head of an `if`, Go reads
+		// the opening brace of `T{}` as the start of the block and refuses the file.
+		s.L("	if (Remove%sResponse{}).FromResult(commands.Remove%sResult{%sID: ownerID}).%sID != ownerID {",
+			op, op, m.Entity.Pascal, m.Entity.Pascal)
+		s.L("		t.Error(\"the owner id did not reach the response\")")
+		s.L("	}")
+		s.L("}")
+		s.Blank()
+	}
+}
+
+// writableChildFields are the entry fields a CALLER sends: the nullable ones are
+// skipped by every mapper assertion here, for the same reason the root's tests
+// skip them — a pointer sample compares by address, and the test would fail
+// against a correct mapper.
+func writableChildFields(c ir.Child) []ir.Field {
+	var out []ir.Field
+	for _, f := range c.Fields {
+		if f.Nullable || f.Facet != "" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }

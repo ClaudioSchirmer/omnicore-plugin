@@ -103,6 +103,19 @@ every non-public route missing `RequirePermission`, and a parallel scan panics o
 route registered outside Mount/MountRaw while OpenAPI is on (`authz-seams.html`). Taxonomy shape per
 `service-layout.html`; granularity is a modeling choice confirmed at the spec.
 
+**The taxonomy is the DEV's decision** — what follows is the default to PROPOSE at the
+spec gate when nothing else is on record, never a shape to impose. **The ACTION spells the
+OPERATION** — `:insert`, `:update` for both PUT and PATCH,
+`:delete`, `:archive` for both archive and unarchive, `:read`; a field-level restriction
+extends the same word (`:read-grade`), it does not invent a new one (`:view-…`). Two
+operations deliberately share an action: PUT and PATCH are one update, and unarchive is the
+undo of archive, so whoever may archive may put it back. Synonyms are the whole problem —
+`create` on one entity and `write` on the next means a deployment grants three words for one
+verb. **Two things outrank it**: a taxonomy the project already grants — match it, in its own
+language — and the dev preferring another spelling, which they owe no reason for. A
+permission is compared exactly against the token, so the only wrong answer is one nothing
+grants.
+
 ## GraphQL
 
 One cumulative registry for the whole service — **built by the framework**, handed to

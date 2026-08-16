@@ -7,6 +7,251 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-08-16
+
+### Added
+
+- **`omnicore-gen prune` — the cleanup a shrinking spec used to hand a human with no tool.**
+  `generate` inserts and replaces but never deletes, deliberately: a run that writes files is
+  the wrong moment to remove other ones, and the shared registration files carry other
+  entities' content. The cost was real work nobody had a command for — orphaned Go files that
+  still compiled and meant nothing, and notification declarations plus labelKeys left in all
+  seven catalogs, where a dead translation key is invisible to `check`, to the compiler and
+  to every test. `prune` lists the three classes and writes nothing until `-apply`: what it
+  would REMOVE, what it would FORGET in the lock (files already deleted by hand — the reason
+  `doctor` repeated `is gone` forever), and what it LEAVES ALONE with the reason. It removes
+  only text the lock still recognises as the generator's own, byte for byte: hand-edited,
+  adopted, claimed by another entity, or a migration — reported, never touched. The lock now
+  MERGES what each run wrote into the shared files instead of replacing it, because dropping
+  the record at the same moment the text stops being written destroyed the only evidence that
+  the leftover was ever the generator's. `evolve-entity`'s codegen path runs it at step 7 and
+  its verify now asks for a clean `prune` — the one check that sees both the orphaned files
+  and the dead keys.
+  **One guard exists because the first answer was wrong.** A value object is declared by one
+  spec and REUSED by others, which emit no copy of it — so dropping the field that declared
+  it makes the file an orphan by every measure the generator has, while another entity still
+  has it as a field type. Prune offered it, and applying that left a project that did not
+  compile. It now reads the sibling specs for the value objects they name, keeps the file,
+  and says which spec still needs it. The whole scenario is a lane of the golden gate now,
+  along with the ordinary half — orphaned collection files and their labelKeys in all seven
+  catalogs removed, the tree still building and passing, and a second prune finding nothing.
+
+- **`evolve-entity` can now apply an approved change through `omnicore-gen`**, with the same
+  two-option gateway `scaffold-entity` uses and the same beta stance — no default, neither
+  option marked recommended: edit `omnicore-gen/<entity>.omnicore.yaml` and regenerate
+  (seconds, a fraction of the tokens, reviewed and proved by the agent), or change every file
+  by hand. The gateway is offered **only when the entity is the generator's** — Phase 0b now
+  runs `omnicore-gen doctor` and reads the lock; an entity nobody generated has no codegen
+  path, because regenerating over hand-written files is a rewrite, not an evolution. The
+  answer is recorded as `Generation:` in the spec so a resumed run does not ask again, and the
+  impact map gains a per-artifact owner (generator-owned · `_manual` hook · hand-written
+  either way).
+
+- **What regeneration does NOT do is now stated where it bites, on both sides of the
+  gateway.** The code comes back from the spec; the database never does — so the ALTER pair
+  is hand-written, in every target dialect, against the shape the gen-report prints (indexes
+  included: a uniqueness whose SCOPE changed adds no column, so a shape read only down to the
+  columns looks already satisfied). Three more asymmetries an evolution meets and a creation
+  does not: a hand-edited owned file is REFUSED by `generate`, so it must be reconciled BEFORE
+  regenerating or it silently keeps the old shape while everything around it moves; a
+  shrinking spec leaves orphan files (`No longer generated` in the report) that still compile
+  and mean nothing; and the generator inserts into the shared notification/catalog files and
+  replaces its own entries but never REMOVES, so a labelKey the spec dropped stays behind in
+  all seven catalogs. Choosing the by-hand path on a generated entity has its own permanent
+  cost, and the option text says it: every owned file touched stops tracking the spec, with
+  `adopt … -why` offered at the end so `doctor` tells the truth afterwards.
+
+### Changed
+
+- **⚠️ The generator targets framework v0.51.0** (was v0.49.1), and the golden host it is
+  proven against was bumped with it. **This is the one change here that can stop working on a
+  project that works today**: a service still pinned to v0.49.x or v0.50.x now reads as
+  `behind`, which the compat doctrine BLOCKS by default — the fix is `/omnicore:upgrade`, or
+  `--force-unsupported` to generate anyway and judge the result. Nothing else in this release
+  changes what an existing tree does. The skew had a visible cost: `scaffold-service` pins the newest
+  published release, so every new project was born with the generator warning `ahead` about
+  itself, and the gate proved a line no project used. 0.50 and 0.51 are purely additive (the
+  authcore Issuer), the emitters needed no change, and the whole matrix — generate, gofmt,
+  vet, build, the generated tests, a real boot and DDL on five engines — is green against the
+  new pin. The compat fixtures now assert the supported version they were written for, so a
+  future bump that leaves them behind fails loudly instead of testing the wrong three
+  relations.
+
+- **A childless entity embedded `AggregateRoot`, and now embeds `BaseEntity`.** The two are
+  not alternatives — `AggregateRoot` IS `BaseEntity` plus the carrier a root keeps its child
+  collections in — and the framework dispatches on the INTERFACE, not the embed: an entity is
+  treated as an aggregate when it implements `AggregateRootProvider`, which the generator
+  emits only for an entity that HAS children. So the extra embed changed no behaviour, took
+  no different write path, and cost nothing at runtime. What it did was tell every reader of
+  the file that the entity has collections, in the first place they look to find out — on
+  entities that have none. The struct's own doc comment now states which one it embeds and
+  why, so the answer is in the file rather than in a maintainer's head.
+
+- **The generated tests now cover what they claimed to.** Six gaps closed, and one of them was
+  a bug rather than an omission: the "accepts a well-formed value" test for a string-backed
+  value object was never emitted, because the sample lookup compared a field's value-object
+  type against the BARE name while a field records it qualified (`vos.Email`) — so the half
+  that proves a VO does not reject everything, and the only caller of `Value()`, were missing
+  from every entity ever generated. Also added: the aggregate contract the framework itself
+  calls (`AggregateChildren`, `RequiresService`, `Add<Child>` — none of which fails loudly);
+  the collection input mappers, in a test file inside `dtos` (a package with no test of its
+  own reads as 0% however well it is exercised); the result mappers of every write verb, both
+  the build-an-entity and the mutate-an-entity shapes; each collection's `CollectionName`,
+  which is a PERSISTED key; and the whole per-entry wire surface — Add/Change/Remove requests
+  and responses — which was the last generated file sitting at zero while its commands looked
+  covered. On the richest model in the matrix that moves the per-file floor from 0% to ≥80%
+  everywhere except the four files the generator's own docs declare boot-proven.
+
+- **Coverage is measured with `-coverpkg`, and the skills now say so.** `scaffold-entity`'s
+  verify and `conventions/tests.md` asked for a plain `-coverprofile`, which credits a file
+  only to tests in its own package: whole test-less packages read as untested while being
+  exercised, and a reviewer was sent to write tests for code that had them. The instruction
+  now names the flag and says what a 0% on an exercised file actually means — the measurement
+  is wrong, not the test missing.
+
+- **The two specs `explain example` prints are in English now**, `language: en-US` included —
+  the flat one (Student) and the shared-identity one (Teacher over a Person base, renamed
+  from Professor/Pessoa). They are the first thing an agent reads before writing a spec, so
+  a Portuguese domain in them was a nudge toward a Portuguese spec in every project. What
+  did NOT change: the `text:` blocks still carry real translations in all seven languages —
+  that is the point of the key — and the structure, key coverage and comments are the same.
+  The shared-identity example is matrix case 18 byte for byte, so the fixture moved with it;
+  both were generated into the vendored golden host and pass build + vet + the generated
+  tests. One column had to be renamed on the way (`number` → `street_number`): it is a
+  reserved word on Oracle, and `check` refused it — the guard working, in the example that
+  teaches the language.
+
+- **The generator is no longer described as scaffold-only.** `omnicore-gen`'s skill states
+  the two entry points and where they diverge (creating runs steps 1→9; changing EDITS the
+  existing spec — never `init`, which refuses without `-force` — and hands the migration,
+  the orphans and the non-owned artifacts back to `evolve-entity`). `gen` now refuses a
+  storage-moving `generate`, pointing at `evolve-entity`, because regenerating writes the
+  code and not the migration and the tree boots green against a table that never moved. The
+  gen-report's "changing this entity once it exists — still a manual edit; the generator
+  creates, it does not evolve" said the opposite of what now happens and is rewritten in the
+  same round.
+
+### Fixed
+
+- **A table's and a column's description never reached the database.** The generated
+  migration carried every `description:` as a `-- ` line above the column, which documents
+  the FILE and nobody else: the DBA on the catalogue, the BI tool listing columns and the
+  next developer opening the table in a client all saw nothing. The description is now
+  stored where a connection can read it, per engine — `COMMENT ON TABLE/COLUMN` on postgres
+  and oracle, an inline `COMMENT` on the mysql column plus `ALTER TABLE … COMMENT` for the
+  table, an `MS_Description` extended property on sqlserver (schema taken from
+  `SCHEMA_NAME()` through a declared variable, never hardcoded `dbo`). **SQLite is the one
+  engine with nowhere to store one, and is the only one that still keeps the text in the
+  file.** Apostrophes are escaped, the text is clamped to MySQL's column limit, and the
+  managed columns (`id`, the FK, `revision`, the timestamps, the archive stamp) carry a
+  description too — a catalogue that documents half a table is one nobody trusts. Verified
+  on all four engines of the generator's own bench: the DDL applies, and the descriptions
+  come back out of `pg_description`, `information_schema.columns`, `sys.extended_properties`
+  and `user_col_comments`.
+  Two consequences, both now written down where they are read: a facet's `description:` was
+  being dropped on the way to the emitter and now reaches its table's comment, and a
+  REWORDED description is a migration like any other shape change — the code regenerates
+  from the spec, the catalogue does not, so it needs a new pair carrying the statement (the
+  gen-report, `conventions/migrations.md` and `evolve-entity`'s migration-strategy slot all
+  say so). `scaffold-entity`'s migration convention said the opposite — "dialect
+  COMMENT-metadata DDL is NOT emitted by default" — and is rewritten, with the per-dialect
+  spelling added to each of the five dialect sheets.
+  The report's warning about it is per-dialect: it tells a reader targeting postgres, mysql,
+  oracle or sqlserver to write the new pair, and tells a SQLite-only project plainly that
+  the same reword costs nothing there — an unconditional paragraph that is wrong for the
+  reader's project every run is one they learn to skip.
+
+- **A start wrapper could not be drained, and the verification boot inherited that.** Every
+  wrapper ran the app with `go run`, which compiles to a temp binary and runs it as a CHILD
+  without forwarding SIGTERM — so the boot-then-SIGTERM step that `scaffold-service`,
+  `scaffold-entity` and `evolve-entity` all end on exited with no drain narration at all, and
+  often left the listener holding the port. It reads as "this service has no graceful
+  shutdown" when nothing was ever asked to shut one down. The wrappers now `go build -o
+  ./bin/<svc>` and run that (bash `exec`s it, so the wrapper's pid IS the app's), on both
+  templates and all three shells, and `shared/boot-contract.md` — the owner every skill
+  routes to for shutdown — states the rule with the fallback for a `go run` you are stuck
+  with: signal the LISTENER's pid or the process group, never the parent alone. Found by an
+  end-to-end trial of the plugin, where a compiled binary drained perfectly and the wrapper
+  did not.
+
+- **`scaffold-entity`'s spec template offered a choice the framework does not have.** §8
+  phrased the sibling-facet coupling as "COUPLING: if §4 has a sibling, include PUT", which
+  reads as a convention a spec may consciously deviate from — and a trial run recorded
+  exactly that, PATCH-only beside a facet, as an accepted trade-off. It is not one: PATCH
+  cannot assign null, so the facet could be granted and never revoked, and `omnicore-gen
+  check` refuses it as a hard blocker. The template now states it as an invariant and names
+  the real alternative — drop the sibling and keep the fields nullable on the root — rather
+  than letting the manual path promise a flexibility the codegen path then denies.
+
+- **The permission vocabulary was a synonym generator.** `init` handed out
+  `<resource>:write` for insert AND patch, which is neither the operation's name nor a
+  vocabulary anything else shares — so one entity was granted `write`, the next `create`,
+  and a deployment ended up with three words for one verb. The house taxonomy is now stated
+  once and used everywhere: **the ACTION spells the OPERATION** — `:insert` · `:update` for
+  BOTH put and patch · `:delete` · `:archive` for BOTH archive and unarchive · `:read`. The
+  two shared actions are deliberate: PUT and PATCH are one update, and unarchive is the undo
+  of archive, so whoever may archive may put it back. It reaches the author at every point
+  they might invent a word instead: the `init` template, the two `explain example` specs (a
+  field restriction there also became `:read-contact` rather than `:view-contact` — a field
+  rule extends the read action, it does not open a vocabulary), the `authz.permissions` key
+  doc that `explain keys` renders, and the blocker for a served operation with no permission,
+  which now names the canonical string instead of `<action>`. The by-hand path is held to the
+  same taxonomy in `scaffold-entity`'s authorization item and `conventions/web.md`.
+  **It is a SUGGESTION and every touchpoint says so.** Nothing enforces the spelling — the
+  validator still only warns when a permission leaves the resource's namespace, and what it
+  blocks is a served operation with NO permission, which aborts boot. Two things outrank the
+  default: a taxonomy the project already grants — in any language, matched exactly, since
+  that is what the caller's token carries — and the dev simply preferring another spelling,
+  which they owe no reason for. In the skills it lands as a `(proposed)` value the dev
+  confirms or overwrites at the spec gate, never a string the agent applies silently.
+
+- **The rules hook arrived as one verb gate PER RULE.** Two invariants that both run on
+  insert came out as two separate `r.IfInsert(func(){…})` blocks, and a third added a third —
+  a file of near-identical wrappers where a reader has to diff the closures to find the
+  rules, and where the framework runs the same verb check once per block on every write. Both
+  hook files (the entity's and a collection's) now group the residual rules BY VERB: one
+  `r.IfInsert` / `r.IfInsertOrUpdate` / … block holding every rule scoped to it, each under
+  its own `── <rule-id> ──` header — the shape the generated `BuildRules` beside it always
+  had. The file's own doc comment states the rule, so it survives being read without the
+  skill, and says what to do with a rule scoped to two verbs: write it as a method and call
+  it from both blocks, never paste it twice. The by-hand path is held to the same standard —
+  `conventions/domain.md`'s "one clause per mode" bullet was too soft to stop this and now
+  names it as the single most common readability failure in a hand-written `BuildRules`,
+  with `evolve-entity` told that a NEW rule joins the existing clause for its verb rather
+  than opening a second one beside it.
+
+- **A `required` rule on a value-object field made the caller read "Required field"
+  twice.** The framework validates every VO-typed field by reflection on every write, and a
+  string-backed raw VO answers an empty value with `RequiredFieldNotification` from inside
+  its own `IsValid` — so declaring the rule as well adds a second notification for the one
+  empty field. An enum is the same shape with a different second message: `""` is not a
+  member, so it already answers with the VO's unknown-member notification. `check` now warns
+  about both, naming the field and the value object, and the four places an author reads
+  before writing a rule say it: `explain rules`, the `omnicore-gen` skill, `scaffold-entity`
+  (the rules item and `conventions/domain.md`, which govern the by-hand path too) and
+  `evolve-entity`'s routing table. Only value objects the spec itself declares are judged —
+  for `vo.kind: reuse` the generator has not seen the `IsValid` and does not guess.
+
+- **`omnicore-gen init` wrote a Portuguese spec into every project.** The template it hands
+  the author carried `language: pt-BR`, a field called `Nome`, a rule id
+  `nome-obrigatorio`, a collection `Itens`, and — the one that reaches a running service —
+  permissions spelled `<resource>:escrever`, `:arquivar`, `:ler`. A permission is matched
+  EXACTLY against what the caller's token carries, so a spec that kept them declared
+  permissions nobody grants, in a language the project may not speak. The template is now
+  English throughout, and says so in its own header: the placeholders are there to be
+  renamed into whatever the project speaks and already grants, not to be kept. `init`'s
+  closing line and the `omnicore-gen` skill say the same thing, so the agent localises
+  `language:`, the names and the permission taxonomy deliberately instead of inheriting one
+  language by accident.
+
+- **`explain ownership` promised a prune that did not exist.** It described the shared
+  registration files — `wire.go`, the notification declarations, the seven catalogs — as
+  "inserted into and removed from"; a WRITE inserts and replaces its own entries and removes
+  nothing, deliberately, because those files carry other entities' content and hand edits.
+  Harmless while every spec only grew; misleading the moment one shrinks, which is exactly
+  what an evolution does. The text and the merge's own doc comment now say what a write does,
+  and point at the command that removes — which, as of this release, is a real one.
+
 ## [0.18.0] — 2026-08-15
 
 ### Changed

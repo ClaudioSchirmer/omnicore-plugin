@@ -38,6 +38,13 @@ No native boolean (stored as a small integer) and JSON is the `JSON` type; money
 integer of minor units. Per-relay note: a MySQL CDC relay needs a unique `server.id` and
 tolerant DDL handling — that is `transport.html` / the bench templates, not this sheet.
 
+## Column & table descriptions — they go in the catalogue
+
+Inline on the column (`… NOT NULL COMMENT '…'`) and `ALTER TABLE <t> COMMENT = '…';` for the
+table. Double the apostrophes inside the text; a column comment stops at 1024 characters and a
+table comment at 2048. `information_schema.columns.column_comment` is what a client reads — a
+`--` line in the migration reaches nobody holding a connection.
+
 ## Read side
 
 Full distributed CQRS is available: entity views project to MongoDB through the CDC

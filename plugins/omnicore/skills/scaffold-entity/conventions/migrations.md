@@ -39,16 +39,37 @@ default as belt-and-suspenders (the framework stamps actively). If the entity ha
 Archive mode, there is no archive column — keep `Modes()` ⟺ the schema declaration ⟺ the migration in
 lockstep.
 
-## Self-documenting DDL — table & column descriptions
+## Self-documenting DDL — the description goes INTO the database
 
 Every generated table and column carries its description, sourced from the spec (§2
-`Description` per column; the §1 one-liner per table) — as plain `-- ` SQL line comments
-in the migration file. That is the whole rule: it is valid on every dialect (SQLite
-included), survives the runners' statement splitting, and keeps the DDL readable in one
-place. Dialect COMMENT-metadata DDL (`COMMENT ON …`, MySQL inline `COMMENT '…'`) is NOT
-emitted by default — only when the dev explicitly asks for catalog-visible comments.
-Applies to EVERY table the entity emits (base, role, children, siblings). Column types
-still come only from `table-schema.html`; a description never changes a type.
+`Description` per column; the §1 one-liner per table) — and it is **stored in the database
+itself, not left as a `-- ` line in the file.** The point of writing a description is that
+someone holding a CONNECTION and not this repository can read it: the DBA on the
+catalogue, the BI tool listing columns, the next developer opening the table in a client.
+A `--` line reaches none of them.
+
+So, per dialect — and this is the framework's own control-plane DDL, mirrored:
+
+| Dialect | Where the description goes |
+|---|---|
+| postgres · oracle | `COMMENT ON TABLE <t> IS '…';` / `COMMENT ON COLUMN <t>.<c> IS '…';` after the CREATE |
+| mysql | inline on the column (`… NOT NULL COMMENT '…'`) + `ALTER TABLE <t> COMMENT = '…';` |
+| sqlserver | `EXEC sp_addextendedproperty @name = N'MS_Description', …` at TABLE and COLUMN level (what SSMS and `sys.extended_properties` read) |
+| **sqlite** | **`--` line comments — the ONLY dialect that has nowhere to store one** |
+
+Escape the apostrophes (`''`) — an ordinary "the person's document" otherwise ends the
+literal and turns the rest of the sentence into syntax. On sqlserver, take the schema from
+`SCHEMA_NAME()` through a `DECLARE @schema sysname` at the top of the file rather than
+hardcoding `dbo`, or a service whose tables live in its own schema fails every one of
+them. Applies to EVERY table the entity emits (base, role, children, siblings), and to the
+managed columns too (`revision`, the archive stamp, the timestamps, the FK) — a catalogue
+that documents half a table is a catalogue nobody trusts. Column types still come only
+from `table-schema.html`; a description never changes a type.
+
+**A reworded description is a MIGRATION, not an edit.** The comment lives in the database,
+so changing the text in the spec or the schema changes nothing until a new numbered pair
+carries the `COMMENT ON` / `sp_addextendedproperty` statement — the same rule as any other
+shape change, and `evolve-entity`'s impact map is where it belongs.
 
 ## Traps
 

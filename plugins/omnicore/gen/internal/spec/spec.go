@@ -747,6 +747,14 @@ type Authz struct {
 	// Permissions maps each mounted operation (insert, update, patch, delete,
 	// archive, unarchive, read) to the permission it requires. Cross-checked
 	// both ways against what is actually mounted.
+	//
+	// The house taxonomy is `<resource>:<action>` with the action spelling the
+	// operation — insert:<r>:insert, update and patch both :update, delete
+	// :delete, archive and unarchive both :archive, read :read. Two operations
+	// share an action on purpose (PUT and PATCH are one update; whoever may
+	// archive may put it back), and spelling insert as `create` or `write`
+	// instead is how one project ends up granting three words for one verb.
+	// A project with its own taxonomy keeps it: this is the default, not a rule.
 	Permissions map[string]string `yaml:"permissions"`
 	// DataAccess is who may reach which rows: anyone-with-permission = every
 	// holder sees every row; owner-only = only their own; tenant = only their
@@ -758,4 +766,39 @@ type Authz struct {
 	// TenantField is the persisted field the tenant claim is matched against,
 	// for tenant access — declare it with assignedFrom: identity-claim.
 	TenantField string `yaml:"tenantField"`
+}
+
+// ValueObjectsNamed is every value-object type a spec depends on: the ones it
+// declares AND the ones its fields reuse from elsewhere in the project.
+//
+// The distinction that matters to a caller is that there is none — a reused
+// value object is a type this spec's code will not compile without, exactly
+// like one it declares. Anything deciding whether a type is still needed has to
+// count both.
+func ValueObjectsNamed(s *Spec) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, vo := range s.ValueObjects {
+		add(vo.Name)
+	}
+	fields := append([]Field{}, s.Fields...)
+	for _, c := range s.Children {
+		fields = append(fields, c.Fields...)
+	}
+	for _, sib := range s.Siblings {
+		fields = append(fields, sib.Fields...)
+	}
+	for _, f := range fields {
+		if f.VO != nil {
+			add(f.VO.Ref)
+		}
+	}
+	return out
 }

@@ -1200,6 +1200,71 @@ func validateAggregateWideKinds(c Child, where string, ps *Problems) {
 	}
 }
 
+// validateRequiredOverValueObject catches the rule that makes one empty field
+// answer twice.
+//
+// The framework validates every value-object field by reflection on every
+// write — nothing declares it, and nothing can skip it short of
+// IgnoreValueObject. A string-backed raw VO reports an empty value as
+// RequiredFieldNotification (that is the shape this generator emits, and the
+// shape the manual teaches), and an enum reports it as its unknown-member
+// notification, because "" is not a member. So a `required` rule on such a
+// field adds a SECOND notification for the one thing the caller got wrong, and
+// the caller reads "Required field" twice for one empty value.
+//
+// A warning and not a blocker: the duplicate is noise, not a broken service,
+// and a reused VO from the project may legitimately tolerate an empty value.
+// Only value objects THIS spec declares are judged — for `vo.kind: reuse` the
+// generator has not seen the IsValid and will not guess at it.
+func validateRequiredOverValueObject(s *Spec, r Rule, scopeFields []Field, where string, ps *Problems) {
+	if r.Kind != "required" {
+		return
+	}
+	for _, name := range r.Fields {
+		f, ok := fieldNamed(scopeFields, name)
+		if !ok || f.VO == nil || f.Nullable {
+			continue
+		}
+		vo, ok := declaredVO(s, f.VO.Ref)
+		if !ok {
+			continue
+		}
+		switch {
+		case vo.Kind == "raw" && vo.Backing == "string":
+			ps.WarnFix(where+".fields",
+				fmt.Sprintf("%s is backed by the value object %s, and a string-backed one "+
+					"already reports an empty value as RequiredFieldNotification — this rule "+
+					"makes the caller receive it TWICE for one empty field", name, vo.Name),
+				"drop this rule: the value object is validated automatically on every write, "+
+					"so presence is already enforced")
+		case vo.Kind == "enum":
+			ps.WarnFix(where+".fields",
+				fmt.Sprintf("%s is backed by the enum %s, and an empty value is already "+
+					"answered with %s — this rule adds a SECOND notification for the same "+
+					"empty field", name, vo.Name, orUnnamed(vo.UnknownNotification)),
+				"drop this rule: enum membership is validated automatically on every write")
+		}
+	}
+}
+
+func fieldNamed(fields []Field, name string) (Field, bool) {
+	for _, f := range fields {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return Field{}, false
+}
+
+func declaredVO(s *Spec, ref string) (ValueObject, bool) {
+	for _, vo := range s.ValueObjects {
+		if vo.Name == ref {
+			return vo, true
+		}
+	}
+	return ValueObject{}, false
+}
+
 // ruleScopeOfRoot is every field a rule on the entity can talk about.
 //
 // A 1:1 facet is a STORAGE decision — the same Go struct, split across two
@@ -1249,6 +1314,7 @@ func validateRuleSet(s *Spec, rs Rules, scopeFields []Field, where string, ps *P
 		validateRuleFields(r, scopeFields, w, ps)
 		validateRuleNotification(s, r, w, ps)
 		validateRuleShape(s, r, scopeFields, w, ps)
+		validateRequiredOverValueObject(s, r, scopeFields, w, ps)
 	}
 
 	for i, m := range rs.Manual {
@@ -2285,10 +2351,17 @@ func validateAuthz(s *Spec, ps *Problems) {
 	}
 	for op := range ops {
 		if _, ok := a.Permissions[op]; !ok {
+			// The fix names the CANONICAL permission rather than a placeholder:
+			// left to invent one, each spec picks a different word for the same
+			// verb — create here, write there — and the deployment ends up
+			// granting three things for one operation.
 			ps.BlockerFix("authz.permissions",
 				fmt.Sprintf("the %s operation is served but has no permission", op),
-				fmt.Sprintf("add %s: %s:<action> — with authorization enabled, "+
-					"a route without one aborts boot", op, a.Resource))
+				fmt.Sprintf("add %s: %s, or whatever string your project already grants "+
+					"for it — the permission is required (with authorization enabled a route "+
+					"without one aborts boot); the spelling is only the suggested default, "+
+					"in which PUT and PATCH share :update and unarchive shares :archive",
+					op, CanonicalPermission(a.Resource, op)))
 		}
 	}
 }

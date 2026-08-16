@@ -4,7 +4,9 @@ description: >-
   omnicore: change an EXISTING entity of an omnicore-based service across every layer it touches —
   add/remove/rename fields, change nullability/uniqueness, add children or siblings,
   enable modes, promote flat → sharedbase — with schema evolution done right (migration +
-  TableSchema + DTOs + translations + view Version bump + OpenAPI move together). Use when
+  TableSchema + DTOs + translations + view Version bump + OpenAPI move together). Applies the
+  approved change either by editing the entity's omnicore-gen spec and regenerating (beta,
+  when the entity is the generator's) or file by file — the dev chooses at a gateway. Use when
   the user wants to change/alter/extend an entity that already exists. To CREATE one,
   that's scaffold-entity. Only for projects that import github.com/ClaudioSchirmer/omnicore.
 ---
@@ -98,10 +100,35 @@ and mappers · routes/surfaces (REST, GraphQL, gRPC) · views it feeds (own, Sha
 Composed — including views of OTHER entities that embed this one) · translations keys ·
 migrations history · tests. Mirror the project's local flavor in everything you generate.
 
+**Then discover WHO WROTE the code — the entity may be the generator's.** Run
+`omnicore-gen doctor -project <service-dir>` (read-only, offline, instant; it looks for
+`omnicore-gen/lock.json`). Its answer decides whether Phase 1 offers a generation gateway
+at all:
+- **no lock, or the lock does not record THIS entity** → the entity is hand-written. There
+  is no codegen path here: regenerating an entity the lock does not know is not an
+  evolution, it is a rewrite of files nobody generated, over hand-written code the dev did
+  not ask you to replace. Do not offer the gateway, do not write a spec YAML, and do not
+  mention the generator again for this run.
+- **the lock records it** → the codegen path is available. Read
+  `omnicore-gen/<entity>.omnicore.yaml`: it is the entity's DECLARED shape and, on that
+  path, the thing you edit — the code is derived FROM it, so it is also a second reading of
+  the current shape to check your Phase 0b map against.
+- **carry `doctor`'s findings into the spec VERBATIM** — each line changes what option 1
+  costs: `! <path> was edited by hand — regeneration will refuse it` (must be reconciled
+  BEFORE regenerating) · `· <path> carries a hand edit adopted at <version>` (an owned file
+  that no longer tracks the spec — a change landing there is hand work on either path) ·
+  `! the spec changed since the last generation` (someone edited the YAML and never
+  regenerated — that drift is not part of your change: surface it and settle it with the
+  dev first) · `! the spec is missing at <path>`.
+- **generator unavailable** (`needs a Go toolchain`, `this plugin install is incomplete`) →
+  say so plainly and continue on the manual path; never approximate the generator by hand.
+
 ## Phase 1 — Spec gate: `evolve-entity/<entity>/spec.md`
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` slots must be answered, never
-defaulted. Sections (structural completeness — `N/A — <why>` instead of deletion):
+defaulted. The header also carries `Generation: <pending>` — the gateway's answer (item 9),
+written the moment it is given. Sections (structural completeness — `N/A — <why>` instead
+of deletion):
 
 1. **The change, in one paragraph** — what the dev asked, restated.
 2. **Impact map** — every file/layer touched, per artifact (migration — in EVERY target
@@ -113,11 +140,21 @@ defaulted. Sections (structural completeness — `N/A — <why>` instead of dele
    schema when exposed there). This list is what Phase 2 executes
    and what the verify greps — nothing outside it gets edited, so a class missing HERE
    is out of scope by construction: enumerate against Phase 0b's surface map, not from
-   memory.
+   memory. **When item 9's gateway lands on the generator**, annotate each artifact with
+   who writes it — generator-owned (regenerated from the spec YAML, never hand-edited) ·
+   a `_manual` hook · hand-written on either path (the migration pair, `microservice.*.yaml`,
+   the proto contract, other entities' views, `qa/*.sh`) — and add the spec YAML itself to
+   the list, since editing it IS the change on that path.
 3. **Migration strategy** [high-risk]: additive ALTER vs rename (a "rename" is really
    rename-in-place vs drop+add+backfill — data decides) vs drop. NOT NULL on existing
    rows needs a default or a backfill step — say which. Every `up` has its `down` twin;
    the down of a destructive step recreates STRUCTURE, not data — say so honestly.
+   **A reworded DESCRIPTION belongs here too.** Table and column descriptions are stored
+   IN the database on every engine but SQLite (`COMMENT ON` · MySQL's inline `COMMENT` ·
+   sqlserver's `MS_Description` extended property — `conventions/migrations.md` owns the
+   per-dialect spelling), so changing the text in the spec or the schema changes nothing
+   until a new pair carries the statement. Cheap and non-destructive, and invisible if it
+   is forgotten: the catalogue keeps answering with the old wording.
 4. **View evolution** [high-risk]: does the projected shape change? Then every affected
    MATERIALIZED view bumps `Version(N)` — and the root schema's COLUMNS are part of the
    rebuild hash, so a plain field add on the aggregate moves it: the full hash list
@@ -159,12 +196,132 @@ defaulted. Sections (structural completeness — `N/A — <why>` instead of dele
    skill adds only the migration path). The REVERSE (sharedbase→flat demotion, or
    moving a role to a different base) is the same catalog walked backwards — equally
    spec-gated here, never improvised and never refused as unsupported.
+   **On the codegen path this is the widest gap between what regenerates and what does
+   not**: `storage.kind` is one key, so the CODE for the role comes back in seconds — while
+   the base table, the data move and the backfill are the hand-written migration, and the
+   identity's own view is refused by this build (`read.identityView`) and stays hand work.
+   Say that in the option text rather than letting "one key" read as "one command".
+9. **Generation path — the GATEWAY** [only when Phase 0b found this entity in the
+   generator's lock; `N/A — hand-written entity, no codegen path` otherwise]. WHAT changes
+   is settled by the sections above; HOW it gets applied is the dev's call, not yours. Ask
+   it as a real choice with exactly TWO options, **in the SAME message as the spec gate** —
+   the dev is already being asked "is this right?", and a second consecutive stop buys
+   nothing; their **1** or **2** then carries both answers. A reply that approves the spec
+   without picking has answered the gate and not this: ask this one again, alone. Never
+   proceed on silence, never pick for them, and **write nothing into the spec YAML before
+   the answer.**
+
+   Before offering option 1, confirm the change is EXPRESSIBLE — `omnicore-gen explain
+   keys` / `explain coverage` for the concern at hand, never from memory (most of what
+   looks like a missing capability is a key nobody guessed). A part that is genuinely
+   outside the language does NOT disqualify option 1: name it in the option text as what
+   lands by hand either way — a `rules.manual` item, the gRPC/proto surface, an integration
+   event, the identity view of a shared base.
+
+   > ⏸️ **How should this change be applied?** Two options, and only these two:
+   >
+   > **1. Change the spec and regenerate — `omnicore-gen` (beta) + review by me**
+   > The change goes into `omnicore-gen/<entity>.omnicore.yaml`; `check` validates it and
+   > `generate` rewrites every file the generator owns — domain, application, web, infra,
+   > wiring, translations and its own tests — in **seconds** and at a **fraction of the
+   > tokens** the by-hand path costs. It also catches statically what an evolution forgets:
+   > a projected shape that moved while `read.view.version` did not is a refusal that names
+   > the number, not a failed boot.
+   > **What it does not do is touch your database.** A migration is written once and never
+   > regenerated — once it has run anywhere the framework records it as applied, so
+   > rewriting the file would change what the file CLAIMS and not one table. The new
+   > numbered pair, in every target dialect, per the migration strategy above, is written
+   > BY HAND — by me, against the shape the generator's report prints. Same for the
+   > invariants the spec language cannot express (they live in hook files it never touches)
+   > and their tests, and for everything outside its ownership: `microservice.*.yaml`, the
+   > proto contract, views of other entities, `qa/*.sh`. I then review the output against
+   > this spec, read the report, and prove it with build + vet + tests + a real boot.
+   > **Beta**: it is still being improved round by round, and its gate covers a lot but can
+   > still hit a case nobody has hit — usually a spec that validates and produces something
+   > that does not compile. When that happens I say so, work around it, and it gets fixed
+   > upstream; the review and the proof steps above are exactly what catch it.
+   >
+   > **2. By hand, file by file, by me**
+   > I edit every file myself, reading the pinned `/docs` before each layer. Slower and far
+   > more tokens, and the same review discipline applies — but nothing depends on the
+   > generator or on the spec language covering the change. On THIS entity it carries one
+   > permanent cost worth knowing before you pick it: every file the generator owns that I
+   > edit stops tracking the spec — `doctor` reports it as a hand edit, the next
+   > regeneration refuses it until it is adopted or forced, and later emitter fixes never
+   > reach it. I will list what I touched and offer to record each one with `adopt … -why`,
+   > which makes `doctor` tell the truth afterwards but does not undo the divergence.
+   >
+   > Reply **1** or **2**.
+
+   **Neither option is marked recommended** while the generator is in beta: they are
+   presented on their merits and the dev chooses. Record the answer in the spec header
+   (`Generation: omnicore-gen` or `Generation: manual`) the moment it is given — a resumed
+   run reads it and does not ask again, and asking twice invites a different answer
+   half-way through one change.
 
 ## Phase 2 — Execute the impact map
 
+**Read the spec's `Generation:` line first** — it decides the shape of this phase. Either
+way: edit ONLY what the impact map lists, and read the owning `/docs` section BEFORE each
+layer you touch by hand — the same mandatory-read rule as scaffolding.
+
+### 2m — by hand (`Generation: manual`, and every hand-written entity)
+
 One pass, in dependency order (migration → schema → domain → application → web → views →
-translations → tests), reading the owning `/docs` section BEFORE each layer it touches —
-the same mandatory-read rule as scaffolding. Edit ONLY what the impact map lists.
+translations → tests). If the entity IS generator-owned and the dev chose this path anyway,
+keep the list of every OWNED file you edited and hand it back at the end with the `adopt`
+offer promised at the gate.
+
+### 2g — spec + regenerate (`Generation: omnicore-gen`)
+
+The order is not the manual one, and the difference is the point:
+
+1. **Read `${CLAUDE_PLUGIN_ROOT}/skills/omnicore-gen/SKILL.md` NOW** — not before, not from
+   memory — and follow it end to end; it owns the language, the refusal ladder and the
+   ownership rules. Then `explain keys` and the topics for the concern at hand, BEFORE
+   touching the YAML. An evolution is exactly where "the language cannot say this" is most
+   tempting, and it has been wrong every time so far.
+2. **Clear `doctor`'s findings first.** A hand-edited owned file is REFUSED by `generate`,
+   so it would keep the OLD shape while everything around it moves — an evolution that
+   half-applies and still compiles. Reconcile each one before regenerating: move the edit
+   into the spec (best), `adopt` it deliberately, or `--force=<path>` to discard it. Say
+   which you did, per file.
+3. **EDIT the existing spec — never `init` over it.** It is the entity's source of truth
+   (`init` refuses without `-force` for exactly that reason). Change only what the impact
+   map says, and `check` after each block rather than once at the end.
+4. **Bump `read.view.version` when the projected shape moved.** The generator compares this
+   run's shape against the one it last wrote and refuses to generate on an unbumped
+   version, naming the number to use — that refusal is the check working, not a blocker.
+   It sees only THIS entity's view: a JoinView embedder in another spec is still yours to
+   bump (spec item 4).
+5. **`generate`, then read the report as the hand-off, not as a log** — `Refused` (files
+   still carrying a hand edit) · **`No longer generated`** (orphans: what the previous spec
+   produced and this one does not — they compile and mean nothing) · the migration hand-off
+   with the target shape · stale registrations · missing translations.
+6. **Write the migration by hand.** A NEW numbered pair, in EVERY target dialect at the
+   same number, per the approved strategy — never an edit to a pair that may have run.
+   Check the DDL against the report's target shape: columns, nullability, **and the
+   indexes** — a uniqueness whose SCOPE changed adds no column, so a shape read only down
+   to the columns looks already satisfied while the rule the domain relies on is still the
+   old one. The report names one exception: an entity that has never shipped ANYWHERE may
+   have its pair deleted and regenerated fresh. Only the dev knows whether that holds —
+   ASK, never assume.
+7. **Prune — one command for everything the write path only ever adds to.**
+   `omnicore-gen prune -spec … -project …` lists the orphaned files AND the notification
+   declarations and translation keys the spec no longer declares (a write inserts and
+   replaces, it never deletes), plus the lock records for files already gone — the reason
+   `doctor` repeats `is gone` forever. Read the three lists, then `-apply`. It leaves alone
+   anything hand-edited, adopted, claimed by another entity, or a migration, and says why
+   for each. This is how spec item 6's "removed keys leave no orphans" gets done on this
+   path; the dead translation key it removes is invisible to every other gate.
+8. **Implement the hooks and everything outside its ownership** — the `_manual` rule and
+   fact stubs (an unwritten rule leaves an invariant unenforced and the service runs on; an
+   unwritten fact PANICS the moment a rule asks for it), plus `microservice.*.yaml`, the
+   proto contract and its stubs, views of OTHER entities embedding this one, `qa/*.sh`, and
+   the tests for everything you wrote by hand.
+9. **Review the tree against THIS spec** (omnicore-gen Step 7): the emitted rules against
+   what the change was meant to mean, the DDL, authz, the read side. Anything wrong is
+   fixed in the spec and regenerated — never by editing a generated file.
 
 ## Knowledge routing — change → `/docs` section
 
@@ -180,7 +337,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | field add/remove/rename (Go ↔ column, id shapes) | table-schema · migrations |
 | value objects: add/rename a VO field, a new enum, place in vos/ or aggregatevos/ | value-objects · service-layout |
 | unique field add/remove → `Constraints` binding · per-engine id/decimal/boolean columns | `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md` (read every TARGET dialect's — targets = `relational.dialect` across ALL `microservice.*.yaml`; the ALTER pair lands in EVERY target's `migrations/<dialect>/` at the same number) |
-| rules / notifications / actionName | rules-dsl · old-state · status-mapping |
+| rules / notifications / actionName (**a new rule joins the EXISTING clause for its verb** — one `IfInsert`/`IfInsertOrUpdate` block holds every rule that runs on it; adding a second gate beside it for one new rule is the readability failure `conventions/domain.md` names, and it re-runs the verb check per block. **A rule a VALUE OBJECT already carries is not a rule to add** — VO fields are validated automatically on every write, presence included: a string-backed raw VO answers an empty value with `RequiredFieldNotification`, an enum with its unknown-member one, so a `required` beside either makes the caller read the same complaint twice) | rules-dsl · value-objects · old-state · status-mapping |
 | children / siblings / cascade — AND any NEW table's shape rules (child FK + covering index; sibling shares the owner's PK, no lifecycle columns; role UNIQUE FK; revision column on entity/base tables only) | aggregate-persistence · table-schema · migrations · scaffold-entity's `conventions/{aggregate-children,siblings,migrations}.md` |
 | write handlers / in-TX hooks | auto-handlers · lifecycle-hooks |
 | full write-path ripple of a change (SQL ↔ outbox ↔ Mongo op ↔ audit verb) | lifecycle-map |
@@ -194,6 +351,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | authz (permission / owner-check / tenant) | authz-seams |
 | feature wiring / bootstrap | bootstrap |
 | file layout / naming (ANY layer) | service-layout |
+| the spec language, its keys and what regeneration owns (codegen path only) | `${CLAUDE_PLUGIN_ROOT}/skills/omnicore-gen/SKILL.md` (owner) + `omnicore-gen explain <topic>` — never from memory |
 
 ## Final verify (the gate)
 
@@ -216,6 +374,14 @@ change at hand — never sweep the whole manual; the Documentation Map in
    renders REQUIRED in OpenAPI (pointer unless the spec says required) · any NEW table
    follows the shape rules (revision column on entity/base only, no leading-`_`
    physical column, unique constraints named on the OWNING table).
+   **On the codegen path, four more — all cheap, all static:** `omnicore-gen doctor` runs
+   clean except for adoptions you made deliberately and named (an unexpected `! was edited
+   by hand` means an owned file drifted DURING this change) · **`omnicore-gen prune` comes
+   back with nothing to remove** — the one check that covers both the orphaned files and the
+   dead translation keys, which no other gate can see · the new migration pair exists
+   in every target dialect and matches the report's target shape, indexes included · the
+   spec YAML and the tree agree (`doctor` does not say "the spec changed since the last
+   generation" — that would mean the last `generate` never ran).
 2. **`gofmt -l` + `go vet` + `go build`** (engine + transport tags) — clean.
 3. **Unit tests** — updated branches green; never weakened to pass.
 4. **BOOT the service** (a verification boot: dev profile, target tags, log to a file —
@@ -239,10 +405,14 @@ diff.
 
 `Status: DRAFT` → reopen the gate with what's answered. `Status: APPROVED` → apply only
 the not-yet-applied items of the impact map, then re-verify. A changed answer reopens
-the spec.
+the spec. **`Generation:` is never re-asked** once it holds an answer — a resumed run reads
+it and continues on that path; only the dev reopening it changes it.
 
 ## What this skill never does
 
 No framework edits, no git, no test edited to pass, no wire-breaking change applied
 without it being flagged in the spec the dev approved, nothing edited outside the
-approved impact map.
+approved impact map. On the codegen path: never hand-edits a generated file (the spec is
+where a wrong output is fixed), never `init`s over an existing spec, never rewrites a
+migration that may have run, and never regenerates an entity the lock does not record —
+that is a rewrite of hand-written code, not an evolution.

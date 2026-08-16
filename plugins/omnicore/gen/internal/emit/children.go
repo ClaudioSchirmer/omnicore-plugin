@@ -226,36 +226,16 @@ func emitChildRulesHook(m *ir.Model, c ir.Child) (fsplan.File, error) {
 
 	s.Doc(
 		fmt.Sprintf("customRules is called at the end of %s's generated BuildRules, with "+
-			"the same arguments and scoped to ONE entry. Add each rule inside the verb "+
-			"gate it belongs to — r.IfInsert, r.IfUpdate and so on — and report a "+
-			"violation with r.AddNotification.", c.Name),
+			"the same arguments and scoped to ONE entry, and reports a violation the same "+
+			"way: r.AddNotification.", c.Name),
+		"",
+		manualGateDoc,
 		"",
 		"A notification raised here is addressed to this entry's position in the "+
 			"collection, which is what makes the caller able to tell which one failed.",
 	)
 	s.L("func (c %s) customRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
-	for _, mr := range c.ManualRules {
-		s.Blank()
-		s.L("\t// ── %s ──", mr.ID)
-		for _, line := range wrap(mr.Description, 68) {
-			s.L("\t// %s", line)
-		}
-		if mr.Notification != "" {
-			s.L("\t// Notification to raise: %s{}", mr.Notification)
-		}
-		if mr.AttachTo != "" {
-			s.L("\t// Attach it to the field: %s", quote(mr.AttachTo))
-		}
-		gates := mr.Gates
-		if len(gates) == 0 {
-			gates = []string{"IfInsertOrUpdate"}
-		}
-		for _, gate := range gates {
-			s.L("\tr.%s(func() {", gate)
-			s.L("\t\t// TODO(%s): implement the rule described above.", mr.ID)
-			s.L("\t})")
-		}
-	}
+	writeManualRuleGates(s, c.ManualRules)
 	s.Blank()
 	s.L("\t_ = actionName")
 	s.L("\t_ = service")

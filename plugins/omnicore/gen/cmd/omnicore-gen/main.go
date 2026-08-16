@@ -32,6 +32,7 @@ Commands:
   generate          generate the entity
   adopt <path>      accept a hand fix on a generated file, so regeneration keeps it
   doctor            report drift between the spec, the lock file and what is on disk
+  prune             remove what an earlier shape of the spec left behind (dry run by default)
   explain [topic]   document the spec language, offline
 
 Common flags:
@@ -71,6 +72,8 @@ func main() {
 		runAdopt(args)
 	case "doctor":
 		runDoctor(args)
+	case "prune":
+		runPrune(args)
 	case "init":
 		runInit(args)
 	default:
@@ -235,6 +238,29 @@ func runDoctor(args []string) {
 	project := fs.String("project", ".", "the service root")
 	_ = fs.Parse(args)
 	if err := cli.Doctor(os.Stdout, *project); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runPrune is deliberately dry by default. Everything else this binary does is
+// additive or refuses; this one deletes, so the run that removes has to be asked
+// for in a second command with -apply.
+func runPrune(args []string) {
+	fs := flag.NewFlagSet("prune", flag.ExitOnError)
+	specPath := fs.String("spec", "", "path to the spec file")
+	project := fs.String("project", ".", "the service root")
+	apply := fs.Bool("apply", false, "actually remove what the plan lists")
+	_ = fs.Parse(args)
+
+	resolved, err := resolveSpecPath(*specPath, *project)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := cli.Prune(os.Stdout, cli.PruneOptions{
+		SpecPath: resolved, ProjectDir: *project, Apply: *apply,
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}

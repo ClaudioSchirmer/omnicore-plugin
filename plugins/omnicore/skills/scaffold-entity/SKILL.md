@@ -363,8 +363,16 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    silent default, and GATED on the backing just settled (relational serves no
    `DeleteOnArchive()`): the exact question shape is in `shared/read-side.md`'s
    elicitation contract; the pin's `views` section carries the served contract.
-6. **Business rules, validations, restrictions — ASK; do not skip and do not invent.** What
-   must `BuildRules` enforce? Required fields, formats (email, document/tax-id), numeric
+6. **Business rules, validations, restrictions — ASK; do not skip and do not invent.**
+   **A rule a VALUE OBJECT already carries is not a rule to declare here** — the framework
+   validates every VO-typed field automatically on every write, so a format check, a closed
+   set, AND presence (a string-backed raw VO answers an empty value with
+   `RequiredFieldNotification`; an enum answers it with its unknown-member notification) are
+   already enforced. Declaring `required` beside one makes the caller read the same
+   complaint TWICE for one empty field. This holds on BOTH generation paths — by hand and in
+   the spec YAML, where `check` warns about it by name. What
+   must `BuildRules` enforce? Required plain fields, formats (email, document/tax-id) that
+   have no VO, numeric
    ranges (e.g. a grade 0–100), string lengths, cross-field invariants, immutability, state
    transitions, uniqueness-driven checks, and per-group caps (counts/totals per key,
    distinct-key limits — "at most N active X per category", "no more than K categories").
@@ -404,8 +412,18 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
     states availability BOTH ways). Refusing an available capability is the mirror image of
     offering an unavailable one, and just as wrong.
 11. **Authorization — TWO distinct questions, both asked (don't invent silently):**
-    - **Permission gate (Layer 1):** the `resource:action` taxonomy per operation (generic vs
-      per-op). Propose one, confirm — never fabricate a permission string unasked.
+    - **Permission gate (Layer 1):** the `resource:action` taxonomy per operation. **This is
+      the DEV's call, not yours** — it lands in the spec as a `(proposed)` value they confirm
+      or overwrite at the gate, never a string you fabricate and apply silently. What you
+      propose, absent anything better: the ACTION spells the OPERATION —
+      `<resource>:insert` · `:update` for BOTH put and patch · `:delete` · `:archive` for
+      BOTH archive and unarchive (one verb and its undo) · `:read`. Say WHY when you propose
+      it, in one line: synonyms are what create the mess — `create` in one entity, `write` in
+      the next, and a deployment granting three words for one thing. **Two things outrank the
+      suggestion**: a taxonomy the project already grants (Phase 0b read its existing routes)
+      — match it, in whatever language it uses — and the dev simply preferring another
+      spelling, which needs no justification. A permission is compared EXACTLY against the
+      caller's token, so the only wrong answer is one that does not match what is granted.
     - **Data-access security (Layer 2/3):** does a caller see/edit only THEIR OWN rows, or a
       tenant's subset? This shapes the command/query `ctx` gateways — an owner-check in
       `BuildRules` fed from `ctx.Identity()`, or a tenant filter in `ToCriteria`. Never write
@@ -545,11 +563,14 @@ Present it like this, verbatim in substance:
 > tests for those are mine to write. I then review the output against the plan you just
 > approved, read the generator's report, and prove it with build + vet + tests + a real
 > boot.
-> **Beta**: it is still being improved round by round, and `scaffold-entity` is so far the
-> only skill that uses it. Its gate covers a lot, and it can still hit a case nobody has
+> **Beta**: it is still being improved round by round; `scaffold-entity` and
+> `evolve-entity` are the skills that use it. Its gate covers a lot, and it can still hit a case nobody has
 > hit yet — usually a spec that validates and produces something that does not compile.
 > When that happens I say so, work around it, and it gets fixed upstream; the review and
 > the proof steps above are exactly what catch it.
+> The spec then stays the entity's source of truth: a later change starts from it at
+> `/omnicore:evolve-entity`, which asks this same question again (the code regenerates from
+> the edited spec; the migration that change needs is always written by hand).
 >
 > **2. Manually, file by file, by me**
 > I generate every file myself, layer by layer, reading the pinned `/docs` before each
@@ -695,9 +716,15 @@ Four DISTINCT levels — do not conflate them:
    not sufficient.
 3. **Unit tests ≥ 80% of the generated entity — WRITE them** (every `BuildRules` branch;
    the command mappers `ToEntity`/`ApplyTo`/`ApplyPartiallyTo`/`FromEntity`; the query
-   `ToCriteria`). **Measure per generated FILE from the cover profile** —
-   `go test -coverprofile` then read the entity's own files (`go tool cover -func`); the
-   bare package percentage mixes in pre-existing code and misstates the entity. See
+   `ToCriteria`). **Measure per generated FILE from the cover profile, and measure it with
+   `-coverpkg=./internal/...`** —
+   `go test -coverpkg=./internal/... -coverprofile=… ./internal/...` then read the entity's
+   own files (`go tool cover -func`); the bare package percentage mixes in pre-existing code
+   and misstates the entity. **The `-coverpkg` is not decoration: without it a file is
+   credited only to tests in its OWN package, so a mapper exercised from another package's
+   test reads as 0% and a whole test-less package (dtos, web) reads as untested when it is
+   not.** A run that reports 0% for a file you know is exercised is measuring wrong, not
+   finding a gap. See
    `conventions/tests.md`. **A generated file under 80% is RED — add tests until it
    meets the target, or surface the miss as an explicit deviation for the dev to
    accept; the per-file `go tool cover -func` lines for every generated file MUST

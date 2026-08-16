@@ -10,6 +10,7 @@ import (
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/discover"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/layout"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/spec"
 )
 
 // Init writes a spec template that already knows the project.
@@ -63,7 +64,9 @@ func Init(w io.Writer, opt InitOptions) error {
 			strings.Join(proj.ExistingVOs, ", "))
 	}
 	fmt.Fprintf(w, "\nThe template does not validate as written — the field list is a "+
-		"placeholder.\nFill it in, then run:\n\n  omnicore-gen check -spec %s\n", path)
+		"placeholder.\nEverything it invents is in English and none of it is a default worth "+
+		"keeping:\nrename the placeholders, `language:` and the permission strings into what "+
+		"this\nproject speaks and already grants. Then run:\n\n  omnicore-gen check -spec %s\n", path)
 	return nil
 }
 
@@ -111,6 +114,12 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("#   omnicore-gen explain example [sharedbase] — a whole spec that validates\n")
 	b.WriteString("# `explain keys` is the one that saves time: most of what looks like \"the\n")
 	b.WriteString("# generator cannot express this\" is a key whose name is not guessable.\n#\n")
+	b.WriteString("# Every placeholder below is written in ENGLISH on purpose — the field, the\n")
+	b.WriteString("# rule id, the permission strings, `language`. None of it is a default worth\n")
+	b.WriteString("# keeping: rename them into the language your project speaks and into the\n")
+	b.WriteString("# permission taxonomy it already uses. English here means the template says\n")
+	b.WriteString("# nothing about a language it cannot know, not that the entity should be\n")
+	b.WriteString("# written in it.\n#\n")
 	fmt.Fprintf(&b, "# Discovered here: dialect(s) %s · read backing %s.\n",
 		strings.Join(p.Dialects, ", "), backing)
 	if len(p.ExistingVOs) > 0 {
@@ -125,7 +134,13 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("# types. No rule can spell it — an English heuristic writes neither\n")
 	b.WriteString("# \"Matriculas\" nor \"Analyses\" — so you declare it.\n")
 	b.WriteString("plural:\n")
-	b.WriteString("language: pt-BR\n\n")
+	b.WriteString("# The language the human-facing text of THIS spec is written in — the\n")
+	b.WriteString("# descriptions, the examples, the table and column comments. It seeds the\n")
+	b.WriteString("# matching label catalog; the other six fall back to the field name. Set it\n")
+	b.WriteString("# to what the project speaks (pt-BR, es, fr, de, it, nl) before you write\n")
+	b.WriteString("# a description in it — a description in one language under a declaration\n")
+	b.WriteString("# of another seeds the wrong catalog, silently.\n")
+	b.WriteString("language: en-US\n\n")
 
 	b.WriteString("storage:\n")
 	b.WriteString("  # flat = its own table. sharedbase-role = a ROLE over an identity that\n")
@@ -149,9 +164,9 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("  # A string needs a length: a zero-length column is rejected outright by\n")
 	b.WriteString("  # postgres, sqlserver and oracle. Money is int64 in minor units, never a\n")
 	b.WriteString("  # float. A value whose set is fixed is an enum value object, not a string.\n")
-	b.WriteString("  - name: Nome\n")
+	b.WriteString("  - name: Name\n")
 	b.WriteString("    type: string\n")
-	b.WriteString("    column: nome\n")
+	b.WriteString("    column: name\n")
 	b.WriteString("    length: 120\n")
 	b.WriteString("    livesOn: root\n")
 	b.WriteString("    example: TODO\n")
@@ -169,18 +184,18 @@ func renderTemplate(entity string, p *discover.Project) string {
 
 	b.WriteString("rules:\n")
 	b.WriteString("  list:\n")
-	b.WriteString("    - id: nome-obrigatorio\n")
+	b.WriteString("    - id: name-required\n")
 	b.WriteString("      kind: required\n")
 	b.WriteString("      scope: [insertOrUpdate]\n")
-	b.WriteString("      fields: [Nome]\n")
+	b.WriteString("      fields: [Name]\n")
 	b.WriteString("      notification: RequiredFieldNotification\n")
 	b.WriteString("  # Anything the DSL cannot express goes here as a NAMED item. The text is\n")
 	b.WriteString("  # what the report tells the implementer to write, and it lands as a stub\n")
 	b.WriteString("  # in a file regeneration never touches.\n")
 	b.WriteString("  # manual:\n")
-	b.WriteString("  #   - id: alguma-regra\n")
+	b.WriteString("  #   - id: some-rule\n")
 	b.WriteString("  #     description: >-\n")
-	b.WriteString("  #       O que precisa ser garantido, em uma frase que alguém consiga implementar.\n")
+	b.WriteString("  #       What must be guaranteed, in one sentence someone can implement.\n")
 	b.WriteString("  #     scope: [insert]\n\n")
 
 	b.WriteString("read:\n")
@@ -200,13 +215,13 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("    maxLimit: 100\n")
 	if backing == "mongo" {
 		b.WriteString("  # indexes:\n")
-		b.WriteString("  #   - {fields: [Nome], unique: true}\n")
-		b.WriteString("  #   - {fields: [Nome], text: true}   # required to serve ?search=\n")
+		b.WriteString("  #   - {fields: [Name], unique: true}\n")
+		b.WriteString("  #   - {fields: [Name], text: true}   # required to serve ?search=\n")
 	}
 	b.WriteString("  byId: true\n")
 	b.WriteString("  byParams:\n")
 	b.WriteString("    filters:\n")
-	b.WriteString("      - {field: Nome, ops: [eq, contains, icontains]}\n")
+	b.WriteString("      - {field: Name, ops: [eq, contains, icontains]}\n")
 	b.WriteString("    # A control is served ONLY if declared. Undeclared, its mere presence on\n")
 	b.WriteString("    # the wire is answered with a typed 400 — that is a contract, not an omission.\n")
 	b.WriteString("    controls:\n")
@@ -218,8 +233,8 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("#   - name: Item\n")
 	b.WriteString("#     # REQUIRED, and it is a PERSISTED key: the document segment, the read\n")
 	b.WriteString("#     # DTO field and the notification path, all from this one name.\n")
-	b.WriteString("#     plural: Itens\n")
-	b.WriteString("#     table: TODO_itens\n")
+	b.WriteString("#     plural: Items\n")
+	b.WriteString("#     table: TODO_items\n")
 	b.WriteString("#     # REQUIRED. A column name outlives the decision that made it.\n")
 	b.WriteString("#     parentColumn: TODO_id\n")
 	b.WriteString("#     ownedBy: root\n")
@@ -241,11 +256,19 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("  # row. owner-only and tenant narrow it — and that is a different question\n")
 	b.WriteString("  # from the permission itself, which is why both are asked.\n")
 	b.WriteString("  dataAccess: anyone-with-permission\n")
+	b.WriteString("  # SUGGESTED strings — the taxonomy is yours, and nothing here enforces\n")
+	b.WriteString("  # this one. What IS required is that every served operation carries a\n")
+	b.WriteString("  # permission: with authorization enabled, a route without one aborts boot.\n")
+	b.WriteString("  # The suggestion is <resource>:<action> with the action spelling the\n")
+	b.WriteString("  # operation, PUT and PATCH sharing :update and unarchive sharing :archive\n")
+	b.WriteString("  # — one verb and its undo. It exists because the alternative writes itself\n")
+	b.WriteString("  # differently every time (create here, write there) and a deployment ends\n")
+	b.WriteString("  # up granting three words for one thing. If this project already grants\n")
+	b.WriteString("  # something else — in any language — rewrite these to it: a permission is\n")
+	b.WriteString("  # matched EXACTLY against what the caller's token carries.\n")
 	b.WriteString("  permissions:\n")
-	fmt.Fprintf(&b, "    insert: %s:escrever\n", resource)
-	fmt.Fprintf(&b, "    patch: %s:escrever\n", resource)
-	fmt.Fprintf(&b, "    archive: %s:arquivar\n", resource)
-	fmt.Fprintf(&b, "    unarchive: %s:arquivar\n", resource)
-	fmt.Fprintf(&b, "    read: %s:ler\n", resource)
+	for _, op := range []string{"insert", "patch", "archive", "unarchive", "read"} {
+		fmt.Fprintf(&b, "    %s: %s\n", op, spec.CanonicalPermission(resource, op))
+	}
 	return b.String()
 }
