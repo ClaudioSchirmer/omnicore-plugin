@@ -537,7 +537,7 @@ Present it like this, verbatim in substance:
 
 > ⏸️ **How should this be generated?** Two options, and only these two:
 >
-> **1. `omnicore-gen` (beta) + review by me** *(recommended)*
+> **1. `omnicore-gen` (beta) + review by me**
 > The generator writes the whole mechanical tree from one spec file — domain, application,
 > web, infra, migrations, wiring, translations and its own tests — in **seconds**, and at a
 > **fraction of the tokens** the manual path costs. What it cannot express, I implement by
@@ -560,8 +560,11 @@ Present it like this, verbatim in substance:
 
 Two rules about this gate:
 
-- **It is not a formality and it has no default.** Ask, then wait. If the dev answers
-  anything other than 1 or 2, ask again rather than picking for them.
+- **It is not a formality and it has no default, and neither option is marked
+  recommended.** While the generator is in beta the two paths are presented on their
+  merits — speed and token cost against not depending on the generator — and the dev
+  chooses. Ask, then wait. If the dev answers anything other than 1 or 2, ask again
+  rather than picking for them.
 - **Nothing about the generator's spec YAML happens before the answer.** That file
   (`omnicore-gen/<entity>.omnicore.yaml` — not this skill's `spec.md`, which is the MODEL and was
   already approved at 1a) is large and dense, and writing one the dev never asked for is

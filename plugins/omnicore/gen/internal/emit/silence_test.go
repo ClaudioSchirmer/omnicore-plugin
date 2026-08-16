@@ -304,3 +304,55 @@ func valuesOf(m map[string]string) []string {
 	}
 	return out
 }
+
+// TestEveryScopedEntityProvesItsScope is the regression for a test that PASSES
+// while proving nothing.
+//
+// A row scope — owner-only or tenant — is the one restriction whose failure is
+// silent in both directions: the query still returns rows, they are simply
+// somebody else's. The generated criteria test used to assert only that the
+// mapper does not error, which an omitted filter also satisfies; a real project
+// noticed and wrote the missing coverage by hand.
+//
+// So this asserts the ASSERTION exists: for every scoped spec of the matrix, the
+// emitted test file must attach an identity, name the scoping field, and compare
+// something against it. Checking that a file "has a test for the scope" by name
+// would pass again the day the body stops asserting.
+func TestEveryScopedEntityProvesItsScope(t *testing.T) {
+	for name, m := range matrixModels(t) {
+		if !m.Read.ByParams {
+			continue
+		}
+		var field string
+		switch m.Authz.DataAccess {
+		case "owner-only":
+			if m.Authz.OwnerField != nil {
+				field = m.Authz.OwnerField.Name
+			}
+		case "tenant":
+			if m.Authz.TenantField != nil {
+				field = m.Authz.TenantField.Name
+			}
+		}
+		if field == "" {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			src := goSources(emitAll(t, m))["internal/application/queries/"+m.Entity.Snake+"_queries_test.go"]
+			if src == "" {
+				t.Fatal("a scoped entity emitted no query tests at all")
+			}
+			for _, needed := range []string{
+				"SetIdentity",                           // a caller is attached, not assumed
+				"out.Filter[" + `"` + field + `"` + "]", // the scoping field is read back
+				"somebody-else",                         // the caller's own attempt to choose it
+			} {
+				if !strings.Contains(src, needed) {
+					t.Errorf("the scope test does not %q — a scoped read whose filter is "+
+						"dropped answers with everybody's rows, and a test that only checks "+
+						"for an error passes anyway", needed)
+				}
+			}
+		})
+	}
+}

@@ -7,6 +7,8 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-08-15
+
 ### Changed
 
 - **A generated file carried its header twice.** Every one opened with the sealed header —
@@ -28,7 +30,10 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   nobody has met, usually a spec that validates and produces something that does not
   compile. The option also states what happens then, because the honest answer is
   reassuring: the agent says so, works around it, and it is fixed upstream — and the review
-  and proof steps already in that option are exactly what catch it.
+  and proof steps already in that option are exactly what catch it. **Neither option is
+  marked recommended any more**: while the generator is in beta the two paths are presented
+  on their merits — speed and token cost against not depending on the generator — and the
+  dev chooses without a nudge.
 
 - **Everything the generator reads or writes about a service now lives in one directory,
   `omnicore-gen/`.** It was in three places: the spec in a generic `specs/`, its report
@@ -114,6 +119,18 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   It also carries the distinction the wording almost never makes: "how do I cap a
   collection per key?" is the framework when the dev is writing Go and the generator when
   they are writing YAML, and a question about a `.omnicore.yaml` is always the generator's.
+
+- **The generated tests now PROVE the row scope, instead of proving nothing.** An
+  `owner-only` or `tenant` entity got one criteria test, and all it asserted was that the
+  mapper does not error — which an omitted filter satisfies too. That is the one
+  restriction whose failure is silent in both directions: the read still answers, with
+  somebody else's rows. A real project's author noticed and wrote the coverage by hand, in
+  two files. It is generated now, and it asserts the three ways a row leaks: the filter
+  carries the identity that ASKED (checked with two different identities, so a pinned
+  constant cannot pass), a value the CALLER sent for that field is overwritten rather than
+  merged, and no identity at all yields the empty scope rather than the unfiltered one.
+  Gated in turn by a matrix-wide test that the assertion EXISTS — checking for a test by
+  name would pass again the day its body stops asserting.
 
 - **`/omnicore:gen` — a door to the generator's CLI for a project that already exists.**
   Five of the six commands were reachable only as steps inside `scaffold-entity`'s codegen

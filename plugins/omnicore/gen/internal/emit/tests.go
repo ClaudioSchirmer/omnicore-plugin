@@ -1428,6 +1428,8 @@ func emitQueryTests(m *ir.Model) (fsplan.File, error) {
 	}
 	s.L("}")
 
+	emitScopeIsForcedTest(s, m)
+
 	if m.Read.ByParams && len(m.Read.FieldRestrict) > 0 {
 		s.Blank()
 		s.Doc(
@@ -1637,6 +1639,86 @@ func rejectsZero(vo ir.ValueObject) bool {
 // tooLongFor builds a value one character past the declared ceiling.
 func tooLongFor(vo ir.ValueObject) string {
 	return fmt.Sprintf("strings.Repeat(%s, %d)", quote("a"), vo.MaxLength+1)
+}
+
+// emitScopeIsForcedTest proves the row scope carries the CALLER's own value.
+//
+// The build test above only proves the mapper does not error, and an owner
+// filter that is silently dropped does not error — it answers with everybody's
+// rows. That gap was found the expensive way: a real project's author noticed
+// the generated tests asserted nothing about the value and wrote two files by
+// hand to cover it. This is those files, generated.
+//
+// Three things are asserted, and each one is a different way to leak a row:
+// the filter carries the identity that asked (checked with TWO identities, so a
+// hardcoded value cannot pass); a value the CALLER sent for that field is
+// overwritten rather than merged; and no identity at all yields the empty
+// scope, never the unfiltered one.
+func emitScopeIsForcedTest(s *src, m *ir.Model) {
+	if !m.Read.ByParams {
+		return
+	}
+	var field, from, a, b string
+	switch m.Authz.DataAccess {
+	case "owner-only":
+		if m.Authz.OwnerField == nil {
+			return
+		}
+		field, from = m.Authz.OwnerField.Name, "Subject"
+		a, b = "ana@example.test", "bruno@example.test"
+	case "tenant":
+		if m.Authz.TenantField == nil {
+			return
+		}
+		field, from = m.Authz.TenantField.Name, "tenant"
+		a, b = "tenant-a", "tenant-b"
+	default:
+		return
+	}
+
+	s.Blank()
+	s.Doc(
+		fmt.Sprintf("The listing is scoped to the caller, and %s is not the caller's to choose.", field),
+		"",
+		"Two identities, because one proves nothing: a mapper that pinned a constant "+
+			"would satisfy a single case and hand every row to the second caller. The "+
+			"query also ARRIVES with a value for the field, which is what a caller "+
+			"probing for someone else's rows would send — it must be overwritten, not "+
+			"merged.")
+	s.L("func Test%sScopeIsForced(t *testing.T) {", m.Entity.Pascal)
+	s.L("\tfor _, want := range []string{%s, %s} {", quote(a), quote(b))
+	s.L("\t\tctx := &configuration.AppContext{}")
+	if from == "Subject" {
+		s.L("\t\tctx.SetIdentity(&configuration.Identity{Subject: want})")
+	} else {
+		s.L("\t\tctx.SetIdentity(&configuration.Identity{Claims: map[string]any{%s: want}})",
+			quote("tenant_id"))
+	}
+	s.L("\t\tq := %s{}", m.Read.QueryList)
+	s.L("\t\t// What a caller fishing for someone else's rows would send.")
+	s.L("\t\tq.Criteria.Filter = map[string]any{%s: %s}", quote(field), quote("somebody-else"))
+	s.L("\t\tout, err := q.ToCriteria(ctx)")
+	s.L("\t\tif err != nil {")
+	s.L("\t\t\tt.Fatalf(%s, err)", quote("the listing criteria failed: %v"))
+	s.L("\t\t}")
+	s.L("\t\tif got := out.Filter[%s]; got != want {", quote(field))
+	s.L("\t\t\tt.Errorf(%s, got, want)",
+		quote("the scope is %v, the caller is "+field+" %v — the caller's rows are not the ones being read"))
+	s.L("\t\t}")
+	s.L("\t}")
+	s.Blank()
+	s.L("\t// No identity: the EMPTY scope, which matches nothing. Leaving the")
+	s.L("\t// filter out here would answer with every row in the table.")
+	s.L("\tanon := &configuration.AppContext{}")
+	s.L("\tout, err := (%s{}).ToCriteria(anon)", m.Read.QueryList)
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("the anonymous listing criteria failed: %v"))
+	s.L("\t}")
+	s.L("\tif got, ok := out.Filter[%s]; !ok || got != \"\" {", quote(field))
+	s.L("\t\tt.Errorf(%s, got, ok)",
+		quote("an anonymous read scoped to %v (present=%v) — with no identity it must match nothing"))
+	s.L("\t}")
+	s.L("}")
 }
 
 // restrictSample is any value of the restricted field: what is under test is
