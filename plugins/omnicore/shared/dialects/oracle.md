@@ -34,6 +34,13 @@ numerics are `NUMBER`. **CDC caveat baked into the column design:** the CDC-tail
 columns are CLOB by framework decision (LogMiner cannot decode native-JSON redo) — this is
 a `table-schema.html` fact, stated here only so it is not "corrected" away.
 
+## Column & table descriptions — they go in the catalogue
+
+`COMMENT ON TABLE "<t>" IS '…';` and `COMMENT ON COLUMN "<t>"."<c>" IS '…';`, as statements
+after the CREATE — `user_tab_comments` / `user_col_comments` are what a client reads. Double
+the apostrophes inside the text. Plain statements, never a PL/SQL block: the migration runner
+splits on top-level semicolons and does not support `BEGIN … END`.
+
 ## Read side
 
 Full distributed CQRS is available: entity views project to MongoDB through the CDC

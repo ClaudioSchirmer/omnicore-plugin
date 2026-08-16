@@ -283,36 +283,54 @@ PowerShell wrapper ship: `start.cmd` is the zero-friction path (no execution pol
 double-click or `cmd`), `start.ps1` the robust one for devs who prefer it (proper
 error handling, clean per-process env). `start.sh` is executable. Shapes:
 
+**They BUILD and then run the binary — never `go run`.** `go run` compiles to a temp
+binary and runs it as a CHILD: it does not forward SIGTERM, so a wrapper started in the
+background and signalled shuts down without the app ever draining — and the skills' own
+verification boot (boot → SIGTERM → read the drain narration) is exactly that shape. It
+also leaves the listener orphaned on the port when the parent is killed. A `go build`
+followed by `exec` costs one incremental compile and makes the wrapper's PID the app's.
+
 ```bash
 #!/usr/bin/env bash
 # Bring up the local bench and run <svc> in dev mode (always the dev profile).
+# Build + exec, never `go run`: exec makes THIS pid the app, so SIGTERM reaches it
+# and the drain runs. Under `go run` the signal stops at a parent that ignores it.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 docker compose -f devops/docker-compose.yml up -d --wait
-APP_PROFILE=dev go run -tags '<engine> <transport>' ./bootstrap
+go build -tags '<engine> <transport>' -o ./bin/<svc> ./bootstrap
+APP_PROFILE=dev exec ./bin/<svc>
 ```
 
 ```bat
 @echo off
 REM Bring up the local bench and run <svc> in dev mode (always the dev profile).
+REM Build + run the binary, never `go run`: the signal must reach the app itself.
 cd /d "%~dp0"
 
 docker compose -f devops/docker-compose.yml up -d --wait || exit /b 1
+go build -tags "<engine> <transport>" -o .\bin\<svc>.exe .\bootstrap || exit /b 1
 set "APP_PROFILE=dev"
-go run -tags "<engine> <transport>" ./bootstrap
+.\bin\<svc>.exe
 ```
 
 ```powershell
 #!/usr/bin/env pwsh
 # Bring up the local bench and run <svc> in dev mode (always the dev profile).
+# Build + run the binary, never `go run`: the signal must reach the app itself.
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 docker compose -f devops/docker-compose.yml up -d --wait
+go build -tags '<engine> <transport>' -o .\bin\<svc>.exe .\bootstrap
 $env:APP_PROFILE = 'dev'
-go run -tags '<engine> <transport>' ./bootstrap
+.\bin\<svc>.exe
 ```
+
+`bin/` is build output, not a document — it belongs in `.gitignore` (the one thing there
+that does, per `shared/generated-documents.md`'s "would running a command reproduce it
+byte for byte?").
 
 Notes:
 - `--wait` blocks on the healthchecks — but NOT on the relay (no healthcheck by

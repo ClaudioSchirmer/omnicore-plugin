@@ -101,6 +101,16 @@ or drain through a pipe (`| tee`, `| grep`): a broken pipe can swallow the narra
 log to a file. (And per the QA discipline: never `kill -9` a serving process — orphans
 keep the ports.)
 
+**Signal the APP, never a `go run`.** `go run` compiles to a temp binary and runs it as a
+CHILD; it does not forward SIGTERM. So a verification boot launched as `go run … &` and
+then sent `kill -TERM $!` exits with no drain at all — no `draining…`, no `drained`, and
+often a listener still holding the port — which reads as "this service has no graceful
+shutdown" when nothing was ever asked to shut one down. Any boot that will be signalled
+runs the BUILT binary (`go build -tags '<engine> <transport>' -o ./bin/<svc> ./bootstrap`,
+then run that; the start wrappers do exactly this and `exec` it, so the wrapper's pid IS
+the app's). If you are stuck with a `go run`, signal the LISTENER — the pid holding the
+port — or the whole process group, never the parent alone.
+
 ## Diagnosis quick-map (doctor)
 
 Boot abort "no relational engine registered" → missing engine build tag · reactions/

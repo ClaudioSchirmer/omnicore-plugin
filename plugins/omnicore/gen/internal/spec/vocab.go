@@ -81,6 +81,20 @@ var (
 	// an operation that does not exist is a refusal, not dead configuration.
 	AuthzOperations = set("insert", "update", "patch", "delete", "archive", "unarchive", "read")
 
+	// canonicalActions is the house taxonomy: the ACTION half of a permission
+	// spells the operation it guards, so one project speaks one vocabulary.
+	//
+	// It exists because the alternative writes itself differently every time —
+	// insert becomes `create` in one spec and `write` in the next, and a
+	// deployment ends up granting three words for one thing. Two operations
+	// share an action ON PURPOSE: PUT and PATCH are both an update, and
+	// unarchive is the undo of archive, so whoever may archive may put it back.
+	canonicalActions = map[string]string{
+		"insert": "insert", "update": "update", "patch": "update",
+		"delete": "delete", "archive": "archive", "unarchive": "archive",
+		"read": "read",
+	}
+
 	Dialects = set("postgres", "mysql", "sqlserver", "oracle", "sqlite")
 )
 
@@ -238,4 +252,24 @@ func RefusedKeys() map[string]string {
 		"siblings[].fields[].unique": "uniqueness of a facet's field is not generated — " +
 			"declare it on a root field",
 	}
+}
+
+// CanonicalPermission is the permission a project should grant for one
+// operation on one resource: `<resource>:<action>`, where the action spells the
+// operation itself.
+//
+// It is a RECOMMENDATION, not a rule the build enforces — a project with its
+// own taxonomy keeps it, and the validator only warns when a permission leaves
+// the resource's namespace. What it prevents is the drift that comes from
+// nobody having decided: `create` here, `write` there, `insert` in the third
+// spec, three grants for one verb.
+func CanonicalPermission(resource, op string) string {
+	action, ok := canonicalActions[op]
+	if !ok {
+		action = op
+	}
+	if resource == "" {
+		return action
+	}
+	return resource + ":" + action
 }

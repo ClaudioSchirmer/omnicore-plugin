@@ -359,9 +359,9 @@ authz:
   resource: course
   dataAccess: anyone-with-permission
   permissions:
-    insert: course:write
-    update: course:write
-    patch: course:write
+    insert: course:insert
+    update: course:update
+    patch: course:update
     archive: course:archive
     unarchive: course:archive
     read: course:read

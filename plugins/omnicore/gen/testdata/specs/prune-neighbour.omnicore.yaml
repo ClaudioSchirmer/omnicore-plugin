@@ -1,0 +1,37 @@
+specVersion: 1
+entity: Mentor
+plural: Mentors
+language: en-US
+storage:
+  kind: flat
+  table: mentors
+  description: Mentors of the institution.
+  managed: {createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at, revision: revision}
+fields:
+  - {name: Name, type: string, column: name, length: 120, livesOn: root, example: Ada Reid, description: The mentor's name.}
+  - name: Email
+    type: string
+    column: email
+    length: 160
+    livesOn: root
+    vo: {kind: reuse, ref: Email}
+    example: ada.reid@school.edu
+    description: The mentor's e-mail address.
+modes: [display, insert, update, archive, unarchive]
+update: {shape: patch}
+delete: {root: soft}
+rules:
+  list:
+    - {id: name-required, kind: required, scope: [insertOrUpdate], fields: [Name], notification: RequiredFieldNotification}
+read:
+  backing: relational
+  view: {name: mentors, version: 1, maxLimit: 50}
+  byId: true
+  byParams:
+    filters: [{field: Name, ops: [eq, contains]}]
+    controls: {pagination: true, orderBy: true}
+surfaces: {rest: true}
+authz:
+  resource: mentor
+  dataAccess: anyone-with-permission
+  permissions: {insert: mentor:insert, patch: mentor:update, archive: mentor:archive, unarchive: mentor:archive, read: mentor:read}

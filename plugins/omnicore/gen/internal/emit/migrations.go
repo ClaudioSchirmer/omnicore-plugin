@@ -114,28 +114,171 @@ type dialect struct {
 	IfExists             bool
 	Quote                func(string) string
 	Column               func(f ir.Field) string
-	Comment              string
+	// Comment is the line-comment marker. It carries what is true about the
+	// FILE — never a description of a table or a column that the engine could
+	// have stored itself.
+	Comment string
+	// InlineColumnComment renders the clause a COLUMN DEFINITION carries where
+	// the engine keeps the description inline. MySQL only; nil elsewhere.
+	InlineColumnComment func(text string) string
+	// TableComment and ColumnComment render the statement that puts a
+	// description INSIDE the database, run right after the CREATE TABLE. nil
+	// where the engine takes it inline instead (MySQL columns) or cannot store
+	// one at all (SQLite).
+	TableComment  func(table, text string) string
+	ColumnComment func(table, column, text string) string
+}
+
+// descriptions decides WHERE a description written in the spec ends up, and
+// that decision is the whole reason for asking the author to write one.
+//
+// A description that lives only as a `--` line in a migration file is invisible
+// to everyone holding a CONNECTION rather than the repository: the DBA reading
+// the catalogue, the BI tool listing columns, the next developer running \d+ or
+// opening the table in a client. So every engine that can store one is given
+// it — postgres and oracle with COMMENT ON after the table, mysql inline on the
+// column plus an ALTER for the table, sqlserver with an MS_Description extended
+// property. SQLite has nowhere to put it, and there, and only there, the text
+// stays in the file.
+type descriptions struct {
+	d       dialect
+	pending []string
+}
+
+// table returns the line to write ABOVE the CREATE TABLE — empty whenever the
+// description is going into the database instead.
+func (x *descriptions) table(table, text string) string {
+	text = clampDescription(firstLine(text))
+	if text == "" {
+		return ""
+	}
+	if x.d.TableComment != nil {
+		x.pending = append(x.pending, x.d.TableComment(table, text))
+		return ""
+	}
+	return x.d.Comment + " " + text + "\n"
+}
+
+// column returns the clause to append to the column DEFINITION and the line to
+// write above it. At most one of the two is ever non-empty.
+func (x *descriptions) column(table, column, text string) (inline, above string) {
+	text = clampDescription(firstLine(text))
+	if text == "" {
+		return "", ""
+	}
+	if x.d.InlineColumnComment != nil {
+		return x.d.InlineColumnComment(text), ""
+	}
+	if x.d.ColumnComment != nil {
+		x.pending = append(x.pending, x.d.ColumnComment(table, column, text))
+		return "", ""
+	}
+	return "", "  " + x.d.Comment + " " + text
+}
+
+// flush writes the statements collected for the table just emitted. It is
+// called after each CREATE TABLE rather than once at the end so the reader
+// meets a table's descriptions beside it.
+func (x *descriptions) flush(b *strings.Builder) {
+	if len(x.pending) == 0 {
+		return
+	}
+	for _, s := range x.pending {
+		b.WriteString(s + "\n")
+	}
+	x.pending = nil
+}
+
+// clampDescription keeps a description inside the tightest engine limit — MySQL
+// stops at 1024 characters on a column. A description longer than that is prose
+// that belongs in the docs, and a DDL error at apply time is an expensive way to
+// find that out.
+func clampDescription(s string) string {
+	const max = 900
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return strings.TrimSpace(string(r[:max-1])) + "…"
+}
+
+// sqlText quotes a description as a SQL string literal, doubling the quotes it
+// contains. An apostrophe in a description is ordinary prose, and unescaped it
+// ends the literal and turns the rest of the sentence into syntax.
+func sqlText(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func commentOnTable(q func(string) string) func(string, string) string {
+	return func(table, text string) string {
+		return fmt.Sprintf("COMMENT ON TABLE %s IS %s;", q(table), sqlText(text))
+	}
+}
+
+func commentOnColumn(q func(string) string) func(string, string, string) string {
+	return func(table, column, text string) string {
+		return fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;", q(table), q(column), sqlText(text))
+	}
+}
+
+// mysqlTableComment uses ALTER rather than a table option on the CREATE, so one
+// mechanism covers every table this file writes. On a table created moments ago
+// it is a metadata-only change.
+func mysqlTableComment(table, text string) string {
+	return fmt.Sprintf("ALTER TABLE %s COMMENT = %s;", backtickQuote(table), sqlText(text))
+}
+
+// sqlserverExtendedProperty stores the description the way T-SQL does: an
+// MS_Description extended property, which is what SSMS, `sys.extended_properties`
+// and every schema browser read as the object's description.
+//
+// The schema is taken from SCHEMA_NAME() through the @schema variable the file
+// declares, not hardcoded to dbo: a service whose tables live in its own schema
+// would otherwise fail every one of these on apply.
+func sqlserverExtendedProperty(table, column, text string) string {
+	var b strings.Builder
+	b.WriteString("EXEC sp_addextendedproperty @name = N'MS_Description', @value = N")
+	b.WriteString(sqlText(text))
+	b.WriteString(",\n  @level0type = N'SCHEMA', @level0name = @schema,\n")
+	fmt.Fprintf(&b, "  @level1type = N'TABLE',  @level1name = N%s", sqlText(table))
+	if column != "" {
+		fmt.Fprintf(&b, ",\n  @level2type = N'COLUMN', @level2name = N%s", sqlText(column))
+	}
+	b.WriteString(";")
+	return b.String()
 }
 
 var dialects = map[string]dialect{
 	"postgres": {
 		Name: "postgres", ID: "UUID", Timestamp: "TIMESTAMPTZ",
 		IfExists: true, Quote: ansiQuote, Column: postgresColumn, Comment: "--",
+		TableComment: commentOnTable(ansiQuote), ColumnComment: commentOnColumn(ansiQuote),
 	},
 	"mysql": {
 		Name: "mysql", ID: "BINARY(16)", Timestamp: "DATETIME(6)",
 		IfExists: true, Quote: backtickQuote, Column: mysqlColumn, Comment: "--",
+		TableComment: mysqlTableComment,
+		InlineColumnComment: func(text string) string {
+			return " COMMENT " + sqlText(text)
+		},
 	},
 	"sqlserver": {
 		Name: "sqlserver", ID: "BINARY(16)", Timestamp: "DATETIMEOFFSET",
 		NamedDefaults: true, IfExists: true, Quote: bracketQuote,
 		Column: sqlserverColumn, Comment: "--",
+		TableComment: func(table, text string) string {
+			return sqlserverExtendedProperty(table, "", text)
+		},
+		ColumnComment: sqlserverExtendedProperty,
 	},
 	"oracle": {
 		Name: "oracle", ID: "RAW(16)", Timestamp: "TIMESTAMP WITH TIME ZONE",
 		DefaultBeforeNotNull: true, IfExists: true, Quote: ansiQuote,
 		Column: oracleColumn, Comment: "--",
+		TableComment: commentOnTable(ansiQuote), ColumnComment: commentOnColumn(ansiQuote),
 	},
+	// SQLite is the only engine here with nowhere to store a description, so it
+	// is the only one whose migration still carries them as `--` lines.
 	"sqlite": {
 		Name: "sqlite", ID: "TEXT", Timestamp: "TEXT",
 		IfExists: true, Quote: ansiQuote, Column: sqliteColumn, Comment: "--",
@@ -242,7 +385,8 @@ func sqliteColumn(f ir.Field) string {
 
 func upSQL(m *ir.Model, d dialect) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "-- %s — %s\n", m.Table, firstLine(m.TableDescription))
+	desc := &descriptions{d: d}
+	fmt.Fprintf(&b, "-- %s\n", m.Table)
 	fmt.Fprintf(&b, "-- Generated by omnicore-gen from the %s spec.\n", m.Entity.Pascal)
 	b.WriteString("\n")
 	writeSessionPrelude(&b, d)
@@ -253,22 +397,31 @@ func upSQL(m *ir.Model, d dialect) string {
 		b.WriteString("\n")
 	}
 
+	b.WriteString(desc.table(m.Table, m.TableDescription))
 	fmt.Fprintf(&b, "CREATE TABLE %s (\n", d.Quote(m.Table))
 
-	// Column comments go on their OWN line, ABOVE the column. Trailing them
-	// after the definition would swallow the separating comma into the comment
-	// and produce DDL that does not parse.
+	// Where a description stays in the file, it goes on its OWN line, ABOVE the
+	// column. Trailing it after the definition would swallow the separating
+	// comma into the comment and produce DDL that does not parse.
 	var lines []string
 	var comments []string
 	add := func(comment, def string) {
 		comments = append(comments, comment)
 		lines = append(lines, def)
 	}
+	// column emits one column together with wherever its description lives on
+	// this engine: inline on the definition, a statement after the table, or a
+	// line above it.
+	column := func(col, note, def string) {
+		inline, above := desc.column(m.Table, col, note)
+		add(above, def+inline)
+	}
 
-	add("", fmt.Sprintf("  %s %s NOT NULL", d.Quote("id"), d.ID))
+	column("id", "Row id — a UUID v7 minted by the framework, not a sequence.",
+		fmt.Sprintf("  %s %s NOT NULL", d.Quote("id"), d.ID))
 
 	if m.IsRole() && m.Base.Link == "separate-fk" {
-		add("  "+d.Comment+" link to the shared identity",
+		column(baseLinkColumn(m), "Link to the shared identity this row plays a role over.",
 			fmt.Sprintf("  %s %s NOT NULL", d.Quote(baseLinkColumn(m)), d.ID))
 	}
 	for _, f := range roleColumns(m) {
@@ -276,28 +429,27 @@ func upSQL(m *ir.Model, d dialect) string {
 		if f.Nullable {
 			null = " NULL"
 		}
-		comment := ""
-		if f.Description != "" {
-			comment = "  " + d.Comment + " " + firstLine(f.Description)
-		}
-		add(comment, fmt.Sprintf("  %s %s%s", d.Quote(f.Column), d.Column(f), null))
+		column(f.Column, f.Description,
+			fmt.Sprintf("  %s %s%s", d.Quote(f.Column), d.Column(f), null))
 	}
 
 	// Revision is mandatory on an entity table: the framework uses it for
 	// optimistic concurrency and refuses to build the repository without it.
-	add("  "+d.Comment+" optimistic-concurrency stamp, maintained by the framework",
+	column(m.Managed.Revision, "Optimistic-concurrency stamp, maintained by the framework.",
 		fmt.Sprintf("  %s %s", d.Quote(m.Managed.Revision), stampTail(d, bigintOf(d), "0", false)))
 
 	if m.Managed.CreatedAt != "" {
-		add("", fmt.Sprintf("  %s %s", d.Quote(m.Managed.CreatedAt),
-			stampTail(d, d.Timestamp, nowOf(d), false)))
+		column(m.Managed.CreatedAt, "When the row was created; written by the database default.",
+			fmt.Sprintf("  %s %s", d.Quote(m.Managed.CreatedAt),
+				stampTail(d, d.Timestamp, nowOf(d), false)))
 	}
 	if m.Managed.UpdatedAt != "" {
-		add("", fmt.Sprintf("  %s %s", d.Quote(m.Managed.UpdatedAt),
-			stampTail(d, d.Timestamp, nowOf(d), false)))
+		column(m.Managed.UpdatedAt, "When the row was last written, maintained by the framework.",
+			fmt.Sprintf("  %s %s", d.Quote(m.Managed.UpdatedAt),
+				stampTail(d, d.Timestamp, nowOf(d), false)))
 	}
 	if m.Managed.ArchivedAt != "" {
-		add("  "+d.Comment+" archive stamp; a non-null value hides the row from reads",
+		column(m.Managed.ArchivedAt, "Archive stamp; a non-null value hides the row from reads.",
 			fmt.Sprintf("  %s %s NULL", d.Quote(m.Managed.ArchivedAt), d.Timestamp))
 	}
 
@@ -324,6 +476,7 @@ func upSQL(m *ir.Model, d dialect) string {
 		b.WriteString("\n")
 	}
 	b.WriteString(");\n")
+	desc.flush(&b)
 
 	// Siblings first, then children: both point back at their owner, so the
 	// owner's table has to exist before either. A facet that lives inside a child
@@ -456,15 +609,21 @@ func downSQL(m *ir.Model, d dialect) string {
 // with it.
 func writeSiblingTable(b *strings.Builder, m *ir.Model, sib ir.Sibling, d dialect) {
 	owner := siblingOwnerTable(m, sib)
-	fmt.Fprintf(b, "%s %s — the %s facet of %s (1:1, key shared with the owner).\n",
-		d.Comment, sib.Table, sib.Name, owner)
+	desc := &descriptions{d: d}
+	text := fmt.Sprintf("The %s facet of %s (1:1, key shared with the owner).", sib.Name, owner)
+	if sib.Description != "" {
+		text = firstLine(sib.Description) + " " + text
+	}
+	b.WriteString(desc.table(sib.Table, text))
 	fmt.Fprintf(b, "CREATE TABLE %s (\n", d.Quote(sib.Table))
-	fmt.Fprintf(b, "  %s %s NOT NULL,\n", d.Quote("id"), d.ID)
+	inline, above := desc.column(sib.Table, "id",
+		fmt.Sprintf("Row id — the same id as the %s row it belongs to.", owner))
+	writeLine(b, above)
+	fmt.Fprintf(b, "  %s %s NOT NULL%s,\n", d.Quote("id"), d.ID, inline)
 	for _, f := range sib.Fields {
-		if f.Description != "" {
-			fmt.Fprintf(b, "  %s %s\n", d.Comment, firstLine(f.Description))
-		}
-		fmt.Fprintf(b, "  %s %s NULL,\n", d.Quote(f.Column), d.Column(f))
+		inline, above := desc.column(sib.Table, f.Column, f.Description)
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s NULL%s,\n", d.Quote(f.Column), d.Column(f), inline)
 	}
 	fmt.Fprintf(b, "  CONSTRAINT %s PRIMARY KEY (%s),\n",
 		d.Quote(sib.Table+"_pkey"), d.Quote("id"))
@@ -472,6 +631,15 @@ func writeSiblingTable(b *strings.Builder, m *ir.Model, sib ir.Sibling, d dialec
 		d.Quote(sib.Table+"_owner_fk"), d.Quote("id"), d.Quote(owner), d.Quote("id"),
 		cascadeClause(d))
 	b.WriteString(");\n")
+	desc.flush(b)
+}
+
+// writeLine writes a description that stayed in the file, and nothing at all on
+// the engines that took it into the catalogue.
+func writeLine(b *strings.Builder, line string) {
+	if line != "" {
+		b.WriteString(strings.TrimRight(line, " ") + "\n")
+	}
 }
 
 // writeChildTable emits a 1:N collection.
@@ -481,13 +649,20 @@ func writeSiblingTable(b *strings.Builder, m *ir.Model, sib ir.Sibling, d dialec
 func writeChildTable(b *strings.Builder, m *ir.Model, c ir.Child, d dialect) {
 	fk := parentColumn(c)
 	owner := childOwnerTable(m, c)
-	fmt.Fprintf(b, "%s %s — the %s collection of %s.\n", d.Comment, c.Table, c.Segment, owner)
+	desc := &descriptions{d: d}
+	text := fmt.Sprintf("The %s collection of %s.", c.Segment, owner)
 	if c.Description != "" {
-		fmt.Fprintf(b, "%s %s\n", d.Comment, firstLine(c.Description))
+		text = firstLine(c.Description) + " " + text
 	}
+	b.WriteString(desc.table(c.Table, text))
 	fmt.Fprintf(b, "CREATE TABLE %s (\n", d.Quote(c.Table))
-	fmt.Fprintf(b, "  %s %s NOT NULL,\n", d.Quote("id"), d.ID)
-	fmt.Fprintf(b, "  %s %s NOT NULL,\n", d.Quote(fk), d.ID)
+	inline, above := desc.column(c.Table, "id",
+		"Row id — a UUID v7 minted by the framework, not a sequence.")
+	writeLine(b, above)
+	fmt.Fprintf(b, "  %s %s NOT NULL%s,\n", d.Quote("id"), d.ID, inline)
+	inline, above = desc.column(c.Table, fk, fmt.Sprintf("The %s row this entry belongs to.", owner))
+	writeLine(b, above)
+	fmt.Fprintf(b, "  %s %s NOT NULL%s,\n", d.Quote(fk), d.ID, inline)
 	for _, f := range c.Fields {
 		if f.Facet != "" {
 			continue // it is a column of the facet's own table
@@ -496,21 +671,29 @@ func writeChildTable(b *strings.Builder, m *ir.Model, c ir.Child, d dialect) {
 		if f.Nullable {
 			null = " NULL"
 		}
-		if f.Description != "" {
-			fmt.Fprintf(b, "  %s %s\n", d.Comment, firstLine(f.Description))
-		}
-		fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(f.Column), d.Column(f), null)
+		inline, above := desc.column(c.Table, f.Column, f.Description)
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s%s%s,\n", d.Quote(f.Column), d.Column(f), null, inline)
 	}
 	if c.ArchivedAt != "" {
-		fmt.Fprintf(b, "  %s %s NULL,\n", d.Quote(c.ArchivedAt), d.Timestamp)
+		inline, above := desc.column(c.Table, c.ArchivedAt,
+			"Archive stamp; a non-null value hides the entry from reads.")
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s NULL%s,\n", d.Quote(c.ArchivedAt), d.Timestamp, inline)
 	}
 	if m.Managed.CreatedAt != "" {
-		fmt.Fprintf(b, "  %s %s,\n", d.Quote(m.Managed.CreatedAt),
-			stampTail(d, d.Timestamp, nowOf(d), false))
+		inline, above := desc.column(c.Table, m.Managed.CreatedAt,
+			"When the entry was created; written by the database default.")
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(m.Managed.CreatedAt),
+			stampTail(d, d.Timestamp, nowOf(d), false), inline)
 	}
 	if m.Managed.UpdatedAt != "" {
-		fmt.Fprintf(b, "  %s %s,\n", d.Quote(m.Managed.UpdatedAt),
-			stampTail(d, d.Timestamp, nowOf(d), false))
+		inline, above := desc.column(c.Table, m.Managed.UpdatedAt,
+			"When the entry was last written, maintained by the framework.")
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(m.Managed.UpdatedAt),
+			stampTail(d, d.Timestamp, nowOf(d), false), inline)
 	}
 	fmt.Fprintf(b, "  CONSTRAINT %s PRIMARY KEY (%s),\n",
 		d.Quote(c.Table+"_pkey"), d.Quote("id"))
@@ -518,6 +701,7 @@ func writeChildTable(b *strings.Builder, m *ir.Model, c ir.Child, d dialect) {
 		d.Quote(c.Table+"_parent_fk"), d.Quote(fk), d.Quote(owner), d.Quote("id"),
 		cascadeClause(d))
 	b.WriteString(");\n")
+	desc.flush(b)
 	fmt.Fprintf(b, "%s every read of the aggregate loads this collection by the key below.\n", d.Comment)
 	fmt.Fprintf(b, "CREATE INDEX %s ON %s (%s);\n",
 		d.Quote(c.Table+"_parent_idx"), d.Quote(c.Table), d.Quote(fk))
@@ -542,39 +726,55 @@ func firstLine(s string) string {
 // derives the identity's primary key, so a null one would collapse every
 // key-less record into a single identity — silent corruption rather than an error.
 func writeBaseTable(b *strings.Builder, m *ir.Model, d dialect) {
-	fmt.Fprintf(b, "%s %s — the shared identity %s plays a role over.\n",
-		d.Comment, m.Base.Table, m.Table)
+	desc := &descriptions{d: d}
+	text := fmt.Sprintf("The shared identity %s plays a role over.", m.Table)
 	if m.Base.Description != "" {
-		fmt.Fprintf(b, "%s %s\n", d.Comment, firstLine(m.Base.Description))
+		text = firstLine(m.Base.Description) + " " + text
 	}
+	b.WriteString(desc.table(m.Base.Table, text))
 	fmt.Fprintf(b, "CREATE TABLE %s (\n", d.Quote(m.Base.Table))
-	fmt.Fprintf(b, "  %s %s NOT NULL,\n", d.Quote("id"), d.ID)
+	inline, above := desc.column(m.Base.Table, "id",
+		"Identity id — derived from the natural key, so the same key resolves to this same row.")
+	writeLine(b, above)
+	fmt.Fprintf(b, "  %s %s NOT NULL%s,\n", d.Quote("id"), d.ID, inline)
 	for _, f := range m.BaseFields() {
 		null := " NOT NULL"
 		if f.Nullable {
 			null = " NULL"
 		}
-		if f.Description != "" {
-			fmt.Fprintf(b, "  %s %s\n", d.Comment, firstLine(f.Description))
-		}
-		fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(f.Column), d.Column(f), null)
+		inline, above := desc.column(m.Base.Table, f.Column, f.Description)
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s%s%s,\n", d.Quote(f.Column), d.Column(f), null, inline)
 	}
-	fmt.Fprintf(b, "  %s %s,\n", d.Quote(m.Managed.Revision),
-		stampTail(d, bigintOf(d), "0", false))
+	inline, above = desc.column(m.Base.Table, m.Managed.Revision,
+		"Optimistic-concurrency stamp, maintained by the framework.")
+	writeLine(b, above)
+	fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(m.Managed.Revision),
+		stampTail(d, bigintOf(d), "0", false), inline)
 	if m.Managed.CreatedAt != "" {
-		fmt.Fprintf(b, "  %s %s,\n", d.Quote(m.Managed.CreatedAt),
-			stampTail(d, d.Timestamp, nowOf(d), false))
+		inline, above := desc.column(m.Base.Table, m.Managed.CreatedAt,
+			"When the identity was created; written by the database default.")
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(m.Managed.CreatedAt),
+			stampTail(d, d.Timestamp, nowOf(d), false), inline)
 	}
 	if m.Managed.UpdatedAt != "" {
-		fmt.Fprintf(b, "  %s %s,\n", d.Quote(m.Managed.UpdatedAt),
-			stampTail(d, d.Timestamp, nowOf(d), false))
+		inline, above := desc.column(m.Base.Table, m.Managed.UpdatedAt,
+			"When the identity was last written, maintained by the framework.")
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(m.Managed.UpdatedAt),
+			stampTail(d, d.Timestamp, nowOf(d), false), inline)
 	}
 	if m.Managed.ArchivedAt != "" {
-		fmt.Fprintf(b, "  %s %s NULL,\n", d.Quote(m.Managed.ArchivedAt), d.Timestamp)
+		inline, above := desc.column(m.Base.Table, m.Managed.ArchivedAt,
+			"Archive stamp; a non-null value hides the identity from reads.")
+		writeLine(b, above)
+		fmt.Fprintf(b, "  %s %s NULL%s,\n", d.Quote(m.Managed.ArchivedAt), d.Timestamp, inline)
 	}
 	fmt.Fprintf(b, "  CONSTRAINT %s PRIMARY KEY (%s)\n",
 		d.Quote(m.Base.Table+"_pkey"), d.Quote("id"))
 	b.WriteString(");\n")
+	desc.flush(b)
 	fmt.Fprintf(b, "%s the natural key: UNIQUE and NOT NULL, because the identity's own\n", d.Comment)
 	fmt.Fprintf(b, "%s key is derived from it. A null here would merge unrelated records.\n", d.Comment)
 	fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",
@@ -692,6 +892,10 @@ func writeSessionPrelude(b *strings.Builder, d dialect) {
 	b.WriteString("-- Required for filtered indexes; clients differ on the default, so the\n")
 	b.WriteString("-- file states it rather than depending on the caller's session.\n")
 	b.WriteString("SET QUOTED_IDENTIFIER ON;\n\n")
+	b.WriteString("-- The schema the descriptions below are attached to. Read from the session\n")
+	b.WriteString("-- rather than hardcoded to dbo, so a service whose tables live in its own\n")
+	b.WriteString("-- schema stores them on ITS objects instead of failing on every one.\n")
+	b.WriteString("DECLARE @schema sysname = SCHEMA_NAME();\n\n")
 }
 
 // childOwnerTable is the table a collection's foreign key points at.

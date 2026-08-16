@@ -439,6 +439,16 @@ var gateOrder = map[string]int{
 	"IfArchive": 3, "IfUnarchive": 4, "IfDelete": 5,
 }
 
+// GateRank is that same order, for an emitter grouping rules by verb outside
+// this package. A gate nobody listed sorts last rather than first, so an
+// unknown one is visible at the bottom instead of silently leading the file.
+func GateRank(gate string) int {
+	if n, ok := gateOrder[gate]; ok {
+		return n
+	}
+	return len(gateOrder)
+}
+
 func resolveClauses(s *spec.Spec, m *Model) []Clause {
 	return resolveClauseSet(s.Rules, func(n string) *Field { return lookupField(m, n) })
 }
@@ -1180,9 +1190,12 @@ type Child struct {
 // There is no Go type for it: its fields live on the OWNER as pointers, and the
 // split is purely physical. An all-nil facet means no row.
 type Sibling struct {
-	Name     string
-	Table    string
-	AttachTo string
+	Name string
+	// Description is what the facet holds, in one line. It reaches the facet
+	// table's own comment in the database.
+	Description string
+	Table       string
+	AttachTo    string
 	// OwnerChild is "" when the facet hangs off the entity's own table, or the
 	// child's NAME when it lives inside that child. It is AttachTo resolved to
 	// the node whose schema must declare it — the framework panics if a facet is
@@ -1235,7 +1248,7 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 func resolveSiblings(s *spec.Spec, m *Model) []Sibling {
 	var out []Sibling
 	for _, sib := range s.Siblings {
-		r := Sibling{Name: sib.Name, Table: sib.Table, AttachTo: sib.AttachTo}
+		r := Sibling{Name: sib.Name, Description: sib.Description, Table: sib.Table, AttachTo: sib.AttachTo}
 		if rest, ok := strings.CutPrefix(sib.AttachTo, "child:"); ok {
 			r.OwnerChild = rest
 		}
@@ -1732,4 +1745,28 @@ func placeNotifications(s *spec.Spec, m *Model) {
 			m.Notifications[i].Moved = true
 		}
 	}
+}
+
+// HasOwnedChildren reports whether any collection's entry type belongs to THIS
+// spec. A role that only MOUNTS the identity's collection has children in the
+// model and writes none of their types, so anything keyed off "has children"
+// alone lands in the wrong file — or, worse, in the right file twice.
+func (m *Model) HasOwnedChildren() bool {
+	for _, c := range m.Children {
+		if !c.Mounted {
+			return true
+		}
+	}
+	return false
+}
+
+// HasPerChildOps reports whether any collection is edited one entry at a time,
+// which is what mounts the Add/Change/Remove trio and its wire types.
+func (m *Model) HasPerChildOps() bool {
+	for _, c := range m.Children {
+		if c.PerChild {
+			return true
+		}
+	}
+	return false
 }

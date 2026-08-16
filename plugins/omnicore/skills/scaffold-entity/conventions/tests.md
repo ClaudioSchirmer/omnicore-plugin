@@ -14,6 +14,13 @@ Target ≥ 80%, measured **per generated FILE, not per package**: run with a cov
 profile and read the entity's own files — the bare package number mixes in pre-existing
 code and misstates the entity (only in a brand-new package do they coincide).
 
+**Pass `-coverpkg=./internal/...`.** Without it Go credits a file only to tests in its OWN
+package, so a mapper exercised from another package's test reads as 0% and a package with
+no test file of its own (dtos, web) reads as entirely untested while being covered. That
+under-report is worse than no number: it sends someone writing tests for code that has
+them, and it hides the files that genuinely have none. A 0% on a file you know is
+exercised means the measurement is wrong, not that the test is missing.
+
 ## What to cover
 
 - **Value objects (`internal/domain/vos/`):** test each VO DIRECTLY. A raw VO's

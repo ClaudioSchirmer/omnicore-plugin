@@ -36,6 +36,13 @@ route there; do not hand-roll it.
 Native `BOOLEAN` and native `JSON`/`JSONB`; money is stored as an integer of minor units
 (never a float); timestamps are application-stamped. No decimal-precision trap.
 
+## Column & table descriptions — they go in the catalogue
+
+`COMMENT ON TABLE <t> IS '…';` and `COMMENT ON COLUMN <t>.<c> IS '…';`, as statements after
+the CREATE. Double the apostrophes inside the text. A description left as a `--` line in the
+migration is invisible to `\d+`, to `pg_description` and to every client — which is the whole
+audience it was written for.
+
 ## Read side
 
 Full distributed CQRS is available: entity views project to MongoDB through the CDC

@@ -394,9 +394,9 @@ authz:
   resource: student
   dataAccess: anyone-with-permission
   permissions:
-    insert: student:write
-    update: student:write
-    patch: student:write
+    insert: student:insert
+    update: student:update
+    patch: student:update
     archive: student:archive
     unarchive: student:archive
     read: student:read

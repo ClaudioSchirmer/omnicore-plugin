@@ -133,8 +133,8 @@ authz:
   resource: teacher
   dataAccess: anyone-with-permission
   permissions:
-    insert: teacher:write
-    patch: teacher:write
+    insert: teacher:insert
+    patch: teacher:update
     archive: teacher:archive
     unarchive: teacher:archive
     read: teacher:read

@@ -3,8 +3,9 @@ name: omnicore-gen
 description: >-
   omnicore: drive omnicore-gen, the spec-driven code generator, to produce a
   complete entity from one YAML file — then review it, implement what the generator
-  refused, and prove it. Read this ONLY after the dev has chosen the codegen path at
-  scaffold-entity's generation gateway; it is not a standalone entry point. To run a single
+  refused, and prove it; and to CHANGE one, by editing that spec and regenerating. Read this
+  ONLY after the dev has chosen the codegen path at a generation gateway — scaffold-entity's
+  (creating) or evolve-entity's (changing); it is not a standalone entry point. To run a single
   generator command against a project that already exists — doctor, check, explain, adopt —
   use /omnicore:gen instead.
 ---
@@ -15,12 +16,21 @@ The generator writes the mechanical 1,600–3,400 lines of an entity from a spec
 what actually needs judgement: the MODEL (already approved before you got here), the
 business rules the spec language cannot express, the review, and the final tests.
 
-**This skill is only reached through `scaffold-entity`'s generation gateway.** If you are
-reading it because the dev asked about the generator directly, that is fine — but a real
-entity still starts at `/omnicore:scaffold-entity`, because the model gate and the plan
-gate are where the thinking happens and this skill does not repeat them. And if what they
-actually want is ONE command against a project that already exists — `doctor`, `check`,
-`explain`, `adopt` — that is `/omnicore:gen`, which is forty lines instead of four hundred.
+**This skill is only reached through a generation gateway** — `scaffold-entity`'s when the
+entity is being created, `evolve-entity`'s when an existing generated one is being changed.
+If you are reading it because the dev asked about the generator directly, that is fine — but
+a real entity still starts at `/omnicore:scaffold-entity` and a real change at
+`/omnicore:evolve-entity`, because the model gate, the plan gate and the impact map are
+where the thinking happens and this skill does not repeat them. And if what they actually
+want is ONE command against a project that already exists — `doctor`, `check`, `explain`,
+`adopt` — that is `/omnicore:gen`, which is forty lines instead of four hundred.
+
+**Creating and changing enter this skill at different steps.** Creating: steps 1→9 in
+order. Changing: the spec already exists, so step 2 is an EDIT of it (never `init`), and
+the caller — `evolve-entity` — owns three things this skill does not: the migration pair an
+evolution needs (written by hand, from step 5's report), the orphans a shrinking spec leaves
+behind, and the artifacts outside the generator's ownership. Steps 3 and 5–9 are identical
+either way.
 
 ## What the generator guarantees, and what it does not
 
@@ -79,7 +89,7 @@ So, before a single line of YAML, in this order:
     omnicore-gen explain rules        # what the rule DSL can express
     omnicore-gen explain names        # the names YOU declare — it invents none
     omnicore-gen explain coverage     # what THIS build generates and what it refuses
-    omnicore-gen explain ownership    # which files it owns, and the two escapes
+    omnicore-gen explain ownership    # which files it owns, the two escapes, and prune
 
 **`explain keys` first**, and read it whole once. It is the whole surface, derived from
 the language definition itself, so it cannot be behind what the loader accepts. It exists
@@ -118,9 +128,30 @@ already exist — and its comments say WHY each choice matters. A spec typed fro
 re-derives all of that from memory, which is where the wrong dialect and the impossible
 read backing come from. FILL the template; do not replace it.
 
+**Everything the template INVENTS is an English placeholder, and none of it is a default
+to keep.** It is written that way on purpose: `init` cannot know what language the project
+speaks, so it says nothing about one rather than stamping a guess into a spec. Three slots
+are yours before anything else, and the template's own comments point at each:
+`language:` (the language of THIS spec's human-facing text — it seeds the matching label
+catalog, so a description in one language under a declaration of another seeds the wrong
+one, silently), the placeholder field/rule/collection names, and the `authz.permissions`
+strings. Fill them from the run's language and the model approved at the gate — and take
+the permission taxonomy from what the PROJECT already grants, since a permission is
+matched exactly against the caller's token and an invented one is a permission nobody
+holds. The identifiers themselves follow the host project's own convention, exactly as
+the calling skill's language rule says.
+
 Fill it from the model the dev approved at scaffold-entity's gate. Do not re-decide the
 model here; if writing the YAML exposes a genuine modelling question, take it back to the
 dev.
+
+**Changing an entity instead: the spec exists — EDIT it, and do not run `init`.** That file
+is the entity's source of truth; `init` refuses to overwrite it without `-force`, and that
+refusal is a feature. Change only what the approved impact map says, `check` after each
+block, and bump `read.view.version` when the projected shape moves — `generate` compares
+this run's shape against the one it last wrote and refuses an unbumped version, naming the
+number. The one thing an edit cannot do is move a table: migrations are hooks (step 5), so
+the ALTER pair is hand-written by the caller.
 
 **Check as you go, not at the end.** Write the storage block and the fields, run `check`,
 read what it says; then the rules, `check` again; then the read side. A 300-line spec
@@ -141,6 +172,15 @@ Three things to get right, because they are the ones that cost a migration later
   out-of-set value to Unknown instead of storing it.
   The reverse holds too: a value with a SHAPE and no fixed set (a document number, a URL,
   a plate) is a `raw` VO, not a regex inline in a rule.
+  **And once a field IS a value object, do NOT also declare `kind: required` on it.** The
+  framework validates every value-object field by reflection on every write — nothing
+  declares it and nothing skips it — and a string-backed raw VO reports an empty value as
+  `RequiredFieldNotification`, exactly the notification the rule would add. The caller then
+  reads "Required field" TWICE for one empty field. An enum is the same story with a
+  different second message: `""` is not a member, so it already answers with the VO's
+  unknown-member notification. `check` warns about both, naming the field. Presence on a
+  VO-backed field is the value object's job; the rule list carries what the VO cannot see —
+  cross-field invariants, ranges over plain numbers, immutability, state transitions.
   Reuse an existing one with `vo: {kind: reuse, ref: <Name>}` — a second copy of a rule is
   a rule that can disagree with itself. Reuse reaches **every** value object the project
   has, including the ones a previous run generated for another entity: two roles over one
@@ -271,6 +311,14 @@ the contract comment, and a stub per item — **write-once, never re-generated, 
 hashed**. The same shape exists for a fact the domain service cannot answer declaratively
 (`service.facts[].kind: manual` → `internal/infra/<entity>_service_manual.go`).
 
+**The hook file arrives with ONE gate per verb holding every rule scoped to it — keep it
+that way when you implement them.** A gate per rule is the shape that grows by accident,
+and it costs twice: the file becomes a wall of near-identical closures a reader has to diff
+to find the rules, and the framework dispatches the same verb check once per block on every
+write. Fill in the TODOs in place; do not wrap each one in its own `r.IfInsert`. A rule
+listed under two gates is still one rule — write it as a method on the receiver and call it
+from both blocks.
+
 The two hook files are NOT equally quiet, and their headers say which is which: an
 unwritten rule leaves an invariant unenforced and the service runs on; an unwritten fact
 panics the moment a rule asks for it. Implement both before you call the entity done.
@@ -292,11 +340,29 @@ things, and the run tells them apart** — read the report rather than the count
 the same posture as the `_manual` rule files, and for a sharper reason. A migration is
 the only output whose effect outlives the file: once it has run anywhere, the framework's
 tracking table records it as applied, so rewriting the file changes what the file CLAIMS
-and not a single table. The generator creates a schema; it does not evolve one. A later
-change is a NEW numbered pair, written by whoever knows where the first one has run. The
+and not a single table. The generator creates a schema; it does not evolve one — **the CODE
+regenerates from an edited spec, the DATABASE never does.** A later change is a NEW numbered
+pair, in every target dialect, written by whoever knows where the first one has run. The
 report prints the shape the regenerated code expects, to compare against — read it as
-confirmation when nothing about the storage moved. There is no flag: the question it
-would answer has one permanent answer.
+confirmation when nothing about the storage moved, and as the specification of the pair you
+owe when it did. There is no flag: the question it would answer has one permanent answer.
+
+**A shrinking spec leaves ORPHANS, and `prune` is what removes them.** Files the previous
+run generated and this one does not are listed in the report under `No longer generated` —
+they are not deleted by a write, they still compile, and they mean nothing. The same
+asymmetry holds inside the shared files: a write inserts and replaces its own entries but
+never deletes, so a labelKey or notification the spec no longer declares stays in the
+notifications file and in all seven catalogs. Both are cleaned by one command:
+
+    omnicore-gen prune -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen prune -spec … -project … -apply
+
+It is DRY by default — read the three lists (remove · forget in the lock · left alone with
+the reason) before `-apply`. It touches only text the lock still recognises as the
+generator's own, byte for byte: a hand-edited file, an adopted one, a declaration another
+entity also claims and every migration are reported and left. Build and run the tests after:
+a notification type removed while the code still references it is a compile error, which is
+the good kind.
 
 ## Step 6 — read the report. It is the handover, not a log
 
@@ -323,7 +389,11 @@ Do not re-read every file. Read against the plan the dev approved and against th
 2. **The rules the report listed as manual** — implement them now, in the hook file, from
    the routed `/docs`. Nothing else in the tree is yours to write.
 3. **The migration** — column types, nullability, uniqueness scope, FK direction. Read
-   the DDL, not the YAML you wrote.
+   the DDL, not the YAML you wrote. **Every `description:` is in there as a real database
+   comment** (postgres/mysql/oracle `COMMENT`, sqlserver `MS_Description`; SQLite is the
+   one engine that has nowhere to store one, so there it stays a `--` line) — which is
+   what makes a vague description expensive: it is what a DBA, a BI tool and the next
+   developer read off the catalogue, not something only this file carries.
 4. **Authz** — the permission per operation, and whether `dataAccess` narrows rows the
    way the domain needs (`owner-only`/`tenant` are a different question from the
    permission).
@@ -395,7 +465,9 @@ exactly why they are the ones worth testing by hand.
 ## Step 9 — hand back
 
 Report to the dev: what was generated, what you implemented by hand and why the DSL could
-not express it, what the report flagged to check, and the result of build/vet/test/boot.
+not express it, what the report flagged to check, and the result of build/vet/test/boot. On
+a CHANGE, add the three things only that path produces: the migration pair you wrote (and in
+which dialects), the orphans you deleted, and any file you adopted or forced.
 If any capability was refused, say which and what the consequence is — never let a
 refusal reach them as silence.
 

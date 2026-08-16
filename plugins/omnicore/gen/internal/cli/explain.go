@@ -88,6 +88,12 @@ a clause the framework dispatches by verb.
 
   required        the field must carry a value. Emptiness is per type:
                   "" for text, the zero instant for a date, 0 for a number.
+                  NOT for a field backed by a value object: those are validated
+                  automatically on every write, and a string-backed raw VO
+                  already answers an empty value with RequiredFieldNotification
+                  while an enum answers it with its unknown-member one. Declared
+                  on top of either, the caller reads the same complaint TWICE for
+                  one empty field, and check warns about it by name.
   immutable       the value cannot change once set. Compares against the
                   pre-write snapshot, so it is never scoped to insert.
   length          min and/or max characters. Text only.
@@ -236,12 +242,24 @@ func explainOwnership() string {
                 re-deriving it from the spec.
 
   registration  wire.go, the notification files, the seven translation catalogs.
-                Inserted into and removed from, never rewritten.
+                Inserted into, and its OWN entries replaced when the spec moves
+                them; never rewritten whole. Those files carry other entities'
+                declarations and hand-written notes, so a WRITE never deletes
+                from them: a labelKey dropped from the spec stays in all seven
+                catalogs. "omnicore-gen prune" is the asked-for act that takes it
+                out — it removes only entries the lock still recognises as this
+                generator's own text, byte for byte, and reports the rest.
 
   everything else is untouched.
 
 Hashes normalise line endings, so a Windows checkout or a format-on-save editor
 does not make the whole tree look hand-written.
+
+A spec that SHRINKS leaves the same kind of residue in owned files: the Go files
+its old shape produced still compile and mean nothing. "omnicore-gen prune" lists
+them (and the lock records for files already deleted by hand, which is why doctor
+keeps reporting "is gone"), and removes them with -apply. A migration is never a
+candidate: its effect outlived the file the moment it ran.
 
 When an owned file has to carry a hand edit — a framework newer than this build,
 or something this generator simply does not cover — run

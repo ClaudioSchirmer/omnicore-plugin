@@ -336,7 +336,23 @@ func ApplyWith(root, entity, specPath, specHash, framework string, ordinals map[
 		entry.Ordinals = ordinals
 	}
 	if registrations != nil {
-		entry.Registrations = registrations
+		// MERGED, never replaced. A key this run no longer writes is still a key
+		// this entity PUT in a shared file, and the record is the only evidence
+		// of that — the text stays on disk either way, so dropping the record
+		// here would lose the one thing that can later prove the leftover is the
+		// generator's own and safe to remove. Prune is what forgets it, at the
+		// same moment it takes the text out.
+		if entry.Registrations == nil {
+			entry.Registrations = map[string]map[string]string{}
+		}
+		for path, decls := range registrations {
+			if entry.Registrations[path] == nil {
+				entry.Registrations[path] = map[string]string{}
+			}
+			for name, hash := range decls {
+				entry.Registrations[path][name] = hash
+			}
+		}
 	}
 
 	for _, d := range decisions {
@@ -483,4 +499,112 @@ func (l *Lock) ViewShapeChangedWithoutBump(entity string, now ViewState) (was in
 		return 0, false
 	}
 	return prev.ViewVersion, true
+}
+
+// ---------------------------------------------------------------- prune
+
+// PruneKind is what pruning decided about one artefact the lock still records.
+type PruneKind string
+
+const (
+	// PruneDelete: it is on disk, unchanged since the generator wrote it, and
+	// this spec no longer produces it. Safe to remove.
+	PruneDelete PruneKind = "delete"
+	// PruneForget: already deleted by hand. Only the lock still remembers it,
+	// which is what makes `doctor` report "is gone" forever.
+	PruneForget PruneKind = "forget"
+	// PruneKeep: it diverged from what the generator wrote, or it carries an
+	// adopted edit. Reported and left alone — the same rule that governs every
+	// other write here.
+	PruneKeep PruneKind = "keep"
+)
+
+// PruneFile is one recorded file and what pruning would do with it.
+type PruneFile struct {
+	Path   string
+	Kind   PruneKind
+	Reason string
+}
+
+// PlanPrune decides what is left over from an EARLIER shape of this spec.
+//
+// It answers a question `generate` deliberately does not: a run that writes
+// files is the wrong moment to delete other ones, so the write path only ever
+// reports orphans. Pruning is the asked-for act, and it obeys the same rule as
+// every write here — anything that no longer matches what the generator itself
+// wrote is reported, never removed.
+//
+// Migrations are never candidates. Their effect outlives the file, so a
+// migration nobody generates anymore is still one that RAN.
+func PlanPrune(root, entity string, current []File, lock *Lock) []PruneFile {
+	prev, ok := lock.Entities[entity]
+	if !ok {
+		return nil
+	}
+	now := map[string]bool{}
+	for _, f := range current {
+		now[f.Path] = true
+	}
+
+	var out []PruneFile
+	for path, rec := range prev.Files {
+		if now[path] || IsMigration(path) {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(root, path))
+		switch {
+		case err != nil:
+			out = append(out, PruneFile{path, PruneForget,
+				"already deleted — only the lock still remembers it"})
+		case rec.AdjustedFor != "":
+			out = append(out, PruneFile{path, PruneKeep,
+				"carries a hand edit adopted at framework " + rec.AdjustedFor})
+		case Hash(content) != rec.Hash:
+			out = append(out, PruneFile{path, PruneKeep,
+				"it was edited by hand since it was generated"})
+		default:
+			out = append(out, PruneFile{path, PruneDelete,
+				"the spec no longer produces it, and it is unchanged since it was written"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// ApplyPrune removes what PlanPrune decided and forgets it in the lock. A
+// PruneKeep is skipped: it is the author's.
+func ApplyPrune(root, entity string, files []PruneFile, lock *Lock) error {
+	entry, ok := lock.Entities[entity]
+	if !ok {
+		return fmt.Errorf("no generated entity named %q is recorded in %s", entity, LockName)
+	}
+	for _, f := range files {
+		switch f.Kind {
+		case PruneDelete:
+			if err := os.Remove(filepath.Join(root, f.Path)); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing %s: %w", f.Path, err)
+			}
+			delete(entry.Files, f.Path)
+		case PruneForget:
+			delete(entry.Files, f.Path)
+		}
+	}
+	lock.Entities[entity] = entry
+	return lock.Save(root)
+}
+
+// ForgetRegistration drops one declaration from what this entity records for a
+// shared file, after the caller has removed the text itself.
+func (l *Lock) ForgetRegistration(entity, path, decl string) {
+	entry, ok := l.Entities[entity]
+	if !ok || entry.Registrations == nil {
+		return
+	}
+	if decls, ok := entry.Registrations[path]; ok {
+		delete(decls, decl)
+		if len(decls) == 0 {
+			delete(entry.Registrations, path)
+		}
+	}
+	l.Entities[entity] = entry
 }

@@ -504,6 +504,73 @@ func number(v float64, specType string) string {
 	}
 }
 
+// writeManualRuleGates emits the residual rules GROUPED BY VERB: one
+// r.IfInsert / r.IfInsertOrUpdate / … block holding every rule scoped to it,
+// each with the description the spec wrote for it.
+//
+// The grouping is the whole point. Emitting a gate per rule produced a file of
+// near-identical two-line closures where the reader had to diff the wrappers to
+// find the rules, and made the framework run the same verb check once per rule
+// on every write. Rules that fire on the same verb read as one block, which is
+// also the shape the generated BuildRules above it already has.
+//
+// A rule scoped to several verbs appears under each of them: it genuinely runs
+// on each, and the doc comment tells the author to implement it once as a method
+// and call it from both blocks.
+func writeManualRuleGates(s *src, rules []ir.ManualRule) {
+	byGate := map[string][]ir.ManualRule{}
+	var order []string
+	for _, mr := range rules {
+		gates := mr.Gates
+		if len(gates) == 0 {
+			gates = []string{"IfInsertOrUpdate"}
+		}
+		for _, g := range gates {
+			if _, seen := byGate[g]; !seen {
+				order = append(order, g)
+			}
+			byGate[g] = append(byGate[g], mr)
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return ir.GateRank(order[i]) < ir.GateRank(order[j])
+	})
+
+	for _, gate := range order {
+		s.Blank()
+		s.L("\tr.%s(func() {", gate)
+		for i, mr := range byGate[gate] {
+			if i > 0 {
+				s.Blank()
+			}
+			s.L("\t\t// ── %s ──", mr.ID)
+			for _, line := range wrap(mr.Description, 66) {
+				s.L("\t\t// %s", line)
+			}
+			if mr.Notification != "" {
+				s.L("\t\t// Notification to raise: %s{}", mr.Notification)
+			}
+			if mr.AttachTo != "" {
+				s.L("\t\t// Attach it to the field: %s", quote(mr.AttachTo))
+			}
+			s.L("\t\t// TODO(%s): implement the rule described above.", mr.ID)
+		}
+		s.L("\t})")
+	}
+}
+
+// manualGateDoc is the shape instruction both hook files open with.
+//
+// It exists because the natural way to write these — one gate per rule — is
+// also the wrong one, and a hook file that shows the wrong shape teaches it:
+// the next rule is added the way the ones above it look.
+const manualGateDoc = "ONE gate per verb, holding every rule that runs on that verb — the " +
+	"shape the generated BuildRules already has. A gate per rule reads as a wall of " +
+	"near-identical closures and makes the framework dispatch the same verb once per rule " +
+	"on every write; rules that share a verb belong in the same block. A rule that appears " +
+	"under two gates is still ONE rule: write it as a method and call it from both, rather " +
+	"than as two copies that can drift apart."
+
 // emitRulesHook writes the escape hatch: created once, then the author's.
 //
 // It is generated WITH the spec's own description of each residual rule, so the
@@ -518,35 +585,14 @@ func emitRulesHook(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 
 	s.Doc(
-		"customRules is called at the end of the generated BuildRules, with the same " +
-			"arguments. Add each rule inside the verb gate it belongs to — r.IfInsert, " +
-			"r.IfUpdate, r.IfArchive and so on — and report a violation with " +
-			"r.AddNotification.",
+		"customRules is called at the end of the generated BuildRules, with the same "+
+			"arguments, and reports a violation the same way: r.AddNotification.",
+		"",
+		manualGateDoc,
 	)
 	s.L("func (e *%s) customRules(actionName string, service domain.Service, r *domain.Rules) {",
 		m.Entity.Pascal)
-	for _, mr := range m.ManualRules {
-		s.Blank()
-		s.L("\t// ── %s ──", mr.ID)
-		for _, line := range wrap(mr.Description, 68) {
-			s.L("\t// %s", line)
-		}
-		if mr.Notification != "" {
-			s.L("\t// Notification to raise: %s{}", mr.Notification)
-		}
-		if mr.AttachTo != "" {
-			s.L("\t// Attach it to the field: %s", quote(mr.AttachTo))
-		}
-		gates := mr.Gates
-		if len(gates) == 0 {
-			gates = []string{"IfInsertOrUpdate"}
-		}
-		for _, gate := range gates {
-			s.L("\tr.%s(func() {", gate)
-			s.L("\t\t// TODO(%s): implement the rule described above.", mr.ID)
-			s.L("\t})")
-		}
-	}
+	writeManualRuleGates(s, m.ManualRules)
 	s.Blank()
 	s.L("\t_ = actionName")
 	s.L("\t_ = service")

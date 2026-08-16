@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,8 +15,12 @@ import (
 
 // Registration files are shared by every entity: the notification declarations
 // and the seven translation catalogs. The generator INSERTS into them and
-// removes from them; it never rewrites one WHOLE, because it carries other
-// entities' content and, often, hand-written notes.
+// REPLACES its own entries when the spec moves them; it never rewrites one
+// WHOLE. A WRITE never prunes, because the file carries other entities' content
+// and, often, hand-written notes, and deciding on their behalf what is dead is
+// not a thing a write should do in passing. A key this spec no longer declares
+// therefore stays where it is until `prune` is asked for — see RemoveTypeDecl
+// and RemoveMapEntry, which are that path.
 //
 // Every merge here is idempotent by construction — it checks for what it is
 // about to add. A merge that appended blindly would duplicate declarations on
@@ -468,4 +473,82 @@ var catalogs = []struct {
 	{"deu", "deu", "DEU", "LangDE"},
 	{"ita", "ita", "ITA", "LangIT"},
 	{"nld", "nld", "NLD", "LangNL"},
+}
+
+// RemoveTypeDecl deletes one declaration — the type and the methods emitted
+// with it — together with the doc comment above it, and reports whether it was
+// there.
+//
+// Removal is the half the merge deliberately never had: `generate` inserts and
+// replaces, because a shared file carries other entities' content and deciding
+// on its behalf what is dead is not a thing a WRITE should do silently. Pruning
+// is a separate, asked-for act, so this is where the deletion lives — and the
+// caller is expected to have checked the recorded hash first: only text the
+// generator itself wrote is ever removed.
+func RemoveTypeDecl(existing, name string) (string, bool) {
+	start, end, ok := declRange(existing, name)
+	if !ok {
+		return existing, false
+	}
+	start = docCommentStart(existing, start)
+	// Take the newline that follows, so a removal does not leave a blank gap
+	// where the declaration used to be.
+	for end < len(existing) && existing[end] == '\n' {
+		end++
+	}
+	out := existing[:start] + existing[end:]
+	return strings.TrimRight(out, "\n") + "\n", true
+}
+
+// docCommentStart walks back over the `//` block immediately above a
+// declaration. The comment is regenerated prose that describes the thing being
+// removed, so leaving it behind would strand a paragraph about a type that is
+// no longer there.
+func docCommentStart(src string, start int) int {
+	for start > 0 {
+		lineEnd := strings.LastIndexByte(src[:start-1], '\n') + 1
+		line := strings.TrimSpace(src[lineEnd : start-1])
+		if !strings.HasPrefix(line, "//") {
+			return start
+		}
+		start = lineEnd
+	}
+	return start
+}
+
+// RemoveMapEntry deletes one catalog key, and reports whether it was there.
+func RemoveMapEntry(existing, key string) (string, bool) {
+	loc := mapEntryRe(key).FindStringIndex(existing)
+	if loc == nil {
+		return existing, false
+	}
+	start, end := loc[0], loc[1]
+	// The regexp starts at the line's leading whitespace and ends at the comma;
+	// swallow the newline so no empty line is left inside the literal.
+	for end < len(existing) && (existing[end] == '\n' || existing[end] == '\r') {
+		end++
+	}
+	if start > 0 && existing[start-1] == '\n' {
+		// keep the preceding newline: start already sits at the line's first byte
+		_ = start
+	}
+	return existing[:start] + existing[end:], true
+}
+
+// IsCatalogPath reports whether a registration file holds translation ENTRIES
+// (a map of key → text) rather than Go declarations. The two are read and
+// removed by different means, and the caller cannot tell them apart from the
+// lock alone — it records both as "a name in a shared file".
+func IsCatalogPath(path string) bool {
+	return strings.Contains(filepath.ToSlash(path), "/application/translations/")
+}
+
+// RegisteredText reads back what a shared file currently holds for one recorded
+// name, so a caller can compare it against the hash the lock kept. The bool is
+// false when the name is no longer in the file at all.
+func RegisteredText(src, name string, catalog bool) (string, bool) {
+	if catalog {
+		return mapValue(src, name)
+	}
+	return declText(src, name)
 }

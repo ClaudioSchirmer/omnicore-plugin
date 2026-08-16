@@ -18,38 +18,42 @@
 #   read.indexes · search · ttlSeconds · fieldRestrict
 #
 # It also shows something you do NOT declare: because it has a facet AND GraphQL,
-# the generator adds a `clearTitulacaoOfProfessor` mutation. On GraphQL an
+# the generator adds a `clearQualificationOfTeacher` mutation. On GraphQL an
 # omitted field and an explicit null reach the code identically, so "clear this"
 # cannot be told from "leave this alone" — the intent needs its own verb, and the
 # REST equivalent stays the root's PUT with the facet's fields null.
 #
+# The human-facing text here is English because `language:` says so, and the two
+# have to agree: descriptions written in the declared language seed the matching
+# label catalog. Write yours in whatever your project speaks, and declare it.
+#
 # Copy the STRUCTURE, never the domain.
 specVersion: 1
-entity: Professor
-plural: Professores
-language: pt-BR
+entity: Teacher
+plural: Teachers
+language: en-US
 
 storage:
   # A ROLE over an identity other roles may share: the same person can be a
   # teacher today and a supplier later, without duplicating the person.
   kind: sharedbase-role
-  table: professores
-  description: Professores — o papel docente sobre a identidade de pessoa.
+  table: teachers
+  description: Teachers — the teaching role over the person identity.
   base:
-    table: pessoas
+    table: persons
     # REQUIRED: the exported Go function that returns the identity's schema.
-    schemaFunc: PessoaBase
+    schemaFunc: PersonBase
     # REQUIRED for separate-fk, REFUSED for shared-pk (there the role's own
     # primary key IS the identity's, so there is no second column to name).
-    linkColumn: pessoa_id
-    description: Identidade de pessoa, compartilhada entre papéis.
+    linkColumn: person_id
+    description: The person identity, shared across roles.
     # false = this spec writes the base. true = another role already declares it,
     # and this one only points at it.
     reuse: false
     # The value the identity is deduplicated by; the framework derives the
     # identity's key from it, so two roles created with the same one resolve to
     # ONE person rather than to two.
-    naturalKey: Documento
+    naturalKey: Document
     link: separate-fk
     # active-only: an archived role frees the slot, so the person can hold the
     # role again later while the old rows stay as history.
@@ -64,161 +68,161 @@ storage:
 fields:
   # livesOn decides the TABLE: base fields are shared by every role over the
   # identity; role fields are private to this one.
-  - name: Documento
+  - name: Document
     type: string
-    column: documento
+    column: document
     length: 20
     livesOn: base
-    example: "123.456.789-00"
-    description: Documento da pessoa — chave natural da identidade.
-  - name: Nome
+    example: "PA-4471902"
+    description: The person's identification document — the identity's natural key.
+  - name: Name
     type: string
-    column: nome
+    column: name
     length: 160
     livesOn: base
-    example: Helena Duarte
-    description: Nome da pessoa.
+    example: Helen Duarte
+    description: The person's full name.
   - name: Email
     type: string
     column: email
     length: 160
     livesOn: base
-    vo: {kind: raw, ref: EmailPessoa}
-    example: helena@escola.br
-    description: E-mail da pessoa.
-  - name: Matricula
+    vo: {kind: raw, ref: PersonEmail}
+    example: helen@school.edu
+    description: The person's e-mail address.
+  - name: RegistrationNumber
     type: string
-    column: matricula
+    column: registration_number
     length: 20
     livesOn: role
     unique:
       enforce: service-precheck+constraint
-      notification: MatriculaJaExisteNotification
+      notification: RegistrationNumberAlreadyExistsNotification
       # active-only: an archived teacher frees the number for reuse.
       scope: active-only
     example: DOC-2026-001
-    description: Matrícula funcional do professor.
-  - name: Situacao
+    description: The teacher's staff registration number.
+  - name: Status
     type: string
-    column: situacao
+    column: status
     length: 20
     livesOn: role
-    vo: {kind: enum, ref: SituacaoProfessor}
-    example: ativo
-    description: Situação do vínculo.
-  - name: CargaHoraria
+    vo: {kind: enum, ref: TeacherStatus}
+    example: active
+    description: The status of the teaching contract.
+  - name: WeeklyHours
     type: int
-    column: carga_horaria
+    column: weekly_hours
     livesOn: role
     example: "40"
-    description: Carga horária semanal.
-  - name: AdmitidoEm
+    description: Contracted hours per week.
+  - name: HiredAt
     type: time
-    column: admitido_em
+    column: hired_at
     livesOn: role
     example: "2026-02-01T09:00:00Z"
-    description: Data de admissão.
-  - name: DesligadoEm
+    description: The hiring date.
+  - name: TerminatedAt
     type: time
-    column: desligado_em
+    column: terminated_at
     nullable: true
     livesOn: role
     example: "2026-12-20T18:00:00Z"
-    description: Data de desligamento, quando houver.
+    description: The termination date, when there is one.
   # Runtime-only: read from a token claim, never persisted. `bool` is read from a
   # boolean claim or from the string "true".
-  - name: SolicitanteEmail
+  - name: RequesterEmail
     type: string
     runtime: true
     claim: email
     livesOn: root
-    example: helena@escola.br
-    description: E-mail de quem chamou.
-  - name: SolicitanteAdmin
+    example: helen@school.edu
+    description: The e-mail of whoever made the call.
+  - name: RequesterIsAdmin
     type: bool
     runtime: true
     claim: is_admin
     livesOn: root
     example: "false"
-    description: Se quem chamou é administrador.
+    description: Whether the caller is an administrator.
 
 valueObjects:
-  - name: EmailPessoa
+  - name: PersonEmail
     kind: raw
     backing: string
-    description: E-mail válido.
+    description: A valid e-mail address.
     regex: '^[^@\s]+@[^@\s]+\.[a-z]{2,}$'
     minLength: 6
     maxLength: 160
-    notification: EmailPessoaInvalidoNotification
-  - name: SituacaoProfessor
+    notification: InvalidPersonEmailNotification
+  - name: TeacherStatus
     kind: enum
     backing: string
-    description: Situação do vínculo docente.
-    unknownNotification: SituacaoProfessorInvalidaNotification
+    description: The status of a teaching contract.
+    unknownNotification: UnknownTeacherStatusNotification
     members:
-      - {name: Ativo, value: ativo}
-      - {name: Afastado, value: afastado}
-      - {name: Desligado, value: desligado}
+      - {name: Active, value: active}
+      - {name: Suspended, value: suspended}
+      - {name: Terminated, value: terminated}
 
 children:
   # ownedBy: base — the collection belongs to the IDENTITY. It survives this role
   # being archived and every other role over the same person reads the same rows.
-  - name: Endereco
-    plural: Enderecos
-    table: pessoa_enderecos
-    parentColumn: pessoa_id
-    description: Endereços da pessoa, compartilhados entre papéis.
+  - name: Address
+    plural: Addresses
+    table: person_addresses
+    parentColumn: person_id
+    description: The person's addresses, shared across roles.
     ownedBy: base
     editStrategy: atomic-replace
-    businessIdentity: [Cep, Numero]
+    businessIdentity: [ZipCode, Number]
     fields:
-      - {name: Logradouro, type: string, column: logradouro, length: 160, example: Rua das Acácias, description: Logradouro.}
-      - {name: Numero, type: string, column: numero, length: 10, example: "128", description: Número.}
-      - {name: Cep, type: string, column: cep, length: 9, example: 90000-000, description: CEP.}
+      - {name: Street, type: string, column: street, length: 160, example: Maple Avenue, description: The street.}
+      - {name: Number, type: string, column: street_number, length: 10, example: "128", description: The street number.}
+      - {name: ZipCode, type: string, column: zip_code, length: 9, example: 90000-000, description: The postal code.}
 
-  # editStrategy: per-child — POST/PUT on /:id/turmas[/:turmaId], a duplicate
+  # editStrategy: per-child — POST/PUT on /:id/classes[/:classId], a duplicate
   # answer on add, and a 404 for an entry that is not there. softRemove makes the
   # removal reversible, so it is mounted as PATCH .../archive rather than DELETE.
-  - name: Turma
-    plural: Turmas
-    table: professor_turmas
-    parentColumn: professor_id
-    description: Turmas que o professor conduz.
+  - name: Class
+    plural: Classes
+    table: teacher_classes
+    parentColumn: teacher_id
+    description: The classes the teacher runs.
     ownedBy: role
     editStrategy: per-child
-    duplicateNotification: TurmaJaAtribuidaNotification
-    businessIdentity: [Codigo]
+    duplicateNotification: ClassAlreadyAssignedNotification
+    businessIdentity: [Code]
     softRemove: true
     archivedAt: deleted_at
     fields:
-      - {name: Codigo, type: string, column: codigo, length: 20, example: 3B-2026, description: Código da turma.}
-      - {name: Disciplina, type: string, column: disciplina, length: 80, example: Matemática, description: Disciplina.}
-      - {name: Periodo, type: string, column: periodo, length: 10, example: manha, description: Período.}
+      - {name: Code, type: string, column: code, length: 20, example: 3B-2026, description: The class code.}
+      - {name: Subject, type: string, column: subject, length: 80, example: Mathematics, description: The subject taught.}
+      - {name: Period, type: string, column: period, length: 10, example: morning, description: The period of day.}
     rules:
       list:
-        - {id: codigo-turma-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+        - {id: class-code-required, kind: required, scope: [insertOrUpdate], fields: [Code], notification: RequiredFieldNotification}
         # A notification raised by a CHILD's rule is declared in aggregatevos:
         # domain imports aggregatevos, so holding it in domain is an import
         # cycle. The generator places it there and the report says so.
-        - id: disciplina-tem-tamanho
+        - id: subject-has-length
           kind: length
           scope: [insertOrUpdate]
-          fields: [Disciplina]
+          fields: [Subject]
           min: 3
-          notification: DisciplinaInvalidaNotification
+          notification: InvalidSubjectNotification
 
 siblings:
   # attachTo: role — a 1:1 facet of the ROLE (a shared base cannot have one: it
   # has many roles, so the 1:1 does not hold). Its fields are fields of the same
   # Go type, split into another table so they can be null in bulk.
-  - name: Titulacao
-    table: professor_titulacoes
-    description: Titulação acadêmica, quando informada.
+  - name: Qualification
+    table: teacher_qualifications
+    description: Academic qualification, when it is on record.
     attachTo: role
     fields:
-      - {name: TituloMaximo, type: string, column: titulo_maximo, length: 40, nullable: true, example: Doutorado, description: Maior titulação.}
-      - {name: InstituicaoTitulo, type: string, column: instituicao_titulo, length: 160, nullable: true, example: UFRGS, description: Instituição.}
+      - {name: HighestDegree, type: string, column: highest_degree, length: 40, nullable: true, example: Doctorate, description: The highest degree held.}
+      - {name: DegreeInstitution, type: string, column: degree_institution, length: 160, nullable: true, example: Riverside University, description: The awarding institution.}
 
 modes: [display, insert, update, archive, unarchive]
 
@@ -226,172 +230,172 @@ update:
   shape: both
   # A field a partial update may NOT touch — a natural key, or anything whose
   # change has to go through a deliberate operation instead.
-  patchExcludes: [Documento]
+  patchExcludes: [Document]
 
 delete:
   root: soft
 
 rules:
   list:
-    - {id: nome-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Nome], notification: RequiredFieldNotification}
+    - {id: name-required, kind: required, scope: [insertOrUpdate], fields: [Name], notification: RequiredFieldNotification}
     # immutable reads the pre-write snapshot, so it only applies on update.
-    - id: documento-imutavel
+    - id: document-immutable
       kind: immutable
       scope: [update]
-      fields: [Documento]
-      notification: DocumentoImutavelNotification
-    - id: carga-valida
+      fields: [Document]
+      notification: DocumentCannotChangeNotification
+    - id: weekly-hours-valid
       kind: range
       scope: [insertOrUpdate]
-      fields: [CargaHoraria]
+      fields: [WeeklyHours]
       min: 1
       max: 44
-      notification: CargaHorariaInvalidaNotification
+      notification: WeeklyHoursOutOfRangeNotification
       echoValue: true
     # comparison relates two fields; skipWhen stands down when the subject is
     # absent — "valid IF given" rather than "required".
-    - id: desligamento-depois-da-admissao
+    - id: termination-after-hiring
       kind: comparison
       scope: [insertOrUpdate]
-      fields: [DesligadoEm]
-      other: AdmitidoEm
+      fields: [TerminatedAt]
+      other: HiredAt
       operator: gte
       skipWhen: "null"
-      notification: DesligamentoAntesDaAdmissaoNotification
+      notification: TerminationBeforeHiringNotification
     # requiredIf: this field becomes required when THAT one carries a value.
-    - id: desligado-exige-situacao
+    - id: terminated-requires-status
       kind: requiredIf
       scope: [insertOrUpdate]
-      fields: [Situacao]
-      other: DesligadoEm
+      fields: [Status]
+      other: TerminatedAt
       notification: RequiredFieldNotification
     # transition: the state machine. Update only — an insert has nothing to move
     # from — and a value that did not change is always allowed.
-    - id: transicao-de-situacao
+    - id: status-transition
       kind: transition
       scope: [update]
-      fields: [Situacao]
+      fields: [Status]
       transitions:
-        ativo: [afastado, desligado]
-        afastado: [ativo, desligado]
-      notification: TransicaoInvalidaNotification
+        active: [suspended, terminated]
+        suspended: [active, terminated]
+      notification: InvalidStatusTransitionNotification
     # childDuplicate and groupCap read the whole COLLECTION, so they name it
     # instead of naming fields.
-    - id: sem-turma-repetida
+    - id: no-repeated-class
       kind: childDuplicate
       scope: [insertOrUpdate]
-      fields: [Turma]
-      notification: TurmaJaAtribuidaNotification
-    - id: no-maximo-duas-por-periodo
+      fields: [Class]
+      notification: ClassAlreadyAssignedNotification
+    - id: at-most-two-per-period
       kind: groupCap
       scope: [insertOrUpdate]
-      fields: [Turma]
-      groupBy: [Periodo]
+      fields: [Class]
+      groupBy: [Period]
       cap: 2
-      notification: DemasiadasTurmasNotification
-    # `only` conta SÓ as entradas que casam. Sem ele o teto vale para todo valor
-    # do campo agrupado igualmente — "no máximo 3 em análise" viraria também "no
-    # máximo 3 recusadas", uma regra que ninguém declarou. Com `only` e sem
-    # `groupBy`, o teto é sobre a coleção inteira restrita ao valor.
-    - id: no-maximo-uma-turma-da-manha
+      notification: TooManyClassesNotification
+    # `only` counts ONLY the entries that match. Without it the cap lands on
+    # every value of the grouped field equally — "at most 3 under review" would
+    # also become "at most 3 rejected", a rule nobody declared. With `only` and
+    # no `groupBy`, the cap is over the whole collection restricted to the value.
+    - id: at-most-one-morning-class
       kind: groupCap
       scope: [insertOrUpdate]
-      fields: [Turma]
+      fields: [Class]
       cap: 1
-      only: {field: Periodo, equals: manha}
-      notification: DemasiadasTurmasNotification
+      only: {field: Period, equals: morning}
+      notification: TooManyClassesNotification
     # ownerCheck is Layer 2: the permission says who may attempt the verb at all,
     # this says who may attempt it on a row that is not theirs. adminField is the
     # bypass, and it is a separate question from the permission.
-    - id: so-o-dono-arquiva
+    - id: only-the-owner-archives
       kind: ownerCheck
       scope: [archive]
       fields: [Email]
-      ownerField: SolicitanteEmail
-      adminField: SolicitanteAdmin
+      ownerField: RequesterEmail
+      adminField: RequesterIsAdmin
       notification: ArchiveNotAllowedNotification
   # Anything the DSL cannot express goes here as a NAMED item: it becomes a line
   # in the report and a stub in a file regeneration never touches.
   manual:
-    - id: carga-somada-das-turmas
+    - id: summed-hours-of-classes
       description: >-
-        A soma da carga horária das turmas ativas do professor não pode exceder
-        a carga horária contratada.
+        The hours of the teacher's active classes, summed, may not exceed the
+        contracted weekly hours.
       scope: [insertOrUpdate]
-      notification: CargaHorariaInvalidaNotification
+      notification: WeeklyHoursOutOfRangeNotification
 
 notifications:
-  - name: MatriculaJaExisteNotification
+  - name: RegistrationNumberAlreadyExistsNotification
     semantic: conflict
-    description: Matrícula já usada por outro professor ativo.
+    description: The registration number is already held by another active teacher.
     text: {ptbr: "Já existe um professor com essa matrícula.", eng: "A teacher with this registration number already exists.", esp: "Ya existe un profesor con esa matrícula.", fra: "Un enseignant avec ce matricule existe déjà.", deu: "Es gibt bereits eine Lehrkraft mit dieser Nummer.", ita: "Esiste già un docente con questa matricola.", nld: "Er bestaat al een docent met dit nummer."}
-  - name: DocumentoImutavelNotification
+  - name: DocumentCannotChangeNotification
     semantic: validation
-    description: Tentativa de trocar a chave natural da identidade.
+    description: An attempt to change the identity's natural key.
     text: {ptbr: "O documento não pode ser alterado.", eng: "The document cannot be changed.", esp: "El documento no puede cambiarse.", fra: "Le document ne peut pas être modifié.", deu: "Das Dokument kann nicht geändert werden.", ita: "Il documento non può essere modificato.", nld: "Het document kan niet worden gewijzigd."}
-  - name: CargaHorariaInvalidaNotification
+  - name: WeeklyHoursOutOfRangeNotification
     semantic: validation
-    description: Carga horária fora do intervalo contratual.
+    description: Weekly hours outside the contractual range.
     tvars: [min, max]
     text: {ptbr: "A carga horária deve estar entre {min} e {max}.", eng: "The workload must be between {min} and {max}.", esp: "La carga debe estar entre {min} y {max}.", fra: "La charge doit être entre {min} et {max}.", deu: "Die Stundenzahl muss zwischen {min} und {max} liegen.", ita: "Il carico deve essere tra {min} e {max}.", nld: "De belasting moet tussen {min} en {max} liggen."}
-  - name: DesligamentoAntesDaAdmissaoNotification
+  - name: TerminationBeforeHiringNotification
     semantic: validation
-    description: Desligamento anterior à admissão.
+    description: A termination dated before the hiring.
     text: {ptbr: "O desligamento não pode ser anterior à admissão.", eng: "The termination cannot precede the admission.", esp: "La baja no puede ser anterior al alta.", fra: "Le départ ne peut pas précéder l'arrivée.", deu: "Der Austritt kann nicht vor dem Eintritt liegen.", ita: "La cessazione non può precedere l'assunzione.", nld: "Het vertrek kan niet vóór de indiensttreding liggen."}
-  - name: TransicaoInvalidaNotification
+  - name: InvalidStatusTransitionNotification
     semantic: state-conflict
-    description: Mudança de situação não permitida.
+    description: A status change that is not allowed.
     text: {ptbr: "O professor não pode ir para essa situação.", eng: "The teacher cannot move to that state.", esp: "El profesor no puede pasar a ese estado.", fra: "L'enseignant ne peut pas passer à cet état.", deu: "Die Lehrkraft kann nicht in diesen Zustand wechseln.", ita: "Il docente non può passare a questo stato.", nld: "De docent kan niet naar die staat."}
-  - name: TurmaJaAtribuidaNotification
+  - name: ClassAlreadyAssignedNotification
     semantic: conflict
-    description: Turma já atribuída a este professor.
+    description: The class is already assigned to this teacher.
     text: {ptbr: "Essa turma já está atribuída ao professor.", eng: "That class is already assigned to the teacher.", esp: "Esa clase ya está asignada.", fra: "Cette classe est déjà attribuée.", deu: "Diese Klasse ist bereits zugewiesen.", ita: "Quella classe è già assegnata.", nld: "Die klas is al toegewezen."}
-  - name: DemasiadasTurmasNotification
+  - name: TooManyClassesNotification
     semantic: validation
-    description: Excesso de turmas no mesmo período.
+    description: Too many classes in the same period.
     text: {ptbr: "Há turmas demais no mesmo período.", eng: "Too many classes in the same period.", esp: "Demasiadas clases en el mismo periodo.", fra: "Trop de classes sur la même période.", deu: "Zu viele Klassen im selben Zeitraum.", ita: "Troppe classi nello stesso periodo.", nld: "Te veel klassen in dezelfde periode."}
   # package: aggregatevos — raised by a child's rule, so the type must live
   # beside the child. Declaring it in domain would be an import cycle.
-  - name: DisciplinaInvalidaNotification
+  - name: InvalidSubjectNotification
     package: aggregatevos
     semantic: validation
-    description: Nome de disciplina curto demais.
+    description: A subject name that is too short.
     text: {ptbr: "O nome da disciplina é curto demais.", eng: "The subject name is too short.", esp: "El nombre de la asignatura es demasiado corto.", fra: "Le nom de la matière est trop court.", deu: "Der Fachname ist zu kurz.", ita: "Il nome della materia è troppo corto.", nld: "De vaknaam is te kort."}
   # package: vos — raised by a value object.
-  - name: EmailPessoaInvalidoNotification
+  - name: InvalidPersonEmailNotification
     package: vos
     semantic: validation
-    description: E-mail fora do formato.
+    description: An e-mail outside the accepted format.
     text: {ptbr: "O e-mail informado não é válido.", eng: "The e-mail is not valid.", esp: "El correo no es válido.", fra: "L'e-mail n'est pas valide.", deu: "Die E-Mail ist ungültig.", ita: "L'e-mail non è valida.", nld: "Het e-mailadres is ongeldig."}
-  - name: SituacaoProfessorInvalidaNotification
+  - name: UnknownTeacherStatusNotification
     package: vos
     semantic: validation
-    description: Situação fora do conjunto.
+    description: A status outside the closed set.
     text: {ptbr: "Situação inválida.", eng: "Invalid state.", esp: "Estado inválido.", fra: "État invalide.", deu: "Ungültiger Zustand.", ita: "Stato non valido.", nld: "Ongeldige staat."}
 
 service:
   required: true
   facts:
-    # The precheck half of Matricula's unique (service-precheck+constraint,
-    # above) asks THIS fact: an exists filtered by the unique field, with
-    # excludeSelf so an update does not collide with itself. Declaring the
-    # enforcement without a fact like this one is refused — the precheck
-    # would otherwise silently not be generated.
-    - name: MatriculaJaExiste
+    # The precheck half of RegistrationNumber's unique
+    # (service-precheck+constraint, above) asks THIS fact: an exists filtered by
+    # the unique field, with excludeSelf so an update does not collide with
+    # itself. Declaring the enforcement without a fact like this one is refused —
+    # the precheck would otherwise silently not be generated.
+    - name: RegistrationNumberTaken
       kind: exists
-      description: Já existe um professor ativo com esta matrícula.
-      field: Matricula
-      filters: [Matricula]
+      description: Whether an active teacher already holds this registration number.
+      field: RegistrationNumber
+      filters: [RegistrationNumber]
       excludeSelf: true
       activeOnly: true
-    - name: TurmasAtivasDaMatricula
+    - name: ActiveClassesOfRegistration
       kind: count
-      description: Quantas turmas ativas a matrícula já tem.
+      description: How many active classes this registration already has.
       # The fact narrows by a field, may exclude the record being written
       # (so an update does not collide with itself) and may count only the
       # rows that are not archived.
-      field: Matricula
-      filters: [Situacao]
+      field: RegistrationNumber
+      filters: [Status]
       excludeSelf: true
       activeOnly: true
     # The aggregating kinds — sum, avg, min, max — compute in the DATABASE over
@@ -409,15 +413,15 @@ service:
     #     rule that consults the fact is made to decide what "there was nothing
     #     to average" means. sum and count return the value alone: there, zero
     #     IS the answer.
-    - name: CargaHorariaMedia
+    - name: AverageWeeklyHours
       kind: avg
-      description: Carga horária média dos professores ativos.
-      field: CargaHoraria
+      description: The average weekly hours across active teachers.
+      field: WeeklyHours
       activeOnly: true
-    - name: MaiorCargaHoraria
+    - name: HighestWeeklyHours
       kind: max
-      description: A maior carga horária em vigor.
-      field: CargaHoraria
+      description: The highest weekly hours in force.
+      field: WeeklyHours
       activeOnly: true
     # `groupBy` makes the same aggregate PER GROUP — one SELECT with GROUP BY,
     # answered as one entry per distinct key, and the generated port returns a
@@ -430,16 +434,16 @@ service:
     # not style. A fact counts rows that are IN THE TABLE. A groupCap counts the
     # entries THIS WRITE carries, which no query can see yet. Ask which set the
     # invariant is about and the choice makes itself.
-    - name: ProfessoresPorSituacao
+    - name: TeachersByStatus
       kind: count
-      groupBy: [Situacao]
-      description: Quantos professores em cada situação de vínculo.
+      groupBy: [Status]
+      description: How many teachers sit in each contract status.
       activeOnly: true
 
 read:
   backing: mongo
   view:
-    name: professores
+    name: teachers
     version: 1
     maxLimit: 100
     # A projection rebuilt from scratch drops archived documents when this is on.
@@ -447,40 +451,40 @@ read:
     # A time-to-live on the projected document, in SECONDS.
     ttlSeconds: 0
   indexes:
-    - {fields: [Matricula], unique: true}
-    - {fields: [Nome], text: true}
+    - {fields: [RegistrationNumber], unique: true}
+    - {fields: [Name], text: true}
     # sparse indexes only the documents that HAVE the field.
-    - {fields: [Situacao, AdmitidoEm], order: desc, sparse: true}
+    - {fields: [Status, HiredAt], order: desc, sparse: true}
   # A field a caller without the permission does not receive — and naming it
   # explicitly is a 403 rather than a silent omission.
   fieldRestrict:
-    - {field: Email, permission: "professor:ver-contato"}
+    - {field: Email, permission: "teacher:read-contact"}
   byId: true
   byParams:
     filters:
-      - {field: Nome, ops: [eq, contains, icontains]}
-      - {field: Matricula, ops: [eq]}
-      - {field: Situacao, ops: [eq, in]}
+      - {field: Name, ops: [eq, contains, icontains]}
+      - {field: RegistrationNumber, ops: [eq]}
+      - {field: Status, ops: [eq, in]}
     controls:
       pagination: true
       orderBy: true
       fields: true
       includeArchived: true
       onlyTotal: true
-      search: [Nome]
+      search: [Name]
 
 surfaces:
   rest: true
   graphql: {enabled: true, connection: true, mutations: [insert, update, archive, unarchive]}
-  exports: {csv: {delimiter: ";"}, xlsx: {sheet: Professores}}
+  exports: {csv: {delimiter: ";"}, xlsx: {sheet: Teachers}}
 
 authz:
-  resource: professor
+  resource: teacher
   dataAccess: anyone-with-permission
   permissions:
-    insert: "professor:escrever"
-    update: "professor:escrever"
-    patch: "professor:escrever"
-    archive: "professor:arquivar"
-    unarchive: "professor:arquivar"
-    read: "professor:ler"
+    insert: "teacher:insert"
+    update: "teacher:update"
+    patch: "teacher:update"
+    archive: "teacher:archive"
+    unarchive: "teacher:archive"
+    read: "teacher:read"

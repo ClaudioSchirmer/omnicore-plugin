@@ -386,6 +386,90 @@ else
   skipf "sqlite DDL" "sqlite3 not installed"
 fi
 
+# ── prune: the only command that DELETES ─────────────────────────────────────
+#
+# Two entities, one shared value object, then the declaring spec drops it. Every
+# measure the generator has — its own file set, its own lock — calls that file an
+# orphan, while the OTHER entity still has it as a field type. This lane exists
+# because the answer was wrong until it was tested: prune offered the file, and
+# applying it left a project that did not compile.
+#
+# It also covers the ordinary half in the same run: an orphaned collection's
+# files and its labelKeys in all seven catalogs go, the tree still builds, and a
+# second prune finds nothing.
+echo "── prune"
+PRUNE_WORK="/tmp/omnicore-gen-prune"
+rm -rf "$PRUNE_WORK"; mkdir -p "$PRUNE_WORK"; cp -R "$HOST/." "$PRUNE_WORK/"
+mkdir -p "$PRUNE_WORK/omnicore-gen"
+cp "$GEN_DIR/internal/cli/example.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml"
+cp "$GEN_DIR/testdata/specs/prune-neighbour.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/"
+prune_ok=1
+# ORDER MATTERS: the neighbour REUSES a value object the first spec declares, so
+# generating it first is refused — the type is not in the project yet.
+for f in student.omnicore.yaml prune-neighbour.omnicore.yaml; do
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
+     -spec "$PRUNE_WORK/omnicore-gen/$f" -project "$PRUNE_WORK" \
+     >>"$PRUNE_WORK/gen.log" 2>&1) || prune_ok=0
+done
+if [[ $prune_ok -eq 1 ]]; then
+  # Drop the Email field AND its value object from the declaring spec; the
+  # neighbour still reuses the VO. Also drop the Guardian collection, so the
+  # ordinary orphan path is exercised in the same run.
+  python3 - "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" <<'PYEOF'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s = re.sub(r'  - name: Email\n(?:    .*\n)+?\n', '', s, count=1)
+s = re.sub(r'  - name: Email\n    kind: raw\n(?:    .*\n)+?\n', '', s, count=1)
+s = re.sub(r'\nchildren:\n(?:.*\n)*?\nsiblings:', '\nsiblings:', s)
+s = s.replace("    version: 1", "    version: 2")
+open(p, 'w').write(s)
+PYEOF
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
+     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" \
+     >>"$PRUNE_WORK/gen.log" 2>&1) || prune_ok=0
+fi
+
+if [[ $prune_ok -ne 1 ]]; then
+  bad "prune: the fixtures could not be generated — $(tail -3 "$PRUNE_WORK/gen.log" | tr '\n' ' ')"
+else
+  PLAN=$(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen prune \
+     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" 2>&1)
+  # The assertion is the REASON, not the path: the file appears either way — the
+  # question is which list it is in.
+  if grep -q "still names this value object" <<<"$PLAN"; then
+    ok "prune keeps a value object another spec still names"
+  else
+    bad "prune offered a value object another spec still uses — applying it breaks the build"
+  fi
+  if [[ -f "$PRUNE_WORK/internal/domain/aggregatevos/guardian.go" ]]; then
+    ok "prune wrote nothing without -apply"
+  else
+    bad "prune removed a file without -apply"
+  fi
+
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen prune \
+     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" -apply \
+     >>"$PRUNE_WORK/prune.log" 2>&1) || bad "prune -apply failed"
+  if [[ -f "$PRUNE_WORK/internal/domain/aggregatevos/guardian.go" ]]; then
+    bad "prune -apply left the orphaned collection behind"
+  elif grep -rq "GuardianFullNameField" "$PRUNE_WORK/internal/application/translations/"; then
+    bad "prune -apply left a dead labelKey in the catalogs"
+  elif (cd "$PRUNE_WORK" && GOWORK=off go build -tags "$ENGINE_TAGS" ./... >>"$PRUNE_WORK/build.log" 2>&1 \
+        && GOWORK=off go test -tags "$ENGINE_TAGS" ./internal/... >>"$PRUNE_WORK/test.log" 2>&1); then
+    ok "prune -apply removes the orphans and the tree still builds and passes"
+  else
+    bad "prune -apply broke the tree — $(tail -3 "$PRUNE_WORK/build.log" "$PRUNE_WORK/test.log" 2>/dev/null | tr '\n' ' ')"
+  fi
+
+  AGAIN=$(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen prune \
+     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" 2>&1)
+  if grep -q "Nothing to prune" <<<"$AGAIN" || ! grep -q "To remove" <<<"$AGAIN"; then
+    ok "a second prune finds nothing left"
+  else
+    bad "prune is not idempotent: it still lists something after applying"
+  fi
+fi
+
 # ── the launcher serves the CURRENT version ──────────────────────────────────
 #
 # The plugin ships the generator as SOURCE and caches the compiled binary in the
