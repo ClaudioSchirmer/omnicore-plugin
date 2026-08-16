@@ -77,6 +77,16 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   future bump that leaves them behind fails loudly instead of testing the wrong three
   relations.
 
+- **A childless entity embedded `AggregateRoot`, and now embeds `BaseEntity`.** The two are
+  not alternatives — `AggregateRoot` IS `BaseEntity` plus the carrier a root keeps its child
+  collections in — and the framework dispatches on the INTERFACE, not the embed: an entity is
+  treated as an aggregate when it implements `AggregateRootProvider`, which the generator
+  emits only for an entity that HAS children. So the extra embed changed no behaviour, took
+  no different write path, and cost nothing at runtime. What it did was tell every reader of
+  the file that the entity has collections, in the first place they look to find out — on
+  entities that have none. The struct's own doc comment now states which one it embeds and
+  why, so the answer is in the file rather than in a maintainer's head.
+
 - **The generated tests now cover what they claimed to.** Six gaps closed, and one of them was
   a bug rather than an omission: the "accepts a well-formed value" test for a string-backed
   value object was never emitted, because the sample lookup compared a field's value-object

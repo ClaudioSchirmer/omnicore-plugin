@@ -47,14 +47,24 @@ func emitAggregate(m *ir.Model) (fsplan.File, error) {
 		s.Doc(m.TableDescription)
 		s.Doc("")
 	}
+	embedNote := "It embeds BaseEntity: this entity owns no child collection, so it is " +
+		"not an aggregate root and does not implement AggregateRootProvider — which is " +
+		"what routes it down the simpler single-table write path."
+	if len(m.Children) > 0 {
+		embedNote = "It embeds AggregateRoot — BaseEntity plus the carrier its child " +
+			"collections live in — and implements AggregateRootProvider below, which is " +
+			"what makes the root and its children one atomic write."
+	}
 	s.Doc(
-		"Persisted fields carry a labelKey tag and nothing else. There is no json tag " +
-			"here on purpose: a domain aggregate is not a wire DTO, wire names live on the " +
-			"web-layer types, and a json tag on this struct would corrupt the snapshot the " +
+		embedNote,
+		"",
+		"Persisted fields carry a labelKey tag and nothing else. There is no json tag "+
+			"here on purpose: a domain aggregate is not a wire DTO, wire names live on the "+
+			"web-layer types, and a json tag on this struct would corrupt the snapshot the "+
 			"framework takes to compare old and new state.",
 	)
 	s.L("type %s struct {", m.Entity.Pascal)
-	s.L("\tdomain.AggregateRoot")
+	s.L("\t%s", rootEmbed(m))
 	for _, f := range m.Fields {
 		s.L("\t%s %s `labelKey:%s`%s", f.Name, f.EntityType, quote(f.LabelKey), fieldComment(f))
 	}
@@ -691,6 +701,23 @@ func fieldNamed(m *ir.Model, name string) ir.Field {
 //
 // The framework cross-checks it against the schema's child declarations and
 // panics when the two disagree, so both are generated from the same source.
+// rootEmbed is what the aggregate embeds, and the choice is made to say
+// something TRUE about the entity rather than to cover both cases.
+//
+// AggregateRoot is BaseEntity plus the carrier a root keeps its child
+// collections in. The framework dispatches on the INTERFACE — an entity is
+// treated as an aggregate when it implements AggregateRootProvider, which this
+// generator emits only for an entity that HAS children — so embedding the
+// carrier in a childless entity changed no behaviour at all. What it did was
+// tell every reader of the file that the entity has collections, in the one
+// place they would look to find out.
+func rootEmbed(m *ir.Model) string {
+	if len(m.Children) > 0 {
+		return "domain.AggregateRoot"
+	}
+	return "domain.BaseEntity"
+}
+
 func emitAggregateChildren(s *src, m *ir.Model) {
 	if len(m.Children) == 0 {
 		return
