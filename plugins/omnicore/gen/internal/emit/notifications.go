@@ -301,6 +301,31 @@ func labelledFields(m *ir.Model) []ir.Field {
 	for _, c := range m.Children {
 		add(c.Fields) // already carries the fields of a facet declared inside it
 	}
+	// A composite's PARTS came in above — they are ordinary fields by then, each
+	// carrying the label the value object declared for it. What is missing is the
+	// composite AS A WHOLE: the aggregate declares a field for it, a rule can
+	// attach a notification to that field, and its key belongs to no part.
+	add(compositeOwnerLabels(m))
+	return out
+}
+
+// compositeOwnerLabels renders each composite this entity carries as the single
+// field the aggregate declares for it, so its own labelKey reaches the catalogs.
+func compositeOwnerLabels(m *ir.Model) []ir.Field {
+	var out []ir.Field
+	sets := [][]ir.Field{m.AllOwnerFields()}
+	for _, c := range m.Children {
+		sets = append(sets, c.Fields)
+	}
+	for _, set := range sets {
+		for _, g := range ir.Composites(set) {
+			out = append(out, ir.Field{
+				Name:        g.Head.Owner,
+				LabelKey:    g.Head.OwnerLabelKey,
+				Description: g.Head.OwnerDescription,
+			})
+		}
+	}
 	return out
 }
 

@@ -25,9 +25,12 @@ func emitValueObjects(m *ir.Model) ([]fsplan.File, error) {
 			f   fsplan.File
 			err error
 		)
-		if vo.Kind == "enum" {
+		switch vo.Kind {
+		case "enum":
 			f, err = emitEnumVO(m, vo)
-		} else {
+		case "composite":
+			f, err = emitCompositeVO(m, vo)
+		default:
 			f, err = emitRawVO(m, vo)
 		}
 		if err != nil {

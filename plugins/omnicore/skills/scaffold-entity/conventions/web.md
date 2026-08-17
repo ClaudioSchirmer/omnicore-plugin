@@ -45,7 +45,9 @@ interface is what lets this layer compile before infra exists.
   the shape. A child-less listing exists only if the dev explicitly asked for one in the
   spec.
 - **Every SCALAR request/response field carries an `example:` tag** — omit it and Swagger's
-  "try it out" renders garbage placeholders. Composite fields (struct/slice/map) must NOT
+  "try it out" renders garbage placeholders. STRUCTURED fields (a struct, slice or map — not
+  to be confused with a composite VALUE OBJECT, whose parts arrive here as plain scalars and
+  DO carry one) must NOT
   carry one — that is a boot reject; whole-body samples go through `Doc.RequestExamples`/
   `Doc.ResponseExamples` (`openapi.html`). Low-risk: decide plausible values yourself.
 - **Strict vs lenient is decided per operation by its FIELDS** — any optional field ⇒ the
@@ -86,6 +88,14 @@ interface is what lets this layer compile before infra exists.
   a RESPONSE DTO field typed as the VO itself (both render natively on every surface;
   OpenAPI/SDL describe it by the underlying type) — so never flag VO-typed response
   fields in existing consumer code as misuse; just don't generate them.
+- **A COMPOSITE value object is FLAT on the wire — never a nested object.** Its parts are
+  ordinary fields here, one per part, named exactly as the schema exposed them
+  (`salaryAmount`, `salaryCurrency`), each typed by the part's own underlying scalar. That
+  is not a simplification: the read side never learns a composite exists, so a nested wire
+  shape would be a hand-built layer with nothing behind it — the filter, `?fields=`,
+  `orderBy`, the export column and the projected document all speak the flat names. Every
+  part of an OPTIONAL composite is a POINTER on the wire, because the value object is absent
+  as a whole.
 - Write responses project via `FromResult`; reads via the framework's doc projector keyed
   by Go field name; bodyless verbs use the no-body responder (204).
 - Filter operators are AI-chosen per field type (strings: eq/ne/in/startswith/contains +

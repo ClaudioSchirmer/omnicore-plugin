@@ -57,6 +57,21 @@ framework auto-validates VO fields — domain.md):
   NO `if != nil` guard on insert/PUT.
 - `FromEntity` is the inverse: `.Value()` for a raw/enum field, a pointer cast back
   (`(*string)(u.Phone)`) for a nullable one.
+- **composite field → the ONE place the flat wire is folded back into the value object.** The
+  Command carries the parts FLAT, under the names the schema exposed them by
+  (`SalaryAmount`, `SalaryCurrency`) — the wire never sees a nested object, because nothing
+  above the schema knows a composite exists. The mapper composes:
+  `u.Salary = vos.Money{Amount: c.SalaryAmount, Currency: vos.Currency(c.SalaryCurrency)}`,
+  each part cast by its OWN kind (a VO part is still just a cast). `FromEntity` reads it
+  back part by part (`out.SalaryAmount = u.Salary.Amount`).
+  - **An OPTIONAL composite (`*Period`) is decided as a GROUP, both ways.** Build it only
+    when at least one part arrived, and leave it `nil` otherwise — that is what writes NULL
+    to every part column, and it is the same verdict the read side takes when every one of
+    them comes back NULL. Projecting is the mirror: `if e.Trial != nil { … }`, and a
+    mandatory part inside it needs a local to point at (`from := e.Trial.From; out.TrialFrom = &from`).
+  - Under PATCH the parts are guarded one by one like any other field, materialising the
+    value object on first use (`if e.Trial == nil { e.Trial = &vos.Period{} }`). A PATCH can
+    fill an absent composite in but never clear it — the same limit every nullable field has.
 
 **`if x != nil` belongs to PATCH only.** `ApplyPartiallyTo` is tri-state (nil = not sent), so
 each line is guarded `if c.X != nil { u.X = <same cast> }`; insert and PUT assign

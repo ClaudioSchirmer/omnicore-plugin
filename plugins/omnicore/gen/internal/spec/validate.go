@@ -71,6 +71,7 @@ func Validate(s *Spec, opt Options) *Problems {
 	validateStorage(s, ps)
 	validateFields(s, ps, opt)
 	validateValueObjects(s, ps, opt)
+	validateComposites(s, ps, opt)
 	validateChildren(s, ps, opt)
 	validateSiblings(s, ps, opt)
 	validateLifecycle(s, ps)
@@ -339,6 +340,19 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 		ps.BlockerFix(where,
 			fmt.Sprintf("%q is a reserved field name", f.Name),
 			why)
+	}
+
+	// A COMPOSITE field answers the single-column questions per PART, not once:
+	// its type, column and length live under parts[], and validateComposites
+	// owns every message about them. Asking for them here would refuse a correct
+	// spec three times before it reached the check that explains the shape.
+	if IsComposite(f) {
+		validateFieldPlacement(s, f, where, ps, isChild)
+		if f.Description == "" {
+			ps.WarnFix(where, "no description",
+				"it is what the aggregate's field comment says about the concept as a whole")
+		}
+		return
 	}
 
 	if !FieldTypes.Has(f.Type) {
@@ -676,13 +690,17 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 			seen[vo.Name] = true
 		}
 
-		if !VOBackings.Has(vo.Backing) {
+		// A composite has no single underlying value — its parts are its value —
+		// so the backing key is refused there rather than demanded.
+		if vo.Kind != "composite" && !VOBackings.Has(vo.Backing) {
 			ps.BlockerFix(where+".backing",
 				fmt.Sprintf("%q is not a backing type", vo.Backing),
 				"one of: "+VOBackings.String())
 		}
 
 		switch vo.Kind {
+		case "composite":
+			validateCompositeDeclaration(s, vo, where, ps, opt)
 		case "raw":
 			if vo.Regex == "" && vo.MinLength == 0 && vo.MaxLength == 0 && vo.Min == nil && vo.Max == nil {
 				ps.BlockerFix(where,
@@ -747,7 +765,8 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 		default:
 			ps.BlockerFix(where+".kind",
 				fmt.Sprintf("%q is not a value-object kind", vo.Kind),
-				"raw (a format or range) | enum (a fixed set of values)")
+				"raw (a format or range) | enum (a fixed set of values) | composite (a "+
+					"value that spans SEVERAL fields, like Money{Amount, Currency})")
 		}
 	}
 }
@@ -1077,7 +1096,10 @@ func validateLifecycle(s *Spec, ps *Problems) {
 			"add update to modes, or remove the shape")
 	}
 	for _, ex := range s.Update.PatchExcludes {
-		if findField(s.Fields, ex) == nil {
+		// A composite may be excluded whole (its own name, which takes every part
+		// with it) or one part at a time (an exposed name), because a partial
+		// update sees the parts and the domain sees the value object.
+		if findField(s.Fields, ex) == nil && findLogicalField(s.Fields, s, ex) == nil {
 			ps.Blockerf("update.patchExcludes", "%q does not name a field of this entity", ex)
 		}
 	}
@@ -1161,6 +1183,7 @@ func validateRules(s *Spec, ps *Problems) {
 		validateRuleSet(s, c.Rules, ruleScopeOfChild(s, c), where, ps)
 		validateAggregateWideKinds(c, where, ps)
 	}
+	validateCompositeRuleTargets(s, ps)
 }
 
 // aggregateWideKinds ask what the AGGREGATE holds, not what one entry says: a
@@ -2063,7 +2086,7 @@ func validateRead(s *Spec, ps *Problems) {
 		}
 		for _, fn := range idx.Fields {
 			if !readableField(s, fn) {
-				ps.Blockerf(where+".fields", "%q does not name a readable field", fn)
+				reportUnreadable(s, fn, where+".fields", ps)
 			}
 		}
 		if idx.Order != "" && !IndexOrders.Has(idx.Order) {
@@ -2082,7 +2105,7 @@ func validateRead(s *Spec, ps *Problems) {
 	for i, fr := range r.FieldRestrict {
 		where := fmt.Sprintf("read.fieldRestrict[%d]", i)
 		if !readableField(s, fr.Field) {
-			ps.Blockerf(where+".field", "%q does not name a readable field", fr.Field)
+			reportUnreadable(s, fr.Field, where+".field", ps)
 		}
 		if fr.Permission == "" {
 			ps.Blockerf(where+".permission", "a restricted field needs the permission that unlocks it")
@@ -2121,7 +2144,7 @@ func validateByParams(s *Spec, r Read, ps *Problems) {
 					"filter on a root field, or promote the value to the root if the "+
 						"listing must narrow by it")
 			} else {
-				ps.Blockerf(where, "%q does not name a filterable field", f.Field)
+				reportUnreadable(s, f.Field, where, ps)
 			}
 			continue
 		}
@@ -2154,15 +2177,15 @@ func validateByParams(s *Spec, r Read, ps *Problems) {
 	}
 	for _, sf := range bp.Sort {
 		if !readableField(s, sf) {
-			ps.Blockerf("read.byParams.sort", "%q does not name a readable field", sf)
+			reportUnreadable(s, sf, "read.byParams.sort", ps)
 		}
 	}
 	for _, sf := range bp.Controls.Search {
 		if !readableField(s, sf) {
-			ps.Blockerf("read.byParams.controls.search", "%q does not name a readable field", sf)
+			reportUnreadable(s, sf, "read.byParams.controls.search", ps)
 			continue
 		}
-		if f := findAnyField(s, sf); f != nil && f.Type != "string" {
+		if f := filterableField(s, sf); f != nil && f.Type != "string" {
 			ps.BlockerFix("read.byParams.controls.search",
 				fmt.Sprintf("%q is not text, so a search cannot match it", sf),
 				"search covers string fields")
@@ -2508,14 +2531,14 @@ func checkFieldDups(fields []Field, where string, ps *Problems) {
 // a collection. Validation and lowering disagreeing here is exactly how a
 // blessed filter used to vanish from the generated request type.
 func filterableField(s *Spec, name string) *Field {
-	if f := findField(s.Fields, name); f != nil {
+	if f := findLogicalField(s.Fields, s, name); f != nil {
 		return f
 	}
 	for i := range s.Siblings {
 		if strings.HasPrefix(s.Siblings[i].AttachTo, "child:") {
 			continue // a child's facet is read through the child, not the listing
 		}
-		if f := findField(s.Siblings[i].Fields, name); f != nil {
+		if f := findLogicalField(s.Siblings[i].Fields, s, name); f != nil {
 			return f
 		}
 	}
@@ -2578,12 +2601,20 @@ func sortedTransitionKeys(m map[string][]string) []string {
 }
 
 func readableField(s *Spec, name string) bool {
-	if findAnyField(s, name) != nil {
+	// The LOGICAL set, not the declared one: a composite's parts are what the
+	// read side can name, and the composite itself is not — it has no single
+	// value to project, sort or restrict.
+	if findLogicalField(s.Fields, s, name) != nil {
 		return true
+	}
+	for i := range s.Siblings {
+		if findLogicalField(s.Siblings[i].Fields, s, name) != nil {
+			return true
+		}
 	}
 	if i := strings.Index(name, "."); i > 0 {
 		if c := findChild(s.Children, name[:i]); c != nil {
-			return findField(c.Fields, name[i+1:]) != nil
+			return findLogicalField(c.Fields, s, name[i+1:]) != nil
 		}
 	}
 	return false

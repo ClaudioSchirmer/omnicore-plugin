@@ -162,9 +162,7 @@ func emitToEntity(s *src, m *ir.Model, op ir.Operation, entity string) {
 	s.Doc("ToEntity builds the aggregate the framework will validate and persist.")
 	s.L("func (c *%s) ToEntity(ctx *configuration.AppContext) (*%s, error) {", op.CommandType, entity)
 	s.L("\te := &%s{}", entity)
-	for _, f := range writableFields(m) {
-		s.L("\te.%s = %s", f.Name, entityValue(f, "c."+f.Name))
-	}
+	emitFieldAssignments(s, writableFields(m), "\t", "e", "c")
 	emitChildAdds(s, m)
 	emitAssignedFields(s, m)
 	emitIdentityFeed(s, m)
@@ -187,9 +185,7 @@ func emitApplyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 			"Every field is assigned unconditionally — that is what makes this a full replacement.")
 	}
 	s.L("func (c *%s) ApplyTo(ctx *configuration.AppContext, e *%s) error {", op.CommandType, entity)
-	for _, f := range writableFields(m) {
-		s.L("\te.%s = %s", f.Name, entityValue(f, "c."+f.Name))
-	}
+	emitFieldAssignments(s, writableFields(m), "\t", "e", "c")
 	emitChildAdds(s, m)
 	// An insert through the identity path assigns too; an update must not —
 	// re-reading the caller would hand the row to whoever edited it last.
@@ -210,7 +206,8 @@ func emitApplyPartiallyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 			"Note the consequence: this verb can never set a value back to null, because "+
 			"an absent field and an explicit null are indistinguishable here.")
 	s.L("func (c *%s) ApplyPartiallyTo(ctx *configuration.AppContext, e *%s) error {", op.CommandType, entity)
-	for _, f := range m.PatchableFields() {
+	plain, groups := ir.PlainAndComposites(m.PatchableFields())
+	for _, f := range plain {
 		s.L("\tif c.%s != nil {", f.Name)
 		if f.Nullable {
 			s.L("\t\te.%s = %s", f.Name, entityValue(f, "c."+f.Name))
@@ -218,6 +215,9 @@ func emitApplyPartiallyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 			s.L("\t\te.%s = %s", f.Name, entityValue(f, "*c."+f.Name))
 		}
 		s.L("\t}")
+	}
+	for _, g := range groups {
+		emitCompositePatch(s, g, "\t", "e."+g.Owner(), "c")
 	}
 	emitIdentityFeed(s, m)
 	s.L("\treturn nil")
@@ -310,15 +310,29 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 			"defaulted a value, and echoing the input back would hide that from the caller.")
 	s.L("func (c *%s) FromEntity(_ *configuration.AppContext, e *%s) (%s, error) {",
 		op.CommandType, entity, op.ResultType)
-	s.L("\treturn %s{", op.ResultType)
+	// With no composite in play the projection is ONE expression, which is how
+	// this has always read. A composite needs statements — an optional one is a
+	// nil check — so the literal is bound to a local and filled in after.
+	plain, groups := ir.PlainAndComposites(m.AllOwnerFields())
+	head, tail := "\treturn "+op.ResultType+"{", "\t}, nil"
+	if len(groups) > 0 {
+		head, tail = "\tout := "+op.ResultType+"{", "\t}"
+	}
+	s.L("%s", head)
 	s.L("\t\tID: *e.GetID(),")
-	for _, f := range m.AllOwnerFields() {
+	for _, f := range plain {
 		s.L("\t\t%s: %s,", f.Name, wireValue(f, "e"))
 	}
 	for _, c := range m.Children {
 		s.L("\t\t%s: %s,", c.GoPlural, c.Projector+"(e)")
 	}
-	s.L("\t}, nil")
+	s.L("%s", tail)
+	if len(groups) > 0 {
+		for _, g := range groups {
+			emitCompositeUnfold(s, g, "\t", "out", "e")
+		}
+		s.L("\treturn out, nil")
+	}
 	s.L("}")
 	s.Blank()
 	s.L("var _ = time.Time{}")
@@ -346,12 +360,23 @@ func emitChildProjectors(s *src, m *ir.Model, entity string) {
 		s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](&e.AggregateRoot)", c.Name)
 		s.L("\tout := make([]%sResult, 0, len(items))", c.Name)
 		s.L("\tfor _, item := range items {")
-		s.L("\t\tout = append(out, %sResult{", c.Name)
+		plain, groups := ir.PlainAndComposites(c.Fields)
+		head, tail := "\t\tout = append(out, "+c.Name+"Result{", "\t\t})"
+		if len(groups) > 0 {
+			head, tail = "\t\tentry := "+c.Name+"Result{", "\t\t}"
+		}
+		s.L("%s", head)
 		s.L("\t\t\tID: item.GetID(),")
-		for _, f := range c.Fields {
+		for _, f := range plain {
 			s.L("\t\t\t%s: %s,", f.Name, wireValue(f, "item"))
 		}
-		s.L("\t\t})")
+		s.L("%s", tail)
+		if len(groups) > 0 {
+			for _, g := range groups {
+				emitCompositeUnfold(s, g, "\t\t", "entry", "item")
+			}
+			s.L("\t\tout = append(out, entry)")
+		}
 		s.L("\t}")
 		s.L("\treturn out")
 		s.L("}")

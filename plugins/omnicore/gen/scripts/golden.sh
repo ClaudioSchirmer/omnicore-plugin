@@ -237,7 +237,7 @@ else
     # request would have filled the gap, because the document was already there.
     NEW_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/students" \
       -H 'Content-Type: application/json' \
-      -d '{"name":"Ana Paula","enrollmentNumber":"2026-09999","email":"ana@escola.br","status":"active","grade":8.5,"enrolledAt":"2026-02-01T09:00:00Z","scholarshipSponsor":"Fundacao Alfa","scholarshipPercentage":50,"guardians":[{"fullName":"Marcos","document":"123.456.789-00","phone":"11999999999"}]}' \
+      -d '{"name":"Ana Paula","enrollmentNumber":"2026-09999","email":"ana@escola.br","status":"active","grade":8.5,"enrolledAt":"2026-02-01T09:00:00Z","tuitionAmount":185000,"tuitionCurrency":"BRL","leaveFrom":"2026-06-01T00:00:00Z","leaveTo":"2026-08-01T00:00:00Z","scholarshipSponsor":"Fundacao Alfa","scholarshipPercentage":50,"guardians":[{"fullName":"Marcos","document":"123.456.789-00","phone":"11999999999"}]}' \
       2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
     if [[ -n "$NEW_ID" ]]; then
       SHAPES=$(python3 - "$NEW_ID" <<'PYSHAPE'

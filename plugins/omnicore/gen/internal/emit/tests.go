@@ -183,9 +183,7 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 	)
 	s.L("func valid%s() *%s {", m.Entity.Pascal, m.Entity.Pascal)
 	s.L("\treturn &%s{", m.Entity.Pascal)
-	for _, f := range m.AllOwnerFields() {
-		s.L("\t\t%s: %s,", f.Name, sampleValue(f))
-	}
+	emitEntityLiteralFields(s, m.AllOwnerFields(), "\t\t")
 	s.L("\t}")
 	s.L("}")
 	s.Blank()
@@ -487,7 +485,13 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		emitFromEntityTest(s, m, op)
 	}
 
-	if op := m.Op("patch"); op != nil && len(m.PatchableFields()) > 0 {
+	// The "absent fields are left alone" case needs ONE field to plant a value in
+	// and read back, and it has to be a field of the entity — a composite's part
+	// is not one, and the value object as a whole is not what the command carries.
+	// A spec whose every patchable field is a composite part simply skips it; the
+	// twin case below still covers the other half of the contract.
+	patchWitness := firstPlain(m.PatchableFields())
+	if op := m.Op("patch"); op != nil && patchWitness != nil {
 		s.Doc("A partial update must leave absent fields alone.",
 			"",
 			"This is the whole contract of the verb: sending nothing must not blank "+
@@ -495,7 +499,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("func TestPatch%sLeavesAbsentFieldsAlone(t *testing.T) {", m.Entity.Pascal)
 		s.L("\tctx := &configuration.AppContext{}")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
-		first := m.PatchableFields()[0]
+		first := *patchWitness
 		// The sample is HOISTED so the assertion compares against the very
 		// value that was assigned. Minting the sample twice compared two
 		// distinct pointers whenever the field is nullable, and the test
@@ -597,15 +601,24 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 			s.L("func TestClear%sEmptiesTheFacet(t *testing.T) {", sib.Name)
 			s.L("\tctx := &configuration.AppContext{}")
 			s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
-			for _, f := range sib.Fields {
+			facetPlain, facetGroups := ir.PlainAndComposites(sib.Fields)
+			for _, f := range facetPlain {
 				s.L("\te.%s = %s", f.Name, entitySample(f))
+			}
+			for _, g := range facetGroups {
+				s.L("\te.%s = %s", g.Owner(), compositeSample(g))
 			}
 			s.L("\tif err := (&Clear%sCommand{}).ApplyTo(ctx, e); err != nil {", sib.Name)
 			s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
 			s.L("\t}")
-			for _, f := range sib.Fields {
+			for _, f := range facetPlain {
 				s.L("\tif e.%s != nil {", f.Name)
 				s.L("\t\tt.Errorf(\"%s survived the clear\")", f.Name)
+				s.L("\t}")
+			}
+			for _, g := range facetGroups {
+				s.L("\tif e.%s != nil {", g.Owner())
+				s.L("\t\tt.Errorf(\"%s survived the clear\")", g.Owner())
 				s.L("\t}")
 			}
 			s.L("}")
@@ -641,6 +654,9 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("import (")
 	s.L("\t%s", quote("strings"))
+	// A composite's parts may be instants, and a comparison rule's case is built
+	// from two of them. The import is pruned when nothing here uses it.
+	s.L("\t%s", quote("time"))
 	s.L("\t%s", quote("testing"))
 	s.Blank()
 	s.L("\t%s", quote(fwImport("domain")))
@@ -650,6 +666,10 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 
 	for _, vo := range m.ValueObjects {
+		if vo.Kind == "composite" {
+			emitCompositeVOTests(s, m, vo)
+			continue
+		}
 		if vo.Kind == "enum" {
 			s.Doc(fmt.Sprintf("%s declares its members; the framework validates membership "+
 				"against exactly this set.", vo.Name))
@@ -798,6 +818,16 @@ func wireSample(f ir.Field) string {
 }
 
 func entityAsWire(f ir.Field, recv string) string {
+	// A composite's part is not a field of the entity: it is read THROUGH the
+	// value object. Every caller skips nullable fields, and every part of an
+	// optional composite is nullable, so no nil guard is ever needed here.
+	if f.Composite != nil {
+		ref := recv + "." + f.Composite.Owner + "." + f.Composite.PartName
+		if f.VOKind != "" {
+			return ref + ".Value()"
+		}
+		return ref
+	}
 	if f.VOKind != "" {
 		return recv + "." + f.Name + ".Value()"
 	}
@@ -1183,11 +1213,21 @@ func emitValidChildBuilder(s *src, m *ir.Model, c ir.Child) {
 	s.Doc(fmt.Sprintf("valid%s is one entry every rule accepts.", c.Name))
 	s.L("func valid%s%s() %s {", m.Entity.Pascal, c.Name, c.Name)
 	s.L("\treturn %s{", c.Name)
-	for _, f := range c.Fields {
+	plain, groups := ir.PlainAndComposites(c.Fields)
+	for _, f := range plain {
 		if f.Nullable {
 			continue
 		}
 		s.L("\t\t%s: %s,", f.Name, entitySample(f))
+	}
+	// A composite is built WHOLE — its parts are not fields of the entry — and an
+	// optional one is skipped for the same reason a nullable field is: the
+	// fixture carries what every rule needs, and absence is never that.
+	for _, g := range groups {
+		if g.Optional() {
+			continue
+		}
+		s.L("\t\t%s: %s,", g.Owner(), compositeSample(g))
 	}
 	s.L("\t}")
 	s.L("}")
@@ -2305,4 +2345,16 @@ func writableChildFields(c ir.Child) []ir.Field {
 		out = append(out, f)
 	}
 	return out
+}
+
+// firstPlain is the first field of a list that stands on its own — not a part of
+// a composite value object. It is what a test needs when it has to name one
+// field of the ENTITY and any will do.
+func firstPlain(fields []ir.Field) *ir.Field {
+	for i := range fields {
+		if fields[i].Composite == nil {
+			return &fields[i]
+		}
+	}
+	return nil
 }

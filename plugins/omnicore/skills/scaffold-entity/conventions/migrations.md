@@ -39,6 +39,15 @@ default as belt-and-suspenders (the framework stamps actively). If the entity ha
 Archive mode, there is no archive column — keep `Modes()` ⟺ the schema declaration ⟺ the migration in
 lockstep.
 
+**A COMPOSITE value object is N columns, and its nullability is TWO questions.** Each part
+gets its own column, typed by the part's own Go type. Whether that column may be NULL is
+decided by the part's shape AND by the value object's: a part declared as a pointer inside
+the VO is nullable, and **an OPTIONAL composite (the entity holds it as `*Money`) makes
+EVERY one of its part columns nullable regardless** — "absent" is written as all-NULL and
+read back from all-NULL, so a single NOT NULL among them makes absence impossible to store.
+Under a mandatory composite each part follows its own type, exactly like a scalar VO field.
+The column COMMENT comes from the PART's description, declared on the value object.
+
 ## Self-documenting DDL — the description goes INTO the database
 
 Every generated table and column carries its description, sourced from the spec (§2

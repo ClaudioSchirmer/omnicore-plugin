@@ -72,6 +72,31 @@ fields:
     description: Data da matrícula.
     labelKey: StudentEnrolledAtField
 
+  # COMPOSITO obrigatório: um conceito em duas colunas. Um valor sem a moeda não
+  # é um preço, que é exatamente quando dois campos são UM value object. O campo
+  # não tem `column:` — cada parte tem a sua — e `as:` dá o nome de fora, porque
+  # "Amount" pertence a Money e não ao aluno.
+  - name: Tuition
+    livesOn: root
+    vo: {kind: composite, ref: Money}
+    description: Mensalidade cobrada nesta matrícula.
+    labelKey: StudentTuitionField
+    parts:
+      - {part: Amount,   column: tuition_amount,   as: TuitionAmount,   example: "185000"}
+      - {part: Currency, column: tuition_currency, as: TuitionCurrency, length: 3, example: BRL}
+
+  # COMPOSITO opcional: ausente por inteiro. Toda coluna de parte é NULL-able,
+  # a ausência é gravada como tudo-NULL e lida de volta do mesmo jeito.
+  - name: Leave
+    livesOn: root
+    nullable: true
+    vo: {kind: composite, ref: Period}
+    description: Afastamento em curso do aluno, quando houver.
+    labelKey: StudentLeaveField
+    parts:
+      - {part: From, column: leave_from, as: LeaveFrom, example: "2026-06-01T00:00:00Z"}
+      - {part: To,   column: leave_to,   as: LeaveTo,   example: "2026-08-01T00:00:00Z"}
+
   - name: RequestingPrincipalEmail
     type: string
     runtime: true
@@ -99,6 +124,59 @@ valueObjects:
       - {name: Suspended, value: suspended}
       - {name: Graduated, value: graduated}
       - {name: Dropped,   value: dropped}
+
+  - name: Money
+    kind: composite
+    description: Um valor em unidades menores, junto com a moeda em que está.
+    parts:
+      - name: Amount
+        type: int64
+        description: O valor, em centavos — nunca um float.
+        labelKey: MoneyAmountField
+      - name: Currency
+        type: string
+        vo: {kind: enum, ref: Currency}
+        description: A moeda em que o valor está expresso.
+        labelKey: MoneyCurrencyField
+    rules:
+      list:
+        - id: amount-not-negative
+          kind: range
+          fields: [Amount]
+          min: 0
+          notification: NegativeAmountNotification
+          echoValue: true
+
+  - name: Currency
+    kind: enum
+    backing: string
+    description: As moedas em que a instituição cobra.
+    unknownNotification: UnknownCurrencyNotification
+    members:
+      - {name: BRL, value: BRL}
+      - {name: USD, value: USD}
+
+  - name: Period
+    kind: composite
+    description: Um intervalo de tempo — um início e um fim que pode estar aberto.
+    parts:
+      - name: From
+        type: time
+        description: O dia em que o período começa.
+        labelKey: PeriodFromField
+      - name: To
+        type: time
+        nullable: true
+        description: O dia em que termina; ausente significa em aberto.
+        labelKey: PeriodToField
+    rules:
+      list:
+        - id: period-ends-after-it-starts
+          kind: comparison
+          fields: [To]
+          other: From
+          operator: gte
+          notification: PeriodEndsBeforeStartNotification
 
 modes: [display, insert, update, archive, unarchive]
 
@@ -166,6 +244,42 @@ rules:
       attachTo: EnrolledAt
 
 notifications:
+  - name: NegativeAmountNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: O valor não pode ser negativo.
+      eng: The amount cannot be negative.
+      esp: El importe no puede ser negativo.
+      fra: Le montant ne peut pas être négatif.
+      deu: Der Betrag darf nicht negativ sein.
+      ita: L'importo non può essere negativo.
+      nld: Het bedrag mag niet negatief zijn.
+
+  - name: UnknownCurrencyNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: Moeda desconhecida.
+      eng: Unknown currency.
+      esp: Moneda desconocida.
+      fra: Devise inconnue.
+      deu: Unbekannte Währung.
+      ita: Valuta sconosciuta.
+      nld: Onbekende valuta.
+
+  - name: PeriodEndsBeforeStartNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: A data final não pode ser anterior à inicial.
+      eng: The end date cannot precede the start date.
+      esp: La fecha final no puede ser anterior a la inicial.
+      fra: La date de fin ne peut pas précéder la date de début.
+      deu: Das Enddatum darf nicht vor dem Startdatum liegen.
+      ita: La data di fine non può precedere quella di inizio.
+      nld: De einddatum mag niet vóór de begindatum liggen.
+
   - name: EnrollmentNumberAlreadyExistsNotification
     semantic: conflict
     text:
@@ -370,6 +484,10 @@ read:
       - field: Grade
         ops: [eq, gte, lte]
       - field: EnrolledAt
+        ops: [gte, lte]
+      - field: TuitionAmount
+        ops: [eq, gte, lte]
+      - field: LeaveFrom
         ops: [gte, lte]
     controls:
       pagination: true

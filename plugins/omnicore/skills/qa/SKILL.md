@@ -75,7 +75,9 @@ session." Never a gate: this run continues on the installed skills.
 ## Phase 0b — Discover (read, don't ask)
 
 Map what the service declares — this inventory IS the test surface:
-- **Entities**: schemas (fields, VOs, uniqueness incl. active-only, children,
+- **Entities**: schemas (fields, VOs — including any COMPOSITE value object and the
+  names its parts are EXPOSED under, which are the only names any surface speaks; the
+  composite's own field name appears NOWHERE on the wire), uniqueness incl. active-only, children,
   siblings, SharedBase roles), `Modes()` per aggregate (the verb set each entity
   actually serves — an absent verb still gets a case, never a skip, but ASSERT THE
   RIGHT CODE, three distinct shapes per `status-mapping`: mode missing from `Modes()`
@@ -117,7 +119,8 @@ Map what the service declares — this inventory IS the test surface:
    `hasPreviousPage`/`startCursor`/`endCursor` truthfulness (cursors are WINDOW EDGES —
    walk by echoing them into `?after=`/`?before=`), page-2 disjointness, cursor
    advance) · **golden-record round-trip** (one record exercising EVERY declared
-   field — VO fields included — written then read back field-by-field on each enabled
+   field — VO fields included, and a COMPOSITE value object as its EXPOSED PARTS, one
+   wire field each, never the composite's own name — written then read back field-by-field on each enabled
    surface: the family that catches a field silently dropped from a DTO/projection,
    which every other family passes over) · rejected reads — the WHOLE typed-400 guard
    family, not one: the relational 1:N pushdown · unknown field · operator outside a

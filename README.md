@@ -32,9 +32,12 @@ All skills are **version-agnostic**: they read the framework version from the pr
 `go.mod` and treat that version's bundled `/docs` as the sole authority, so they never
 drift as the framework evolves.
 
-Works with any published omnicore release (docs-pinned by design). Version-matched to the
-framework's v0.43.0 (value objects + IfArchive/IfUnarchive) · plugin 0.12.0 — publish the two
-in sync.
+The **skills** work with any published omnicore release (docs-pinned by design). The
+**generator** is the one part that targets a single line — one supported version, one shape
+of emitted code, because branching templates per framework version is the largest drift
+source a generator can have: today that is the framework's **v0.52.0** (composite value
+objects), paired with plugin **0.20.0**. Publish the two in sync. An older pin is refused by
+default with the fix named; a newer one generates anyway, and the compiler is the oracle.
 
 ## Install
 

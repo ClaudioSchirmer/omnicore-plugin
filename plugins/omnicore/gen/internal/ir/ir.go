@@ -108,6 +108,11 @@ type Field struct {
 	// its owner's own table. The Go type carries it like any other field — the
 	// split is physical — so only the two emitters that write TABLES care.
 	Facet string
+	// Composite is set when this field is one PART of a composite value object.
+	// Everything above the schema treats it as an ordinary field under its
+	// exposed name; this is the back-reference the four domain-facing emitters
+	// read to put the value object back together. Nil for every other field.
+	Composite *CompositePart
 }
 
 type Unique struct {
@@ -284,6 +289,12 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	}
 
 	for _, f := range s.Fields {
+		if spec.IsComposite(f) {
+			// One spec field, N logical ones — the expansion that lets every
+			// emitter above the schema keep reading a flat list.
+			m.Fields = append(m.Fields, expandComposite(s, m.Entity.Pascal, f)...)
+			continue
+		}
 		rf := resolveField(m.Entity.Pascal, f)
 		if f.Runtime {
 			m.Runtime = append(m.Runtime, rf)
@@ -319,6 +330,17 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	m.PatchExcludes = map[string]bool{}
 	for _, name := range s.Update.PatchExcludes {
 		m.PatchExcludes[name] = true
+		// Excluding a composite by its own name excludes every part of it: the
+		// wire has the parts, the spec named the concept, and taking half of a
+		// value object out of a patch is not a shape anyone asked for.
+		for _, g := range Composites(m.Fields) {
+			if g.Owner() != name {
+				continue
+			}
+			for _, p := range g.Parts {
+				m.PatchExcludes[p.Name] = true
+			}
+		}
 	}
 	m.Read = resolveRead(s, m)
 	m.Ops = resolveOps(s, m)
@@ -822,7 +844,16 @@ type ValueObject struct {
 	UnknownName         string
 	UnknownValue        string
 	UnknownNotification string
+
+	// Parts and Rules are the composite half: what the value object is made of,
+	// and the invariants its own IsValid checks over them.
+	Parts []VOPart
+	Rules []Rule
 }
+
+// IsComposite reports whether the value object's value spans several fields —
+// the kind that declares no Value() and is decomposed by the schema.
+func (v ValueObject) IsComposite() bool { return v.Kind == "composite" }
 
 // EnumMember is one declared value of an enum value object.
 type EnumMember struct {
@@ -844,6 +875,9 @@ func resolveValueObjects(s *spec.Spec) []ValueObject {
 			MinLength: vo.MinLength, MaxLength: vo.MaxLength,
 			Min: vo.Min, Max: vo.Max, Notification: vo.Notification,
 			UnknownNotification: vo.UnknownNotification,
+		}
+		if vo.Kind == "composite" {
+			resolveCompositeDeclaration(s, vo, &v)
 		}
 		if vo.Kind == "enum" {
 			v.UnknownName = vo.Name + "Unknown"
@@ -1231,6 +1265,10 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			ch.Projector = "project" + m.Entity.Pascal + ch.GoPlural
 		}
 		for _, f := range c.Fields {
+			if spec.IsComposite(f) {
+				ch.Fields = append(ch.Fields, expandComposite(s, c.Name, f)...)
+				continue
+			}
 			ch.Fields = append(ch.Fields, resolveField(c.Name, f))
 		}
 		for _, id := range c.BusinessIdentity {
@@ -1253,6 +1291,10 @@ func resolveSiblings(s *spec.Spec, m *Model) []Sibling {
 			r.OwnerChild = rest
 		}
 		for _, f := range sib.Fields {
+			if spec.IsComposite(f) {
+				r.Fields = append(r.Fields, expandComposite(s, m.Entity.Pascal, f)...)
+				continue
+			}
 			r.Fields = append(r.Fields, resolveField(m.Entity.Pascal, f))
 		}
 		out = append(out, r)
@@ -1660,7 +1702,10 @@ func attachChildFacets(m *Model) {
 func (m *Model) UsesVOsInChildren() bool {
 	for _, c := range m.Children {
 		for _, f := range c.Fields {
-			if f.VOKind != "" {
+			// A COMPOSITE part counts even when it is a plain scalar inside the
+			// value object: the fixture builds the value object itself, and that
+			// type lives in vos whatever its parts are made of.
+			if f.VOKind != "" || f.Composite != nil {
 				return true
 			}
 		}
@@ -1673,7 +1718,7 @@ func (m *Model) UsesVOsInChildren() bool {
 // then, and importing it otherwise does not compile.
 func (m *Model) UsesVOs() bool {
 	for _, f := range m.AllOwnerFields() {
-		if f.VOKind != "" {
+		if f.VOKind != "" || f.Composite != nil {
 			return true
 		}
 	}

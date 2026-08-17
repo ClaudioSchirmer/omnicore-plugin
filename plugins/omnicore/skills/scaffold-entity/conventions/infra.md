@@ -28,6 +28,39 @@ root; the domain-service implementation in its own file here.
   All three are OPTIONAL: undeclared ⇒ never mentioned in any SQL.
 - Boot checks the docs route you past: field-exists, column bijection, PK single-column,
   **`Modes()` ⟺ archive-column** agreement.
+- **A COMPOSITE value object is NOT a `Field` — it is decomposed here, and this schema is the
+  only place that knows it is stored across several columns.** A struct VO passed to
+  `Field(...)` is a boot panic naming the fix, because its value has no single column to be.
+  Declare it the way every other sub-object of a schema is declared — a constructor builds
+  the whole thing with its own chain and the owner attaches it, exactly like
+  `Sibling(NewSiblingSchema[T](…).Field(…))`:
+  `Composite(core.NewCompositeValueObject[vos.Money]().Field("Amount", "salary_amount").As("SalaryAmount").Field("Currency", "salary_currency").As("SalaryCurrency"))`.
+  Five things decide whether it is right, and each has a boot panic behind it
+  (`table-schema.html`, "Decomposing a composite value object"):
+  - the entity field is located **BY TYPE**, not by name — so an entity carrying two fields
+    of one composite type is refused (model the second as its own VO type);
+  - `Field(goName, column)` names the field **inside the value object**; the part is typed
+    and validated exactly like a schema `Field`;
+  - `As(exposedName)` renames the part on the OUTSIDE, and it is what everything downstream
+    sees. The default is the part's own name, which reads right when the VO is specific
+    (`Address{Street, City}` → `street`, `city`) and wrong when it is generic: `Money` on a
+    salary field would expose `?amount=`, and a second `Money`-shaped concept on the same
+    entity would collide with no way out. **Alias a generic VO; leave a specific one alone.**
+    The `labelKey` still comes from the tag INSIDE the value object — the VO owns its
+    vocabulary for every entity that uses it;
+  - **the once rule** — one `Composite(...)` per type across the root, every sibling and the
+    shared base. Splitting one across two tables is a boot failure: a sibling loads by its
+    own statement, so a split VO reconstructs half-built;
+  - every schema position takes one — root, sibling, aggregate child, shared base (type-less,
+    so its parts resolve against each role's struct at `SharedBase(...)` time, which means
+    the role must carry the composite field itself). `NewExternalSchema` is the ONE
+    exception: it describes an upstream service's columns, so declare those as plain Fields.
+  - **DDL**: an OPTIONAL composite (`*Money`) needs EVERY part column NULL-able — that is
+    what "absent" is written as, and what the read side reads absence from. Under a mandatory
+    one each part follows its own Go type.
+  - A part tagged `json:"-"`, or a composite implementing `json.Marshaler`/`Unmarshaler`, is
+    a boot failure for the same reason it is on an entity: the `Old()` ghost is a JSON
+    round-trip.
 
 ## Repository — decisions
 
