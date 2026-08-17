@@ -279,8 +279,14 @@ func emitFacetClearCommands(m *ir.Model) ([]fsplan.File, error) {
 		s.L("\t// all-nil facet UNTOUCHED on a partial update and DELETES its row on a")
 		s.L("\t// full one. Everything this command does not assign keeps the value it")
 		s.L("\t// was loaded with, so \"full\" costs nothing here.")
-		for _, f := range sib.Fields {
+		plain, groups := ir.PlainAndComposites(sib.Fields)
+		for _, f := range plain {
 			s.L("\te.%s = nil", f.Name)
+		}
+		// A composite goes as a WHOLE: its parts are not fields of the entity, and
+		// the value object is what the facet's row carries.
+		for _, g := range groups {
+			s.L("\te.%s = nil", g.Owner())
 		}
 		s.L("\treturn nil")
 		s.L("}")

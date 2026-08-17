@@ -1,0 +1,112 @@
+# Eixo: VALUE OBJECT COMPOSTO nas DUAS posicoes que so um modelo sharedbase tem
+# — na BASE (a identidade compartilhada, que nao tem tipo Go proprio e resolve
+# suas partes contra a struct de cada papel) e no PAPEL.
+#
+# O schema da base e type-less: suas partes sao resolvidas em .SharedBase(...),
+# contra a struct deste papel, o que obriga o papel a carregar o campo do
+# composto — o analogo exato de "um papel carrega todo campo da base".
+specVersion: 1
+entity: Colaborador
+plural: Colaboradores
+language: pt-BR
+storage:
+  kind: sharedbase-role
+  table: colaboradores
+  description: Colaboradores — papel sobre a identidade de pessoa.
+  base:
+    table: pessoas_rh
+    schemaFunc: PessoaRHBase
+    description: Identidade de pessoa, compartilhada entre papeis.
+    naturalKey: Documento
+    link: separate-fk
+    linkColumn: pessoa_id
+    rowUniqueness: unique-fk
+    orphanPolicy: delete-when-unreferenced
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "123.456.789-00", description: Documento — chave natural da identidade.}
+  # Composto na BASE.
+  - name: Endereco
+    livesOn: base
+    vo: {kind: composite, ref: Logradouro}
+    description: Endereco da pessoa.
+    parts:
+      - {part: Rua,    column: endereco_rua,    as: EnderecoRua, length: 160, example: "Rua das Acacias 120"}
+      - {part: Cidade, column: endereco_cidade, as: EnderecoCidade, length: 80, example: Porto Alegre}
+  # Composto no PAPEL, opcional.
+  - name: Salario
+    livesOn: role
+    nullable: true
+    vo: {kind: composite, ref: Dinheiro}
+    description: Salario acordado, quando ja definido.
+    parts:
+      - {part: Quantia, column: salario_quantia, as: SalarioQuantia, example: "850000"}
+      - {part: Moeda,   column: salario_moeda,   as: SalarioMoeda, length: 3, example: BRL}
+valueObjects:
+  - name: Logradouro
+    kind: composite
+    description: Um endereco — rua e cidade, que so juntas localizam alguem.
+    parts:
+      - {name: Rua,    type: string, description: Rua e numero., labelKey: LogradouroRuaField}
+      - {name: Cidade, type: string, description: Cidade., labelKey: LogradouroCidadeField}
+    rules:
+      list:
+        - {id: cidade-obrigatoria, kind: required, fields: [Cidade], notification: CidadeObrigatoriaNotification}
+  - name: Dinheiro
+    kind: composite
+    description: Uma quantia em unidades menores junto com a moeda em que esta.
+    parts:
+      - {name: Quantia, type: int64, description: A quantia em centavos., labelKey: DinheiroQuantiaField}
+      - name: Moeda
+        type: string
+        vo: {kind: enum, ref: Moeda}
+        description: A moeda em que a quantia esta expressa.
+        labelKey: DinheiroMoedaField
+    rules:
+      list:
+        - {id: quantia-nao-negativa, kind: range, fields: [Quantia], min: 0, notification: QuantiaNegativaNotification, echoValue: true}
+  - name: Moeda
+    kind: enum
+    backing: string
+    description: Moedas aceitas.
+    unknownNotification: MoedaDesconhecidaNotification
+    members:
+      - {name: BRL, value: BRL}
+      - {name: USD, value: USD}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: patch}
+delete: {root: soft}
+rules:
+  list:
+    - {id: doc-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Documento], notification: RequiredFieldNotification}
+notifications:
+  - name: CidadeObrigatoriaNotification
+    package: vos
+    semantic: validation
+    description: Cidade ausente no endereco.
+    text: {ptbr: "A cidade e obrigatoria.", eng: "The city is required.", esp: "La ciudad es obligatoria.", fra: "La ville est obligatoire.", deu: "Die Stadt ist erforderlich.", ita: "La citta e obbligatoria.", nld: "De stad is verplicht."}
+  - name: QuantiaNegativaNotification
+    package: vos
+    semantic: validation
+    description: Quantia negativa.
+    text: {ptbr: "A quantia nao pode ser negativa.", eng: "The amount cannot be negative.", esp: "El importe no puede ser negativo.", fra: "Le montant ne peut pas etre negatif.", deu: "Der Betrag darf nicht negativ sein.", ita: "L'importo non puo essere negativo.", nld: "Het bedrag mag niet negatief zijn."}
+  - name: MoedaDesconhecidaNotification
+    package: vos
+    semantic: validation
+    description: Moeda fora do conjunto.
+    text: {ptbr: "Moeda desconhecida.", eng: "Unknown currency.", esp: "Moneda desconocida.", fra: "Devise inconnue.", deu: "Unbekannte Waehrung.", ita: "Valuta sconosciuta.", nld: "Onbekende valuta."}
+read:
+  backing: relational
+  view: {name: colaboradores, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Documento, ops: [eq]}
+      - {field: EnderecoCidade, ops: [eq, contains]}
+      - {field: SalarioQuantia, ops: [gte, lte]}
+    controls: {pagination: true, fields: true, includeArchived: true}
+surfaces: {rest: true}
+authz:
+  resource: colaborador
+  dataAccess: anyone-with-permission
+  permissions: {insert: "colaborador:escrever", patch: "colaborador:escrever", archive: "colaborador:arquivar", unarchive: "colaborador:arquivar", read: "colaborador:ler"}

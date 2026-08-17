@@ -65,17 +65,13 @@ func emitAggregate(m *ir.Model) (fsplan.File, error) {
 	)
 	s.L("type %s struct {", m.Entity.Pascal)
 	s.L("\t%s", rootEmbed(m))
-	for _, f := range m.Fields {
-		s.L("\t%s %s `labelKey:%s`%s", f.Name, f.EntityType, quote(f.LabelKey), fieldComment(f))
-	}
+	emitStructFields(s, m.Fields)
 	for _, sib := range m.SiblingsOn("") {
 		s.Blank()
 		s.L("\t// The %s facet. It lives in its own table sharing this row's key, but", sib.Name)
 		s.L("\t// there is no separate Go type: the split is physical only. All-nil")
 		s.L("\t// means the row does not exist.")
-		for _, f := range sib.Fields {
-			s.L("\t%s %s `labelKey:%s`%s", f.Name, f.EntityType, quote(f.LabelKey), fieldComment(f))
-		}
+		emitStructFields(s, sib.Fields)
 	}
 	if len(m.Children) > 0 {
 		s.Blank()

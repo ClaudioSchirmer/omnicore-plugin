@@ -53,10 +53,19 @@ translation catalogs are **registration sites** — existing files you APPEND to
 **The decision rule (inverted on purpose): a field that needs ANY validation beyond
 presence/nullability — a format, a length/range bound, a closed set — IS a value object, by
 DEFAULT.** Inline in `BuildRules` stays for exactly two cases: a pure-presence rule
-(required non-empty) and a cross-field invariant (spanning two+ fields). "Only one aggregate
+(required non-empty) and a cross-field invariant **between fields that are not one concept**
+(a rule spanning the entity's own unrelated fields). "Only one aggregate
 carries it today" is NOT a reason to inline — a VO is single-responsibility + one home for
 the rule, not merely reuse. Model it as a VO type in `internal/domain/vos/`, never a bare
 `string`/`int` with the check re-written in `BuildRules`.
+
+**And a value object is NOT limited to one field.** When two or three fields only mean
+something together — `Money{Amount, Currency}`, `Period{From, To}`,
+`Address{Street, City, ZipCode}` — they are ONE value object spanning several columns, not N
+loose fields with a hand-written rule between them. That is the **composite** kind below.
+The old workaround (flatten the fields onto the entity and force the rule into `BuildRules`)
+is the shape to stop writing: the rule leaves the concept it belongs to, and nothing stops a
+second entity from re-deriving it differently.
 
 **A field whose valid values are a FIXED, CLOSED set is ALWAYS an enum value object — no
 exception, no judgment, no `plain`.** The test is mechanical and property-based, NOT a
@@ -70,7 +79,10 @@ country-specific `State`) the dev deliberately signs off in §2's `VO?` column �
 fixed-value set, never the agent's silent default. Full contract + examples:
 `value-objects.html` (read it before generating this layer).
 
-**Which kind — the two VO shapes:**
+**Which kind — the three VO shapes.** Two questions decide, in order: *how many fields does
+the value occupy* (one → raw/enum, several → composite), then *who owns the rule* (the type
+writes it → raw, the framework checks membership → enum).
+
 - a formatted/constrained primitive — Name, Email, Phone, Document/tax-id, ZipCode, a card
   number, a bounded quantity: a **raw value object** (`ValueObject[T]`), owns a bespoke
   `IsValid` (a regex, a length cap, a range).
@@ -81,6 +93,24 @@ fixed-value set, never the agent's silent default. Full contract + examples:
   (EXPLICIT values, never bare `iota`; the zero value is the `Unknown` sentinel, never a
   member) + `Values()` + an `Unknown…Notification`, and writes NO `IsValid` — the framework
   validates membership from the declared set.
+- a value that spans SEVERAL fields — `Money{Amount, Currency}`, `Period{From, To}`,
+  `Address{Street, City, ZipCode}`: a **composite value object**. A plain struct in
+  `vos/` that declares `IsValid` and **no `Value()`** — that absence IS the discriminator, so
+  a composite may never declare one (expose a canonical rendering as `String()` instead). It
+  is where a CROSS-FIELD rule belongs ("the end may not precede the start"), which is the
+  thing a single-scalar VO cannot express and the reason the kind exists. A part may itself
+  be a raw or enum VO (`Money.Currency`) — and the composite validates that part from inside
+  its own `IsValid` (`domain.ValidateEnum(v.Currency, "Currency", ctx)`), because the
+  framework's automatic pass validates the COMPOSITE, never its interior. Nesting a
+  composite inside a composite is not modelling: that is an entity in disguise.
+  - **Mandatory or optional as a WHOLE.** Held by value → the value object is always there,
+    and each part follows its own Go type. Held as a `*Period` → the whole thing is optional:
+    every part column NULL reconstructs as `nil`, any part carrying a value makes it present,
+    and a NULL on a non-pointer part is then a half-written row and a loud error.
+  - **The domain declares nothing extra.** The struct owns its rule and that is all it knows;
+    which columns it occupies is declared ONCE, in the `TableSchema` (see infra.md), and
+    nothing downstream — criteria, audit, the projection, the read DTO, filters, `orderBy`,
+    `?fields=`, OpenAPI, GraphQL, gRPC, the exports — ever learns a composite exists.
 
 **Validation is AUTOMATIC — the part a code-first reflex trips on.** You never call a VO's
 validation by hand. The framework discovers every VO-typed field by reflection and
@@ -93,7 +123,9 @@ own `IsValid` (the canonical shape in `value-objects.html`), and an enum answers
 its unknown-member notification, since `""` is not a member. A required rule beside either
 one makes the caller receive the SAME complaint twice for one empty field — the failure a
 run here actually shipped. Presence on a VO field is the VO's job; `BuildRules` carries
-what the VO cannot see. To opt one out in a mode, `r.IgnoreValueObject("Field")` inside that mode's gate;
+what the VO cannot see. **A COMPOSITE field is discovered and validated by the same pass** —
+nothing registers it, and a `nil` optional composite is skipped entirely, because absence is
+not a violation. To opt one out in a mode, `r.IgnoreValueObject("Field")` inside that mode's gate;
 to force a VO that is not a plain field (computed, in a slice), `r.ValidateValueObject(name,
 vo)`. Both on `*Rules`, root and child alike.
 

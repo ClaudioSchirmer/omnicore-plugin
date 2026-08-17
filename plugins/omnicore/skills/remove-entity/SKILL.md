@@ -95,7 +95,13 @@ never defaulted. Sections (structural — `N/A — <why>`, never deleted):
    other roles (the base STAYS; only this role's slice goes), composed/embedding views
    of other entities (they need their own edit + `Version` decision, listed here),
    integration events consumed elsewhere (consumers break — the dev decides the
-   sequencing). Each one `⚠️ OPEN` until decided. **Two shared-base cases need their
+   sequencing), **and every value object in `internal/domain/vos/` another entity still
+   has as a field type** — a VO is declared by one entity and REUSED by others, which
+   carry no copy of it, so a file that looks orphaned by every measure can be the one type
+   the rest of the project does not compile without. Grep the type name across `internal/`
+   before listing any `vos/` file for deletion; a composite VO is the easiest to get wrong,
+   because the entity that reuses it names the type once and its parts appear as ordinary
+   columns everywhere else. Each one `⚠️ OPEN` until decided. **Two shared-base cases need their
    own verdict, never improvised:** removing the BASE itself while any role lives is
    forbidden by design — but the PHYSICAL guard exists only if the dev's migrations
    declared the role→base FKs `ON DELETE RESTRICT` (the framework asks for it, never

@@ -180,13 +180,44 @@ Three things to get right, because they are the ones that cost a migration later
   different second message: `""` is not a member, so it already answers with the VO's
   unknown-member notification. `check` warns about both, naming the field. Presence on a
   VO-backed field is the value object's job; the rule list carries what the VO cannot see —
-  cross-field invariants, ranges over plain numbers, immutability, state transitions.
+  ranges over plain numbers, immutability, state transitions, and cross-field invariants
+  between fields that are UNRELATED. One between fields that are ONE concept belongs on a
+  composite value object instead (next bullet), and declaring it on the entity is refused.
   Reuse an existing one with `vo: {kind: reuse, ref: <Name>}` — a second copy of a rule is
   a rule that can disagree with itself. Reuse reaches **every** value object the project
   has, including the ones a previous run generated for another entity: two roles over one
   shared base share the base's columns, so they share the value objects on them. If a
   refusal names a type ending in `Notification`, that is the answer to a different
   question — a notification is what a rule RAISES, a value object is what a field IS.
+- **A value object is not limited to one column — ask the "do these mean anything alone?"
+  question too.** `Money{Amount, Currency}`, `Period{From, To}`, `Address{Street, City,
+  ZipCode}`: neither half means anything by itself, which is exactly when several columns
+  are ONE value object. Declare it `kind: composite` with its `parts` and its own `rules`,
+  and place it on the field with `vo: {kind: composite, ref: <Name>}` plus one
+  `parts[]` entry per part saying which column it lives in. Two halves, two owners: the
+  declaration says what the value object IS (for every entity that uses it), the field says
+  where THIS entity stores it. Reading the pair back tells you the whole design.
+  - **A CROSS-FIELD rule belongs there, not in `rules.list`.** "The end may not precede the
+    start" is a rule about the period, not about the entity carrying it — declaring it on
+    the entity is refused, and the message says where it goes. What a composite may check is
+    what its own parts can answer (`required`, `length`, `range`, `comparison`,
+    `requiredIf`); anything needing the old state, another field of the entity or the domain
+    service stays on the entity, where it can see them.
+  - **`as:` renames the part on the OUTSIDE, and generic value objects need it.** The
+    default exposed name is the part's own, which reads right for `Address{Street, City}`
+    (`?street=`, `?city=`) and wrong for `Money` on a salary field, which would expose
+    `?amount=`. Those exposed names are the ONLY names the outside world ever sees — the
+    filter, `?fields=`, `orderBy`, the export column, the JSON field, the projected document
+    — because nothing above the schema learns a composite exists. Renaming one later is a
+    wire break.
+  - **`nullable` on the FIELD and on a PART are different questions.** On the field it means
+    the whole value object may be absent (every part column NULL-able, absence written and
+    read as all-NULL); on a part it means that one part is optional INSIDE a value object
+    that is present. Both reach the DDL, and getting them backwards is a column that refuses
+    a legitimate row.
+  - **Each composite type appears ONCE per entity** — across the root, its facets and its
+    shared base. A second `Money`-shaped concept on one entity is its own type, not a second
+    decomposition; the framework refuses the split at boot and `check` refuses it earlier.
 - **`read.byParams.controls`.** A control is served ONLY if declared, and an undeclared
   one arriving on the wire is answered with a typed 400. That is a contract, not an
   omission.

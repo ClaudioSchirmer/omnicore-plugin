@@ -42,7 +42,7 @@ func TestPlanPruneTellsTheFourCasesApart(t *testing.T) {
 			"internal/a.go":      {Class: Owned, Hash: Hash([]byte("generated"))},
 			"internal/edited.go": {Class: Owned, Hash: Hash([]byte("generated"))},
 			"internal/adopted.go": {Class: Owned, Hash: Hash([]byte("generated")),
-				AdjustedFor: "v0.51.0", Why: "a framework fix"},
+				AdjustedFor: "v0.52.0", Why: "a framework fix"},
 			"internal/gone.go":                       {Class: Owned, Hash: Hash([]byte("generated"))},
 			"internal/still.go":                      {Class: Owned, Hash: Hash([]byte("generated"))},
 			"migrations/sqlite/0001_e_manual.up.sql": {Class: Owned, Hash: "whatever"},

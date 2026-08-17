@@ -463,6 +463,29 @@ func renderCheck(b *strings.Builder, in Input) {
 			"stored.\n\n", strings.Join(raws, ", "))
 	}
 
+	// The two composite decisions a reviewer cannot see from the Go code alone,
+	// and that both cost something real to change afterwards: the names the parts
+	// are EXPOSED under (a wire contract, because nothing above the schema knows
+	// a composite exists) and whether the value object is optional as a whole
+	// (which decides the nullability of every one of its columns).
+	for _, g := range ir.Composites(m.AllOwnerFields()) {
+		names := make([]string, 0, len(g.Parts))
+		for _, p := range g.Parts {
+			names = append(names, "`"+p.JSONName+"`")
+		}
+		presence := "mandatory — it is always there, and each part follows its own type"
+		if g.Optional() {
+			presence = "OPTIONAL as a whole — every one of its columns is NULL-able, because " +
+				"absence is written and read as all-NULL"
+		}
+		fmt.Fprintf(b, "- **Are %s the names you want on the wire?** They are the parts of the "+
+			"composite value object `%s`, and they are the ONLY names the outside world ever "+
+			"sees — the filter, `?fields=`, `orderBy`, the JSON field, the export column and "+
+			"the projected document key — because nothing above the schema learns a composite "+
+			"exists. Renaming one later is a wire break, not a refactor. The value object is "+
+			"%s.\n\n", strings.Join(names, ", "), g.Head.VOName, presence)
+	}
+
 	b.WriteString("These are the decisions the spec made that are expensive to change later. " +
 		"Read them against what you actually meant.\n\n")
 	b.WriteString("| Decision | Value | Why it matters |\n|---|---|---|\n")

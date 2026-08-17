@@ -164,8 +164,18 @@ type Field struct {
 	// sharedbase; sibling:<name> for a facet's field.
 	LivesOn string `yaml:"livesOn"`
 	// VO wraps the field in a value object: reuse of an existing type, or one
-	// declared under valueObjects (raw or enum).
+	// declared under valueObjects (raw, enum or composite).
 	VO *FieldVO `yaml:"vo"`
+	// Parts maps each part of a COMPOSITE value object onto its own column. It
+	// is required for — and only for — a field whose vo.kind is composite: such
+	// a value object declares no Value(), so its value spans several columns and
+	// the single column key has nothing to hold.
+	//
+	// The declaration under valueObjects says what the value object IS (its
+	// parts, their types, its rules); this list says where THIS entity stores
+	// them. That is the same division the framework draws: the domain never
+	// learns it is decomposed, and the schema is the only place that knows.
+	Parts []FieldPart `yaml:"parts"`
 	// Unique declares that the field's value must not repeat, and how that is
 	// enforced and answered.
 	Unique *Unique `yaml:"unique"`
@@ -195,11 +205,53 @@ type Field struct {
 
 type FieldVO struct {
 	// Kind is how the field is wrapped: none | reuse (an existing VO type) |
-	// raw | enum.
+	// raw | enum | composite.
 	Kind string `yaml:"kind"`
 	// Ref is the value-object type name — an entry of valueObjects, or, for
 	// reuse, a type that already exists in the project.
 	Ref string `yaml:"ref"`
+}
+
+// FieldPart places ONE part of a composite value object into a column. It is
+// the spec's form of the framework's Field("<part>", "<column>").As("<name>")
+// chain, and it exists per FIELD rather than per value object because the
+// columns belong to this entity's table while the value object belongs to the
+// domain.
+type FieldPart struct {
+	// Part is the part's name INSIDE the value object — an entry of the
+	// declaration's parts list.
+	Part string `yaml:"part"`
+	// Column is the physical column this part is stored in. Each part gets its
+	// own; the map must be a bijection.
+	Column string `yaml:"column"`
+	// As is the logical name the part is EXPOSED under — to criteria, the audit
+	// timeline, the projected document, the read DTO, filters, orderBy,
+	// ?fields=, OpenAPI, GraphQL and the exports, none of which ever learn a
+	// composite exists.
+	//
+	// It defaults to the part's own name, which reads right when the value
+	// object is specific (Address{Street, City} → street, city) and wrong when
+	// it is generic: Money{Amount, Currency} on a salary field would expose
+	// ?amount=, and an entity carrying both a Money and a Discount would
+	// collide on it with no way out — a part's name belongs to the value object,
+	// not to the consumer.
+	As string `yaml:"as"`
+	// Type is the part's persistable type, from the same closed set a field
+	// draws from. It is required when the value object is REUSED from elsewhere
+	// in the project (the declaration is not in this file to read); when the
+	// value object is declared here it may be omitted, and is cross-checked
+	// against the declaration when given.
+	Type string `yaml:"type"`
+	// Nullable says this part's column may hold NULL. Like type, it is required
+	// only for a reused value object and cross-checked otherwise. A part of an
+	// OPTIONAL composite (the field itself is nullable) is stored NULL-able
+	// regardless: "every part column NULL" is how absence is written and read.
+	Nullable bool `yaml:"nullable"`
+	// Length is the column length, required for a string part.
+	Length int `yaml:"length"`
+	// Example is a plausible sample value in the part's wire format; it is what
+	// the generated OpenAPI examples ("try it out") show.
+	Example string `yaml:"example"`
 }
 
 type Unique struct {
@@ -221,12 +273,37 @@ type ValueObject struct {
 	// Name is the value-object type name that fields reference via vo.ref.
 	Name string `yaml:"name"`
 	// Kind is what the value object is: raw = a validated shape; enum = a
-	// closed set of members.
+	// closed set of members; composite = a value that spans SEVERAL fields.
 	Kind string `yaml:"kind"`
-	// Backing is the underlying representation: string or int.
+	// Backing is the underlying representation: string or int. A composite has
+	// none — its value is its parts, not a scalar — so the key is refused there.
 	Backing string `yaml:"backing"`
 	// Description is one line on what the value object means.
 	Description string `yaml:"description"`
+
+	// composite
+
+	// Parts are the fields a COMPOSITE value object is made of — the reason its
+	// value cannot be one column. Money{Amount, Currency}, Period{From, To},
+	// Address{Street, City, ZipCode}: neither half means anything alone, which
+	// is what makes the concept one value object rather than two fields.
+	//
+	// The parts are the value object's own shape and are declared ONCE here, for
+	// every entity that uses it. Where each part is STORED is per entity, and is
+	// declared on the field (fields[].parts).
+	Parts []VOPart `yaml:"parts"`
+	// Rules are the composite's own invariants — the ones checked inside its
+	// IsValid, over its parts. This is where a CROSS-FIELD rule lives, the thing
+	// a single-scalar value object cannot express and the reason composites
+	// exist: "the end date may not precede the start" is a rule about the value
+	// object, not about the entity carrying it.
+	//
+	// The kinds allowed here are the ones a value object can answer from its own
+	// parts: required, length, range, comparison and requiredIf. Anything that
+	// needs the rest of the entity, the old state or a service belongs to the
+	// entity's own rules (or to rules.manual); a composite that knew about them
+	// would not be a value object.
+	Rules Rules `yaml:"rules"`
 
 	// raw
 
@@ -253,6 +330,36 @@ type ValueObject struct {
 	// DescriptionKeys asks for a translation key per enum member. Refused by
 	// this build — per-value translation keys are not generated.
 	DescriptionKeys bool `yaml:"descriptionKeys"`
+}
+
+// VOPart is one field of a composite value object: its name, its type, and the
+// vocabulary it carries. It is the DOMAIN half of a composite — the column half
+// is FieldPart, on the entity that stores it.
+type VOPart struct {
+	// Name is the part's exported Go field name inside the value object,
+	// PascalCase.
+	Name string `yaml:"name"`
+	// Type is the part's persistable type, from the same closed set a field
+	// draws from: string | int | int64 | float64 | bool | time | id.
+	Type string `yaml:"type"`
+	// Nullable makes the part a POINTER inside the value object — optional even
+	// when the value object itself is present. Period{From, To *time.Time} is
+	// the shape: an open-ended period has a start and no end.
+	Nullable bool `yaml:"nullable"`
+	// VO wraps the part in a value object of its own: reuse of an existing type,
+	// or one declared under valueObjects. A part may be a raw or an enum value
+	// object (Money's Currency is the canonical case) but never another
+	// composite — a value object nested two deep is an entity in disguise.
+	VO *FieldVO `yaml:"vo"`
+	// LabelKey is the translation-catalog key for the part's label — what a
+	// CSV/XLSX column header and a part-level notification resolve through. It
+	// is declared on the VALUE OBJECT rather than on the entity because the
+	// value object owns its vocabulary for every entity that uses it. Derived
+	// when omitted.
+	LabelKey string `yaml:"labelKey"`
+	// Description is one line on what the part means. It becomes the column
+	// comment in the migration, and in the spec's language it seeds the label.
+	Description string `yaml:"description"`
 }
 
 type EnumMember struct {
@@ -787,6 +894,14 @@ func ValueObjectsNamed(s *Spec) []string {
 	}
 	for _, vo := range s.ValueObjects {
 		add(vo.Name)
+		// A composite's part may itself be a value object, and a part that
+		// REUSES one is a dependency exactly like a field that does: the
+		// generated composite does not compile without it.
+		for _, p := range vo.Parts {
+			if p.VO != nil {
+				add(p.VO.Ref)
+			}
+		}
 	}
 	fields := append([]Field{}, s.Fields...)
 	for _, c := range s.Children {

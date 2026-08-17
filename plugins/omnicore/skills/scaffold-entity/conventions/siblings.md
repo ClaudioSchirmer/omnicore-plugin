@@ -25,6 +25,22 @@ sibling of a sibling.
   sibling Go type; the split is purely physical, declared only in the schema.
 - **Strict partition boot check:** every Go field/column belongs to exactly one of
   {owner, its siblings} — overlap panics.
+- **A COMPOSITE value object is never SPLIT across the owner and a facet** — the framework
+  refuses it at the boot checkpoint (the "once rule"): a facet is loaded by its OWN
+  statement, so an absent facet row leaves half the value object zeroed and it reconstructs
+  half-built, and an optional composite's "every part NULL ⇒ absent" verdict cannot be
+  reached by either half alone. The strict partition above is about single fields and does
+  NOT license this — every part of one value object lives in ONE table. And a composite that
+  lives on the facet must be OPTIONAL (`*Money`): the facet is emptied by nilling its
+  fields, and one held by value has no nil to be emptied to.
+- **A COMPOSITE value object is never SPLIT across the owner and a facet** — the framework
+  refuses it at the boot checkpoint (the "once rule"): a facet is loaded by its own
+  statement, so an absent facet row would leave half the value object zeroed and reconstruct
+  it half-built, and an optional composite's "every part NULL ⇒ absent" verdict cannot be
+  reached by either half alone. The strict partition above is about single fields and does
+  NOT license this: put every part of one value object in one table. A composite that lives
+  ON the facet must be OPTIONAL (`*Money`) — the facet is emptied by nilling its fields, and
+  one held by value has no nil to be emptied to.
 - DDL: the sibling table's PK IS the owner's PK (FK, cascade delete), columns nullable,
   **no lifecycle columns** — the owner owns the lifecycle.
 - Commands/requests: the sibling fields are just more pointer fields on the owner's DTOs —

@@ -20,8 +20,23 @@ var (
 	// identifier; a claim is anything else the token carries.
 	AssignedFrom = set("identity-subject", "identity-claim")
 
-	VOKinds            = set("none", "reuse", "raw", "enum")
-	VOBackings         = set("string", "int")
+	// VOKinds is what a field's value object IS. The three declared kinds split
+	// on two questions: who owns the rule (raw writes it, enum gets membership
+	// for free) and how many columns the value occupies — a composite declares
+	// no Value(), so its value spans several and the schema decomposes it.
+	VOKinds = set("none", "reuse", "raw", "enum", "composite")
+	// VODeclaredKinds is what a valueObjects[] entry may declare. `none` and
+	// `reuse` are field-side answers ("no value object" / "one that already
+	// exists"), so they are not declarations.
+	VODeclaredKinds = set("raw", "enum", "composite")
+	VOBackings      = set("string", "int")
+
+	// CompositeRuleKinds is what a COMPOSITE value object's own rules may check.
+	// The set is the rule kinds answerable from the parts alone: a value object
+	// sees its own value and nothing else — no old state, no siblings, no
+	// service, no collection. Anything outside it belongs to the entity's rules,
+	// and a composite that reached for them would not be a value object.
+	CompositeRuleKinds = set("required", "length", "range", "comparison", "requiredIf")
 	UniqueEnforcements = set("service-precheck+constraint", "constraint-only")
 	UniqueScopes       = set("all", "active-only")
 
@@ -161,7 +176,8 @@ func Vocabularies() []Vocabulary {
 		{"fields[].type", FieldTypes,
 			"the persistable set; money is int64 in minor units, never a float."},
 		{"fields[].vo.kind", VOKinds,
-			"enum when the valid values are finite and known; raw when it is a shape."},
+			"enum when the valid values are finite and known; raw when it is a shape; " +
+				"composite when the value needs SEVERAL columns to mean anything."},
 		{"fields[].assignedFrom", AssignedFrom,
 			"the server fills it from the caller's identity, so no write request carries it."},
 		{"fields[].unique.enforce", UniqueEnforcements,
@@ -169,7 +185,13 @@ func Vocabularies() []Vocabulary {
 		{"fields[].unique.scope", UniqueScopes,
 			"all = an archived row keeps holding the value forever; active-only = it frees it."},
 		{"valueObjects[].backing", VOBackings,
-			"what the value object stores underneath."},
+			"what the value object stores underneath; a composite has none — its parts are its value."},
+		{"valueObjects[].kind", VODeclaredKinds,
+			"raw/enum occupy ONE column; composite spans several and the schema decomposes it."},
+		{"valueObjects[].parts[].type", FieldTypes,
+			"a composite's part is persisted like any field, so it draws from the same closed set."},
+		{"valueObjects[].rules.list[].kind", CompositeRuleKinds,
+			"what a composite may check from its own parts; the rest belongs to the entity's rules."},
 		{"children[].ownedBy", ChildOwners,
 			"base = the collection belongs to the shared identity and outlives this role."},
 		{"children[].editStrategy", EditStrategies,
@@ -251,6 +273,14 @@ func RefusedKeys() map[string]string {
 			"declare it on a root field, or use businessIdentity for same-entry detection",
 		"siblings[].fields[].unique": "uniqueness of a facet's field is not generated — " +
 			"declare it on a root field",
+		"valueObjects[].rules.manual": "a composite value object has no hook file of its own; " +
+			"a hand-written invariant over it belongs to the entity's rules.manual, which " +
+			"already sees the composite as a field",
+		"valueObjects[].rules.manual[].actionName": "describe the condition in the description instead",
+		"valueObjects[].rules.list[].actionName":   "a value object validates its value, not a verb",
+		"valueObjects[].rules.list[].scope": "a value object's rule has no verb to gate on — " +
+			"the framework validates every value-object field on every write; a rule that " +
+			"must fire on one verb only belongs to the entity's rules",
 	}
 }
 

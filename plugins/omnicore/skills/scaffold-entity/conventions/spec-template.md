@@ -54,7 +54,7 @@ Generation: <pending>    <!-- omnicore-gen | manual — the dev's answer at gate
     record the decision, never silently `n/a` it.
 
 ## 2. Fields                                 [one row per field — none may be missing]
-| Field | Go type | VO? (reuse/new-raw/new-enum/plain) | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
+| Field | Go type | VO? (reuse/new-raw/new-enum/new-composite/plain) | Nullable | Unique | Lives on (root/base/role/child/sibling) | example: | Description |
 |---|---|---|---|---|---|---|---|
 - Nullable ⇒ pointer. Money = int64 minor units, never float. Exact decimals → `string`
   (float64 rounds); `float64` is fine for non-money numerics. Column types per dialect:
@@ -67,10 +67,20 @@ Generation: <pending>    <!-- omnicore-gen | manual — the dev's answer at gate
   incomplete spec.** Classify each field against the Phase 0b `vos/` inventory: `plain` (only
   a presence rule, or none — NEVER a field whose values are a fixed set: that is ALWAYS an
   enum VO), `reuse vos.X` (an existing VO whose rule fits — REUSE it, never a
-  second copy), `new-raw vos.X` (a bespoke format/length/range → a new raw VO) or
-  `new-enum vos.X` (a closed set/status/kind → a new enum VO). A 1:N child is an AGGREGATE
+  second copy), `new-raw vos.X` (a bespoke format/length/range → a new raw VO),
+  `new-enum vos.X` (a closed set/status/kind → a new enum VO) or
+  `new-composite vos.X` / `reuse vos.X` for a value that spans SEVERAL columns. A 1:N child is an AGGREGATE
   value object → §3 (`internal/domain/aggregatevos/`). This is what lets the dev see, edit and
   APPROVE the VO/reuse decision before any code is generated.
+- **A COMPOSITE occupies ONE row of §2 and several columns.** When two or three fields only
+  mean something together — an amount and its currency, a start and an end, a street/city/zip
+  — write ONE row for the concept, name the VO, and list its parts with their columns and
+  the name each is EXPOSED under (that exposed name is what the filters in §9, the wire and
+  the exports all use). Write the parts as a nested list under the row rather than as
+  separate §2 rows: separate rows are exactly the flattening this kind exists to replace, and
+  a reviewer cannot tell from them that the fields are one value. Say which parts are
+  nullable, and whether the composite AS A WHOLE is optional — they are different questions
+  and both reach the DDL.
 - Id/uuid fields (the PK, every FK, any cross-aggregate reference): the Go type follows
   the PIN's identity contract (SKILL.md boot-traps, "Id typing") — on a typed-identity
   pin write **`domain.ID`** (nullable ⇒ `*domain.ID`); on older pins (≤ v0.29.0) write

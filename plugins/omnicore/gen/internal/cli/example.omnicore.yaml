@@ -85,6 +85,36 @@ fields:
     description: The date the student enrolled.
     labelKey: StudentEnrolledAtField
 
+  # A COMPOSITE value object: ONE concept stored across SEVERAL columns. An
+  # amount without its currency is not a price, which is exactly when two
+  # columns are one value object rather than two fields. The field carries no
+  # `column:` — each PART has one — and `as:` names the part on the OUTSIDE,
+  # because "Amount" belongs to Money rather than to a student. Everything
+  # downstream (the filters below, the DTOs, the exports, the projection) sees
+  # tuitionAmount and tuitionCurrency and never learns a composite exists.
+  - name: Tuition
+    livesOn: root
+    vo: {kind: composite, ref: Money}
+    description: The tuition charged for this enrollment.
+    labelKey: StudentTuitionField
+    parts:
+      - {part: Amount,   column: tuition_amount,   as: TuitionAmount,   example: "185000"}
+      - {part: Currency, column: tuition_currency, as: TuitionCurrency, length: 3, example: USD}
+
+  # The same, made OPTIONAL by nullable: the value object is absent as a whole.
+  # Every part column is then NULL-able, absence is written as all-NULL and read
+  # back the same way, and a PATCH can fill it in but never clear it — the same
+  # limit any nullable field has under a partial body.
+  - name: Leave
+    livesOn: root
+    nullable: true
+    vo: {kind: composite, ref: Period}
+    description: The leave of absence the student is on, when there is one.
+    labelKey: StudentLeaveField
+    parts:
+      - {part: From, column: leave_from, as: LeaveFrom, example: "2026-06-01T00:00:00Z"}
+      - {part: To,   column: leave_to,   as: LeaveTo,   example: "2026-08-01T00:00:00Z"}
+
   # assignedFrom: PERSISTED, but filled by the server from the caller's
   # identity. The field appears in no write DTO — the client has nothing to
   # send, so there is no value to ignore. Written on insert and left alone
@@ -129,6 +159,71 @@ valueObjects:
       - {name: Suspended, value: suspended}
       - {name: Graduated, value: graduated}
       - {name: Dropped,   value: dropped}
+
+  # A COMPOSITE value object: no backing, because its value is its PARTS. It
+  # declares no Value() either — that absence is what tells the framework to
+  # decompose it instead of storing it in one column. Its rules are the ones it
+  # can answer from its own parts; anything needing the entity, the old state or
+  # a service is a rule of the entity and is declared up there.
+  - name: Money
+    kind: composite
+    description: An amount in minor units, together with the currency it is in.
+    parts:
+      - name: Amount
+        type: int64
+        description: The amount, in the currency's minor units — cents, never a float.
+        labelKey: MoneyAmountField
+      # A part may itself be a value object. The enum is validated from INSIDE
+      # Money: the framework's automatic pass validates the composite, never its
+      # interior.
+      - name: Currency
+        type: string
+        vo: {kind: enum, ref: Currency}
+        description: The currency the amount is denominated in.
+        labelKey: MoneyCurrencyField
+    rules:
+      list:
+        - id: amount-not-negative
+          kind: range
+          fields: [Amount]
+          min: 0
+          notification: NegativeAmountNotification
+          echoValue: true
+
+  - name: Currency
+    kind: enum
+    backing: string
+    description: The currencies the institution charges in.
+    unknownNotification: UnknownCurrencyNotification
+    members:
+      - {name: USD, value: USD}
+      - {name: EUR, value: EUR}
+      - {name: BRL, value: BRL}
+
+  # The CROSS-FIELD rule is why composites exist: no single-scalar value object
+  # can say "the end may not precede the start", because neither field can see
+  # the other.
+  - name: Period
+    kind: composite
+    description: A span of time — a start, and an end that may still be open.
+    parts:
+      - name: From
+        type: time
+        description: The day the period starts.
+        labelKey: PeriodFromField
+      - name: To
+        type: time
+        nullable: true
+        description: The day it ends; absent means it is still open.
+        labelKey: PeriodToField
+    rules:
+      list:
+        - id: period-ends-after-it-starts
+          kind: comparison
+          fields: [To]
+          other: From
+          operator: gte
+          notification: PeriodEndsBeforeStartNotification
 
 modes: [display, insert, update, archive, unarchive]
 
@@ -238,6 +333,42 @@ notifications:
       deu: Unbekannter Einschreibestatus.
       ita: Stato di iscrizione sconosciuto.
       nld: Onbekende inschrijvingsstatus.
+
+  - name: NegativeAmountNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: O valor não pode ser negativo.
+      eng: The amount cannot be negative.
+      esp: El importe no puede ser negativo.
+      fra: Le montant ne peut pas être négatif.
+      deu: Der Betrag darf nicht negativ sein.
+      ita: L'importo non può essere negativo.
+      nld: Het bedrag mag niet negatief zijn.
+
+  - name: UnknownCurrencyNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: Moeda desconhecida.
+      eng: Unknown currency.
+      esp: Moneda desconocida.
+      fra: Devise inconnue.
+      deu: Unbekannte Währung.
+      ita: Valuta sconosciuta.
+      nld: Onbekende valuta.
+
+  - name: PeriodEndsBeforeStartNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: A data final não pode ser anterior à inicial.
+      eng: The end date cannot precede the start date.
+      esp: La fecha final no puede ser anterior a la inicial.
+      fra: La date de fin ne peut pas précéder la date de début.
+      deu: Das Enddatum darf nicht vor dem Startdatum liegen.
+      ita: La data di fine non può precedere quella di inizio.
+      nld: De einddatum mag niet vóór de begindatum liggen.
 
   - name: OutsideEnrollmentWindowNotification
     semantic: validation
@@ -365,6 +496,9 @@ read:
         ops: [eq, gte, lte]
       - field: EnrolledAt
         ops: [gte, lte]
+      # A part filters like any other field, under the name `as:` exposed it by.
+      - field: TuitionAmount
+        ops: [eq, gte, lte]
     controls:
       pagination: true
       orderBy: true

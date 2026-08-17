@@ -238,6 +238,8 @@ var specTypes = map[string]reflect.Type{
 	"Managed":       reflect.TypeOf(Managed{}),
 	"Field":         reflect.TypeOf(Field{}),
 	"FieldVO":       reflect.TypeOf(FieldVO{}),
+	"FieldPart":     reflect.TypeOf(FieldPart{}),
+	"VOPart":        reflect.TypeOf(VOPart{}),
 	"Unique":        reflect.TypeOf(Unique{}),
 	"ValueObject":   reflect.TypeOf(ValueObject{}),
 	"EnumMember":    reflect.TypeOf(EnumMember{}),

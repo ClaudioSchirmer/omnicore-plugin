@@ -49,6 +49,11 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 	s.L("import (")
 	s.L("\t%s", quote(fwImport("infra/db/core")))
 	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
+	if schemaNeedsVOs(m) {
+		// A composite is decomposed by TYPE, so the schema names the value object
+		// itself — the one place outside the domain that mentions one.
+		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+	}
 	s.L(")")
 	s.Blank()
 
@@ -91,12 +96,13 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 		var b strings.Builder
 		fmt.Fprintf(&b, "Sibling(core.NewSiblingSchema[*appdomain.%s](%s).",
 			m.Entity.Pascal, quote(sib.Table))
-		for i, f := range sib.Fields {
+		calls := schemaFieldCalls(sib.Fields, "\t\t\t")
+		for i, c := range calls {
 			sep := "."
-			if i == len(sib.Fields)-1 {
+			if i == len(calls)-1 {
 				sep = ")"
 			}
-			fmt.Fprintf(&b, "\n\t\t\tField(%s, %s)%s", quote(f.Name), quote(f.Column), sep)
+			fmt.Fprintf(&b, "\n\t\t\t%s%s", c, sep)
 		}
 		chain = append(chain, call{
 			pre: []string{
@@ -112,8 +118,8 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 	for _, c := range m.RoleChildren() {
 		chain = append(chain, call{text: fmt.Sprintf("Child(%sSchema())", c.Name)})
 	}
-	for _, f := range roleColumns(m) {
-		chain = append(chain, call{text: fmt.Sprintf("Field(%s, %s)", quote(f.Name), quote(f.Column))})
+	for _, c := range schemaFieldCalls(roleColumns(m), "\t\t") {
+		chain = append(chain, call{text: c})
 	}
 	if m.Managed.ArchivedAt != "" {
 		chain = append(chain, call{text: fmt.Sprintf("DeletedAt(%s)", quote(m.Managed.ArchivedAt))})
@@ -353,7 +359,17 @@ func emitBaseSchema(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package schemas")
 	s.Blank()
-	s.L("import %s", quote(fwImport("infra/db/core")))
+	if ir.HasComposites(m.BaseFields()) {
+		// The shared identity is TYPE-LESS, but a composite it decomposes is not:
+		// the value object is named here and resolved against each role's struct
+		// at SharedBase(...) time.
+		s.L("import (")
+		s.L("\t%s", quote(fwImport("infra/db/core")))
+		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+		s.L(")")
+	} else {
+		s.L("import %s", quote(fwImport("infra/db/core")))
+	}
 	s.Blank()
 
 	doc := []string{fmt.Sprintf("%s is the identity %s plays a role over.", m.Base.FuncName, m.Entity.Pascal)}
@@ -373,8 +389,8 @@ func emitBaseSchema(m *ir.Model) (fsplan.File, error) {
 	s.L("\treturn core.NewSharedBaseSchema(%s).", quote(m.Base.Table))
 	s.L("\t\tID(%s).", quote("id"))
 	s.L("\t\tRevision(%s).", quote(m.Managed.Revision))
-	for _, f := range m.BaseFields() {
-		s.L("\t\tField(%s, %s).", quote(f.Name), quote(f.Column))
+	for _, c := range schemaFieldCalls(m.BaseFields(), "\t\t") {
+		s.L("\t\t%s.", c)
 	}
 	s.L("\t\tNaturalID(%s).", quote(naturalColumn(m)))
 	tail := []string{}

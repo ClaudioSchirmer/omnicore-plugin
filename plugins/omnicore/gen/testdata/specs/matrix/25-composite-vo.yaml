@@ -1,0 +1,150 @@
+# Eixo: VALUE OBJECT COMPOSTO em TODA posicao de schema que o framework aceita
+# numa entidade flat — raiz (obrigatorio e opcional), sibling e filho.
+#
+# O framework decompoe por TIPO e cada tipo aparece UMA vez no grafo de schemas
+# da entidade (raiz + siblings + base), entao raiz e sibling usam tipos
+# diferentes. O filho e outro schema, com sua propria regra do "uma vez so".
+specVersion: 1
+entity: Contrato
+plural: Contratos
+language: pt-BR
+storage:
+  kind: flat
+  table: contratos
+  description: Contratos com valores e vigencias.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "CT-9911", description: Codigo do contrato.}
+  # Composto OBRIGATORIO na RAIZ, com uma parte que e ela mesma um enum.
+  - name: Valor
+    livesOn: root
+    vo: {kind: composite, ref: Dinheiro}
+    description: Valor mensal do contrato.
+    parts:
+      - {part: Quantia, column: valor_quantia, as: ValorQuantia, example: "185000"}
+      - {part: Moeda,   column: valor_moeda,   as: ValorMoeda, length: 3, example: BRL}
+  # Composto OPCIONAL na RAIZ, com regra cruzada e uma parte anulavel.
+  - name: Vigencia
+    livesOn: root
+    nullable: true
+    vo: {kind: composite, ref: Periodo}
+    description: Vigencia do contrato, quando ja definida.
+    parts:
+      - {part: De,  column: vigencia_de,  as: VigenciaDe, example: "2026-02-01T00:00:00Z"}
+      - {part: Ate, column: vigencia_ate, as: VigenciaAte, example: "2026-12-31T00:00:00Z"}
+children:
+  # Composto num FILHO: o schema do filho e outro arquivo, e o tipo da entrada
+  # mora em aggregatevos enquanto o value object mora em vos.
+  - name: Parcela
+    plural: Parcelas
+    table: contrato_parcelas
+    parentColumn: contrato_id
+    description: Parcelas do contrato.
+    ownedBy: root
+    editStrategy: atomic-replace
+    businessIdentity: [Numero]
+    fields:
+      - {name: Numero, type: int, column: numero, example: "1", description: Numero da parcela.}
+      - name: Cobranca
+        vo: {kind: composite, ref: Dinheiro}
+        description: Valor cobrado nesta parcela.
+        parts:
+          - {part: Quantia, column: cobranca_quantia, as: CobrancaQuantia, example: "15417"}
+          - {part: Moeda,   column: cobranca_moeda,   as: CobrancaMoeda, length: 3, example: BRL}
+siblings:
+  # Composto num SIBLING: obrigatoriamente OPCIONAL, porque o facet e esvaziado
+  # anulando seus campos e um composto por valor nao tem nil.
+  - name: Reajuste
+    table: contrato_reajustes
+    description: Janela de reajuste, quando houver.
+    attachTo: root
+    fields:
+      - name: JanelaReajuste
+        nullable: true
+        vo: {kind: composite, ref: Janela}
+        description: Janela em que o reajuste pode ser aplicado.
+        parts:
+          - {part: Inicio, column: reajuste_inicio, as: ReajusteInicio, example: "2026-11-01T00:00:00Z"}
+          - {part: Fim,    column: reajuste_fim,    as: ReajusteFim, example: "2026-11-30T00:00:00Z"}
+valueObjects:
+  - name: Dinheiro
+    kind: composite
+    description: Uma quantia em unidades menores junto com a moeda em que esta.
+    parts:
+      - {name: Quantia, type: int64, description: A quantia em centavos., labelKey: DinheiroQuantiaField}
+      - name: Moeda
+        type: string
+        vo: {kind: enum, ref: Moeda}
+        description: A moeda em que a quantia esta expressa.
+        labelKey: DinheiroMoedaField
+    rules:
+      list:
+        - {id: quantia-nao-negativa, kind: range, fields: [Quantia], min: 0, notification: QuantiaNegativaNotification, echoValue: true}
+  - name: Moeda
+    kind: enum
+    backing: string
+    description: Moedas aceitas.
+    unknownNotification: MoedaDesconhecidaNotification
+    members:
+      - {name: BRL, value: BRL}
+      - {name: USD, value: USD}
+  - name: Periodo
+    kind: composite
+    description: Um intervalo com inicio e um fim que pode estar aberto.
+    parts:
+      - {name: De,  type: time, description: Dia em que comeca., labelKey: PeriodoDeField}
+      - {name: Ate, type: time, nullable: true, description: "Dia em que termina; ausente significa em aberto.", labelKey: PeriodoAteField}
+    rules:
+      list:
+        - {id: fim-depois-do-inicio, kind: comparison, fields: [Ate], other: De, operator: gte, notification: FimAntesDoInicioNotification}
+  - name: Janela
+    kind: composite
+    description: Uma janela de datas fechada dos dois lados.
+    parts:
+      - {name: Inicio, type: time, description: Primeiro dia da janela., labelKey: JanelaInicioField}
+      - {name: Fim,    type: time, description: Ultimo dia da janela., labelKey: JanelaFimField}
+    rules:
+      list:
+        - {id: janela-fim-depois-do-inicio, kind: comparison, fields: [Fim], other: Inicio, operator: gte, notification: FimAntesDoInicioNotification}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+delete: {root: soft}
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+notifications:
+  - name: QuantiaNegativaNotification
+    package: vos
+    semantic: validation
+    description: Quantia negativa.
+    text: {ptbr: "A quantia nao pode ser negativa.", eng: "The amount cannot be negative.", esp: "El importe no puede ser negativo.", fra: "Le montant ne peut pas etre negatif.", deu: "Der Betrag darf nicht negativ sein.", ita: "L'importo non puo essere negativo.", nld: "Het bedrag mag niet negatief zijn."}
+  - name: MoedaDesconhecidaNotification
+    package: vos
+    semantic: validation
+    description: Moeda fora do conjunto.
+    text: {ptbr: "Moeda desconhecida.", eng: "Unknown currency.", esp: "Moneda desconocida.", fra: "Devise inconnue.", deu: "Unbekannte Waehrung.", ita: "Valuta sconosciuta.", nld: "Onbekende valuta."}
+  - name: FimAntesDoInicioNotification
+    package: vos
+    semantic: validation
+    description: Fim anterior ao inicio.
+    text: {ptbr: "A data final nao pode ser anterior a inicial.", eng: "The end date cannot precede the start date.", esp: "La fecha final no puede ser anterior a la inicial.", fra: "La date de fin ne peut pas preceder la date de debut.", deu: "Das Enddatum darf nicht vor dem Startdatum liegen.", ita: "La data di fine non puo precedere quella di inizio.", nld: "De einddatum mag niet voor de begindatum liggen."}
+read:
+  backing: relational
+  view: {name: contratos, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, contains]}
+      # Uma parte filtra como qualquer outro campo, pelo nome que `as:` expos.
+      - {field: ValorQuantia, ops: [eq, gte, lte]}
+      - {field: ValorMoeda, ops: [eq, in]}
+      - {field: VigenciaDe, ops: [gte, lte]}
+    controls: {pagination: true, orderBy: true, fields: true, onlyTotal: true, includeArchived: true}
+surfaces:
+  rest: true
+  graphql: {enabled: true, connection: true, mutations: [insert, update, archive, unarchive]}
+  exports: {csv: {delimiter: ";"}, xlsx: {sheet: Contratos}}
+authz:
+  resource: contrato
+  dataAccess: anyone-with-permission
+  permissions: {insert: "contrato:escrever", update: "contrato:escrever", patch: "contrato:escrever", archive: "contrato:arquivar", unarchive: "contrato:arquivar", read: "contrato:ler"}

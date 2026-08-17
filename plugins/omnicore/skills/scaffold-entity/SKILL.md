@@ -171,10 +171,17 @@ Self-configure by reading the project:
   identity view (don't recreate either). This is the "add a role to an existing base" path
   (drives item 1's create-vs-add-role question).
 - **Existing value objects (`internal/domain/vos/`).** Enumerate what the project already
-  has — an `Email`, `ZipCode`, `Document`, a `Relationship` enum — BEFORE modeling any
+  has — an `Email`, `ZipCode`, `Document`, a `Relationship` enum, and any COMPOSITE
+  (`Money`, `Period`, `Address`: a struct declaring `IsValid` and NO `Value()`, whose value
+  spans several columns) — BEFORE modeling any
   field: a field whose rule matches an existing VO REUSES it (import `vos`, no new type),
   never a second copy; a new VO is created only when none fits. This inventory feeds the
   spec's §2 `VO?` column so the reuse-vs-new call is decided per field, visibly.
+  **The reuse test for a composite is asked of a GROUP of fields, not of one:** "an amount
+  and a currency" matches an existing `Money`, and missing that re-flattens a value object
+  the project already has. A composite is the easiest to overlook in this sweep, because
+  every entity reusing it names the type ONCE and its parts read as ordinary columns
+  everywhere else.
 - **A domain map from `scaffold-system`?** Look for `scaffold-system/domain-map.md` —
   whether this run was delegated by that skill or invoked directly in a project that has
   one; if it exists, reading it is MANDATORY, not optional. `Status: APPROVED` and it
@@ -373,7 +380,9 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    the spec YAML, where `check` warns about it by name. What
    must `BuildRules` enforce? Required plain fields, formats (email, document/tax-id) that
    have no VO, numeric
-   ranges (e.g. a grade 0–100), string lengths, cross-field invariants, immutability, state
+   ranges (e.g. a grade 0–100), string lengths, cross-field invariants BETWEEN UNRELATED
+   FIELDS (one between fields that are ONE concept — a start and an end, an amount and its
+   currency — is a COMPOSITE value object instead, `conventions/domain.md`), immutability, state
    transitions, uniqueness-driven checks, and per-group caps (counts/totals per key,
    distinct-key limits — "at most N active X per category", "no more than K categories").
    The domain is where the entity earns its keep —
@@ -665,7 +674,9 @@ Four DISTINCT levels — do not conflate them:
      → a format/regex/length/range check inline in a root's or an AVO's `BuildRules` is
      usually a value object that wasn't extracted (its rule belongs in a `vos/` `IsValid`,
      tested there). For each hit, confirm it is either a signed-off `plain` exception in the
-     spec's §2 `VO?` column or a genuine cross-field rule; otherwise lift it into a VO.
+     spec's §2 `VO?` column or a cross-field rule between fields that are genuinely
+     UNRELATED; otherwise lift it into a VO — and when the fields it spans are one concept,
+     the VO it belongs in is a COMPOSITE, not a rule that stays.
      (`internal/domain/vos/` is EXPECTED to hold regex — that path is not swept.)
    - **SQLite service only** — `grep -rnE '"[a-zA-Z_]+_(key|pkey)"|"PRIMARY"' internal/infra/`
      over the repo `Constraints` maps → must hit NOTHING: SQLite binds a unique/PK violation
@@ -704,7 +715,10 @@ Four DISTINCT levels — do not conflate them:
    - NO schema file is bundled — ONE schema per file (`service-layout.html`): under the
      schema dir, no `.go` file declares more than one schema (`grep -c` the schema-builder
      decl per file — the decl token per `table-schema.html`; ≥2 in one file is a layout
-     violation `go build` won't flag).
+     violation `go build` won't flag). Count the ROOT constructor only: a schema legally
+     contains other builder constructors — a facet's `NewSiblingSchema`, a composite value
+     object's `NewCompositeValueObject` — and counting those reads a correct single-schema
+     file as bundled.
 
    **Level 1 is a PRE-BOOT gate: run every applicable check to a clean pass BEFORE any step
    that BOOTS the service (level 4 QA regression; the separate functional e2e). Every item
@@ -769,7 +783,8 @@ only a genuinely missing docs file does.
 | When generating… | Read section(s) |
 |---|---|
 | rules / notifications / Old / actionName | rules-dsl · old-state · status-mapping |
-| value objects: raw vs enum, auto-validation, EnumByValue, Ignore/Validate | value-objects |
+| value objects: raw vs enum vs **composite** (a value spanning several columns), auto-validation, EnumByValue, Ignore/Validate | value-objects |
+| decomposing a composite value object (`Composite`/`As`, the once rule, absence semantics) | table-schema · value-objects |
 | domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | custom-command-handler · service-to-service |
 | aggregate children / cascade | aggregate-persistence |
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |
@@ -801,7 +816,11 @@ only a genuinely missing docs file does.
   INSERT fails (runtime 500 the build won't catch). The persistable field-type set is
   CLOSED — an unknown Go type (incl. `uuid.UUID` and any NON-VO named type) is a BOOT FAIL
   at `Field(...)` with the fix in the message; a value object over a base type — raw
-  (`type Email string`) or enum (`type Status int`) — is unwrapped and first-class. Wire DTOs/requests stay `string` and convert at
+  (`type Email string`) or enum (`type Status int`) — is unwrapped and first-class. **A
+  COMPOSITE value object is a STRUCT and is first-class too — it just never reaches
+  `Field(...)`:** its value spans several columns, so it is declared with `Composite(...)`
+  (`conventions/infra.md`), and passing one to `Field(...)` is its own boot panic naming the
+  decomposition. "Struct ⇒ boot fail" holds only for a struct that is not a value object. Wire DTOs/requests stay `string` and convert at
   the mappers (`domain.NewID(s)` / `.Value()`). On an older pin (≤ v0.29.0) ids are plain
   `string` and `domain.ID` is never a field type — that divergence, and the exact native id
   column per engine, live in the dialect sheet.
@@ -832,6 +851,19 @@ only a genuinely missing docs file does.
   themselves — emitting it there is noise, not safety.
 - **`ApplyTo` on a SharedBase upsert may run twice** → pure/idempotent.
 - **`domain.Old(e)` is nil on Insert** → guard.
+- **Composite value objects carry six boot panics of their own** — each names its fix, and
+  each is a shape that otherwise looks reasonable: a composite passed to `Field(...)` (it
+  spans several columns — decompose it); a scalar or enum VO passed to
+  `NewCompositeValueObject` (it occupies ONE — `Field(...)`; the discriminator is the
+  presence of `Value()`, so a composite must never declare one); a struct with no `IsValid`
+  (not a value object — decomposition is not a way to flatten an arbitrary struct); TWO
+  fields of one composite type on an entity (resolution is BY TYPE, so there is nothing to
+  pick from — model the second as its own type); one composite split across the root and a
+  sibling or the shared base (**the once rule** — a sibling loads by its own statement, so
+  the value object would reconstruct half-built); and a part tagged `json:"-"` or a
+  composite implementing `json.Marshaler`/`Unmarshaler` (both poison the `Old()` ghost,
+  which is a JSON round-trip — and a custom marshaler is far likelier on a value object than
+  on an entity).
 - **Authorization is not surface-specific** — the same handler + `RequirePermission` at each
   surface's registration unit (route · field · procedure); decide once per operation.
 

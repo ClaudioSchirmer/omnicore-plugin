@@ -40,6 +40,7 @@ const (
 	CapAssignedField  Capability = "server-assigned fields (from the caller's identity)"
 	CapMountedChild   Capability = "a shared identity's collection, exposed on a second role"
 	CapGroupedFact    Capability = "per-group facts, computed by the database (GROUP BY)"
+	CapCompositeVO    Capability = "composite value objects (a value spanning several columns)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -68,6 +69,7 @@ var implemented = map[Capability]bool{
 	CapPerChild:       true,
 	CapAssignedField:  true,
 	CapMountedChild:   true,
+	CapCompositeVO:    true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -86,7 +88,7 @@ func AllCapabilities() []Capability {
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapGeneratedTests, CapPerChild,
-		CapAssignedField, CapMountedChild, CapGroupedFact,
+		CapAssignedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 	}
 }
 
@@ -114,6 +116,12 @@ func CheckCoverage(s *Spec) *Problems {
 	for i, f := range s.Fields {
 		if f.VO != nil && f.VO.Kind != "" && f.VO.Kind != "none" {
 			uses(CapValueObjects, fmt.Sprintf("fields[%d].vo", i), "value-object fields")
+			break
+		}
+	}
+	for i, vo := range s.ValueObjects {
+		if vo.Kind == "composite" {
+			uses(CapCompositeVO, fmt.Sprintf("valueObjects[%d]", i), "composite value objects")
 			break
 		}
 	}

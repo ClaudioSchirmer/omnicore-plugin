@@ -7,6 +7,90 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-08-16
+
+### Added
+
+- **Composite value objects — the generator learned the framework's third VO kind.** A value
+  object may now span several persisted columns (`Money{Amount, Currency}`,
+  `Period{From, To}`, `Address{Street, City, ZipCode}`), and the language says so in two
+  halves that belong to two different owners: `valueObjects[]` with `kind: composite` says
+  what the value object IS — its `parts` and its own `rules` — once, for every entity that
+  uses it; `fields[].parts[]` says where THIS entity stores it, one `{part, column, as}` per
+  part. That split is the framework's own: the domain declares a plain struct that owns its
+  rule and nothing else, and the `TableSchema` is the only place that knows it is stored
+  across N columns.
+  **What it replaces is a workaround, not a gap.** Before, a multi-field concept had to be
+  flattened onto the entity with the rule between the fields hand-written in `BuildRules` —
+  the rule leaving the concept it belongs to, and nothing stopping the next entity from
+  re-deriving it differently. A `comparison` rule between two parts now lives on the value
+  object, where it can be reused and cannot drift.
+  - **The parts EVAPORATE below the schema, and so does the feature.** One spec field expands
+    into one ordinary logical field per part, under the name `as:` exposes it by, and exactly
+    four emitters ever learn otherwise — the aggregate struct (one field of the value
+    object's type, not N), the `TableSchema` (`Composite(core.NewCompositeValueObject[…]…)`),
+    the command mappers (fold the flat wire fields back into the value object) and the
+    valid-entity fixture. The migration, the view, the request and response DTOs, the
+    listing, the filters, `?fields=`, `orderBy`, OpenAPI, GraphQL and the exports read the
+    expanded parts as ordinary fields and never ask — which is the same claim the framework
+    makes, held to by the generator.
+  - **Every schema position the framework accepts is generated and PROVEN, not assumed**: the
+    root, a 1:1 facet, an aggregate child and a shared base. Two golden-matrix cases cover
+    them — one flat entity carrying a mandatory composite, an optional one, one in a child
+    and one in a facet; one shared-base role carrying one on the identity and one on the
+    role. Both generate, gofmt, build, vet and run their generated tests, and the DDL applies
+    on all five engines. Three of the four positions cross a package boundary that looks
+    alike and is not (the entry lives in `aggregatevos`, the value object in `vos`; the
+    shared base is type-less and still names the type), and each needed its own import fix —
+    found by the gate, not by reading.
+  - **The generated tests cover the kind too.** A composite gets an accepts-a-well-formed-value
+    case plus one per declared rule. The positive case is not ceremony: a cross-field rule
+    written against the wrong operand refuses everything and passes every negative test
+    there is.
+  - **Absence is decided as a GROUP, symmetrically.** A composite held as a pointer is
+    optional as a whole: the mapper builds it only when at least one part arrived, and the
+    read side reconstructs `nil` only when every part column is NULL. The DDL follows —
+    every part column of an optional composite is NULL-able, whatever the parts' own shapes,
+    because a single NOT NULL among them makes absence impossible to store.
+  - **`as:` exists because a part's name belongs to the value object, not to the consumer.**
+    The default exposed name is the part's own, which reads right for `Address{Street, City}`
+    and wrong for `Money` on a salary field, which would expose `?amount=` — and a second
+    `Money`-shaped concept on one entity would collide on it with no way out.
+  - Every misuse is refused with the fix named, and the refusals go in both directions: a
+    composite declared as a plain `column:`, a scalar VO given `parts:`, a rule of the ENTITY
+    declared on a value object (it needs the old state or a service, which a value object
+    cannot see), a cross-field rule between two parts left on the entity, one composite split
+    across a table and its facet (the once rule), a mandatory composite on a facet (a facet is
+    emptied by nilling its fields, and a composite held by value has no nil), a composite in
+    `businessIdentity`, a composite named as a filter or a sort (it has no single value — the
+    message offers its parts by name). `check` catches each of them before the framework's
+    boot panic does.
+  - **`prune` and reuse learned the kind at the same time.** The value-object inventory read
+    `Value()` to tell a value object from a notification — and a composite declares none, by
+    definition. Left alone, a generated composite would have been invisible: `vo: {kind:
+    reuse}` would refuse the type as naming nothing, and `prune` would read its file as an
+    orphan and offer to delete a type another entity depends on. The inventory now accepts
+    `IsValid` as the second half of the test.
+
+### Changed
+
+- **⚠️ The generator targets framework v0.52.0** (was v0.51.0), and the golden host it is
+  proven against pins that line. Composite value objects are a v0.52.0 capability — the
+  emitted `Composite(...)` chain does not exist before it — so this is the release to take
+  together with the framework's. A project still on v0.51.x reads as `Behind` and is refused
+  by default (`--force-unsupported` overrides, and the compiler is the oracle).
+- **The skills carry the third kind now, everywhere the second one was taught.** The
+  scaffold-entity conventions gained it in all six places a hand-written entity meets it —
+  the VO taxonomy and the "which kind" decision (`domain.md`), the schema decomposition with
+  its five boot panics (`infra.md`), the fold/unfold seam in the command mappers
+  (`application.md`), the flat-wire contract (`web.md`), the per-part column nullability
+  (`migrations.md`), and what a composite's tests owe (`tests.md`) — plus the §2 spec row that
+  keeps a reviewer from seeing N loose fields where the model has one value. `doctor` can name
+  the composite boot panics, `evolve-entity` says that renaming an exposed part is a wire
+  break while ADOPTING a composite over existing flat columns costs no DDL and no rebuild,
+  and `remove-entity` now checks `vos/` for types another entity still reuses before listing
+  any of them for deletion — the failure `prune` already had a guard for, on the by-hand path.
+
 ## [0.19.0] — 2026-08-16
 
 ### Added

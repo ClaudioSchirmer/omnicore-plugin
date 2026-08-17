@@ -262,6 +262,12 @@ func runGo(dir string, args ...string) (string, error) {
 var (
 	voTypeRe  = regexp.MustCompile(`(?m)^type\s+([A-Z][A-Za-z0-9]*)\s`)
 	voValueRe = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*Value\s*\(`)
+	// A COMPOSITE value object declares no Value() — that absence is precisely
+	// what makes it one — so IsValid is the second half of the test. Without it
+	// every generated composite was invisible to the inventory: a field trying to
+	// reuse one was refused as naming nothing, and `prune` read its file as an
+	// orphan and offered to delete a type another spec still depended on.
+	voIsValidRe = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*IsValid\s*\(`)
 	// Hand-written files may group declarations — `type ( CPF string; UF string )`
 	// — which the anchored form above never matches, so those types vanished
 	// from the inventory and a legitimate reuse was refused as unknown.
@@ -302,10 +308,16 @@ func discoverVOs(root string) ([]string, map[string]string) {
 		if err != nil {
 			continue
 		}
-		// A file may declare several types; only those carrying Value() count.
-		hasValue := map[string]bool{}
+		// A file may declare several types; only those the framework would treat
+		// as a value object count — one that yields a scalar (Value) or one that
+		// owns a rule over several fields (IsValid). A notification has neither,
+		// which is what keeps this an inventory of value objects.
+		isVO := map[string]bool{}
 		for _, m := range voValueRe.FindAllSubmatch(b, -1) {
-			hasValue[string(m[1])] = true
+			isVO[string(m[1])] = true
+		}
+		for _, m := range voIsValidRe.FindAllSubmatch(b, -1) {
+			isVO[string(m[1])] = true
 		}
 		by := ""
 		if bytes.Contains(b, []byte(generatedBanner)) {
@@ -323,7 +335,7 @@ func discoverVOs(root string) ([]string, map[string]string) {
 			}
 		}
 		for _, name := range declared {
-			if !hasValue[name] {
+			if !isVO[name] {
 				continue
 			}
 			if _, dup := owner[name]; dup {

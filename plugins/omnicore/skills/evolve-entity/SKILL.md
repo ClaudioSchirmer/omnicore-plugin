@@ -95,7 +95,9 @@ BEFORE any doc is read. Never bump inline.
 ## Phase 0b — Discover the CURRENT shape (read, don't ask)
 
 Build the entity's map before proposing anything: domain type + `BuildRules` + modes ·
-TableSchema (and whether flat / sharedbase / children / siblings) · command + query DTOs
+TableSchema (and whether flat / sharedbase / children / siblings, **and any
+`Composite(...)` decomposition — the exposed part names it declares are a wire contract,
+and the field it decomposes appears on no surface under its own name**) · command + query DTOs
 and mappers · routes/surfaces (REST, GraphQL, gRPC) · views it feeds (own, SharedBase,
 Composed — including views of OTHER entities that embed this one) · translations keys ·
 migrations history · tests. Mirror the project's local flavor in everything you generate.
@@ -336,6 +338,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 |---|---|
 | field add/remove/rename (Go ↔ column, id shapes) | table-schema · migrations |
 | value objects: add/rename a VO field, a new enum, place in vos/ or aggregatevos/ | value-objects · service-layout |
+| a value object spanning SEVERAL columns (composite): its decomposition, the exposed part names, the once rule. **Renaming an exposed part is a WIRE break, not a refactor** — that name is the filter, the `?fields=` key, the JSON field, the export column and the projected document key, because nothing above the schema knows a composite exists. And **turning existing flat fields into a composite costs no DDL and no view rebuild**: keep the same columns and pin every exposed name with `.As(...)`, and every name the outside world ever saw is preserved | table-schema · value-objects |
 | unique field add/remove → `Constraints` binding · per-engine id/decimal/boolean columns | `${CLAUDE_PLUGIN_ROOT}/shared/dialects/<dialect>.md` (read every TARGET dialect's — targets = `relational.dialect` across ALL `microservice.*.yaml`; the ALTER pair lands in EVERY target's `migrations/<dialect>/` at the same number) |
 | rules / notifications / actionName (**a new rule joins the EXISTING clause for its verb** — one `IfInsert`/`IfInsertOrUpdate` block holds every rule that runs on it; adding a second gate beside it for one new rule is the readability failure `conventions/domain.md` names, and it re-runs the verb check per block. **A rule a VALUE OBJECT already carries is not a rule to add** — VO fields are validated automatically on every write, presence included: a string-backed raw VO answers an empty value with `RequiredFieldNotification`, an enum with its unknown-member one, so a `required` beside either makes the caller read the same complaint twice) | rules-dsl · value-objects · old-state · status-mapping |
 | children / siblings / cascade — AND any NEW table's shape rules (child FK + covering index; sibling shares the owner's PK, no lifecycle columns; role UNIQUE FK; revision column on entity/base tables only) | aggregate-persistence · table-schema · migrations · scaffold-entity's `conventions/{aggregate-children,siblings,migrations}.md` |

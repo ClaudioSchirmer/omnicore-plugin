@@ -91,9 +91,7 @@ func emitAVO(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.Doc(doc...)
 	s.L("type %s struct {", c.Name)
 	s.L("\tdomain.Managed")
-	for _, f := range c.Fields {
-		s.L("\t%s %s `labelKey:%s`%s", f.Name, f.EntityType, quote(f.LabelKey), fieldComment(f))
-	}
+	emitStructFields(s, c.Fields)
 	s.L("}")
 	s.Blank()
 
@@ -263,6 +261,12 @@ func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("import (")
 	s.L("\t%s", quote(fwImport("infra/db/core")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
+	if childSchemaNeedsVOs(m, c) {
+		// An entry may carry a composite value object too, and a composite is
+		// decomposed BY TYPE — so the child's schema names the value object, which
+		// lives in vos even though the entry itself lives in aggregatevos.
+		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+	}
 	s.L(")")
 	s.Blank()
 
@@ -280,11 +284,8 @@ func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("\treturn core.NewTableSchema[aggregatevos.%s](%s).", c.Name, quote(c.Table))
 	s.L("\t\tID(%s).", quote("id"))
 	s.L("\t\tParentID(%s).", quote(parentColumn(c)))
-	for _, f := range c.Fields {
-		if f.Facet != "" {
-			continue // declared inside its own Sibling block below
-		}
-		s.L("\t\tField(%s, %s).", quote(f.Name), quote(f.Column))
+	for _, call := range schemaFieldCalls(ownColumnsOf(c), "\t\t") {
+		s.L("\t\t%s.", call)
 	}
 	// A facet declared on this child is built over the CHILD's type: the
 	// framework refuses a sibling whose type is not its owner's, because a facet
@@ -292,12 +293,13 @@ func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	for _, sib := range m.SiblingsOn(c.Name) {
 		s.L("\t\t// The %s facet of one %s: its own table, sharing that row's key.", sib.Name, c.Name)
 		s.L("\t\tSibling(core.NewSiblingSchema[aggregatevos.%s](%s).", c.Name, quote(sib.Table))
-		for i, f := range sib.Fields {
+		calls := schemaFieldCalls(sib.Fields, "\t\t\t")
+		for i, call := range calls {
 			sep := "."
-			if i == len(sib.Fields)-1 {
+			if i == len(calls)-1 {
 				sep = ")."
 			}
-			s.L("\t\t\tField(%s, %s)%s", quote(f.Name), quote(f.Column), sep)
+			s.L("\t\t\t%s%s", call, sep)
 		}
 	}
 	tail := childTail(m, c)
@@ -362,11 +364,22 @@ func emitChildInput(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.Blank()
 
 	s.L("func (i %s) To%s() aggregatevos.%s {", c.InputType, c.Name, c.Name)
-	s.L("\treturn aggregatevos.%s{", c.Name)
-	for _, f := range c.Fields {
+	plain, groups := ir.PlainAndComposites(c.Fields)
+	head, tail := "\treturn aggregatevos."+c.Name+"{", "\t}"
+	if len(groups) > 0 {
+		head = "\tout := aggregatevos." + c.Name + "{"
+	}
+	s.L("%s", head)
+	for _, f := range plain {
 		s.L("\t\t%s: %s,", f.Name, entityValue(f, "i."+f.Name))
 	}
-	s.L("\t}")
+	s.L("%s", tail)
+	if len(groups) > 0 {
+		for _, g := range groups {
+			emitCompositeFold(s, g, "\t", "out."+g.Owner(), "i")
+		}
+		s.L("\treturn out")
+	}
 	s.L("}")
 	s.Blank()
 	s.L("var _ = time.Time{}")
@@ -509,12 +522,23 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 			"this one exists because a per-entry verb answers with the entry it "+
 			"touched, not with everything around it.")
 	s.L("func projectOne%s(item aggregatevos.%s) %sResult {", c.Name, c.Name, c.Name)
-	s.L("\treturn %sResult{", c.Name)
+	plain, groups := ir.PlainAndComposites(c.Fields)
+	head, tail := "\treturn "+c.Name+"Result{", "\t}"
+	if len(groups) > 0 {
+		head = "\tout := " + c.Name + "Result{"
+	}
+	s.L("%s", head)
 	s.L("\t\tID: item.GetID(),")
-	for _, f := range c.Fields {
+	for _, f := range plain {
 		s.L("\t\t%s: %s,", f.Name, wireValue(f, "item"))
 	}
-	s.L("\t}")
+	s.L("%s", tail)
+	if len(groups) > 0 {
+		for _, g := range groups {
+			emitCompositeUnfold(s, g, "\t", "out", "item")
+		}
+		s.L("\treturn out")
+	}
 	s.L("}")
 
 	return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",

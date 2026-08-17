@@ -29,7 +29,14 @@ exercised means the measurement is wrong, not that the test is missing.
   `IsValid` at all (`EnumValueObject` declares members; the FRAMEWORK validates
   membership — `value-objects.html`): assert its `Values()` set and
   `UnknownNotification()`, and prove out-of-set rejection through the entity's
-  validation path. Format/length/range/closed-set coverage lives HERE now — NOT in the
+  validation path. A **composite VO** owns an `IsValid` like a raw one and is tested the
+  same way, with the pair that a cross-field rule makes essential: one case proving a
+  well-formed value is ACCEPTED, and one per declared rule proving it is refused. The
+  positive case is not ceremony — a cross-field rule reading its two operands the wrong way
+  round refuses everything and passes every negative test there is. Cover the parts that are
+  themselves value objects too (an out-of-set enum part must be refused from INSIDE the
+  composite: the framework's automatic pass validates the composite, never its interior).
+  Format/length/range/closed-set coverage lives HERE now — NOT in the
   entity's `BuildRules`.
 - **Domain (the coverage driver):** the happy path + EVERY `BuildRules` branch — each
   required plain field, cross-field invariants, optional fields passing as nil, transition

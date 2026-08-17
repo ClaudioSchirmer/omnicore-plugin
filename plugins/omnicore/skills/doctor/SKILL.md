@@ -189,6 +189,7 @@ for concepts this table doesn't list.
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
 | parked events / failed ripples / `omnicore_projection_failures` / `ProjectionHealth` / `parkedRetry`·`reconcile` knobs | views · auto-query-handlers · yaml-reference |
 | declaration boot panics (undeclared field, reserved names, depth, `Modes()`⟺archive column, index guards — the write/read schema guard families) | table-schema · views |
+| a boot panic naming a value object: a multi-field one mapped with `Field(...)` (decompose it with `Composite(...)`), a scalar/enum one passed to `NewCompositeValueObject` (it occupies ONE column — `Field(...)`), a struct with no `IsValid` (not a value object at all), two fields of one composite type on an entity (resolution is BY TYPE), one composite split across root and a sibling (the once rule), a `json:"-"` part or a value object with a custom (un)marshaler (both poison the `Old()` ghost) | table-schema · value-objects · old-state |
 | 401/403 that are NOT probes (JWKS unreachable, expired vs invalid, revocation) | auth-middleware |
 | HTTP-layer statuses with no handler involved (413 body limit, 408 read timeout, 504 request deadline, idle-close) | app-context · yaml-reference |
 | outbound call hangs/failures (breaker open, retry budget, TLS/HMAC — httpclient AND grpcclient) | httpclient · grpc |
