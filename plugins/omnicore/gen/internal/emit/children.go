@@ -430,11 +430,11 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 			"stored.")
 	s.L("type Add%sCommand struct {", op)
 	s.L("\tpipeline.CommandWithBodyIDBase")
-	s.L("\t%s dtos.%s", c.Name, c.InputType)
+	emitChildFieldsFlat(s, c)
 	s.L("}")
 	s.Blank()
 	s.L("func (cmd *Add%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
-	s.L("\te.%s(cmd.%s.To%s())", c.AddMethod, c.Name, c.Name)
+	s.L("\te.%s(%s)", c.AddMethod, childInputFold(c, "cmd", "\t"))
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
@@ -461,11 +461,11 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("type Change%sCommand struct {", op)
 	s.L("\tpipeline.CommandWithBodyIDBase")
 	s.L("\t%sID string", c.Name)
-	s.L("\t%s dtos.%s", c.Name, c.InputType)
+	emitChildFieldsFlat(s, c)
 	s.L("}")
 	s.Blank()
 	s.L("func (cmd *Change%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
-	s.L("\te.%s(cmd.%sID, cmd.%s.To%s())", c.ChangeMethod, c.Name, c.Name, c.Name)
+	s.L("\te.%s(cmd.%sID, %s)", c.ChangeMethod, c.Name, childInputFold(c, "cmd", "\t"))
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
@@ -571,6 +571,8 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.Blank()
 	s.L("import (")
 	s.L("\t%s", quote(fwImport("domain")))
+	s.L("\tfwrequests %s", quote(fwImport("web/requests")))
+	s.L("\tfwresponses %s", quote(fwImport("web/responses")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
 	s.L(")")
 	s.Blank()
@@ -582,12 +584,11 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		"The owner comes from the path; the body is the entry, in the same shape it "+
 			"has inside the root's own body.")
 	s.L("type Add%sRequest struct {", op)
+	s.L("\t%s", autoRequestEmbed)
 	s.L("\t%sRequest", c.Name)
 	s.L("}")
 	s.Blank()
-	s.L("func (r Add%sRequest) ToCommand() *commands.Add%sCommand {", op, op)
-	s.L("\treturn &commands.Add%sCommand{%s: r.%sRequest.ToInput()}", op, c.Name, c.Name)
-	s.L("}")
+	emitAutoToCommand(s, "Add"+op+"Request", "Add"+op+"Command")
 	s.Blank()
 	emitPerChildResponse(s, m, c, "Add")
 
@@ -599,16 +600,12 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 			"replacement — a field left out is not \"unchanged\", it is a field the "+
 			"caller did not send.", idParam))
 	s.L("type Change%sRequest struct {", op)
+	s.L("\t%s", autoRequestEmbed)
 	s.L("\t%sID string `path:%s`", c.Name, quote(idParam))
 	s.L("\t%sRequest", c.Name)
 	s.L("}")
 	s.Blank()
-	s.L("func (r Change%sRequest) ToCommand() *commands.Change%sCommand {", op, op)
-	s.L("\treturn &commands.Change%sCommand{", op)
-	s.L("\t\t%sID: r.%sID,", c.Name, c.Name)
-	s.L("\t\t%s: r.%sRequest.ToInput(),", c.Name, c.Name)
-	s.L("\t}")
-	s.L("}")
+	emitAutoToCommand(s, "Change"+op+"Request", "Change"+op+"Command")
 	s.Blank()
 	emitPerChildResponse(s, m, c, "Change")
 
@@ -618,22 +615,21 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		"",
 		"There is no body: everything the verb needs is in the path.")
 	s.L("type Remove%sRequest struct {", op)
+	s.L("\t%s", autoRequestEmbed)
+	s.Blank()
 	s.L("\t%sID string `path:%s`", c.Name, quote(idParam))
 	s.L("}")
 	s.Blank()
-	s.L("func (r Remove%sRequest) ToCommand() *commands.Remove%sCommand {", op, op)
-	s.L("\treturn &commands.Remove%sCommand{%sID: r.%sID}", op, c.Name, c.Name)
-	s.L("}")
+	emitAutoToCommand(s, "Remove"+op+"Request", "Remove"+op+"Command")
 	s.Blank()
 	s.Doc(fmt.Sprintf("Remove%sResponse answers with the owner alone.", op))
 	s.L("type Remove%sResponse struct {", op)
+	s.L("\t%s", autoResponseEmbed)
+	s.Blank()
 	s.L("\t%sID domain.ID `json:%s`", entity, quote(m.Entity.Camel+"Id"))
 	s.L("}")
 	s.Blank()
-	s.L("func (Remove%sResponse) FromResult(r commands.Remove%sResult) Remove%sResponse {",
-		op, op, op)
-	s.L("\treturn Remove%sResponse{%sID: r.%sID}", op, entity, entity)
-	s.L("}")
+	emitAutoFromResult(s, "Remove"+op+"Response", "commands.Remove"+op+"Result")
 
 	return goFile("internal/web/requests/"+naming.Snake(op)+"_requests.go",
 		fsplan.Owned, fmt.Sprintf("the per-entry wire types for %s", c.Table), s)
@@ -643,21 +639,45 @@ func emitPerChildResponse(s *src, m *ir.Model, c ir.Child, verb string) {
 	entity := m.Entity.Pascal
 	s.Doc(fmt.Sprintf("%s%sResponse is the owner's id plus the entry as stored.", verb, c.OpBase))
 	s.L("type %s%sResponse struct {", verb, c.OpBase)
+	s.L("\t%s", autoResponseEmbed)
+	s.Blank()
 	s.L("\t%sID domain.ID `json:%s`", entity, quote(m.Entity.Camel+"Id"))
 	s.L("\t%s %sResponse `json:%s`", c.Name, c.Name, quote(naming.Camel(c.Name)))
 	s.L("}")
 	s.Blank()
-	s.L("func (%s%sResponse) FromResult(r commands.%s%sResult) %s%sResponse {",
-		verb, c.OpBase, verb, c.OpBase, verb, c.OpBase)
-	s.L("\treturn %s%sResponse{", verb, c.OpBase)
-	s.L("\t\t%sID: r.%sID,", entity, entity)
-	s.L("\t\t%s: %sResponse{", c.Name, c.Name)
-	s.L("\t\t\tID: r.%s.ID,", c.Name)
-	for _, f := range c.Fields {
-		s.L("\t\t\t%s: r.%s.%s,", f.Name, c.Name, f.Name)
-	}
-	s.L("\t\t},")
-	s.L("\t}")
-	s.L("}")
+	emitAutoFromResult(s, verb+c.OpBase+"Response", "commands."+verb+c.OpBase+"Result")
 	s.Blank()
+}
+
+// emitChildFieldsFlat declares the entry's writable fields directly on a
+// per-entry command.
+//
+// FLAT, not one nested input field, and the reason is the command's own
+// responsibility: this verb handles exactly ONE entry, so the entry IS the
+// body. (The root's insert carries `[]dtos.<C>Input` for the opposite reason —
+// it handles MANY.) Flat is also what lets the Request build this command
+// through the framework's generic mapper: the wire body is flat too, so the
+// two shapes align field for field and no hand-written seat is left over.
+func emitChildFieldsFlat(s *src, c ir.Child) {
+	for _, f := range c.Fields {
+		s.L("\t%s %s", f.Name, f.GoType)
+	}
+}
+
+// childInputLiteral renders the entry on its way into the domain.
+//
+// It goes through dtos.<C>Input rather than building the aggregate value
+// object here, and that is the whole point of the indirection: the input type
+// is where a value object is REASSEMBLED — an enum cast, a composite folded
+// from its parts — and that reassembly must exist in exactly one place. What
+// this literal does is a flat copy of scalars, which is the part that can be
+// repeated without anything drifting.
+func childInputFold(c ir.Child, recv, indent string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "dtos.%s{\n", c.InputType)
+	for _, f := range c.Fields {
+		fmt.Fprintf(&b, "%s\t%s: %s.%s,\n", indent, f.Name, recv, f.Name)
+	}
+	fmt.Fprintf(&b, "%s}.To%s()", indent, c.Name)
+	return b.String()
 }

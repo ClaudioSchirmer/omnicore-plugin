@@ -31,6 +31,15 @@ session's PATH. Always point it at the service:
 
     omnicore-gen <command> -project <service-dir>
 
+**Pass `-project` explicitly, every time, and read back the `Project:` line the command
+prints.** The flag defaults to `.` and the generator walks UP to the nearest `go.mod`,
+treating that module as the service — so an omitted flag does not fail, it targets
+whatever module the working directory happens to sit in. Every command answers with
+`Project: <module> (<abs path>)` before anything else; that line is the only place the
+target appears, because every file path it lists afterwards is relative. Confirm it
+before a write, and ask the dev for the directory rather than inferring it from the
+shell. (`${CLAUDE_PLUGIN_ROOT}/skills/omnicore-gen/SKILL.md` owns the full rationale.)
+
 It builds itself from source on first use, so a **Go toolchain on PATH** is the only
 external requirement. `needs a Go toolchain` or `this plugin install is incomplete` means
 the generator is unavailable — say so plainly rather than approximating it by hand.

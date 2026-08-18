@@ -306,6 +306,25 @@ func labelledFields(m *ir.Model) []ir.Field {
 	// composite AS A WHOLE: the aggregate declares a field for it, a rule can
 	// attach a notification to that field, and its key belongs to no part.
 	add(compositeOwnerLabels(m))
+	// A COMPUTED read field has no column, so it came through none of the sets
+	// above — but it is a column of the tabular export like any other, and its
+	// header is looked up by exactly the same key. Leaving it out is the same
+	// defect the collections had: the export succeeds and the heading is an
+	// internal name.
+	add(computedLabels(m))
+	return out
+}
+
+// computedLabels renders each computed read field as the labelled field the
+// catalog needs. Only the two attributes the catalog reads are set — nothing
+// below this line has a column to speak of.
+func computedLabels(m *ir.Model) []ir.Field {
+	var out []ir.Field
+	for _, c := range m.Read.Computed {
+		out = append(out, ir.Field{
+			Name: c.Name, LabelKey: c.LabelKey, Description: c.Description,
+		})
+	}
 	return out
 }
 

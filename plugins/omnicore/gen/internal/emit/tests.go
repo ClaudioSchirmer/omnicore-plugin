@@ -1330,6 +1330,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\tfwqueries %s", quote(fwImport("application/queries")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
+	s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
 	s.L(")")
 	s.Blank()
 	s.L("var _ = time.Now")
@@ -1409,17 +1410,17 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 			"It carries the controls the spec declared for a single read; one dropped "+
 				"here is a parameter the caller sends and the read ignores.")
 		s.L("func TestFind%sByIDRequestBuildsItsQuery(t *testing.T) {", m.Entity.Pascal)
-		s.L("\tif q := (Find%sByIDRequest{}).ToQuery(); q == nil {", m.Entity.Pascal)
+		s.L("\tif q := (Find%sByIDRequest{}).ToQuery(fwqueries.ReadCriteria{}); q == nil {", m.Entity.Pascal)
 		s.L("\t\tt.Fatal(\"the by-id request produced no query\")")
 		s.L("\t}")
-		if m.Read.Controls.IncludeArchived {
-			s.L("\t// The control SENT, not merely absent: the two paths through the")
-			s.L("\t// mapper are what the pointer exists to tell apart.")
-			s.L("\tyes := true")
-			s.L("\tif q := (Find%sByIDRequest{IncludeArchived: &yes}).ToQuery(); q == nil || !q.IncludeArchived {", m.Entity.Pascal)
-			s.L("\t\tt.Error(\"includeArchived was sent and did not reach the query\")")
-			s.L("\t}")
-		}
+		s.L("\t// The criteria travels WHOLE. A by-id read takes it the same way the")
+		s.L("\t// paged one does — the wrapper parses the wire, the mapper carries it")
+		s.L("\t// through — so a mapper that rebuilt a fresh criteria instead would")
+		s.L("\t// drop whatever the wire said, silently and on every request.")
+		s.L("\tq := (Find%sByIDRequest{}).ToQuery(fwqueries.ReadCriteria{IncludeArchived: true})", m.Entity.Pascal)
+		s.L("\tif q == nil || !q.Criteria.IncludeArchived {")
+		s.L("\t\tt.Error(\"the parsed criteria did not reach the query\")")
+		s.L("\t}")
 		s.L("}")
 		s.Blank()
 	}
@@ -1438,6 +1439,8 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 		s.L("}")
 		s.Blank()
 	}
+
+	emitReadMappingTests(s, m)
 
 	emitPerChildRequestTests(s, m)
 
@@ -1496,7 +1499,9 @@ func emitQueryTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\t}")
 	}
 	s.L("}")
+	s.Blank()
 
+	emitFromQueryResultTest(s, m)
 	emitScopeIsForcedTest(s, m)
 
 	if m.Read.ByParams && len(m.Read.FieldRestrict) > 0 {
@@ -1865,7 +1870,7 @@ func emitAddChildOpTest(s *src, m *ir.Model, c ir.Child) {
 	s.L("func TestAdd%sCommand_AppliesAndProjects(t *testing.T) {", c.OpBase)
 	s.L("\tctx := &configuration.AppContext{}")
 	ownerFixture(s, m)
-	s.L("\tcmd := &Add%sCommand{%s: %s}", c.OpBase, c.Name, childInputLiteral(m, c, false))
+	s.L("\tcmd := &Add%sCommand{%s}", c.OpBase, childFieldsInline(c))
 	s.L("\tif err := cmd.ApplyTo(ctx, e); err != nil {")
 	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
 	s.L("\t}")
@@ -1903,7 +1908,7 @@ func emitChangeChildOpTest(s *src, m *ir.Model, c ir.Child) {
 	s.Blank()
 	s.L("\tcmd := &Change%sCommand{", c.OpBase)
 	s.L("\t\t%sID: %s,", c.Name, quote(seededEntryID))
-	s.L("\t\t%s: %s,", c.Name, childInputLiteral(m, c, false))
+	s.L("\t\t%s,", childFieldsInline(c))
 	s.L("\t}")
 	s.L("\tif err := cmd.ApplyTo(ctx, e); err != nil {")
 	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
@@ -1924,9 +1929,8 @@ func emitChangeChildOpTest(s *src, m *ir.Model, c ir.Child) {
 	s.L("func TestChange%sCommand_UnknownIDProjectsNothing(t *testing.T) {", c.OpBase)
 	s.L("\tctx := &configuration.AppContext{}")
 	ownerFixture(s, m)
-	s.L("\tcmd := &Change%sCommand{%sID: %s, %s: %s}",
-		c.OpBase, c.Name, quote("019ffd00-0000-7000-8000-0000000000ff"), c.Name,
-		childInputLiteral(m, c, true))
+	s.L("\tcmd := &Change%sCommand{%sID: %s}",
+		c.OpBase, c.Name, quote("019ffd00-0000-7000-8000-0000000000ff"))
 	s.L("\tout, err := cmd.FromEntity(ctx, e)")
 	s.L("\tif err != nil {")
 	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
@@ -2243,7 +2247,7 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 		s.L("\t}}")
 		s.L("\tcmd := r.ToCommand()")
 		for _, f := range fields {
-			s.L("\tif cmd.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+			s.L("\tif cmd.%s != %s {", f.Name, wireSample(f))
 			s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
 			s.L("\t}")
 		}
@@ -2270,7 +2274,7 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 		s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be replaced\")")
 		s.L("\t}")
 		for _, f := range fields {
-			s.L("\tif cmd.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+			s.L("\tif cmd.%s != %s {", f.Name, wireSample(f))
 			s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
 			s.L("\t}")
 		}
@@ -2357,4 +2361,21 @@ func firstPlain(fields []ir.Field) *ir.Field {
 		}
 	}
 	return nil
+}
+
+// childFieldsInline renders an entry's fields as they sit on a per-entry
+// command — flat, one key per field, no wrapper.
+//
+// The nested spelling it replaced (`{Parcela: dtos.ParcelaInput{…}}`) belonged
+// to a command that carried the entry as one value. A per-entry verb handles
+// exactly ONE entry, so the entry IS the command.
+func childFieldsInline(c ir.Child) string {
+	var b strings.Builder
+	for i, f := range c.Fields {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s: %s", f.Name, wireSample(f))
+	}
+	return b.String()
 }

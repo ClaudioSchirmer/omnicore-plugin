@@ -135,6 +135,13 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 	orphans := fsplan.Orphans(model.Entity.Pascal, result.Files, lock)
 	migrationsKept := keptMigrations(decisions)
 
+	// WHERE, before WHAT. This is the only command that writes, and -project
+	// defaults to the working directory: run from inside another module and the
+	// root resolves to THAT module, silently, and a whole service lands in it.
+	// The file list alone cannot show that — every path is relative — so the
+	// root is printed first, on the dry run and on the real one alike.
+	fmt.Fprintf(w, "Project: %s (%s)\n\n", proj.ModulePath, proj.Root)
+
 	if opt.DryRun {
 		fmt.Fprintf(w, "Dry run — nothing was written.\n\n")
 		for _, d := range decisions {

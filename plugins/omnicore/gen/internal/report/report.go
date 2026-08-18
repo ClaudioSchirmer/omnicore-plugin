@@ -172,6 +172,40 @@ func renderTodo(b *strings.Builder, in Input) {
 			"plausible answer skips the rule this exists to enforce.\n\n")
 	}
 
+	if len(m.Read.Computed) > 0 {
+		empty = false
+		path := fmt.Sprintf("internal/application/queries/%s_computed_manual.go", m.Entity.Snake)
+		fmt.Fprintf(b, "### `%s`\n\n", path)
+		// The failure mode here is the opposite of the manual facts' above, and
+		// that is the whole reason this section is worded separately: a fact
+		// PANICS until it is written, a derivation is silent. Nothing reports an
+		// empty one — the read succeeds, the row is right, and one column is
+		// blank on every surface at once.
+		if createdThisRun(in.Decisions, path) {
+			b.WriteString("The spec declared these read fields as DERIVED — no column holds " +
+				"them, so the framework fetches their sources and hands the filled Result to " +
+				"you. The file was just created, with a stub per read shape; the bodies are " +
+				"yours, and regeneration will never touch them.\n\n")
+		} else {
+			b.WriteString("This file already exists and is YOURS — the generator did not open " +
+				"it and cannot tell whether these are filled. It lists them so you can check " +
+				"the file still covers what the spec declares, which is where a field added " +
+				"to the spec later goes unnoticed.\n\n")
+		}
+		for _, c := range m.Read.Computed {
+			fmt.Fprintf(b, "**`%s` (%s)** ← `%s`\n\n", c.Name, c.GoType, strings.Join(c.Sources, "`, `"))
+			if c.Description != "" {
+				fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(c.Description, "\n", " "))
+			}
+		}
+		b.WriteString("**Until a body is written the field renders absent, and nothing says so** " +
+			"— unlike a manual fact, which panics. The read answers 200, the other columns are " +
+			"correct, and this one is empty on REST, on GraphQL and in the export at once. What " +
+			"the declaration already bought needs no code: `?fields=` on the field fetches its " +
+			"sources instead, `?orderBy=` on it is a typed 400, and the export keeps the column " +
+			"under its label.\n\n")
+	}
+
 	if len(in.MigrationsKept) > 0 {
 		empty = false
 		renderMigrationHandoff(b, in)

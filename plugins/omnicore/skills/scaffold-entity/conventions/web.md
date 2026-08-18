@@ -31,9 +31,11 @@ interface is what lets this layer compile before infra exists.
 
 - **`path:"id"` on a by-id request = boot panic** — the primary `:id` is auto-bound; only
   EXTRA path segments declare `path:"…"` (`:gradeId` → `path:"gradeId"`).
-- **The `?fields=` guard is RECURSIVE**: a list request declaring `Fields` forces EVERY
-  response field — including every field of every NESTED response type — to be
-  pointer/slice + `omitempty`, or boot panics (invisible to `go build`).
+- **The `?fields=` guard is RECURSIVE, and it fires TWICE**: a list request declaring
+  `Fields` forces every response field — including every field of every NESTED response
+  type — to be pointer/slice + `omitempty`, and a second guard forces the same discipline
+  on the query's RESULT (`application.md`). Either one unmet is a boot panic, invisible to
+  `go build`.
 - **Children BELONG in the list response — dropping them buys NOTHING.** On both backings
   the full aggregate is already in hand when the list is served (a Mongo view returns the
   whole projected document; a relational view loads the whole aggregate through the same
@@ -41,8 +43,8 @@ interface is what lets this layer compile before infra exists.
   into N+1 by-id calls. Mirror the child collections as nested slices, exactly like the
   by-id response (`auto-query-handlers.html`'s `?fields=` example is a LIST response with
   a nested child array); the recursive `?fields=` guard is satisfied by making every
-  nested response type pointer/slice + `omitempty` (previous trap), never by amputating
-  the shape. A child-less listing exists only if the dev explicitly asked for one in the
+  nested response type — and its Result twin — pointer/slice + `omitempty` (previous
+  trap), never by amputating the shape. A child-less listing exists only if the dev explicitly asked for one in the
   spec.
 - **Every SCALAR request/response field carries an `example:` tag** — omit it and Swagger's
   "try it out" renders garbage placeholders. STRUCTURED fields (a struct, slice or map — not
@@ -96,8 +98,47 @@ interface is what lets this layer compile before infra exists.
   `orderBy`, the export column and the projected document all speak the flat names. Every
   part of an OPTIONAL composite is a POINTER on the wire, because the value object is absent
   as a whole.
-- Write responses project via `FromResult`; reads via the framework's doc projector keyed
-  by Go field name; bodyless verbs use the no-body responder (204).
+- **BOTH sides project via `FromResult` — the read has the write's anatomy.** A write
+  Response maps from the command's Result; a read Response maps from the QUERY's Result
+  (`application.md`). A raw view document reaches no transport any more, so there is no
+  doc projector to key by hand. Bodyless verbs still use the no-body responder (204).
+- **The generic mappers are OPT-IN, and the marker is a claim you are making.** A
+  Response that embeds `fwresponses.Auto` gets `AutoFromResult`; a Request that embeds
+  `fwrequests.Auto` gets `AutoFromRequest`, and neither helper COMPILES without the embed
+  — the constraint is a sealed interface the framework grants only through it. Embed it
+  when the two shapes are name-aligned (which is the normal case: the wire name and the
+  Go name come from one declaration). Leave it off and write the body by hand when the
+  seat exists precisely to rename, flatten or fold — that is what the escape hatch is for,
+  not a fallback.
+- **With the marker, the pair is checked at BOOT, in both directions.** Every one of the
+  five route constructors validates it: names must align AND each mapped pair must be
+  directly assignable, or the mount panics naming the field. The rule reads by LAYER — a
+  type in `web/` (Request, Response) must be FULLY connected, because a wire field with no
+  counterpart either renders null forever or has its value dropped in silence; a type in
+  `application/` (Command, Result) may carry MORE, which is how a Command holds its path
+  id or an identity overlay and how a Result holds a field the Response deliberately cuts
+  off the wire. A Result carrying `json` tags is refused outright, marker or not — wire
+  naming is the Response's job.
+- **A NESTED wire type carries no marker.** The marker rides the type at the TOP of a
+  walk — the one the constructor is handed. A child's entry type is reached as an element
+  of the parent's collection, and the mapper recurses into it by field name; embedding the
+  marker there would claim a check nothing performs.
+- **A read Response is the SINGLE wire authority, on every surface at once.** REST,
+  GraphQL and the CSV/XLSX export all render exactly the fields it declares, under its
+  `json` names — a field outside it exports nowhere, and `?fields=` speaks that one
+  vocabulary, so a selection valid on `GET /things` is valid on `GET /things.csv`. This is
+  the trap worth stating: a business column present in the view and absent from the DTO
+  used to reach the export and no longer does.
+- **`exportLabelKey:"<catalog key>"` is where an export COLUMN HEADER comes from** —
+  translated per request language, falling back to the json name. It rides the Response
+  (recursively — a nested row's fields need their own), because the Response is what the
+  export projects. Reuse the same catalog key the schema's `labelKey` uses so the two
+  converge instead of drifting into two translations of one word.
+- **A by-id read takes its criteria the same way the listing does:
+  `ToQuery(criteria queries.ReadCriteria)`.** The wire vocabulary is smaller — exactly one
+  reserved control, `includeArchived`, still honored only when the Request DTO declares
+  it and 400 otherwise — but the SEAT is identical, so the query stores the criteria and
+  its `ToCriteria` returns it. Do not re-read the DTO's `*bool` by hand; that seat is gone.
 - Filter operators are AI-chosen per field type (strings: eq/ne/in/startswith/contains +
   i-variants; numbers/dates: + gt/gte/lt/lte) — low-risk, decide and show in the spec.
 - Exports (when the spec asks) mount at the APP ROOT (`/<entities>.csv`), not under the

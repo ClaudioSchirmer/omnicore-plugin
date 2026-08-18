@@ -41,6 +41,7 @@ const (
 	CapMountedChild   Capability = "a shared identity's collection, exposed on a second role"
 	CapGroupedFact    Capability = "per-group facts, computed by the database (GROUP BY)"
 	CapCompositeVO    Capability = "composite value objects (a value spanning several columns)"
+	CapComputedRead   Capability = "computed read fields (derived per document, no column)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -70,6 +71,7 @@ var implemented = map[Capability]bool{
 	CapAssignedField:  true,
 	CapMountedChild:   true,
 	CapCompositeVO:    true,
+	CapComputedRead:   true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -89,6 +91,7 @@ func AllCapabilities() []Capability {
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapGeneratedTests, CapPerChild,
 		CapAssignedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
+		CapComputedRead,
 	}
 }
 
@@ -164,6 +167,9 @@ func CheckCoverage(s *Spec) *Problems {
 	}
 	if len(s.Read.FieldRestrict) > 0 {
 		uses(CapFieldRestrict, "read.fieldRestrict", "field-level read restriction")
+	}
+	if len(s.Read.Computed) > 0 {
+		uses(CapComputedRead, "read.computed", "computed read fields")
 	}
 	if s.Read.IdentityView != "" && s.Read.IdentityView != "skip" {
 		uses(CapIdentityView, "read.identityView", "a shared identity view")

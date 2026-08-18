@@ -73,8 +73,15 @@ against the generator's OWN bench (`gen/devops/docker-compose.yml`, containers
 tables, and borrowing someone's engines means a gate that passes here by breaking
 work over there. It has happened; do not repeat it.
 
-Green means green: `62 passed · 0 failed · 0 skipped`. A skipped lane is a lane
+Green means green: `64 passed · 0 failed · 0 skipped`. A skipped lane is a lane
 that proved nothing.
+
+While the framework version the generator targets is UNPUBLISHED there is no tag for
+the vendored host to pin, so every lane that compiles generated code would be measuring
+today's emitters against yesterday's API. Point the gate at the checkout instead —
+`OMNICORE_LOCAL=/path/to/omnicore bash plugins/omnicore/gen/scripts/golden.sh` — and bump
+`plugins/omnicore/gen/testdata/host/go.mod` once the tag exists. The gate says which
+situation it is in on startup.
 
 ## Skills
 

@@ -262,6 +262,7 @@ var specTypes = map[string]reflect.Type{
 	"Filter":        reflect.TypeOf(Filter{}),
 	"Controls":      reflect.TypeOf(Controls{}),
 	"FieldRestrict": reflect.TypeOf(FieldRestrict{}),
+	"Computed":      reflect.TypeOf(Computed{}),
 	"Surfaces":      reflect.TypeOf(Surfaces{}),
 	"GraphQL":       reflect.TypeOf(GraphQL{}),
 	"Exports":       reflect.TypeOf(Exports{}),

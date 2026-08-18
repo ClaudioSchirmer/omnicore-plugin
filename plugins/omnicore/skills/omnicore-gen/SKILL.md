@@ -62,6 +62,30 @@ service:
 
     omnicore-gen <command> -project <service-dir> …
 
+**`-project` is not optional in practice, and getting it wrong is the one mistake that
+writes a whole service into the wrong repository.** The flag defaults to `.`, and the
+generator then walks UP from there to the nearest `go.mod` and treats THAT module as the
+service. So it never fails loudly for a bad target — it silently finds a different one.
+Run it from anywhere inside another module and the tree lands there. It has happened while
+building this generator: invoked from the generator's own directory with the flag omitted,
+it resolved `Project: github.com/…/omnicore-plugin/gen` and would have generated a service
+into the generator's source.
+
+So:
+
+- **Always pass `-project` explicitly**, and point it at the SERVICE ROOT — the directory
+  whose `go.mod` declares the service's module, not a subdirectory of it and not the
+  workspace above it.
+- **Read the `Project:` line every command prints before letting a write proceed.** It
+  names the module AND the absolute path the generator resolved. If that is not the
+  service you meant, stop; nothing else in the output will tell you — every path it
+  lists is relative, so a wrong root looks identical to a right one.
+- When the dev has not named a directory, ask. Do not infer it from the shell's working
+  directory, which is whatever the last command left behind.
+
+`doctor`'s "No generated entity is recorded in this project" is usually this same mistake
+seen from the other side: the right generator, the wrong root.
+
 It builds itself from source on first use — the generator travels as Go source, so the
 only external requirement is a **Go toolchain on PATH**. If it answers `needs a Go
 toolchain` or `this plugin install is incomplete`, say so plainly and go back to the
@@ -218,9 +242,35 @@ Three things to get right, because they are the ones that cost a migration later
   - **Each composite type appears ONCE per entity** — across the root, its facets and its
     shared base. A second `Money`-shaped concept on one entity is its own type, not a second
     decomposition; the framework refuses the split at boot and `check` refuses it earlier.
+- **Every generated DTO opts into the framework's generic mappers, and that is a claim,
+  not a shortcut.** A Response embeds `fwresponses.Auto`, a Request embeds
+  `fwrequests.Auto`, and the bodies become one call each. The generator can make that
+  claim honestly because nothing in this language renames a field on one side only:
+  `fields[].name` drives the Go name and the wire name together, and `parts[].as` renames
+  both halves of a composite at once. What the marker buys back is a check the generator
+  cannot give itself — at Mount, every Request field must land on a same-named Command
+  field and every Response field must read from a same-named Result field, or the boot
+  panics naming it. That is a regression net over the EMITTERS: two of them drifting apart
+  used to ship a silent null.
 - **`read.byParams.controls`.** A control is served ONLY if declared, and an undeclared
   one arriving on the wire is answered with a typed 400. That is a contract, not an
   omission.
+- **`read.computed` is the read side's `manual` fact: a field no column holds.** You
+  declare the shape — `name`, `type`, and `from:` naming the STORED fields the derivation
+  reads — and the body is yours, in
+  `internal/application/queries/<entity>_computed_manual.go`, written once and never
+  rewritten. Two functions, one per read shape, because the listing's Result is a sparse
+  pointer shape when it serves `?fields=` and the by-id one is not.
+  - What the declaration alone buys: `?fields=<name>` fetches `from:` instead of a name
+    no column has, `?orderBy=<name>` is a typed 400 on every surface, and the CSV/XLSX
+    export keeps the column under its `labelKey`.
+  - So it is neither filterable nor sortable nor indexable, and naming it under
+    `byParams.filters`, `byParams.sort`, `controls.search`, `read.indexes` or
+    `read.fieldRestrict` is refused with the reason.
+  - **The failure mode is SILENT, unlike a manual fact's.** A fact panics until it is
+    written; an unwritten derivation renders the field absent and nothing reports it —
+    the read answers 200 and one column is empty on REST, on GraphQL and in the export at
+    once. The gen-report lists them for exactly that reason.
 - **A 1:1 facet (`siblings`) has one coupling worth knowing before you write it.** It is
   cleared by the ROOT's full update with its fields null — so `update.shape` cannot be
   `patch` alone, or a granted facet could never be revoked. And **with GraphQL on, the
@@ -339,8 +389,13 @@ a generated file. You declare it as a named manual item:
 
 The generator then emits `internal/domain/<entity>_rules_manual.go` with the signature,
 the contract comment, and a stub per item — **write-once, never re-generated, never
-hashed**. The same shape exists for a fact the domain service cannot answer declaratively
-(`service.facts[].kind: manual` → `internal/infra/<entity>_service_manual.go`).
+hashed**. The same shape exists twice more: for a fact the domain service cannot answer
+declaratively (`service.facts[].kind: manual` →
+`internal/infra/<entity>_service_manual.go`), and for a DERIVED read field
+(`read.computed` → `internal/application/queries/<entity>_computed_manual.go`). All three
+are the same bargain — the language declares the shape, a human writes the body — and they
+differ only in what an unwritten body does: a rule quietly enforces nothing, a fact panics
+on first use, a derivation renders an empty column. The gen-report says which is which.
 
 **The hook file arrives with ONE gate per verb holding every rule scoped to it — keep it
 that way when you implement them.** A gate per rule is the shape that grows by accident,
@@ -429,14 +484,17 @@ Do not re-read every file. Read against the plan the dev approved and against th
    way the domain needs (`owner-only`/`tenant` are a different question from the
    permission).
 5. **The read side** — the view name and `Version`, the declared filters and controls,
-   the indexes. A `?search=` needs a declared text index.
+   the indexes. A `?search=` needs a declared text index. If the spec declares
+   `read.computed`, the derivation hook is the one place where a green build still means
+   an empty column — check its bodies are written.
 6. **If the entity has a facet and GraphQL**, check that both clear paths are there: the
    root's PUT with the facet's fields null, and `clear<Facet>Of<Entity>`. The report lists
    them side by side. A facet a caller can grant and never revoke is the failure this
    pair exists to prevent.
 
 Anything wrong here is fixed **in the spec**, then regenerated. The only files you author
-are the two `*_manual.go` hooks.
+are the `*_manual.go` hooks — the rules one, the service one, and the computed-read one
+when the spec declares derived fields.
 
 ### When the output is wrong and the spec seems unable to say so
 

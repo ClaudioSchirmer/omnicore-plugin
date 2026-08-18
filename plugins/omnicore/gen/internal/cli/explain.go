@@ -217,17 +217,20 @@ func explainOwnership() string {
 
   hook          written once when missing, then never touched and never hashed —
                 which is what keeps regeneration routine. Everything named
-                *_manual is one, and there are three:
+                *_manual is one, and there are four:
 
                   <entity>_rules_manual.go     rules.manual — an invariant the
                                                DSL cannot express
                   <entity>_service_manual.go   a fact whose kind is manual
+                  <entity>_computed_manual.go  read.computed — a read field no
+                                               column holds
                   NNNN_<entity>_manual.sql     the migration pair
 
-                The two Go ones are NOT equally quiet, and the header of each
+                The three Go ones are NOT equally quiet, and the header of each
                 says which it is: unwritten rules leave invariants unenforced and
                 the service runs on; an unwritten fact panics the moment a rule
-                asks.
+                asks; an unwritten derivation renders one column empty on every
+                surface and reports nothing at all.
 
                 The MIGRATION is a hook for a different reason, and it is the
                 sharpest one here: its effect outlives the file. Once it has run

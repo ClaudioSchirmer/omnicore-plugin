@@ -148,6 +148,12 @@ generator emits it).
   served, undeclared = typed 400): pagination/`orderBy` expected defaults; `?fields=` /
   `?search=` / `?onlyTotal` / `?includeArchived` each yes/no (low-risk — filled, shown;
   `?search=` only where a text index will serve it).
+- Computed read fields: any value the reads should return that NO column holds (a display
+  label, a total, a status derived from two dates)? Name it, its type, and the stored
+  fields it is derived from. It is filled once per document in `FromQueryResult`, so every
+  surface agrees; `?fields=` on it fetches the sources, `?orderBy=` on it is a 400, and a
+  filter over it is impossible — say so when offering it. Ask: it is cheap here and a
+  hand-built layer later.
 - Field-level read authz: any field only SOME callers may see? (`ReadCriteria.Restrict`
   — passive omission vs active 403, prunes `?fields=`/GraphQL selection/exports alike;
   `authz-seams.html`.) Ask — invisible at modeling time, loved when offered.
