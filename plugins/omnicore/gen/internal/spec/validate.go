@@ -953,6 +953,24 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 					"notification makes the rejection specific")
 		}
 		validateNotificationRef(s, c.DuplicateNotification, where+".duplicateNotification", ps)
+		// A per-entry verb addresses ONE entry, so its command carries the
+		// entry's fields directly plus the id naming it — `<Child>ID`, taken
+		// from the route segment. A field of the same name would land twice in
+		// one struct, which the compiler refuses in generated code the author
+		// did not write and cannot fix. Refuse it here, where the name is.
+		if c.EditStrategy == "per-child" {
+			clash := c.Name + "ID"
+			for _, f := range c.Fields {
+				if f.Name != clash {
+					continue
+				}
+				ps.BlockerFix(where+".fields",
+					fmt.Sprintf("%q collides with the path field the per-entry verbs "+
+						"declare for this collection", clash),
+					"the entry's own id already reaches the command from the route; "+
+						"rename this field (or drop it, if it IS that id)")
+			}
+		}
 	}
 }
 
@@ -2112,6 +2130,8 @@ func validateRead(s *Spec, ps *Problems) {
 		}
 	}
 
+	validateComputed(s, r, ps)
+
 	if r.IdentityView != "" {
 		if !IdentityViews.Has(r.IdentityView) {
 			ps.BlockerFix("read.identityView",
@@ -2122,6 +2142,114 @@ func validateRead(s *Spec, ps *Problems) {
 			ps.BlockerFix("read.identityView",
 				"only a shared-base model has an identity view",
 				"remove the key")
+		}
+	}
+}
+
+// validateComputed checks the derived read fields.
+//
+// The rules all trace back to one fact: a computed field has NO COLUMN. So it
+// cannot be filtered, cannot be ordered by, and cannot feed another computed
+// field — and its sources have to be real, stored fields, because pushing them
+// to the store is what makes `?fields=<computed>` work at all.
+func validateComputed(s *Spec, r Read, ps *Problems) {
+	if len(r.Computed) == 0 {
+		return
+	}
+	if !r.ByID && r.ByParams == nil {
+		ps.BlockerFix("read.computed",
+			"a computed field is a READ field, and this entity serves no read",
+			"set read.byId and/or read.byParams, or drop the computed fields")
+	}
+	seen := map[string]bool{}
+	for _, c := range r.Computed {
+		seen[c.Name] = true
+	}
+	for i, c := range r.Computed {
+		where := fmt.Sprintf("read.computed[%d] (%s)", i, orUnnamed(c.Name))
+		switch {
+		case c.Name == "":
+			ps.Blockerf(where, "the computed field needs a name")
+		case !goIdentRe.MatchString(c.Name):
+			ps.BlockerFix(where,
+				fmt.Sprintf("%q is not a usable Go field name", c.Name),
+				"use exported PascalCase, e.g. DisplayName")
+		case readableField(s, c.Name):
+			ps.BlockerFix(where,
+				fmt.Sprintf("%q is already a field of this entity", c.Name),
+				"a computed field is one the STORE does not hold — rename it, or drop "+
+					"the declaration and read the stored field")
+		}
+		if c.Type == "" {
+			ps.Blockerf(where+".type", "the computed field needs a type")
+		} else if !FieldTypes.Has(c.Type) {
+			ps.BlockerFix(where+".type",
+				fmt.Sprintf("%q is not a field type", c.Type),
+				"one of: "+FieldTypes.String())
+		}
+		if len(c.From) == 0 {
+			ps.BlockerFix(where+".from",
+				"the computed field names no source",
+				"list the stored fields the derivation reads — they are what the "+
+					"framework fetches when a caller selects this field, so a source left "+
+					"out arrives nil")
+		}
+		for _, src := range c.From {
+			if seen[src] {
+				ps.BlockerFix(where+".from",
+					fmt.Sprintf("%q is itself computed, so it has no column to push down", src),
+					"name the STORED fields behind it instead")
+				continue
+			}
+			if !readableField(s, src) {
+				reportUnreadable(s, src, where+".from", ps)
+			}
+		}
+	}
+	// A filter and a sort are both evaluated in the store. Declaring either
+	// over a computed field is refused HERE rather than at the framework's boot
+	// guard, so the author reads it against the spec they wrote.
+	if bp := r.ByParams; bp != nil {
+		for i, f := range bp.Filters {
+			if seen[f.Field] {
+				ps.BlockerFix(fmt.Sprintf("read.byParams.filters[%d]", i),
+					fmt.Sprintf("%q is computed — a filter is evaluated in the store, and "+
+						"there is no column there to compare", f.Field),
+					"filter on the stored fields it is derived from")
+			}
+		}
+		for _, sf := range bp.Sort {
+			if seen[sf] {
+				ps.BlockerFix("read.byParams.sort",
+					fmt.Sprintf("%q is computed — ordering happens in the store and the "+
+						"keyset cursor is built from stored values", sf),
+					"sort on the stored fields it is derived from")
+			}
+		}
+		for _, sf := range bp.Controls.Search {
+			if seen[sf] {
+				ps.BlockerFix("read.byParams.controls.search",
+					fmt.Sprintf("%q is computed, so no index covers it", sf),
+					"search the stored fields it is derived from")
+			}
+		}
+	}
+	for i, idx := range r.Indexes {
+		for _, fn := range idx.Fields {
+			if seen[fn] {
+				ps.BlockerFix(fmt.Sprintf("read.indexes[%d]", i),
+					fmt.Sprintf("%q is computed — there is no stored value to index", fn),
+					"index the stored fields it is derived from")
+			}
+		}
+	}
+	for i, fr := range r.FieldRestrict {
+		if seen[fr.Field] {
+			ps.BlockerFix(fmt.Sprintf("read.fieldRestrict[%d]", i),
+				fmt.Sprintf("%q is computed — Restrict scrubs a COLUMN from the "+
+					"projection, sort and filter, and there is none", fr.Field),
+				"restrict the stored fields it is derived from; the derivation then "+
+					"receives them absent")
 		}
 	}
 }

@@ -7,6 +7,117 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-08-17
+
+### Changed
+
+- **BREAKING — the generator emits the framework's new read anatomy: a Query declares a
+  RESULT, and the Response is the single wire authority.** The framework retired the path
+  where each transport received a raw view document and decided for itself what to do with
+  it, and with it the seat the generator used (`responses.AutoFromDoc`). The read side now
+  mirrors the write side, and so does the generated code.
+  - **Every read emits a Result type** — `Find<Entity>ByIDResult` / `Find<Plural>ByParamsResult`,
+    application-pure, no wire tags, co-located with its query, plus one `<Child>RowResult`
+    per collection shared by both reads exactly as `<Child>Row` already was. The Result owns
+    field EXISTENCE: a field absent from it can reach no surface, because none of them ever
+    sees the document again.
+  - **`FromQueryResult` is emitted on both queries** — mandatory on the new interfaces, and
+    the one seat where read-side computation may happen. It runs once per DOCUMENT, so REST,
+    GraphQL and the tabular exports cannot disagree; the same work in a Response would run
+    once per SURFACE.
+  - **Both read Responses gain `FromResult`**, delegating to the framework's generic
+    name-based mapper (which they opt into by embedding `fwresponses.Auto` — see the
+    Added entry below), and every mount passes it where `AutoFromDoc` used to go: the REST
+    pair, the CSV and XLSX exports (which take the projection as a new argument, because the
+    export's columns now come from the Response instead of the view's `TableSchema`) and the
+    GraphQL connection. Both read handlers are generic over two parameters now — the query
+    AND its Result.
+  - **A by-id request maps `ToQuery(criteria queries.ReadCriteria)`**, the same seat the
+    listing has, and the query carries `Criteria` instead of a hand-copied
+    `IncludeArchived bool`. The wire vocabulary is unchanged: one reserved control, declared
+    by the DTO, everything else a typed 400.
+  - **`exportLabelKey` is emitted on every read Response field, recursively.** An export
+    column's header lives on the DTO the export projects — with the columns themselves now
+    coming from the Response, a field's label had nowhere else to go. The key is the one the
+    schema already declares, so the two converge instead of drifting apart.
+  - Pointer discipline follows: a listing that serves `?fields=` emits a sparse Result as
+    well as a sparse Response, which is what the framework's second boot guard requires.
+  - The supported framework line moves to `v0.53.0`. There is no compatibility branch — a
+    project on `v0.52.x` is refused with the upgrade path, because the emitted code does not
+    compile against it.
+
+### Added
+
+- **Every generated DTO opts into the framework's generic mappers.** A Response embeds
+  `fwresponses.Auto` and its `FromResult` becomes `AutoFromResult`; a Request embeds
+  `fwrequests.Auto` and its `ToCommand` becomes `AutoFromRequest`. Neither helper compiles
+  without the embed — the constraint is a sealed interface — so the opt-in is a claim, and
+  the generator can make it honestly: nothing in this language renames a field on one side
+  only, since `fields[].name` drives the Go name and the wire name together and
+  `parts[].as` renames both halves of a composite at once.
+  What it buys back is a check the generator cannot give itself. At Mount, every Request
+  field must land on a same-named Command field and every Response field must read from a
+  same-named Result field, directly assignable, or the boot panics naming it. **That is a
+  regression net over the EMITTERS** — the command side validated nothing before, so two
+  emitters drifting apart shipped a silent null. The rule reads by layer: a type in `web/`
+  must be fully connected, a type in `application/` may carry more (a path id, an identity
+  overlay, a Result field the Response deliberately cuts off the wire).
+  Measured on a spec carrying a composite value object at the root, another in a child and
+  per-entry verbs: **467 → 394 lines** of generated mapper across the touched files. The
+  entry types nested inside a walk (`<Child>Request`, `<Child>Response`) carry no marker —
+  it rides the type at the TOP of each walk, which is the one the constructor is handed.
+
+- **A per-entry command is FLAT, and `<Child>Request.ToInput()` is gone.**
+  `Add<Child>Command` / `Change<Child>Command` now carry the entry's fields directly
+  instead of one nested `dtos.<Child>Input`, because that is what the verb is: the root's
+  insert handles MANY entries and carries a slice, a per-entry verb handles exactly ONE
+  and the entry IS the command. Flat is also what lets its Request build it through the
+  generic mapper — the wire body is flat too, so the last hand-written `ToCommand` in the
+  generated tree goes away.
+  `ApplyTo` still routes through `dtos.<Child>Input`, built inline from those fields: the
+  input type is where a value object is REASSEMBLED (an enum cast, a composite folded from
+  its parts), and that reassembly stays in one place. `ToInput()` had no caller left once
+  the root's mappers went generic, so it is no longer emitted — the copier recurses
+  `[]<Child>Request → []dtos.<Child>Input` by field name.
+  New refusal at `check`: a child field named `<Child>ID` under `editStrategy: per-child`
+  collides with the path field those commands declare, which would emit a struct with a
+  duplicate field — a compile error in code the author did not write and cannot fix.
+
+- **Computed read fields — `read.computed`, a read field no column holds.** The read side's
+  `manual` fact: the language declares the shape (`name`, `type`, and `from:` naming the
+  STORED fields the derivation reads) and the body is the author's, in
+  `internal/application/queries/<entity>_computed_manual.go` — written once, never
+  rewritten. Two functions, one per read shape, because a listing serving `?fields=` has a
+  sparse Result and a by-id read does not.
+  What the declaration alone buys, with no code at all: `?fields=<name>` fetches the sources
+  instead of a name no column has, `?orderBy=<name>` is a typed 400 on every surface, and the
+  CSV/XLSX export keeps the column under its `labelKey` — which is now fed into all seven
+  translation catalogs like any other labelled field, so the header is a translation and not
+  an internal identifier.
+  It is therefore neither filterable nor sortable nor indexable, and naming it under
+  `byParams.filters`, `byParams.sort`, `controls.search`, `read.indexes` or
+  `read.fieldRestrict` is refused at `check` with the reason — before the framework's own
+  boot guard would say the same thing later and further away.
+  **The failure mode is silent, and that is why it is reported twice.** An unwritten rule
+  leaves an invariant unenforced; an unwritten fact panics on first use; an unwritten
+  derivation renders one column empty on REST, on GraphQL and in the export at once, and
+  nothing complains. The gen-report gives it its own section saying so, and
+  `explain ownership` now lists three Go hooks rather than two.
+- **The GraphQL surface gains the by-id read.** An entity with `read.byId` and a GraphQL
+  surface now registers the singular node beside the connection, under the same entity name,
+  over the same handler and Response. It was the one read the REST surface served and
+  GraphQL did not.
+- **Two generated tests per read.** One asserts the Result→Response travel actually happens
+  (the framework boot-guards the alignment, but a guard that fires when a service starts is
+  a guard nobody sees in a pull request); the other exercises `FromQueryResult` on an empty
+  Result — the shape a `?fields=` selection that named none of a computed field's sources
+  really produces, and where a derivation that dereferences a source without checking fails.
+- **`OMNICORE_LOCAL` on the golden gate.** Points the vendored host at a framework CHECKOUT
+  instead of the pinned release, staged once and copied by every lane. Without it there is no
+  way to gate the emitters against a framework version that is not published yet, which is
+  exactly when the emitters change; the gate now also says so on startup when the host's pin
+  and the targeted line disagree.
+
 ## [0.20.0] — 2026-08-16
 
 ### Added

@@ -796,7 +796,9 @@ only a genuinely missing docs file does.
 | view backing: relational (SoR) vs Mongo — posture, elicitation, gating | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
 | SharedBaseView / ComposedView (read) | views · query-side |
 | domain events (`RegisterEvent`, post-commit publish) | auto-handlers · command-handler |
-| response projection (AutoFromDoc / FromDoc) | auto-query-handlers · custom-query-handler |
+| the read's Result + `FromQueryResult`, and the Response's `FromResult` (`responses.Map`) — the read side's Result anatomy | auto-query-handlers · custom-query-handler |
+| computed read fields (`computed:"A,B"` — derived, no column, sources pushed down, `?orderBy=` refused) | auto-query-handlers |
+| export columns + headers (`exportLabelKey`, the Response as the export's column source) | auto-query-handlers · reference |
 | REST routes / OpenAPI | openapi · reference |
 | GraphQL surface | graphql |
 | migrations (numbering, .down, dialect) | migrations · yaml-reference |
@@ -834,7 +836,10 @@ only a genuinely missing docs file does.
   `0001_framework` is in a separate tracking table — no collision). Not `0002`.
 - **`path:"id"` on a by-id request → boot panic** (the `*Spec`/HasPathID owns `:id`; never
   declare it — extra path segments use `path:"..."`).
-- **`?fields=` opt-in → every Response field must be `*T`/slice + `,omitempty`** or panic.
+- **`?fields=` opt-in → every Response field must be `*T`/slice + `,omitempty`, AND the
+  query's Result must be pointer/slice throughout too** (two separate boot guards) — a
+  projected-out column has to arrive absent on both shapes, and a value type cannot tell
+  absent from zero.
 - **View `Version(N)`** — bump on rebuild-relevant change (root/embeds/DeleteOnArchive/
   jsonSchema/collation/capped/time-series); index-only does NOT; forgetting panics.
 - **A relational view (`.RelationalSource`) has NO Mongo collection** — SyncEngine,

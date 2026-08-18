@@ -25,13 +25,18 @@ func emitExports(s *src, m *ir.Model) {
 	if op == nil {
 		return
 	}
-	handler := fmt.Sprintf("&handlers.FindByParamsQueryHandler[*appqueries.%s]{\n"+
-		"\t\t\tReader: d.ViewReader, View: viewName,\n\t\t}", m.Read.QueryList)
+	handler := listHandler(m)
 
 	if m.Surfaces.CSV {
 		s.L("\t// Mounted at the app root: under the group, %s/:id would match first.", m.Entity.Route)
+		s.L("\t//")
+		s.L("\t// The export projects the SAME Response the JSON listing does, so its")
+		s.L("\t// columns are that DTO's fields and its headers their exportLabelKey.")
+		s.L("\t// One consequence worth knowing: ?fields= speaks one vocabulary here and")
+		s.L("\t// on GET %s — a selection that works on one works on the other.", m.Entity.Route)
 		s.L("\tcsvH, csvSpec := fwweb.QueryAsCSVSpec(d.Pipeline,")
 		s.L("\t\trequests.%s{},", op.RequestType)
+		s.L("\t\trequests.%s{}.FromResult,", op.ResponseType)
 		s.L("\t\tview,")
 		s.L("\t\td.Export,")
 		s.L("\t\t%s,", handler)
@@ -54,6 +59,7 @@ func emitExports(s *src, m *ir.Model) {
 	if m.Surfaces.XLSX {
 		s.L("\txlsxH, xlsxSpec := fwweb.QueryAsXLSXSpec(d.Pipeline,")
 		s.L("\t\trequests.%s{},", op.RequestType)
+		s.L("\t\trequests.%s{}.FromResult,", op.ResponseType)
 		s.L("\t\tview,")
 		s.L("\t\td.Export,")
 		s.L("\t\t%s,", handler)
@@ -120,15 +126,24 @@ func emitGraphQL(m *ir.Model) (*src, bool) {
 
 	if m.Surfaces.GQLConnection && m.Read.ByParams {
 		op := m.Op("byParams")
-		s.L("\t// A paged connection over the same view the REST listing reads.")
-		s.L("\treg.Register(fwgraphql.QueryWithParams[")
-		s.L("\t\trequests.%s,", op.RequestType)
-		s.L("\t\trequests.%s,", op.ResponseType)
-		s.L("\t](")
+		s.L("\t// A paged connection over the same view the REST listing reads — same")
+		s.L("\t// handler, same Response, so the node type and the JSON body cannot drift.")
+		s.L("\treg.Register(fwgraphql.QueryWithParams[requests.%s](", op.RequestType)
 		s.L("\t\t%s, %s,", quote(m.Entity.PluralCamel), quote(m.Entity.Pascal))
-		s.L("\t\t&handlers.FindByParamsQueryHandler[*appqueries.%s]{", m.Read.QueryList)
-		s.L("\t\t\tReader: d.ViewReader, View: view.Name(),")
-		s.L("\t\t},")
+		s.L("\t\trequests.%s{}.FromResult,", op.ResponseType)
+		s.L("\t\t%s,", graphQLListHandler(m))
+		s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(op.Permission))
+		s.Blank()
+	}
+	if m.Surfaces.GQLConnection && m.Read.ByID {
+		op := m.Op("byId")
+		s.L("\t// The singular twin of the connection: one nullable node, the same")
+		s.L("\t// entity name, so both fields resolve to ONE type in the schema. A")
+		s.L("\t// missing id answers null with the canonical not-found in errors[].")
+		s.L("\treg.Register(fwgraphql.QueryByID[requests.%s](", op.RequestType)
+		s.L("\t\t%s, %s,", quote(m.Entity.Camel), quote(m.Entity.Pascal))
+		s.L("\t\trequests.%s{}.FromResult,", op.ResponseType)
+		s.L("\t\t%s,", graphQLByIDHandler(m))
 		s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(op.Permission))
 		s.Blank()
 	}

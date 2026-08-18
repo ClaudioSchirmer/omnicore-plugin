@@ -238,6 +238,34 @@ type ReadModel struct {
 	Controls        spec.Controls
 	QueryByID       string
 	QueryList       string
+	// ResultByID / ResultList are the application-layer Result types the two
+	// reads declare — the read-side twin of a command's Result. The framework
+	// fills one per document and the Query's FromQueryResult hook sees it
+	// BEFORE any transport does, so a field absent from the Result can reach
+	// no wire.
+	ResultByID string
+	ResultList string
+	// Computed are the derived read fields: no column, filled by the hook the
+	// generator writes once and the author owns from then on.
+	Computed []ComputedField
+}
+
+// ComputedField is a read field with no column behind it.
+type ComputedField struct {
+	Name string
+	// GoType/BaseGoType are the DERIVED value's type. Nullability is not a
+	// property of the declaration: the derivation may always decline to produce
+	// a value, so the wire shape is a pointer wherever the surrounding shape is.
+	GoType      string
+	BaseGoType  string
+	JSONName    string
+	LabelKey    string
+	Example     string
+	Description string
+	// Sources are the Result field names the derivation reads. They travel to
+	// the wire as the `computed:"A,B"` tag, which is what makes `?fields=`
+	// fetch the columns behind the derivation instead of a name no column has.
+	Sources []string
 }
 
 type Filter struct {
@@ -615,6 +643,17 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 	}
 	r.QueryByID = "Find" + m.Entity.Pascal + "ByIDQuery"
 	r.QueryList = "Find" + m.Entity.PluralPascal + "ByParamsQuery"
+	r.ResultByID = "Find" + m.Entity.Pascal + "ByIDResult"
+	r.ResultList = "Find" + m.Entity.PluralPascal + "ByParamsResult"
+	for _, c := range s.Read.Computed {
+		base := goTypeOf(c.Type)
+		r.Computed = append(r.Computed, ComputedField{
+			Name: c.Name, GoType: base, BaseGoType: base,
+			JSONName: naming.Camel(c.Name), LabelKey: c.LabelKey,
+			Example: c.Example, Description: c.Description,
+			Sources: append([]string(nil), c.From...),
+		})
+	}
 	if s.Read.ByParams != nil {
 		r.Controls = s.Read.ByParams.Controls
 		for _, f := range s.Read.ByParams.Filters {

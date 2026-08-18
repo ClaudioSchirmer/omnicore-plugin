@@ -43,12 +43,53 @@ else
   SUM() { cksum "$@"; }
 fi
 
+# stage_host lays the vendored host down in $1, ready to be generated into.
+#
+# OMNICORE_LOCAL points the copy at a framework CHECKOUT instead of the pinned
+# release. That is what makes this gate usable while the framework's next
+# version is still unreleased: there is no tag to pin, so the only way to prove
+# the emitters match the API is to build against the source. Unset — the normal
+# case — nothing is rewritten and the host keeps the version its go.mod pins.
+# The rewrite happens ONCE, into a staged template every lane then copies. The
+# gate lays the host down about thirty times; resolving the module graph that
+# many times would dominate its runtime for no added proof.
+STAGED="${STAGED:-/tmp/omnicore-gen-host-staged}"
+stage_host() {
+  local dest="$1"
+  if [[ -z "${OMNICORE_LOCAL:-}" ]]; then
+    rm -rf "$dest"; mkdir -p "$dest"; cp -R "$HOST/." "$dest/"
+    return 0
+  fi
+  if [[ ! -d "$STAGED" ]]; then
+    mkdir -p "$STAGED"; cp -R "$HOST/." "$STAGED/"
+    (cd "$STAGED" \
+      && GOWORK=off go mod edit -replace "github.com/ClaudioSchirmer/omnicore=$OMNICORE_LOCAL" \
+      && GOWORK=off go mod tidy) >/tmp/gg-local.log 2>&1 \
+      || { echo "  ❌ could not point the host at $OMNICORE_LOCAL"; sed -n '1,20p' /tmp/gg-local.log; rm -rf "$STAGED"; exit 1; }
+    echo "  (host staged against the framework checkout at $OMNICORE_LOCAL)"
+  fi
+  rm -rf "$dest"; mkdir -p "$dest"; cp -R "$STAGED/." "$dest/"
+}
+
 pass=0; fail=0; skip=0
 ok()   { echo "  ✅ $1"; pass=$((pass+1)); }
 bad()  { echo "  ❌ $1"; fail=$((fail+1)); }
 skipf(){ echo "  ⏭  $1 (skipped: $2)"; skip=$((skip+1)); }
 
 echo "═══ omnicore-gen golden gate ═══"
+
+# The host pins a RELEASED framework. While the version this generator targets
+# is still unreleased there is no tag to pin, and every lane that compiles
+# generated code would be measuring the emitters against an API that predates
+# them. Say so once, loudly, instead of letting a wall of red read as a
+# generator defect.
+WANTED=$(grep -oE 'Supported = "v[0-9.]+"' "$GEN_DIR/internal/compat/compat.go" | grep -oE 'v[0-9.]+')
+PINNED=$(grep -oE 'ClaudioSchirmer/omnicore v[0-9.]+' "$HOST/go.mod" | head -1 | grep -oE 'v[0-9.]+')
+if [[ -z "${OMNICORE_LOCAL:-}" && -n "$WANTED" && -n "$PINNED" && "$WANTED" != "$PINNED" ]]; then
+  echo "  ⚠  the vendored host pins framework $PINNED and this generator targets $WANTED."
+  echo "     Point the gate at a checkout — OMNICORE_LOCAL=/path/to/omnicore bash scripts/golden.sh —"
+  echo "     or bump testdata/host/go.mod once $WANTED is published."
+fi
 
 # ── Lane 0: the generator's own tests ────────────────────────────────────────
 echo "── unit tests"
@@ -64,8 +105,7 @@ if [[ ! -d "$HOST" ]]; then
   echo "  vendored host missing at $HOST"
   exit 1
 fi
-rm -rf "$WORK"; mkdir -p "$WORK"
-cp -R "$HOST/." "$WORK/"
+stage_host "$WORK"
 mkdir -p "$WORK/omnicore-gen"
 for f in $FIXTURES; do cp "$f" "$WORK/omnicore-gen/"; done
 SPEC="$WORK/omnicore-gen/$(basename "$PRIMARY_FIXTURE")"
@@ -114,8 +154,7 @@ fi
 # Its own tree, its own build: indexes, text search and the projection options
 # only exist on that backing, and nothing else here would compile them.
 echo "── the mongo-backed shape"
-rm -rf "$WORK_MONGO"; mkdir -p "$WORK_MONGO"
-cp -R "$HOST/." "$WORK_MONGO/"
+stage_host "$WORK_MONGO"
 mkdir -p "$WORK_MONGO/omnicore-gen"; cp "$MONGO_FIXTURE" "$WORK_MONGO/omnicore-gen/"
 if (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
       -spec "$WORK_MONGO/omnicore-gen/$(basename "$MONGO_FIXTURE")" -project "$WORK_MONGO" \
@@ -398,8 +437,8 @@ fi
 # files and its labelKeys in all seven catalogs go, the tree still builds, and a
 # second prune finds nothing.
 echo "── prune"
-PRUNE_WORK="/tmp/omnicore-gen-prune"
-rm -rf "$PRUNE_WORK"; mkdir -p "$PRUNE_WORK"; cp -R "$HOST/." "$PRUNE_WORK/"
+PRUNE_WORK="${PRUNE_WORK:-/tmp/omnicore-gen-prune}"
+stage_host "$PRUNE_WORK"
 mkdir -p "$PRUNE_WORK/omnicore-gen"
 cp "$GEN_DIR/internal/cli/example.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml"
 cp "$GEN_DIR/testdata/specs/prune-neighbour.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/"
@@ -553,14 +592,17 @@ fi
 # Case 18 IS the shared-identity example, byte for byte.
 echo "── the coverage matrix"
 MATRIX_DIR="$GEN_DIR/testdata/specs/matrix"
+# Where the matrix generates INTO. Overridable like every other work dir, so a
+# maintainer can point the whole gate at one directory and read the output.
+MATRIX_WORK="${MATRIX_WORK:-/tmp/omnicore-gen-matrix}"
 for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   name=$(basename "$spec" .yaml)
   case "$name" in
     16-*) continue ;;  # paired with 06 below: it REUSES that base
     20-*) continue ;;  # paired with 12 below: it MOUNTS that identity's collection
   esac
-  work="/tmp/omnicore-gen-matrix/$name"
-  rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"
+  work="$MATRIX_WORK/$name"
+  stage_host "$work"
   mkdir -p "$work/omnicore-gen"; cp "$spec" "$work/omnicore-gen/"
 
   if ! (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
@@ -590,8 +632,8 @@ done
 # A second role over an identity the first role created. It is its own lane
 # because it is the only case whose input is another case's OUTPUT: reuse: true
 # means the base schema is expected to be there already.
-work="/tmp/omnicore-gen-matrix/reuse"
-rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"; mkdir -p "$work/omnicore-gen"
+work="$MATRIX_WORK/reuse"
+stage_host "$work"; mkdir -p "$work/omnicore-gen"
 cp "$MATRIX_DIR/06-sharedbase-sharedpk.yaml" "$MATRIX_DIR/16-reuso-de-base.yaml" "$work/omnicore-gen/"
 reuse_ok=1
 for f in "$work"/omnicore-gen/*.yaml; do
@@ -614,8 +656,8 @@ fi
 # and the specs are copied under their real names because a mounted collection
 # is checked against the spec that declares it, which is found by the
 # *.omnicore.yaml convention a real project always follows.
-work="/tmp/omnicore-gen-matrix/mounted"
-rm -rf "$work"; mkdir -p "$work"; cp -R "$HOST/." "$work/"; mkdir -p "$work/omnicore-gen"
+work="$MATRIX_WORK/mounted"
+stage_host "$work"; mkdir -p "$work/omnicore-gen"
 cp "$MATRIX_DIR/12-filho-de-base.yaml" "$work/omnicore-gen/bibliotecario.omnicore.yaml"
 cp "$MATRIX_DIR/20-filho-de-base-montado.yaml" "$work/omnicore-gen/estagiario_bib.omnicore.yaml"
 mounted_ok=1

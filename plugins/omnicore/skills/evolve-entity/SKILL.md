@@ -345,6 +345,9 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | write handlers / in-TX hooks | auto-handlers · lifecycle-hooks |
 | full write-path ripple of a change (SQL ↔ outbox ↔ Mongo op ↔ audit verb) | lifecycle-map |
 | read-side impact of a write change (backing, kinds, archive regime) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) |
+| **a field added to a read: it must land on the query's RESULT, not only on the Response.** The Result owns field existence — a Response field with no same-named Result field behind it is a BOOT PANIC, not a silently empty column, and a Result carrying `json` tags is refused. The reverse is safe and sometimes deliberate: a Result-only field feeds a computed field's derivation and never reaches the wire | auto-query-handlers · custom-query-handler |
+| **a field removed from a read Response disappears from the EXPORT too** — the Response is the export's column source, so this is one change with two wire consequences, and `?fields=` stops accepting the name on both. Its column header lives in the same place: `exportLabelKey` on the Response field | auto-query-handlers · reference |
+| a computed read field added/removed/re-sourced (`read.computed` on the codegen path) — the sources are what `?fields=` pushes down, so changing `from:` changes which columns the store fetches; the derivation body is a hook the generator never rewrites, so a NEW field needs its TODO filled or the column renders empty and nothing says so | auto-query-handlers · `${CLAUDE_PLUGIN_ROOT}/skills/omnicore-gen/SKILL.md` |
 | view shape / indexes / `Version` bump (the FULL rebuild-hash list — root columns, embeds, embedder coupling — is in `views`) | views · auto-query-handlers · mongo-schema-evolution |
 | SharedBaseView / ComposedView impact | views · query-side |
 | REST routes / OpenAPI surface | openapi · reference |

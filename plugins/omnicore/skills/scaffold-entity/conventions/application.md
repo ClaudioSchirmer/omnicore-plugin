@@ -17,7 +17,8 @@ Dispatch / ScopedRepository → `command-handler.html` · query handlers + contr
 
 Per `service-layout.html`: one Command per verb (`insert_`/`update_`=PUT/`patch_`=PATCH/
 `delete_`/`archive_`/`unarchive_`), Result co-located with its Command; queries by-id
-SINGULAR / by-params PLURAL, one type per file; `dtos/` exists only for child-collection
+SINGULAR / by-params PLURAL, one type per file, each with its Result co-located — the read
+side mirrors the write's Command+Result pairing; `dtos/` exists only for child-collection
 inputs. **NO handler files** — the Auto handlers are framework generics instantiated at
 the web layer, never written here.
 
@@ -42,6 +43,53 @@ parameter**; an input-echo silently hides every domain transformation. Contract 
 `auto-handlers.html` (projection contract). Bodyless verbs return the framework's empty
 result — take its NAME from `auto-handlers.html` at the pin, never invent a local empty
 struct for it.
+
+## Read — the same anatomy, reversed
+
+A query is a command read backwards, and the layer's shapes say so. Take the
+signatures from `auto-query-handlers.html` at the pin; what follows is the process.
+
+- **A query declares a RESULT, and the Result owns field EXISTENCE.** Application-pure —
+  no wire tags, field names identical to the view document's Go keys — co-located with
+  its query, one per read shape. A field absent from it can reach no surface: REST,
+  GraphQL and the export all consume the Result through the Response, and none of them
+  ever sees the document again.
+- **`FromQueryResult(ctx, r)` is MANDATORY and is the read's `FromEntity`.** The framework
+  fills the Result from the stored document and hands it here BEFORE any transport sees
+  it. That placement is the point: derived values and ctx-aware shaping computed at this
+  seat are computed ONCE per document, so every surface renders the same thing. The same
+  work done in a Response's `FromResult` runs once per surface and the export disagrees
+  with the JSON. Nothing to derive → `return r, nil`.
+- **`?fields=` forces pointers, recursively, on the Result AND the Response.** A caller
+  asking for a subset means a leaf has to arrive ABSENT, and a value type cannot tell
+  absent from zero. The framework boot-guards it on both shapes; a by-id read declares no
+  `?fields=`, so plain values are right there.
+- **A COMPUTED field is one the store does not hold.** Declare it on the Result, fill it
+  in `FromQueryResult`, and tag the Response `computed:"Src1,Src2"` with the STORED fields
+  it reads. The tag is what makes it work rather than merely appear: `?fields=<computed>`
+  fetches the sources (there is no column behind the name), `?orderBy=<computed>` is a
+  typed 400 on every surface, and a `filter:` over one is a boot panic. A source need not
+  appear on the Response — one that exists only on the Result feeds the derivation and
+  never reaches the wire.
+
+## A per-entry command is FLAT — one command, one responsibility
+
+A collection reaches the application layer two ways, and the shapes differ because the
+OPERATIONS differ. The root's insert/update handles MANY entries, so it carries
+`[]dtos.<Child>Input`. A per-entry verb (`Add`/`Change`) handles exactly ONE, so the
+entry IS the command: its fields sit directly on the command, beside the `<Child>ID`
+the route supplies on `Change`/`Remove`. That is not an inconsistency to iron out —
+each command says what it is for.
+
+Two consequences worth knowing before writing either:
+
+- **`ApplyTo` still goes through `dtos.<Child>Input`**, building it inline from the flat
+  fields. The input type is where a value object is REASSEMBLED — an enum cast, a
+  composite folded from its parts — and that reassembly belongs in one place. What
+  `ApplyTo` writes is a flat copy of scalars, which is the half that can repeat without
+  drifting.
+- **A child field named `<Child>ID` collides** with the path field on the per-entry
+  commands. `check` refuses it with that reason.
 
 ## Wire → VO mapping — a CAST, not a constructor (avoid bloat)
 
@@ -91,7 +139,8 @@ exist, split rules via `actionName`.
 The Command/Query layer is where identity-derived security lives:
 - **Write:** the input mappers feed runtime-only authz fields from `ctx.Identity()` onto
   the entity (read by `BuildRules` — domain.md Layer-2).
-- **Read:** `ToCriteria(ctx)` injects restrictions/tenant filters.
+- **Read:** `ToCriteria(ctx)` injects restrictions/tenant filters — and `FromQueryResult(ctx, r)`
+  is the second gateway, where ctx-aware SHAPING of the returned data belongs.
 See `authz-seams.html`.
 
 ## Service injection — enforced pairing

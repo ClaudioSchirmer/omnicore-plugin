@@ -709,10 +709,51 @@ type Read struct {
 	// FieldRestrict hides a field from callers without a permission — asking
 	// for it explicitly is a 403 rather than a silent omission.
 	FieldRestrict []FieldRestrict `yaml:"fieldRestrict"`
+	// Computed declares read fields that have no column: the value is DERIVED
+	// per document, after the store answered, and the derivation is yours to
+	// write in a hook file the generator never rewrites.
+	Computed []Computed `yaml:"computed"`
 	// IdentityView is whether this role creates the shared identity's own view,
 	// joins it, or skips it. Refused by this build — the identity's own view is
 	// not generated yet.
 	IdentityView string `yaml:"identityView"`
+}
+
+// Computed is one derived read field — a value the reads return that no column
+// holds. It is the read side's twin of a `manual` fact: the language declares
+// the SHAPE (its name, its type, the fields it is derived from) and hands the
+// body to a human, in a file the generator writes once and never touches again.
+//
+// What the declaration buys, beyond the field existing:
+//   - `?fields=<name>` pushes the SOURCES down to the store instead of the
+//     computed name, which has no column to resolve;
+//   - `?orderBy=<name>` is refused with a typed 400 on every surface, because
+//     ordering happens in the store and the keyset cursor is built from stored
+//     values;
+//   - the tabular exports keep the column, headed by its labelKey.
+//
+// It is therefore NOT filterable and NOT sortable — declaring it under
+// byParams.filters is refused, for the same reason: a filter is evaluated in
+// the store, and there is nothing there to evaluate.
+type Computed struct {
+	// Name is the field's name, in the same PascalCase spelling a persisted
+	// field uses; the wire name is derived from it like any other field's.
+	Name string `yaml:"name"`
+	// Type is the derived value's type, from the same closed set a persisted
+	// field draws from.
+	Type string `yaml:"type"`
+	// From names the persisted fields the derivation reads. They are what the
+	// framework pushes to the store when the caller selects this field, so the
+	// list has to be complete — a source left out is a source that arrives nil.
+	From []string `yaml:"from"`
+	// LabelKey is the translation-catalog key the tabular exports render as
+	// this column's header; absent, the header is the wire name.
+	LabelKey string `yaml:"labelKey"`
+	// Example feeds the OpenAPI example, exactly as on a persisted field.
+	Example string `yaml:"example"`
+	// Description is one line on what the value MEANS. It reaches the hook the
+	// author has to implement, which is the one place it is genuinely needed.
+	Description string `yaml:"description"`
 }
 
 type View struct {

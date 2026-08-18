@@ -56,6 +56,11 @@ func requestImports(s *src, m *ir.Model, needQueries bool) {
 	if needQueries {
 		s.L("\tfwqueries %s", quote(fwImport("application/queries")))
 	}
+	// Both markers, every time: the pruner drops whichever a file does not
+	// reference, and deciding it here would mean re-deriving per file what the
+	// emitters already know.
+	s.L("\tfwrequests %s", quote(fwImport("web/requests")))
+	s.L("\tfwresponses %s", quote(fwImport("web/responses")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
 	s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
 	s.L(")")
@@ -77,6 +82,8 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 		s.Doc("", "Every field is optional: omitting one leaves the stored value untouched.")
 	}
 	s.L("type %s struct {", op.RequestType)
+	s.L("\t%s", autoRequestEmbed)
+	s.Blank()
 	for _, f := range commandFields(m, partial) {
 		s.L("\t%s %s `json:%s example:%s`", f.Name,
 			commandFieldType(f, partial), quote(jsonTag(f, partial)), quote(f.Example))
@@ -89,28 +96,14 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	s.L("}")
 	s.Blank()
 
-	s.Doc("ToCommand hands the body to the application layer unchanged. " +
-		"No normalisation happens here: the domain is what decides a value's final form.")
-	s.L("func (r %s) ToCommand() *commands.%s {", op.RequestType, op.CommandType)
-	s.L("\tcmd := &commands.%s{", op.CommandType)
-	for _, f := range commandFields(m, partial) {
-		s.L("\t\t%s: r.%s,", f.Name, f.Name)
-	}
-	s.L("\t}")
-	if !partial {
-		for _, c := range m.Children {
-			s.L("\tfor _, item := range r.%s {", c.GoPlural)
-			s.L("\t\tcmd.%s = append(cmd.%s, item.ToInput())", c.GoPlural, c.GoPlural)
-			s.L("\t}")
-		}
-	}
-	s.L("\treturn cmd")
-	s.L("}")
+	emitAutoToCommand(s, op.RequestType, op.CommandType)
 	s.Blank()
 
 	// ── response
 	s.Doc(fmt.Sprintf("%s is what %s returns.", op.ResponseType, op.Summary))
 	s.L("type %s struct {", op.ResponseType)
+	s.L("\t%s", autoResponseEmbed)
+	s.Blank()
 	s.L("\tID domain.ID `json:\"id\" example:\"7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51\"`")
 	for _, f := range m.AllOwnerFields() {
 		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType, quote(jsonTag(f, false)), quote(f.Example))
@@ -120,25 +113,11 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	}
 	s.L("}")
 	s.Blank()
-	s.L("func (%s) FromResult(r commands.%s) %s {", op.ResponseType, op.ResultType, op.ResponseType)
-	s.L("\tout := %s{", op.ResponseType)
-	s.L("\t\tID: r.ID,")
-	for _, f := range m.AllOwnerFields() {
-		s.L("\t\t%s: r.%s,", f.Name, f.Name)
-	}
-	s.L("\t}")
-	for _, c := range m.Children {
-		s.L("\tfor _, item := range r.%s {", c.GoPlural)
-		s.L("\t\tout.%s = append(out.%s, %sResponse{", c.GoPlural, c.GoPlural, c.Name)
-		s.L("\t\t\tID: item.ID,")
-		for _, f := range c.Fields {
-			s.L("\t\t\t%s: item.%s,", f.Name, f.Name)
-		}
-		s.L("\t\t})")
-		s.L("\t}")
-	}
-	s.L("\treturn out")
-	s.L("}")
+	emitAutoFromResult(s, op.ResponseType, "commands."+op.ResultType,
+		"",
+		"It reads the entity as STORED, never an echo of the request: the domain may "+
+			"have normalised or defaulted a value, and echoing the input back would hide "+
+			"that from the caller.")
 	s.Blank()
 	s.L("var _ = time.Time{}")
 
@@ -162,7 +141,7 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package requests")
 	s.Blank()
-	requestImports(s, m, false)
+	requestImports(s, m, true)
 
 	s.Doc(
 		fmt.Sprintf("%s declares the read controls this endpoint serves.", op.RequestType),
@@ -177,16 +156,17 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	s.L("}")
 	s.Blank()
 
-	s.L("func (r %s) ToQuery() *appqueries.%s {", op.RequestType, m.Read.QueryByID)
-	if m.Managed.Archiving && m.Read.Controls.IncludeArchived {
-		s.L("\tincludeArchived := false")
-		s.L("\tif r.IncludeArchived != nil {")
-		s.L("\t\tincludeArchived = *r.IncludeArchived")
-		s.L("\t}")
-		s.L("\treturn &appqueries.%s{IncludeArchived: includeArchived}", m.Read.QueryByID)
-	} else {
-		s.L("\treturn &appqueries.%s{}", m.Read.QueryByID)
-	}
+	// ToQuery takes the parsed criteria, exactly like the listing's does. A
+	// by-id read speaks a SMALLER wire vocabulary — one reserved control — but
+	// it is the same seat, so the control this DTO declares reaches the query
+	// without anyone unwrapping a *bool by hand.
+	s.Doc("ToQuery is the web→application boundary: pure mapping, no ctx. " +
+		"Identity-derived overlays layer onto the criteria inside the query's " +
+		"ToCriteria(ctx), which is the only layer below the web boundary that may " +
+		"read the AppContext.")
+	s.L("func (r %s) ToQuery(criteria fwqueries.ReadCriteria) *appqueries.%s {",
+		op.RequestType, m.Read.QueryByID)
+	s.L("\treturn &appqueries.%s{Criteria: criteria}", m.Read.QueryByID)
 	s.L("}")
 	s.Blank()
 
@@ -196,16 +176,23 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 		"It carries the WHOLE aggregate — the root's fields, the facets' fields and "+
 			"the collections. Reading one record and getting less of it than the listing "+
 			"gives for the same record is the shape nobody expects, and there is no "+
-			"second request that would fill the gap: the document was already fetched.")
+			"second request that would fill the gap: the document was already fetched.",
+		"",
+		responseAuthorityDoc)
 	s.L("type %s struct {", op.ResponseType)
+	s.L("\t%s", autoResponseEmbed)
+	s.Blank()
 	s.L("\tID string `json:\"id\" example:\"7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51\"`")
 	for _, f := range m.AllOwnerFields() {
-		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType, quote(f.JSONName), quote(f.Example))
+		s.L("\t%s %s `%s`", f.Name, f.GoType, readFieldTag(f, false))
 	}
+	emitComputedResponseFields(s, m, false)
 	for _, c := range m.Children {
 		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
 	}
 	s.L("}")
+	s.Blank()
+	emitReadFromResult(s, op.ResponseType, m.Read.ResultByID)
 	s.Blank()
 	s.L("var _ = time.Time{}")
 
@@ -247,7 +234,7 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 	// projector; with ?fields= on, every field must be a pointer or slice with
 	// omitempty, or the framework panics when the wrapper is built.
 	pointered := m.Read.Controls.Fields
-	s.Doc(fmt.Sprintf("%s is one row of the listing.", op.ResponseType))
+	s.Doc(fmt.Sprintf("%s is one row of the listing.", op.ResponseType), "", responseAuthorityDoc)
 	if pointered {
 		s.Doc("",
 			"Every field is a pointer with omitempty because this listing serves "+
@@ -255,6 +242,8 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 				"framework refuses to build the endpoint otherwise.")
 	}
 	s.L("type %s struct {", op.ResponseType)
+	s.L("\t%s", autoResponseEmbed)
+	s.Blank()
 	if pointered {
 		s.L("\tID *string `json:\"id,omitempty\" example:\"7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51\"`")
 	} else {
@@ -265,17 +254,19 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 	// so leaving them out discards data that was fetched anyway and pushes the
 	// caller into one extra request per row to get it back.
 	for _, f := range m.AllOwnerFields() {
-		typ, tag := f.GoType, quote(f.JSONName)
+		typ := f.GoType
 		if pointered {
 			typ = "*" + f.BaseGoType
-			tag = quote(f.JSONName + ",omitempty")
 		}
-		s.L("\t%s %s `json:%s example:%s`", f.Name, typ, tag, quote(f.Example))
+		s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
 	}
+	emitComputedResponseFields(s, m, pointered)
 	for _, c := range m.Children {
 		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment+",omitempty"))
 	}
 	s.L("}")
+	s.Blank()
+	emitReadFromResult(s, op.ResponseType, m.Read.ResultList)
 	s.Blank()
 	s.L("var _ = time.Time{}")
 
@@ -400,17 +391,13 @@ func emitRoute(s *src, m *ir.Model, op ir.Operation, entity string) {
 	case op.Verb == "byParams":
 		s.L("\t%s, %s := fwweb.QueryWithParamsSpec(d.Pipeline,", hv, sv)
 		s.L("\t\trequests.%s{},", op.RequestType)
-		s.L("\t\tfwresponses.AutoFromDoc[requests.%s],", op.ResponseType)
-		s.L("\t\t&handlers.FindByParamsQueryHandler[*appqueries.%s]{", m.Read.QueryList)
-		s.L("\t\t\tReader: d.ViewReader, View: viewName,")
-		s.L("\t\t})")
+		s.L("\t\trequests.%s{}.FromResult,", op.ResponseType)
+		s.L("\t\t%s)", listHandler(m))
 	case op.Verb == "byId":
 		s.L("\t%s, %s := fwweb.QueryByIDSpec(d.Pipeline,", hv, sv)
 		s.L("\t\trequests.%s{},", op.RequestType)
-		s.L("\t\tfwresponses.AutoFromDoc[requests.%s],", op.ResponseType)
-		s.L("\t\t&handlers.FindByIDQueryHandler[*appqueries.%s]{", m.Read.QueryByID)
-		s.L("\t\t\tReader: d.ViewReader, View: viewName,")
-		s.L("\t\t})")
+		s.L("\t\trequests.%s{}.FromResult,", op.ResponseType)
+		s.L("\t\t%s)", byIDHandler(m))
 	case op.Bodyless:
 		s.L("\t%s, %s := fwweb.CommandByIDSpec(d.Pipeline,", hv, sv)
 		s.L("\t\tfwresponses.NoBody,")
@@ -542,12 +529,13 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 				s.L("\tID string `json:\"id\"`")
 			}
 			for _, f := range c.Fields {
-				typ, tag := f.GoType, quote(f.JSONName)
+				typ := f.GoType
 				if pointered {
 					typ = "*" + f.BaseGoType
-					tag = quote(f.JSONName + ",omitempty")
 				}
-				s.L("\t%s %s `json:%s example:%s`", f.Name, typ, tag, quote(f.Example))
+				// exportLabelKey rides the nested row too: a hierarchical export
+				// gives every level its own columns, and each needs a header.
+				s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
 			}
 			s.L("}")
 			s.Blank()
@@ -563,21 +551,18 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 		}
 		s.Doc(fmt.Sprintf("%sRequest is one entry sent in the %s collection.", c.Name, c.Segment),
 			"",
-			"It carries no id: the server mints one.")
+			"It carries no id: the server mints one.",
+			"",
+			"It declares no mapper of its own. This type is never the top of a "+
+				"request — it is reached as an element of the root's collection or "+
+				"through the per-entry verbs' embed — and the generic Request→Command "+
+				"mapping recurses into it by field name, so the entry travels without a "+
+				"seat here. The marker rides the type at the TOP of each walk.")
 		s.L("type %sRequest struct {", c.Name)
 		for _, f := range c.Fields {
 			s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType,
 				quote(jsonTag(f, false)), quote(f.Example))
 		}
-		s.L("}")
-		s.Blank()
-
-		s.L("func (r %sRequest) ToInput() dtos.%s {", c.Name, c.InputType)
-		s.L("\treturn dtos.%s{", c.InputType)
-		for _, f := range c.Fields {
-			s.L("\t\t%s: r.%s,", f.Name, f.Name)
-		}
-		s.L("\t}")
 		s.L("}")
 		s.Blank()
 

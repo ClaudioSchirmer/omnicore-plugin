@@ -483,6 +483,26 @@ read:
   fieldRestrict:
     - field: Grade
       permission: student:read-grade
+  # A COMPUTED read field: one the reads return and no column holds. The
+  # language declares the shape — the name, the type, the stored fields the
+  # derivation reads — and the BODY is yours, in
+  # internal/application/queries/<entity>_computed_manual.go, which the
+  # generator writes once and never touches again.
+  #
+  # What the declaration alone buys, on every surface at once:
+  #   ?fields=enrollmentLabel  fetches `from:` instead of a name no column has
+  #   ?orderBy=enrollmentLabel is a typed 400 — ordering happens in the store
+  #   the CSV/XLSX export       keeps the column, headed by labelKey
+  #
+  # It is therefore neither filterable nor sortable, and declaring it under
+  # byParams.filters is refused for the same reason.
+  computed:
+    - name: EnrollmentLabel
+      type: string
+      from: [Name, EnrollmentNumber]
+      labelKey: StudentEnrollmentLabelField
+      example: "Alice Parker Reid (2026-00417)"
+      description: The student's name followed by the enrollment number, for listings.
   byId: true
   byParams:
     filters:
