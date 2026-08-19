@@ -7,6 +7,140 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-08-19
+
+### Changed
+
+- **⚠️ The generator targets framework v0.54.0** (was v0.53.0), and the golden host it is
+  proven against pins that line. There is no compatibility branch — one supported version,
+  one shape of emitted code. Nothing the generator emits changed shape for it: the release's
+  breaking changes land under the emitted code rather than in it (`core.Querier` split, the
+  removal of `metadata.Signature()`), and the two that DO reach a generated service were
+  already satisfied — `Revision` has always been mandatory on every entity and base schema
+  this build writes, and the repositories it emits are `BaseAggregateRepository`, which
+  carries the archived-reader capability unarchive now requires.
+
+- **Emitted comments that v0.54.0 made false.** Every root update is now guarded on the
+  revision it was loaded with, so two callers replacing a collection through the root no
+  longer "lose each other's work" — the second is refused with a 409 and reloads. The
+  per-child commands' doc comment said the old thing, and the revision column's own
+  comment (spec key, migration comment, table documentation) described a stamp nobody
+  read anything from.
+
+### Added
+
+- **`delete.archiveWhen` — an ordinary update that RETIRES the row**, which is v0.54.0's
+  `CompleteAsArchive()` made declarable. Naming a field, the value that means "retire
+  this" and optionally the value to rest at appends one condition to the end of the
+  generated `IfUpdate` clause; the framework then runs the whole archive off that same
+  request — the archive stamp, the child cascade, the `ARCHIVED` event the read side
+  routes on, and an archive audit entry.
+
+  It lives under `delete` rather than among the rules because it is not a rule: every
+  other clause in `BuildRules` decides whether a write is ALLOWED, and this one decides
+  what the write IS. Refused when the entity does not declare `archive` in `modes` (the
+  framework panics when a rule asks an entity that forbids archiving to complete as one)
+  or serves no update at all, and — when the deciding field is an enum declared in the
+  spec — the trigger and resting values are checked against its members, so a typo is
+  refused rather than compiling into a condition that never matches.
+
+  Two more ways to reach that same silence are WARNED about, because a trigger no update
+  can set retires nothing and the generated code looks exactly like the working version:
+  the deciding field sitting in `update.patchExcludes` when patch is the entity's only
+  shape, and an `immutable` rule over it scoped to update. Warnings and not refusals
+  because one path survives both — a row INSERTED already holding the trigger, retired by
+  the next update that touches it, whatever it changes.
+
+  **What it does NOT change is which gates the write passed**, and that is the question to
+  settle before declaring it. A write is decided by a permission (who may attempt the verb
+  on this ROUTE) and by the rules that fire for the verb it turned out to be. This key
+  moves neither: the request arrives under the UPDATE's permission, never the archive's,
+  and it runs the `IfUpdate` rules — `IfArchive` does not fire on this path, so a rule
+  scoped to `archive` never sees it. Declare it when both populations are the same;
+  restate the guard with `scope: [update]` when they are not. The gen-report lists it as a
+  SECOND removal door and now names the archive-scoped rules of that entity by id, because
+  "check the permissions" was the half of the warning that pointed at nothing specific.
+
+  `becomes` exists because the archive rules do NOT re-fire on this path: the row is
+  archived holding whatever the closure leaves behind. That is right when the trigger is a
+  resting state ("dropped") and wrong when it is a request ("closing"), which is the
+  distinction the key exists to let an author make.
+
+- **`fields[].text` — the field's LABEL, per catalog.** A label is the field's short human
+  name: it is what a 422 payload puts in `fieldLabel` and what a CSV/XLSX export puts in a
+  column header. It takes the same seven catalogs a notification's text does, and unlike
+  one it is optional and may be partial — a catalog left out falls back to the field's own
+  name, spaced out. Declarable on a persisted field, on a composite's part
+  (`valueObjects[].parts[].text`, because the value object owns its vocabulary for every
+  entity that uses it) and on a computed read field.
+
+  **This replaces seeding the label from `description:`, which was wrong.** A description
+  is a sentence about what the field means — it is what the column COMMENT wants; a label
+  is a name. The generator used to copy the description into whichever catalog matched the
+  spec's `language:`, so a field documented as "Immutable handle of the tenant; reaches
+  URLs, logs and external configuration…" came back in a live validation payload with that
+  whole paragraph as its `fieldLabel`, in exactly one language — the other six fell back to
+  the field name and were right. The fallback is now what every catalog does, and it also
+  stopped splitting runs of capitals (`TenantID` reads as "Tenant ID", not "Tenant I D").
+
+  **The seven catalogs are now declared once**, which is what made the label reachable from
+  every consumer without a fourth copy of the list. `spec.Texts.Map` owns the yaml-key →
+  catalog-code mapping and `spec.CatalogCodes` owns the order; the notification resolver
+  and the translation validator read them instead of spelling the seven out, and the
+  emitters take the order from the IR. An eighth catalog added to one and not the other
+  used to be invisible — the language would be accepted from a spec, validated against
+  nothing and never emitted; a test now fails on the drift instead.
+
+- **`fields[].assignedFrom: derived` — a persisted field the SERVER computes from the
+  entity's own fields.** The two identity values already answered "the server fills this,
+  so the client never sends it", but only for a value read from the caller's token. A
+  public key derived from an immutable handle had no equivalent, so it was generated as an
+  ordinary field: it landed in every write DTO and in the published OpenAPI as writable,
+  and the caller's value was accepted and silently ignored.
+
+  `derived` takes the field out of every write request, command and OpenAPI request schema
+  and emits NO assignment — the generator cannot know the derivation. What computes it is a
+  `rules.manual` entry scoped to insert, which the generation report now lists as owed, at
+  the top, with what happens if it is never written: the column keeps its zero value and
+  nothing reports it. Declaring `identity-subject` and overwriting it in a rule produces
+  the right bytes and a spec that lies about where the value comes from; this is the honest
+  key for it.
+
+- **`valueObjects[].kind: manual` — a value object this language cannot express, which you
+  write.** `reuse` resolves against types the project ALREADY has, so an author who needed
+  a value object with a rule no `raw` or `enum` can state (a checksum, a lookup) had no
+  legal declaration at all: pointing `reuse` at a type they were about to write was refused
+  with "the project declares no value object named X", which reads like a naming mistake
+  and is not one.
+
+  A `manual` value object is declared with its name, its backing and a REQUIRED description
+  of what it enforces. The generator types the field as it and converts to and from the
+  backing exactly as it does for a generated one, and writes no file — a stub that
+  validates nothing would pass every check the framework runs, silently. The report asks
+  for it by name with the exact shape (`type X <backing>`, `Value()`, `IsValid`) and says
+  the backing is a contract — until the type is on disk, at which point it stops billing it
+  as blocking the build and asks instead whether what it enforces still matches what the
+  spec says it enforces, which is the ask that survives the first run: the generator never
+  opens a file it does not own, so a description rewritten to mean something stricter
+  leaves a stale rule behind it. It is the loudest of the four escape hatches by design: an
+  unwritten rule quietly enforces nothing, an unwritten fact panics on first use, an
+  unwritten derivation renders an empty column — an unwritten value object does not
+  compile.
+
+  Two consequences the gate found, both about the run AFTER the author writes the type.
+  The declaration STAYS legal: the type is now in the project, and the "already declared —
+  reuse it instead" refusal would otherwise tell the author to stop asking for the thing
+  they were asked to write, so the feature would work exactly once. And no test is
+  generated for it: the generator does not know the rule, so anything it asserted would be
+  its own guess failing inside the author's file — the one property it could check, that
+  the type exists with the right shape, the compiler already checks louder on the same run.
+
+### Fixed
+
+- The gen-report's advice on a translation you edited by hand — "if your version is the
+  better one, put it in the spec" — could not be followed for a field label, because no key
+  held one. `fields[].text` is that key.
+
 ## [0.21.0] — 2026-08-17
 
 ### Changed

@@ -71,6 +71,114 @@ func TestUniqueLineCarriesTheScope(t *testing.T) {
 	}
 }
 
+// TestSecondRemovalDoorNamesWhatItSkips pins the warning for the one write that
+// is not the verb it looks like.
+//
+// A reviewer reads the routes and sees an update and an archive as two doors.
+// `delete.archiveWhen` makes one of them also the other, and a write through it
+// passes NEITHER gate the entity declares for removal: not the archive
+// permission (it arrived on the update's route) and not the archive-scoped
+// rules (IfArchive does not fire in ModeUpdate). The row said only the first,
+// which is the half that names nothing the reviewer can go and look at — so an
+// ownerCheck guarding removal read as covered when it was being walked past.
+func TestSecondRemovalDoorNamesWhatItSkips(t *testing.T) {
+	model := func(clauses []ir.Clause) *ir.Model {
+		return &ir.Model{
+			Entity: ir.Names{Pascal: "Teacher"}, Table: "teachers",
+			ArchiveWhen: &ir.ArchiveWhen{
+				Field: ir.Field{Name: "Status"}, Equals: "terminated", Becomes: "suspended",
+			},
+			Clauses: clauses,
+		}
+	}
+
+	guarded := lineWith(Render(Input{
+		Model: model([]ir.Clause{{Gate: "IfArchive", Rules: []ir.Rule{
+			{ID: "only-the-owner-archives", Kind: "ownerCheck"},
+		}}}),
+		SpecPath: "omnicore-gen/teacher.omnicore.yaml",
+	}), "| Removal, second door |")
+
+	for _, want := range []string{
+		"only-the-owner-archives", // the rule that does not run, by name
+		"scope: [update]",         // and what to do about it
+		"UPDATE's permission",     // the other gate, still said
+	} {
+		if !strings.Contains(guarded, want) {
+			t.Errorf("the second-door row omits %q, so the reviewer cannot act on it:\n%s",
+				want, guarded)
+		}
+	}
+
+	// With nothing scoped to archive there is no rule to name, and inventing one
+	// would be worse than the generic sentence: the warning still has to say the
+	// path exists, because a rule added LATER lands on the same silence.
+	bare := lineWith(Render(Input{
+		Model:    model(nil),
+		SpecPath: "omnicore-gen/teacher.omnicore.yaml",
+	}), "| Removal, second door |")
+	if strings.Contains(bare, "never runs on this path") {
+		t.Errorf("a rule is named where the entity declares none:\n%s", bare)
+	}
+	if !strings.Contains(bare, "IfArchive") {
+		t.Errorf("the row stops mentioning the path it warns about:\n%s", bare)
+	}
+}
+
+// TestManualValueObjectStopsBeingOwedOnceWritten pins the state the report was
+// blind to.
+//
+// A `kind: manual` value object is the one outstanding item that stops the
+// package compiling, so the first run says exactly that. Every run after the
+// author writes it said it AGAIN — which is how a report claims work is
+// outstanding that somebody finished three runs ago, the standard the hook-file
+// block two sections above already holds itself to. What is owed and what is
+// merely worth re-reading are different asks, and the second one is real: the
+// generator never opens a file it does not own, so a description the spec
+// rewrote to mean something stricter leaves a stale rule behind it.
+func TestManualValueObjectStopsBeingOwedOnceWritten(t *testing.T) {
+	model := &ir.Model{
+		Entity: ir.Names{Pascal: "Student"}, Table: "students",
+		ValueObjects: []ir.ValueObject{{
+			Name: "NationalID", Kind: "manual", Backing: "string", GoBacking: "string",
+			Description: "Valid by its own check digits.",
+		}},
+	}
+
+	owed := Render(Input{Model: model, SpecPath: "omnicore-gen/student.omnicore.yaml"})
+	if !strings.Contains(owed, "### Value objects you write") {
+		t.Error("a value object nobody has written is not asked for")
+	}
+	if !strings.Contains(owed, "does not compile until each one exists") {
+		t.Error("the report does not say what an unwritten value object costs")
+	}
+	if !strings.Contains(owed, "func (v NationalID) IsValid(") {
+		t.Error("the shape the implementer has to match is missing, which is the whole " +
+			"reason this block carries code at all")
+	}
+
+	written := Render(Input{
+		Model: model, SpecPath: "omnicore-gen/student.omnicore.yaml",
+		ExistingVOs: []string{"NationalID"},
+	})
+	if strings.Contains(written, "does not compile until each one exists") {
+		t.Error("the report still bills a value object that is already on disk as " +
+			"blocking the build")
+	}
+	if !strings.Contains(written, "### Value objects you already wrote") {
+		t.Error("a written value object drops off the report entirely — a spec that moves " +
+			"under it then leaves a stale rule nobody is told to re-read")
+	}
+	if !strings.Contains(written, "NationalID") {
+		t.Errorf("the written block names no value object:\n%s", written)
+	}
+	// The backing is a contract on every run, not only on the first: it is what
+	// the emitted mappers convert through.
+	if !strings.Contains(written, "`.Value()`") {
+		t.Error("the written block drops the backing contract")
+	}
+}
+
 func storageLine(report string) string { return lineWith(report, "| Storage |") }
 
 func lineWith(report, prefix string) string {

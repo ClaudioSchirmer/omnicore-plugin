@@ -169,10 +169,14 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 		MigrationsKept:      migrationsKept,
 		TargetTables:        result.TargetTables,
 		Orphans:             orphans,
-		CompatLevel:         string(verdict.Level),
-		CompatMessage:       verdict.Message,
-		FrameworkPinned:     verdict.Pinned,
-		Warnings:            warnings,
+		// Discovery ran BEFORE anything was written, which is what makes this
+		// answer meaningful: the generator writes no file for a `kind: manual`
+		// value object, so a name in here is one the author already wrote.
+		ExistingVOs:     proj.ExistingVOs,
+		CompatLevel:     string(verdict.Level),
+		CompatMessage:   verdict.Message,
+		FrameworkPinned: verdict.Pinned,
+		Warnings:        warnings,
 	})
 	reportPath := filepath.Join(filepath.Dir(opt.SpecPath),
 		model.Entity.Snake+".gen-report.md")

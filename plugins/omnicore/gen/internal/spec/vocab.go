@@ -17,18 +17,26 @@ var (
 
 	// AssignedFrom is where the SERVER reads a persisted field's value, for the
 	// fields a client is not allowed to send. The subject is the caller's own
-	// identifier; a claim is anything else the token carries.
-	AssignedFrom = set("identity-subject", "identity-claim")
+	// identifier; a claim is anything else the token carries; `derived` is the
+	// ELSE — the value comes from the entity itself, and the generator only
+	// promises to keep the field out of the write surface.
+	AssignedFrom = set("identity-subject", "identity-claim", "derived")
 
-	// VOKinds is what a field's value object IS. The three declared kinds split
-	// on two questions: who owns the rule (raw writes it, enum gets membership
-	// for free) and how many columns the value occupies — a composite declares
-	// no Value(), so its value spans several and the schema decomposes it.
-	VOKinds = set("none", "reuse", "raw", "enum", "composite")
+	// VOKinds is what a field's value object IS. The generated kinds split on
+	// two questions: who owns the rule (raw writes it, enum gets membership for
+	// free) and how many columns the value occupies — a composite declares no
+	// Value(), so its value spans several and the schema decomposes it.
+	//
+	// The two remaining answers are about WHO WRITES THE TYPE: `reuse` for one
+	// that already exists in the project, `manual` for one that does not exist
+	// yet and that you will write, because its rule is outside what this
+	// language can express.
+	VOKinds = set("none", "reuse", "raw", "enum", "composite", "manual")
 	// VODeclaredKinds is what a valueObjects[] entry may declare. `none` and
 	// `reuse` are field-side answers ("no value object" / "one that already
-	// exists"), so they are not declarations.
-	VODeclaredKinds = set("raw", "enum", "composite")
+	// exists"), so they are not declarations. `manual` IS one: the type is not
+	// in the project yet, so the spec has to say what it will be.
+	VODeclaredKinds = set("raw", "enum", "composite", "manual")
 	VOBackings      = set("string", "int")
 
 	// CompositeRuleKinds is what a COMPOSITE value object's own rules may check.
@@ -177,9 +185,11 @@ func Vocabularies() []Vocabulary {
 			"the persistable set; money is int64 in minor units, never a float."},
 		{"fields[].vo.kind", VOKinds,
 			"enum when the valid values are finite and known; raw when it is a shape; " +
-				"composite when the value needs SEVERAL columns to mean anything."},
+				"composite when the value needs SEVERAL columns to mean anything; reuse for a " +
+				"type the project ALREADY has, manual for one it does not and you will write."},
 		{"fields[].assignedFrom", AssignedFrom,
-			"the server fills it from the caller's identity, so no write request carries it."},
+			"the server fills it, so no write request carries it — from the identity, or " +
+				"(derived) from the entity's own fields, by a rule you write."},
 		{"fields[].unique.enforce", UniqueEnforcements,
 			"whether a Service pre-check answers before the database constraint does."},
 		{"fields[].unique.scope", UniqueScopes,
@@ -187,7 +197,8 @@ func Vocabularies() []Vocabulary {
 		{"valueObjects[].backing", VOBackings,
 			"what the value object stores underneath; a composite has none — its parts are its value."},
 		{"valueObjects[].kind", VODeclaredKinds,
-			"raw/enum occupy ONE column; composite spans several and the schema decomposes it."},
+			"raw/enum occupy ONE column; composite spans several and the schema decomposes " +
+				"it; manual is the one the generator does not write — you do."},
 		{"valueObjects[].parts[].type", FieldTypes,
 			"a composite's part is persisted like any field, so it draws from the same closed set."},
 		{"valueObjects[].rules.list[].kind", CompositeRuleKinds,

@@ -50,10 +50,31 @@ func TestEverySpecFieldIsConsumedOrRefused(t *testing.T) {
 	}
 }
 
-// deliberatelyUnread lists fields no emitter reads ON PURPOSE, each with the
-// reason. An entry here is a claim that setting the key changes nothing AND
-// that this is correct — not a place to silence a finding.
+// deliberatelyUnread lists fields the scan above cannot see reaching an
+// emitter, each with the reason. Two kinds live here, and the difference
+// matters when reading an entry:
+//
+//   - the key genuinely changes nothing downstream, and that is correct — it is
+//     read by the VALIDATOR, or it is documentation for whoever reads the spec;
+//   - the key is read through an ACCESSOR in this package, and what the
+//     resolver consumes is the accessor's result. The scan looks for the field
+//     name in ir/ and emit/, so a field reached as `n.Text.Map()` or
+//     `spec.ExposedName(...)` looks unread from there and is not.
+//
+// What an entry is never allowed to be is a way to silence a finding: a field
+// nobody reads and nobody explains is the exact failure this test exists for.
 var deliberatelyUnread = map[string]string{
+	// The seven catalogs, read through Texts.Map — which exists so the mapping
+	// from yaml key to catalog code is written once. Before it, every consumer
+	// spelled the seven out, which is what made them look consumed here.
+	"Texts.PTBR": readThroughTextsMap,
+	"Texts.ENG":  readThroughTextsMap,
+	"Texts.ESP":  readThroughTextsMap,
+	"Texts.FRA":  readThroughTextsMap,
+	"Texts.DEU":  readThroughTextsMap,
+	"Texts.ITA":  readThroughTextsMap,
+	"Texts.NLD":  readThroughTextsMap,
+
 	"Spec.SourcePath": "bookkeeping, not part of the language",
 	"Child.SoftRemove": "the validator's gate for archivedAt: it forces the pair to " +
 		"agree, and archivedAt is what the schema and the DDL actually read",
@@ -83,6 +104,14 @@ var deliberatelyUnread = map[string]string{
 	"Delete.Root": "same: it is cross-checked against the modes rather than read " +
 		"on its own",
 }
+
+// readThroughTextsMap is one reason shared by the seven catalog fields, so the
+// entries above stay a list of names rather than seven copies of a paragraph.
+// TestCatalogSetIsWrittenOnce is what proves the claim: it fails if a catalog
+// stops being reachable through Map.
+const readThroughTextsMap = "consumed through Texts.Map, which renders the seven " +
+	"catalogs keyed by the framework's catalog codes — the shape every consumer reads " +
+	"them in, and the reason the yaml-key-to-code mapping is written once"
 
 type specField struct {
 	Qualified string

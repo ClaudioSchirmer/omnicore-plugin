@@ -405,26 +405,30 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 	if f.AssignedFrom != "" {
 		if isChild {
 			ps.BlockerFix(where+".assignedFrom",
-				"an entry of a collection is not assigned from the caller's identity",
-				"the field that records who acted belongs to the root, which is where "+
-					"the write is addressed")
+				"an entry of a collection is not server-assigned",
+				"the write is addressed to the root, and it is the root that carries the "+
+					"field the server fills")
 		}
 		if !AssignedFrom.Has(f.AssignedFrom) {
 			ps.BlockerFix(where+".assignedFrom",
 				fmt.Sprintf("%q is not a source the server can read", f.AssignedFrom),
 				"one of: "+AssignedFrom.String())
 		}
+		fromIdentity := f.AssignedFrom == "identity-subject" || f.AssignedFrom == "identity-claim"
 		if f.AssignedFrom == "identity-claim" && f.Claim == "" {
 			ps.BlockerFix(where+".claim",
 				"the field is filled from a claim but does not say which",
 				"name it, e.g. claim: tenant_id — there is no convention to fall back on")
 		}
-		if f.AssignedFrom == "identity-subject" && f.Claim != "" {
+		if f.AssignedFrom != "identity-claim" && f.Claim != "" {
 			ps.BlockerFix(where+".claim",
-				"the subject is not a claim, so naming one says two different things",
+				"this field is not filled from a claim, so naming one says two different things",
 				"drop claim, or use assignedFrom: identity-claim")
 		}
-		if f.Type != "string" {
+		// Only an IDENTITY is necessarily text. A derived value is whatever the
+		// derivation produces — a domain.ID for a public key computed from an
+		// immutable handle is the case this exists for.
+		if fromIdentity && f.Type != "string" {
 			ps.BlockerFix(where+".type",
 				"an identity is text, so the field that records one is text",
 				"set type: string")
@@ -432,8 +436,19 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 		if f.Nullable {
 			ps.BlockerFix(where+".nullable",
 				"a server-assigned field is always written, so it is never null",
-				"drop nullable — an anonymous caller is a matter for the permission, "+
-					"not for the column")
+				"drop nullable — a caller who cannot supply it is a matter for the "+
+					"permission, not for the column")
+		}
+		// `derived` says the server owns the value; nothing in this build can
+		// know HOW it is computed, so the one thing that CAN be checked is that
+		// somewhere claims to compute it. With no manual rule the field is
+		// simply never written, and the column holds the zero value forever —
+		// silently, which is the failure shape this generator refuses to ship.
+		if f.AssignedFrom == "derived" && !isChild && !hasInsertManualRule(s) {
+			ps.WarnFix(where+".assignedFrom",
+				"nothing in this spec computes this field",
+				"a derived field is filled by a rules.manual entry scoped to insert — "+
+					"declare it, or the column keeps its zero value and no error says so")
 		}
 	}
 
@@ -504,7 +519,7 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 					fmt.Sprintf("the project declares no value object named %q", f.VO.Ref), fix)
 			}
 		}
-		if (f.VO.Kind == "raw" || f.VO.Kind == "enum") && f.VO.Ref == "" {
+		if declaredHere(f.VO.Kind) && f.VO.Ref == "" {
 			ps.BlockerFix(where+".vo",
 				"a new value object needs a name",
 				"set vo.ref and declare it under valueObjects")
@@ -512,7 +527,7 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 		// A raw/enum ref that names nothing used to pass here and surface as an
 		// undefined type at go build. reuse has its own resolution above; these
 		// two kinds declare IN THIS SPEC, so the declaration must be here.
-		if (f.VO.Kind == "raw" || f.VO.Kind == "enum") && f.VO.Ref != "" {
+		if declaredHere(f.VO.Kind) && f.VO.Ref != "" {
 			if vo := findVO(s.ValueObjects, f.VO.Ref); vo == nil {
 				ps.BlockerFix(where+".vo.ref",
 					fmt.Sprintf("this spec declares no value object named %q", f.VO.Ref),
@@ -681,7 +696,7 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 			ps.BlockerFix(where, fmt.Sprintf("%q is not a usable Go type name", vo.Name), "use PascalCase")
 		} else if seen[vo.Name] {
 			ps.Blockerf(where, "the value object %q is declared twice", vo.Name)
-		} else if existing[vo.Name] && opt.VOOwner[vo.Name] != s.Entity {
+		} else if existing[vo.Name] && opt.VOOwner[vo.Name] != s.Entity && vo.Kind != "manual" {
 			ps.BlockerFix(where,
 				fmt.Sprintf("the project already declares a value object named %q", vo.Name),
 				fmt.Sprintf("reuse it instead — on the field write vo: {kind: reuse, ref: %s}; "+
@@ -689,6 +704,12 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 		} else {
 			seen[vo.Name] = true
 		}
+
+		// The `manual` exemption above is the whole point of that kind: the type it
+		// declares is one the author WRITES, so the run AFTER they write it finds
+		// the type in the project and would otherwise be told to reuse the thing
+		// this spec asked for. A declaration has to stay legal once it is
+		// honoured, or the feature works exactly once.
 
 		// A composite has no single underlying value — its parts are its value —
 		// so the backing key is refused there rather than demanded.
@@ -745,6 +766,33 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 			if len(vo.Members) > 0 {
 				ps.Blockerf(where+".members", "members belong to an enum value object, not a raw one")
 			}
+		case "manual":
+			// The generator writes nothing for this type, so what it CAN check
+			// is that the spec says enough for someone to write it — and that
+			// the spec is not describing something it could have generated.
+			if vo.Description == "" {
+				ps.BlockerFix(where+".description",
+					"a hand-written value object needs to say what it enforces",
+					"one line, precise enough to implement — it is what the report asks "+
+						"the implementer for, and an unnamed escape hatch degenerates into "+
+						"an empty TODO")
+			}
+			if vo.Notification != "" || vo.UnknownNotification != "" {
+				ps.BlockerFix(where,
+					"the notification a hand-written value object raises is its own business",
+					"the type you write chooses what to report through the "+
+						"NotificationContext; declare the notification under notifications "+
+						"and raise it from IsValid")
+			}
+			if vo.Regex != "" || vo.MinLength != 0 || vo.MaxLength != 0 ||
+				vo.Min != nil || vo.Max != nil || len(vo.Members) > 0 {
+				ps.BlockerFix(where,
+					"this value object declares a rule the generator can express, and asks "+
+						"to be hand-written anyway",
+					"drop the rule keys and write the type, or set kind: raw / enum and let "+
+						"the generator write it — one of the two, never a declaration that "+
+						"says both")
+			}
 		case "enum":
 			if len(vo.Members) == 0 {
 				ps.BlockerFix(where+".members",
@@ -766,7 +814,8 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 			ps.BlockerFix(where+".kind",
 				fmt.Sprintf("%q is not a value-object kind", vo.Kind),
 				"raw (a format or range) | enum (a fixed set of values) | composite (a "+
-					"value that spans SEVERAL fields, like Money{Amount, Currency})")
+					"value that spans SEVERAL fields, like Money{Amount, Currency}) | "+
+					"manual (a rule none of those can express — you write the type)")
 		}
 	}
 }
@@ -1180,6 +1229,126 @@ func validateLifecycle(s *Spec, ps *Problems) {
 		ps.BlockerFix("delete.root",
 			"a soft delete is declared but the entity does not archive",
 			"add archive (and usually unarchive) to modes")
+	}
+	validateArchiveWhen(s, has, ps)
+}
+
+// validateArchiveWhen checks the one lifecycle rule that changes what a write
+// IS rather than whether it is allowed.
+//
+// Everything here is about the two ways it can be declared and mean nothing: an
+// entity that cannot archive at all (the framework panics when the rule fires),
+// and a trigger value the field can never hold (the condition compiles, never
+// matches, and nothing reports it).
+func validateArchiveWhen(s *Spec, has map[string]bool, ps *Problems) {
+	aw := s.Delete.ArchiveWhen
+	if aw == nil {
+		return
+	}
+	const w = "delete.archiveWhen"
+	if !has["archive"] {
+		ps.BlockerFix(w,
+			"this update is declared to finish as an archive, but the entity does not archive",
+			"add archive to modes — the framework panics when a rule asks an entity that "+
+				"forbids archiving to complete as one")
+	}
+	if !has["update"] {
+		ps.BlockerFix(w,
+			"this is a decision an UPDATE makes, and the entity serves no update",
+			"add update to modes, or drop the key — the archive verb reaches the row "+
+				"through its own door")
+	}
+	if aw.Field == "" {
+		ps.BlockerFix(w+".field", "the field that decides is required",
+			"name one field — the state, e.g. field: Status")
+	}
+	if aw.Equals == "" {
+		ps.BlockerFix(w+".equals", "the value that means \"retire this row\" is required",
+			"e.g. equals: closing")
+	}
+	// The same emptiness is tested twice on purpose: the blocker above reports
+	// it, and this bails out only AFTER equals has had its say, so an author who
+	// wrote neither key is told about both in one run instead of one per run.
+	if aw.Field == "" {
+		return
+	}
+	f := findField(s.Fields, aw.Field)
+	if f == nil {
+		ps.Blockerf(w+".field", "%q does not name a field of this entity", aw.Field)
+		return
+	}
+	if f.Runtime {
+		ps.BlockerFix(w+".field",
+			"a runtime-only field is fed from the caller's token, so it does not say "+
+				"anything about the row's state",
+			"decide on a persisted field")
+	}
+	if f.Nullable {
+		ps.BlockerFix(w+".field",
+			"a nullable field cannot carry the decision: \"no value\" is not a state",
+			"decide on a non-nullable field")
+	}
+	if f.Type != "string" {
+		ps.BlockerFix(w+".field",
+			"the trigger is compared as text, and this field is not text",
+			"decide on a string field (an enum value object is the usual one)")
+	}
+	// When the field IS an enum declared here, the values are a closed set and a
+	// typo is checkable — which is the whole difference between a condition that
+	// fires and one that silently never does.
+	if f.VO != nil && f.VO.Kind == "enum" {
+		if vo := findVO(s.ValueObjects, f.VO.Ref); vo != nil {
+			members := map[string]bool{}
+			for _, mb := range vo.Members {
+				members[fmt.Sprint(mb.Value)] = true
+			}
+			if !members[aw.Equals] {
+				ps.Blockerf(w+".equals", "%q is not a member value of %s", aw.Equals, vo.Name)
+			}
+			if aw.Becomes != "" && !members[aw.Becomes] {
+				ps.Blockerf(w+".becomes", "%q is not a member value of %s", aw.Becomes, vo.Name)
+			}
+		}
+	}
+	if aw.Becomes != "" && aw.Becomes == aw.Equals {
+		ps.BlockerFix(w+".becomes",
+			"the resting value is the trigger value, so the assignment does nothing",
+			"drop becomes — the row is archived holding the trigger value either way")
+	}
+	warnUnreachableTrigger(s, aw, w, ps)
+}
+
+// warnUnreachableTrigger covers the two ways an update cannot MOVE the field to
+// the trigger, which is the same silence the enum check above refuses: the
+// condition compiles, no caller ever reaches it, and nothing says so.
+//
+// They are warnings rather than blockers because one path survives both: a row
+// INSERTED already holding the trigger value. It is then retired by the next
+// update that touches it — whatever that update changes — which is a stranger
+// behaviour than the one the author was asking for, and worth saying either way.
+func warnUnreachableTrigger(s *Spec, aw *ArchiveWhen, w string, ps *Problems) {
+	// `both` and `put` still serve a full body, where the field is writable;
+	// only a patch-only entity has no door left.
+	if s.Update.Shape == "patch" && contains(s.Update.PatchExcludes, aw.Field) {
+		ps.WarnFix(w+".field",
+			fmt.Sprintf("%q is in update.patchExcludes, and patch is this entity's only "+
+				"update shape", aw.Field),
+			"no update can set the trigger, so the row retires only if it was INSERTED "+
+				"holding it — drop the exclusion, serve put as well, or decide on another field")
+	}
+	for _, r := range s.Rules.List {
+		if r.Kind != "immutable" || !contains(r.Fields, aw.Field) {
+			continue
+		}
+		if !contains(r.Scope, "update") && !contains(r.Scope, "insertOrUpdate") {
+			continue
+		}
+		ps.WarnFix(w+".field",
+			fmt.Sprintf("%q is immutable on update (rule %q), so a write that moves it to "+
+				"the trigger is refused before it can retire anything", aw.Field, r.ID),
+			"decide on a mutable field, or narrow the immutability — the two rules are "+
+				"asking the same field to never change and to change into a removal")
+		return
 	}
 }
 
@@ -1822,11 +1991,8 @@ func validateNotifications(s *Spec, ps *Problems, opt Options) {
 }
 
 func validateTexts(n Notification, where string, ps *Problems, opt Options) {
-	langs := map[string]string{
-		"ptbr": n.Text.PTBR, "eng": n.Text.ENG, "esp": n.Text.ESP, "fra": n.Text.FRA,
-		"deu": n.Text.DEU, "ita": n.Text.ITA, "nld": n.Text.NLD,
-	}
-	for _, code := range []string{"ptbr", "eng", "esp", "fra", "deu", "ita", "nld"} {
+	langs := n.Text.Map()
+	for _, code := range CatalogCodes {
 		if strings.TrimSpace(langs[code]) != "" {
 			continue
 		}
@@ -2869,4 +3035,37 @@ func validateMountedChild(s *Spec, c Child, where string, ps *Problems, opt Opti
 			"the collection is projected as ONE document segment, so a field left out "+
 				"here is a field this role's readers never see — restate all of them")
 	}
+}
+
+// hasInsertManualRule reports whether the spec names at least one hand-written
+// rule that runs on insert — the only place a `derived` field can be computed
+// inside the generated tree.
+//
+// It is deliberately coarse: it asks whether SOMETHING claims the insert path,
+// not whether that something assigns this particular field. The generator
+// cannot read the rule it did not write, and a check that pretends to would be
+// a false green.
+func hasInsertManualRule(s *Spec) bool {
+	for _, mr := range s.Rules.Manual {
+		if len(mr.Scope) == 0 {
+			return true // no scope declared means every verb, insert included
+		}
+		for _, sc := range mr.Scope {
+			if sc == "insert" || sc == "insertOrUpdate" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// declaredHere reports whether a field's vo.kind names a value object this spec
+// must declare under valueObjects.
+//
+// `reuse` is the one that resolves elsewhere — against the project's existing
+// types. `manual` resolves HERE even though the generator writes no code for
+// it: the type does not exist yet, so the declaration is the only place that
+// says what it will be, and the report reads it to ask for it.
+func declaredHere(kind string) bool {
+	return kind == "raw" || kind == "enum" || kind == "manual"
 }

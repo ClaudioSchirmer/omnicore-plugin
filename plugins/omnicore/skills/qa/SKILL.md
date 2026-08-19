@@ -110,7 +110,9 @@ Map what the service declares — this inventory IS the test surface:
 1. **Coverage matrix** — per entity × surface: the case families derived from Phase 0b
    and the pin's docs — happy path per served verb · validation 422 (a representative
    VO/rule failure per shape, asserting the notification KEY, not prose) · the dual
-   409 (duplicate vs wrong-state — only where the entity declares each) · archive
+   409 (duplicate vs wrong-state — the duplicate flavor only where the entity declares
+   it; the wrong-state one is also raised by the FRAMEWORK on a write the pin's
+   `lifecycle-map` guards, so derive it from there, not from the spec) · archive
    round-trip (`archive → hidden → ?includeArchived reveals → unarchive → visible`;
    with `DeleteOnArchive`, absence instead) · read vocabulary (one filter/`?orderBy=`
    per declared operator family, `?fields=` when opted in, `?search=` where a text index

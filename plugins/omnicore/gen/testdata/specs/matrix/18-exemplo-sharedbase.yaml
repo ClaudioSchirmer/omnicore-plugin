@@ -23,9 +23,16 @@
 # cannot be told from "leave this alone" — the intent needs its own verb, and the
 # REST equivalent stays the root's PUT with the facet's fields null.
 #
-# The human-facing text here is English because `language:` says so, and the two
-# have to agree: descriptions written in the declared language seed the matching
-# label catalog. Write yours in whatever your project speaks, and declare it.
+# The human-facing text here is English because `language:` says so. Write yours
+# in whatever your project speaks, and declare it — the report quotes these
+# descriptions back to a reviewer under that heading.
+#
+# A description and a LABEL are different things. The description is a sentence
+# about what the field means and becomes the column comment; the label is the
+# field's short human NAME — what a 422 payload puts in `fieldLabel` and what a
+# CSV/XLSX export puts in a column header. The label is `text:`, optional and per
+# catalog (the flat example shows one); a catalog left out falls back to the
+# field's own name.
 #
 # Copy the STRUCTURE, never the domain.
 specVersion: 1
@@ -234,6 +241,28 @@ update:
 
 delete:
   root: soft
+  # There is a key that would fit here and is deliberately NOT declared:
+  # `delete.archiveWhen`, which makes an ordinary update finish as an archive —
+  # a contract moving to "terminated" retiring the row off the same PATCH.
+  #
+  # It is left out because of what guards removal on THIS entity. A write passes
+  # two gates before the framework writes it:
+  #
+  #   1. the PERMISSION on the route it arrived at — `teacher:archive` on
+  #      PATCH /teachers/:id/archive, `teacher:update` on PATCH /teachers/:id;
+  #   2. the RULES that fire for the verb the write turned out to be — the
+  #      `only-the-owner-archives` ownerCheck below runs in ModeArchive.
+  #
+  # archiveWhen changes what the write IS, not which door it came through: it
+  # runs under `teacher:update`, and IfArchive does not fire on that path (the
+  # rules run once, in ModeUpdate). Both gates this entity declares for removal
+  # would be skipped — a caller holding only `teacher:update`, over a row that is
+  # not theirs, would retire it.
+  #
+  # So the key is not for every entity: declare it when removal is guarded the
+  # same way the update is, and restate the guard with scope: [update] when it is
+  # not. Matrix case 06 is the shape that qualifies — no archive-scoped rule at
+  # all — and the flat example (`explain example`) shows the declaration itself.
 
 rules:
   list:

@@ -433,9 +433,10 @@ func upSQL(m *ir.Model, d dialect) string {
 			fmt.Sprintf("  %s %s%s", d.Quote(f.Column), d.Column(f), null))
 	}
 
-	// Revision is mandatory on an entity table: the framework uses it for
-	// optimistic concurrency and refuses to build the repository without it.
-	column(m.Managed.Revision, "Optimistic-concurrency stamp, maintained by the framework.",
+	// Revision is mandatory on an entity table: the framework guards every root
+	// update on it and refuses to build the repository without it.
+	column(m.Managed.Revision, "Optimistic-concurrency stamp: bumped on every write, and "+
+		"the value each update is guarded on. Maintained by the framework.",
 		fmt.Sprintf("  %s %s", d.Quote(m.Managed.Revision), stampTail(d, bigintOf(d), "0", false)))
 
 	if m.Managed.CreatedAt != "" {
@@ -747,7 +748,7 @@ func writeBaseTable(b *strings.Builder, m *ir.Model, d dialect) {
 		fmt.Fprintf(b, "  %s %s%s%s,\n", d.Quote(f.Column), d.Column(f), null, inline)
 	}
 	inline, above = desc.column(m.Base.Table, m.Managed.Revision,
-		"Optimistic-concurrency stamp, maintained by the framework.")
+		"Optimistic-concurrency stamp: bumped on every write. Maintained by the framework.")
 	writeLine(b, above)
 	fmt.Fprintf(b, "  %s %s%s,\n", d.Quote(m.Managed.Revision),
 		stampTail(d, bigintOf(d), "0", false), inline)

@@ -52,7 +52,7 @@ what you do:
 - **It needs no AI and no network.** It reads YAML and writes files. You are a client of
   it, not a prerequisite for it.
 - **It owns whole files.** Never hand-edit a generated file. Change the spec and
-  regenerate. The two escape hatches are named and permanent (below).
+  regenerate. The escape hatches are named, declared and permanent (below).
 
 ## Step 0 — the command
 
@@ -156,10 +156,10 @@ read backing come from. FILL the template; do not replace it.
 to keep.** It is written that way on purpose: `init` cannot know what language the project
 speaks, so it says nothing about one rather than stamping a guess into a spec. Three slots
 are yours before anything else, and the template's own comments point at each:
-`language:` (the language of THIS spec's human-facing text — it seeds the matching label
-catalog, so a description in one language under a declaration of another seeds the wrong
-one, silently), the placeholder field/rule/collection names, and the `authz.permissions`
-strings. Fill them from the run's language and the model approved at the gate — and take
+`language:` (the language of THIS spec's human-facing text — it decides no catalog; it is
+what the gen-report tells a reviewer the descriptions and labels below are written in),
+the placeholder field/rule/collection names, and the `authz.permissions` strings. Fill
+them from the run's language and the model approved at the gate — and take
 the permission taxonomy from what the PROJECT already grants, since a permission is
 matched exactly against the caller's token and an invented one is a permission nobody
 holds. The identifiers themselves follow the host project's own convention, exactly as
@@ -352,6 +352,53 @@ Three things to get right, because they are the ones that cost a migration later
   an `owner-only` policy then reads; letting the body carry it means anyone can create a
   row owned by someone else. Do not describe it in `rules.manual` and hand-write the
   mapper: it is a key.
+- **A field the SERVER computes from another one: `assignedFrom: derived`.** Same
+  exclusion, different source: a public key derived from an immutable handle is never
+  proposed by a caller, so it leaves every write request, command and OpenAPI request
+  schema — while `identity-*` would be a spec that lies about where the value comes from.
+  The generator writes NO assignment for it (it cannot know the derivation): **you owe a
+  `rules.manual` entry scoped to insert** that computes it, and the report lists the field
+  until you do. Declaring the field ordinarily instead is the failure this exists to kill —
+  it lands in the write DTO, the OpenAPI documents it as writable, and the caller's value
+  is accepted and silently ignored.
+- **The field's LABEL is `text:`, not `description:`.** The description is a sentence about
+  what the field means and becomes the column comment; the label is its short human name —
+  what a 422 payload puts in `fieldLabel` and what a CSV/XLSX export puts in a column
+  header. `text:` takes the seven catalogs like a notification's, is optional, and may be
+  partial: a catalog left out falls back to the field's own name. Give it to any field
+  whose name does not read as a label in the languages the project serves.
+- **An update that RETIRES the row: `delete.archiveWhen`.** When a field reaching one
+  value means the record should not be left active ("dropped", "terminated", "cancelled"),
+  declare it — `field` + `equals`, plus an optional `becomes` — and the generated
+  `IfUpdate` clause ends by asking the framework to finish THAT write as an archive: the
+  archive stamp, the child cascade, the `ARCHIVED` event the read side routes on, an
+  archive audit entry, all off a plain PUT/PATCH. It needs `archive` in `modes` (an entity
+  that forbids archiving panics when the rule fires) and it is checked against the enum's
+  members when the field is one, so a typo'd trigger is refused instead of silently never
+  matching — as is a trigger no update can SET, which warns when the field is in
+  `update.patchExcludes` on a patch-only entity or carries an `immutable` rule scoped to
+  update. **`becomes` is the trap worth reading twice**: the archive rules do NOT re-fire
+  on this path, so the row is archived holding whatever the closure leaves — right when the
+  trigger is a resting state, wrong when it is a request.
+
+  **Before declaring it, answer who is allowed through it — the generator does not, and
+  cannot.** Three different things decide a write, and this key moves between them:
+
+  | | What it decides | Where it is declared |
+  |---|---|---|
+  | permission | who may attempt the verb on this ROUTE at all | `authz.permissions.<verb>` |
+  | rule | whether that attempt is allowed on THIS row | `rules.list[].scope` |
+  | `archiveWhen` | what the write turns out to BE | `delete.archiveWhen` |
+
+  It changes the third, so the first two stay the update's. The write arrives under
+  `<res>:update`, never `<res>:archive` — the archive permission guards the archive route,
+  and this request did not use it — and it runs the `IfUpdate` rules, so a rule with
+  `scope: [archive]` never sees it. **Declare it when both populations are the same**
+  (`explain example` shows exactly that: whoever may edit an enrollment may close it).
+  When they are not, either restate the guard with `scope: [update]` so it fires on the
+  door actually used, or leave the key out and keep removal on its own route —
+  `explain example sharedbase` is that case, and says so where the key would have gone.
+  The gen-report lists it as a SECOND removal door for the same reason.
 - **A second role can EXPOSE the identity's collection.** With `storage.base.reuse: true`,
   declaring `children[].ownedBy: base` MOUNTS a collection the base-owning spec already
   declared: restate its shape verbatim (the generator compares it field by field against
@@ -389,13 +436,29 @@ a generated file. You declare it as a named manual item:
 
 The generator then emits `internal/domain/<entity>_rules_manual.go` with the signature,
 the contract comment, and a stub per item — **write-once, never re-generated, never
-hashed**. The same shape exists twice more: for a fact the domain service cannot answer
-declaratively (`service.facts[].kind: manual` →
-`internal/infra/<entity>_service_manual.go`), and for a DERIVED read field
-(`read.computed` → `internal/application/queries/<entity>_computed_manual.go`). All three
-are the same bargain — the language declares the shape, a human writes the body — and they
-differ only in what an unwritten body does: a rule quietly enforces nothing, a fact panics
-on first use, a derivation renders an empty column. The gen-report says which is which.
+hashed**. The same shape exists three times more:
+
+| The ELSE | Declared as | Where the body goes |
+|---|---|---|
+| an invariant the rule DSL cannot say | `rules.manual` | `internal/domain/<entity>_rules_manual.go` |
+| a question the service cannot answer declaratively | `service.facts[].kind: manual` | `internal/infra/<entity>_service_manual.go` |
+| a read field no column holds | `read.computed` | `internal/application/queries/<entity>_computed_manual.go` |
+| a VALUE OBJECT whose rule is neither a shape nor a set | `valueObjects[].kind: manual` | `internal/domain/vos/<name>.go` — **you create the file** |
+
+All four are the same bargain — the language declares the shape, a human writes the body —
+and they differ only in what an unwritten body does: a rule quietly enforces nothing, a
+fact panics on first use, a derivation renders an empty column, and a missing value object
+**does not compile**. The gen-report says which is which, and for the value object it
+prints the exact shape (`type X <backing>`, `Value()`, `IsValid`) — the backing is a
+contract, because the emitted mappers convert with `vos.X(v)` and read back with
+`.Value()`.
+
+**`kind: manual` is the answer to "the generator cannot write this value object", and
+`kind: reuse` is not.** Reuse resolves against types the project ALREADY has, so pointing
+it at one you are about to write is refused with "the project declares no value object
+named X" — which reads like a naming mistake and is not one. When the rule is a checksum,
+a lookup, anything raw and enum cannot say: declare it `manual`, with the `description`
+that tells whoever writes it what to enforce.
 
 **The hook file arrives with ONE gate per verb holding every rule scoped to it — keep it
 that way when you implement them.** A gate per rule is the shape that grows by accident,

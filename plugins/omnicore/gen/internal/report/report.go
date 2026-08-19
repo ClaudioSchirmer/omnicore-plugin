@@ -42,12 +42,18 @@ type Input struct {
 	// content that no longer matches this spec.
 	StaleRegistrations []string
 	Orphans            []string
-	MigrationsKept     []string
-	TargetTables       []emit.TargetTable
-	CompatLevel        string
-	CompatMessage      string
-	FrameworkPinned    string
-	Warnings           []string
+	// ExistingVOs are the value objects the project ALREADY declares, as
+	// discovery found them BEFORE this run wrote anything. The report needs it
+	// for one question: whether a `kind: manual` value object is still owed or
+	// was written on an earlier run — the difference between "the package does
+	// not compile" and "check that it still matches the spec".
+	ExistingVOs     []string
+	MigrationsKept  []string
+	TargetTables    []emit.TargetTable
+	CompatLevel     string
+	CompatMessage   string
+	FrameworkPinned string
+	Warnings        []string
 }
 
 // Render produces the markdown.
@@ -109,6 +115,92 @@ func renderTodo(b *strings.Builder, in Input) {
 			rules: c.ManualRules,
 		})
 	}
+	// The value objects the spec declared and the generator deliberately did not
+	// write — split by whether the author has written them YET.
+	//
+	// Saying the same sentence either way is how a report claims work is
+	// outstanding that somebody finished three runs ago, which is the standard
+	// the hook-file block above already holds itself to. The two states are not
+	// a nuance here: one stops the package compiling and one is a file to
+	// re-read against a spec that may have moved since.
+	var owedVOs, writtenVOs []ir.ValueObject
+	for _, vo := range m.ValueObjects {
+		if vo.Kind != "manual" {
+			continue
+		}
+		if names(in.ExistingVOs).has(vo.Name) {
+			writtenVOs = append(writtenVOs, vo)
+			continue
+		}
+		owedVOs = append(owedVOs, vo)
+	}
+	// The owed ones go FIRST of everything: this is the only outstanding item
+	// that stops the package COMPILING, and it carries the exact shape, because
+	// a hand-written type with a different underlying type fails at a call site
+	// that names neither this report nor the spec.
+	if len(owedVOs) > 0 {
+		empty = false
+		b.WriteString("### Value objects you write\n\n")
+		b.WriteString("Declared as `kind: manual`, so the generator wrote NO file for them — " +
+			"the emitted code already declares fields of these types and converts to and from " +
+			"their backing, so the package does not compile until each one exists:\n\n")
+		for _, vo := range owedVOs {
+			fmt.Fprintf(b, "- **`%s`** — `internal/domain/vos/%s.go`. %s\n",
+				vo.Name, naming.Snake(vo.Name), vo.Description)
+			fmt.Fprintf(b, "  ```go\n"+
+				"  type %[1]s %[2]s\n"+
+				"  func (v %[1]s) Value() %[2]s { return %[2]s(v) }\n"+
+				"  func (v %[1]s) IsValid(fieldName string, ctx *domain.NotificationContext) bool\n"+
+				"  ```\n"+
+				"  The underlying type is `%[2]s` and is not negotiable: the mappers convert "+
+				"with `vos.%[1]s(x)` and read back with `.Value()`. `IsValid` is the "+
+				"framework's entry point — it is found by TYPE, with no registration, and "+
+				"reports every problem it finds through the context rather than returning "+
+				"one, so a caller sees all of them at once.\n", vo.Name, vo.GoBacking)
+		}
+		b.WriteString("\n")
+	}
+	// Already on disk. The generator did not open them — it never reads inside a
+	// file it does not own — so it cannot say whether the rule still matches
+	// what the spec describes, and it asks rather than announcing completion.
+	// The spec is the thing that moves: a description rewritten to mean
+	// something stricter changes nothing in a type nobody re-read.
+	if len(writtenVOs) > 0 {
+		empty = false
+		b.WriteString("### Value objects you already wrote\n\n")
+		b.WriteString("Declared as `kind: manual` and already in the project. The generator " +
+			"did not open them and cannot tell whether what they enforce still matches what " +
+			"the spec says they enforce — listed so a description that moved does not leave " +
+			"a stale rule behind it:\n\n")
+		for _, vo := range writtenVOs {
+			fmt.Fprintf(b, "- **`%s`** — `internal/domain/vos/%s.go`. %s\n",
+				vo.Name, naming.Snake(vo.Name), vo.Description)
+		}
+		b.WriteString("\nThe backing stays a contract across every run: the mappers convert " +
+			"with `vos.<Name>(x)` and read back with `.Value()`, so changing the underlying " +
+			"type of one of these breaks call sites that name neither this report nor the " +
+			"spec.\n\n")
+	}
+
+	// A DERIVED field before the hooks: it is the one thing on this list that
+	// the generator changed the API for on the author's word. The field left
+	// every write DTO because the spec said the server owns it — and if nothing
+	// assigns it, the column holds its zero value on every insert and no error
+	// anywhere says so. That is the quietest failure this build can produce.
+	if derived := m.DerivedFields(); len(derived) > 0 {
+		empty = false
+		b.WriteString("### Fields declared DERIVED, which nothing here computes\n\n")
+		for _, f := range derived {
+			fmt.Fprintf(b, "- **`%s`** — `assignedFrom: derived` took it out of every write "+
+				"request, command and OpenAPI request schema, so a client cannot set it. "+
+				"WRITING it is yours: a `rules.manual` entry scoped to insert, assigning it "+
+				"from the fields it derives from. Idempotent by construction when it is a "+
+				"pure function of an immutable field, which is the case this exists for.\n",
+				f.Name)
+		}
+		b.WriteString("\n")
+	}
+
 	for _, h := range hooks {
 		if len(h.rules) == 0 {
 			continue
@@ -426,6 +518,12 @@ func renderCheck(b *strings.Builder, in Input) {
 	if assigned := m.AssignedFields(); len(assigned) > 0 {
 		b.WriteString("### Fields the server fills\n\n")
 		for _, f := range assigned {
+			if f.AssignedFrom == "derived" {
+				// Server-assigned too, but the generator wrote no assignment for
+				// it: it is outstanding WORK, so it is listed where outstanding
+				// work is, at the top of this report.
+				continue
+			}
 			source := "the caller's own identifier (`Identity().Subject`)"
 			if f.AssignedFrom == "identity-claim" {
 				source = fmt.Sprintf("the `%s` claim of the caller's token", f.Claim)
@@ -550,6 +648,37 @@ func renderCheck(b *strings.Builder, in Input) {
 			"%s. |\n", presence(m.Op("delete") != nil, "also mounted", "not mounted"))
 	} else {
 		b.WriteString("| Removal | no archive column | Rows are removed permanently or not at all. |\n")
+	}
+
+	// A reviewer reading the routes sees an update and an archive as two doors.
+	// This is the case where one of them is also the other, and nothing on the
+	// wire says so: the caller sends a plain PUT/PATCH and the row retires.
+	//
+	// Two gates decide a write, and this door changes neither: it arrives on the
+	// update's ROUTE, under the update's permission, and it runs the update's
+	// RULES. Saying only the first — which this table did — leaves the reviewer
+	// checking half of it, and the half it left out is the one that names
+	// something concrete: the archive-scoped rules of THIS entity, which the
+	// generator can list.
+	if aw := m.ArchiveWhen; aw != nil {
+		rest := "the row is archived holding that value"
+		if aw.Becomes != "" {
+			rest = fmt.Sprintf("the row is archived holding `%s`", aw.Becomes)
+		}
+		skipped := "and `IfArchive` does not fire on it, so any rule you later scope to " +
+			"`archive` will not see it either"
+		if ids := archiveScopedRuleIDs(m); len(ids) > 0 {
+			skipped = fmt.Sprintf("and `IfArchive` does NOT fire on it, so %s "+
+				"(scoped to `archive`) never runs on this path — restate it with "+
+				"`scope: [update]` if it has to guard both doors",
+				"`"+strings.Join(ids, "`, `")+"`")
+		}
+		fmt.Fprintf(b, "| Removal, second door | an update that sets `%s` to `%s` | "+
+			"The DOMAIN retires the row from an ordinary update: full archive — stamp, "+
+			"child cascade, `ARCHIVED` event, archive audit entry — and %s. It runs under "+
+			"the UPDATE's permission, not `archive`'s, %s. Check that the callers of the "+
+			"update route are the ones allowed to retire a record. |\n",
+			aw.Field.Name, aw.Equals, rest, skipped)
 	}
 
 	for _, f := range m.Fields {
@@ -799,4 +928,37 @@ func pairingNote(m *ir.Model, hoisted []string) string {
 		return " by the business identity the spec declared, because a wholesale replace returns entries with no id"
 	}
 	return ""
+}
+
+// names is a set of identifiers read as a lookup. It is a type rather than a
+// loop so the call site reads as the question it is asking.
+type names []string
+
+func (n names) has(want string) bool {
+	for _, got := range n {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
+// archiveScopedRuleIDs names the rules that fire only when the write IS an
+// archive — the ones an archiveWhen path silently walks past.
+//
+// It reads the resolved clauses rather than the spec so it sees the gate the
+// emitter actually wrote, which is the thing that decides whether a rule runs.
+func archiveScopedRuleIDs(m *ir.Model) []string {
+	var out []string
+	for _, c := range m.Clauses {
+		if c.Gate != "IfArchive" {
+			continue
+		}
+		for _, r := range c.Rules {
+			if r.ID != "" {
+				out = append(out, r.ID)
+			}
+		}
+	}
+	return out
 }

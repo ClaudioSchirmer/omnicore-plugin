@@ -9,13 +9,36 @@ storage:
   description: Anotações privadas de cada usuário.
   managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
 fields:
-  - {name: Texto, type: string, column: texto, length: 1000, livesOn: root, example: Lembrar da reunião, description: Conteúdo da anotação.}
+  # `text` é o RÓTULO do campo, por catálogo — o nome curto que aparece em
+  # `fieldLabel` num 422 e no cabeçalho de uma exportação. Não é a descrição:
+  # essa é a frase que vira comentário da coluna. Catálogo não declarado cai no
+  # nome do próprio campo.
+  - name: Texto
+    type: string
+    column: texto
+    length: 1000
+    livesOn: root
+    example: Lembrar da reunião
+    description: Conteúdo da anotação.
+    text: {ptbr: Texto, eng: Text}
+  # Chave pública da anotação, derivada do texto — o servidor calcula, o cliente
+  # nunca envia. `derived` só promete tirar o campo de todo DTO de escrita e do
+  # schema do OpenAPI; QUEM calcula é a regra manual abaixo, e o relatório cobra.
+  - {name: Codigo, type: string, column: codigo, length: 40, livesOn: root, assignedFrom: derived, example: anot-7f3a91, description: Código público da anotação.}
   # O dono NÃO vem do corpo: com owner-only, deixar o cliente escolher o dono é
   # deixar qualquer um criar anotação no nome de outro. assignedFrom tira o campo
   # de todo DTO de escrita e o preenche da identidade autenticada.
   - {name: DonoEmail, type: string, column: dono_email, length: 160, livesOn: root, assignedFrom: identity-subject, example: ana@escola.br, description: E-mail do dono da anotação.}
 modes: [display, insert, update]
 update: {shape: patch}
+rules:
+  manual:
+    - id: codigo-derivado-do-texto
+      description: >-
+        Calcular Codigo a partir de Texto no insert — função pura do texto, então
+        reaplicar é idempotente. Sem esta regra a coluna fica com o valor zero e
+        nada acusa.
+      scope: [insert]
 read:
   backing: relational
   view: {name: anotacoes, version: 1}

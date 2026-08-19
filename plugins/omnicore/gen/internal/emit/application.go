@@ -225,14 +225,19 @@ func emitApplyPartiallyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 	s.Blank()
 }
 
-// emitAssignedFields writes the persisted fields the SERVER owns.
+// emitAssignedFields writes the persisted fields the SERVER reads from the
+// caller's identity.
 //
 // It runs on insert only. The value is the caller's, not the client's: the
 // field is absent from the request, so there is nothing to ignore, and a later
 // update leaves it alone because it is absent from that mapper too — which is
 // what makes "who created this row" a fact rather than a claim.
+//
+// A `derived` field is server-assigned too and is deliberately NOT here: what
+// computes it is a rule in the entity's own hook file, so there is no
+// assignment for this mapper to write.
 func emitAssignedFields(s *src, m *ir.Model) {
-	assigned := m.AssignedFields()
+	assigned := m.IdentityAssignedFields()
 	if len(assigned) == 0 {
 		return
 	}
@@ -258,7 +263,7 @@ func emitAssignedFields(s *src, m *ir.Model) {
 // the command feeds it onto the entity, and BuildRules enforces with it.
 func emitIdentityFeed(s *src, m *ir.Model) {
 	if len(m.Runtime) == 0 {
-		if len(m.AssignedFields()) == 0 {
+		if len(m.IdentityAssignedFields()) == 0 {
 			s.L("\t_ = ctx")
 		}
 		return

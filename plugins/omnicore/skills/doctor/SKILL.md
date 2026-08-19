@@ -179,6 +179,7 @@ for concepts this table doesn't list.
 | boot aborts / probes 401·503 / autoRun / env vars / drain — the quick-map | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) · bootstrap for version-exact |
 | capability availability / events fan-out (2×·never) / subscribe⇄receiver aborts / cache slots | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) · the pin's section for exact contracts |
 | write accepted but view/audit/outbox wrong — the cross-layer triage table | lifecycle-map · read-lifecycle-map |
+| a write REFUSED where it used to be accepted — a 409 on an update, a 404 on a lifecycle verb: read what the pin guards a write on before treating it as a regression | lifecycle-map · status-mapping |
 | log anatomy (`threadId`/`traceId`/`msg` anchors) / ELK bench profile | logs |
 | authz boot panic (missing RequirePermission sweep) / blank `/docs` (CDN, air-gapped) | authz-seams · openapi |
 | boot order / guards / feature wiring | bootstrap |

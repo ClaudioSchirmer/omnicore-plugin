@@ -247,6 +247,7 @@ var specTypes = map[string]reflect.Type{
 	"Sibling":       reflect.TypeOf(Sibling{}),
 	"Update":        reflect.TypeOf(Update{}),
 	"Delete":        reflect.TypeOf(Delete{}),
+	"ArchiveWhen":   reflect.TypeOf(ArchiveWhen{}),
 	"Rules":         reflect.TypeOf(Rules{}),
 	"Rule":          reflect.TypeOf(Rule{}),
 	"RuleOnly":      reflect.TypeOf(RuleOnly{}),
