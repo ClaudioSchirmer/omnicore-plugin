@@ -246,8 +246,11 @@ func notificationsSkeleton(pkg string) string {
 // one entry per notification, plus the entity's own context label, plus a label
 // for every field.
 // langOrder is the framework's catalog set. All seven, always — a subset would
-// leave some users reading a raw translation key.
-var langOrder = []string{"ptbr", "eng", "esp", "fra", "deu", "ita", "nld"}
+// leave some users reading a raw translation key. It comes from the IR rather
+// than being restated: this file emits the catalogs, and a list that disagreed
+// with the one the notifications were resolved under would emit a file for a
+// language nothing filled.
+var langOrder = ir.LangOrder
 
 func catalogEntries(m *ir.Model) map[string][]MapEntry {
 	out := map[string][]MapEntry{}
@@ -269,7 +272,7 @@ func catalogEntries(m *ir.Model) map[string][]MapEntry {
 		// because nothing reports it: the export succeeds, the data is right,
 		// and the heading is an internal name.
 		for _, f := range labelledFields(m) {
-			entries = append(entries, MapEntry{Key: f.LabelKey, Value: labelText(f, lang, m.Language)})
+			entries = append(entries, MapEntry{Key: f.LabelKey, Value: labelText(f, lang)})
 		}
 		out[lang] = entries
 	}
@@ -316,13 +319,13 @@ func labelledFields(m *ir.Model) []ir.Field {
 }
 
 // computedLabels renders each computed read field as the labelled field the
-// catalog needs. Only the two attributes the catalog reads are set — nothing
-// below this line has a column to speak of.
+// catalog needs. Only the attributes the catalog reads are set — nothing below
+// this line has a column to speak of.
 func computedLabels(m *ir.Model) []ir.Field {
 	var out []ir.Field
 	for _, c := range m.Read.Computed {
 		out = append(out, ir.Field{
-			Name: c.Name, LabelKey: c.LabelKey, Description: c.Description,
+			Name: c.Name, LabelKey: c.LabelKey, Text: c.Text, Description: c.Description,
 		})
 	}
 	return out
@@ -341,6 +344,7 @@ func compositeOwnerLabels(m *ir.Model) []ir.Field {
 			out = append(out, ir.Field{
 				Name:        g.Head.Owner,
 				LabelKey:    g.Head.OwnerLabelKey,
+				Text:        g.Head.OwnerText,
 				Description: g.Head.OwnerDescription,
 			})
 		}
@@ -348,53 +352,51 @@ func compositeOwnerLabels(m *ir.Model) []ir.Field {
 	return out
 }
 
-// labelText uses the field's description when the spec's own language matches
-// the catalog, and falls back to the field name otherwise — a placeholder a
-// translator can find, never a wrong translation presented as right.
+// labelText is the field's LABEL in one catalog: what the spec declared under
+// fields[].text, or the field's own name spaced out.
 //
-// The match is against the SPEC's declared language, not a hardcoded catalog:
-// pinning it to ptbr put an English description into the Portuguese catalog as
-// if it were Portuguese — the exact wrong-translation-presented-as-right this
-// function exists to avoid.
-func labelText(f ir.Field, lang, specLang string) string {
-	if f.Description != "" && lang == catalogOf(specLang) {
-		return strings.TrimSuffix(firstLine(f.Description), ".")
+// It deliberately does NOT read the field's description. It used to, in the one
+// catalog matching the spec's declared language, and that is a category error
+// with a visible cost: a description is a sentence explaining what the field
+// means — it is what the column COMMENT wants — while a label is the field's
+// short human name, which is what a validation payload puts in `fieldLabel` and
+// what a CSV/XLSX export puts in a column header. Seeding one from the other
+// put a whole paragraph in a 422 payload, in exactly one language, so the only
+// catalog that got special treatment was the one that came out wrong.
+//
+// The fallback is the field name, spaced out — a placeholder a translator can
+// find, which is what the other six catalogs always did and which is right.
+func labelText(f ir.Field, lang string) string {
+	if t := strings.TrimSpace(f.Text[lang]); t != "" {
+		return t
 	}
 	return spaceOut(f.Name)
 }
 
-// catalogOf maps a spec's free-form language declaration onto the framework's
-// catalog code, or "" when it matches none.
-func catalogOf(specLang string) string {
-	switch strings.ToLower(strings.ReplaceAll(specLang, "-", "")) {
-	case "pt", "ptbr", "ptpt":
-		return "ptbr"
-	case "en", "eng", "enus", "engb":
-		return "eng"
-	case "es", "esp":
-		return "esp"
-	case "fr", "fra":
-		return "fra"
-	case "de", "deu":
-		return "deu"
-	case "it", "ita":
-		return "ita"
-	case "nl", "nld":
-		return "nld"
-	}
-	return ""
-}
-
+// spaceOut turns a Go field name into the placeholder label — the fallback every
+// catalog the spec left no text for now uses, so it is read by end users.
+//
+// A run of capitals stays together: TenantID is "Tenant ID" and CPFNumber is
+// "CPF Number". Splitting on every capital gave "Tenant I D", which was
+// tolerable while one catalog was filled from elsewhere and is not now that all
+// seven land here.
 func spaceOut(name string) string {
+	rs := []rune(name)
 	var b strings.Builder
-	for i, r := range name {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			b.WriteByte(' ')
+	for i, r := range rs {
+		if i > 0 && isUpper(r) {
+			prevLower := !isUpper(rs[i-1])
+			nextLower := i+1 < len(rs) && !isUpper(rs[i+1])
+			if prevLower || nextLower {
+				b.WriteByte(' ')
+			}
 		}
 		b.WriteRune(r)
 	}
 	return b.String()
 }
+
+func isUpper(r rune) bool { return r >= 'A' && r <= 'Z' }
 
 func mergeCatalog(m *ir.Model, root, code, typeName, ctor, langConst string, entries []MapEntry, prior map[string]string) (*fsplan.File, []string, []string, map[string]string, error) {
 	rel := "internal/application/translations/" + code + ".go"

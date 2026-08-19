@@ -39,6 +39,9 @@ type CompositePart struct {
 	// about the value object attaches to. The parts carry their own, declared
 	// inside the value object.
 	OwnerLabelKey string
+	// OwnerText is the LABEL of the composite as a whole, per catalog code, as
+	// the aggregate's own field declared it.
+	OwnerText map[string]string
 	// OwnerDescription is the one line about the concept, used as the aggregate
 	// field's comment.
 	OwnerDescription string
@@ -68,8 +71,9 @@ type VOPart struct {
 	GoType      string // includes the pointer when the part is optional
 	BaseGoType  string
 	Nullable    bool
-	VOKind      string // "" | raw | enum | reuse
+	VOKind      string // "" | raw | enum | reuse | manual
 	LabelKey    string
+	Text        map[string]string
 	Description string
 }
 
@@ -92,7 +96,7 @@ func resolveCompositeDeclaration(s *spec.Spec, sv spec.ValueObject, v *ValueObje
 			Name: p.Name, SpecType: p.SpecType,
 			GoType: p.GoType, BaseGoType: p.BaseGoType,
 			EntityType: p.GoType, BaseEntityType: p.BaseGoType,
-			VOKind: p.VOKind, Nullable: p.Nullable, LabelKey: p.LabelKey,
+			VOKind: p.VOKind, Nullable: p.Nullable, LabelKey: p.LabelKey, Text: p.Text,
 			JSONName: naming.Camel(p.Name), Description: p.Description,
 		}
 		return &f
@@ -119,6 +123,7 @@ func resolveVOPart(voName string, p spec.VOPart) VOPart {
 		Name: p.Name, SpecType: p.Type, GoType: goType, BaseGoType: base,
 		Nullable: p.Nullable, VOKind: kind,
 		LabelKey:    spec.PartLabelKey(voName, p),
+		Text:        p.Text.Map(),
 		Description: p.Description,
 	}
 }
@@ -198,13 +203,13 @@ func expandComposite(s *spec.Spec, entity string, f spec.Field) []Field {
 			// emitter, for one) sees the truth.
 			EntityType: partType, BaseEntityType: partBase, VOKind: voKind,
 			Nullable: lf.Nullable, Length: lf.Length,
-			JSONName: naming.Camel(lf.Name), LabelKey: lf.LabelKey,
+			JSONName: naming.Camel(lf.Name), LabelKey: lf.LabelKey, Text: lf.Text.Map(),
 			Example: lf.Example, Description: lf.Description,
 			LivesOn: f.LivesOn,
 			Composite: &CompositePart{
 				VOName: voName, VOType: "vos." + voName,
 				Owner: f.Name, OwnerNullable: f.Nullable,
-				OwnerLabelKey: label, OwnerDescription: f.Description,
+				OwnerLabelKey: label, OwnerText: f.Text.Map(), OwnerDescription: f.Description,
 				PartName: fp.Part, Exposed: lf.Name,
 				PartType: partType, PartBaseType: partBase, PartNullable: partNullable,
 				First: i == 0, Last: i == len(f.Parts)-1,

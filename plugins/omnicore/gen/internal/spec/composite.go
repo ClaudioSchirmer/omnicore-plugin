@@ -94,6 +94,7 @@ func PartAsField(s *Spec, owner Field, fp FieldPart) Field {
 		out.VO = p.VO
 		out.LabelKey = PartLabelKey(vo.Name, *p)
 		out.Description = p.Description
+		out.Text = p.Text
 	}
 	return out
 }

@@ -36,6 +36,10 @@ type Model struct {
 	Clauses     []Clause
 	ManualRules []ManualRule
 	HasHookFile bool
+	// ArchiveWhen is the lifecycle decision an ordinary update can reach: when
+	// set, the generated IfUpdate clause ends by asking the framework to finish
+	// THIS write as an archive.
+	ArchiveWhen *ArchiveWhen
 
 	Notifications []Notification
 	ValueObjects  []ValueObject
@@ -95,11 +99,16 @@ type Field struct {
 	Length         int
 	JSONName       string
 	LabelKey       string
-	Example        string
-	Description    string
-	Unique         *Unique
-	Runtime        bool
-	Claim          string
+	// Text is the field's LABEL per catalog code, from the spec. A catalog the
+	// spec left out is absent here too, and the catalog emitter falls back to
+	// the field's own name — the label is deliberately NOT derived from
+	// Description, which is a sentence about the field, not its name.
+	Text        map[string]string
+	Example     string
+	Description string
+	Unique      *Unique
+	Runtime     bool
+	Claim       string
 	// AssignedFrom names where the server reads this field's value when the
 	// client is not allowed to send it. Empty for an ordinary field.
 	AssignedFrom string
@@ -260,6 +269,7 @@ type ComputedField struct {
 	BaseGoType  string
 	JSONName    string
 	LabelKey    string
+	Text        map[string]string
 	Example     string
 	Description string
 	// Sources are the Result field names the derivation reads. They travel to
@@ -355,6 +365,7 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	m.Clauses = appendUniqueClauses(m)
 	m.ManualRules = resolveManualRules(s.Rules)
 	m.HasHookFile = len(m.ManualRules) > 0
+	m.ArchiveWhen = resolveArchiveWhen(s, m)
 	m.PatchExcludes = map[string]bool{}
 	for _, name := range s.Update.PatchExcludes {
 		m.PatchExcludes[name] = true
@@ -446,7 +457,7 @@ func resolveField(entity string, f spec.Field) Field {
 		GoType: goType, BaseGoType: base,
 		EntityType: entityType, BaseEntityType: entityBase, VOKind: voKind,
 		Nullable: f.Nullable, Length: f.Length,
-		JSONName: naming.Camel(f.Name), LabelKey: label,
+		JSONName: naming.Camel(f.Name), LabelKey: label, Text: f.Text.Map(),
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
 		AssignedFrom: f.AssignedFrom,
 		LivesOn:      f.LivesOn,
@@ -582,8 +593,10 @@ func resolveManualRules(rs spec.Rules) []ManualRule {
 	return out
 }
 
-// langOrder is the framework's catalog set. All seven, always.
-var langOrder = []string{"ptbr", "eng", "esp", "fra", "deu", "ita", "nld"}
+// LangOrder is the framework's catalog set, re-exported from the spec package
+// so the emitters — which consume the IR and deliberately do not import the
+// spec — read the same list instead of keeping a third copy of it.
+var LangOrder = spec.CatalogCodes
 
 func resolveNotifications(s *spec.Spec) []Notification {
 	var out []Notification
@@ -592,12 +605,9 @@ func resolveNotifications(s *spec.Spec) []Notification {
 		if pkg == "" {
 			pkg = "domain"
 		}
-		texts := map[string]string{
-			"ptbr": n.Text.PTBR, "eng": n.Text.ENG, "esp": n.Text.ESP, "fra": n.Text.FRA,
-			"deu": n.Text.DEU, "ita": n.Text.ITA, "nld": n.Text.NLD,
-		}
+		texts := n.Text.Map()
 		var missing []string
-		for _, code := range langOrder {
+		for _, code := range LangOrder {
 			if strings.TrimSpace(texts[code]) == "" {
 				missing = append(missing, code)
 				// The placeholder is deliberately loud: an untranslated string
@@ -649,7 +659,7 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 		base := goTypeOf(c.Type)
 		r.Computed = append(r.Computed, ComputedField{
 			Name: c.Name, GoType: base, BaseGoType: base,
-			JSONName: naming.Camel(c.Name), LabelKey: c.LabelKey,
+			JSONName: naming.Camel(c.Name), LabelKey: c.LabelKey, Text: c.Text.Map(),
 			Example: c.Example, Description: c.Description,
 			Sources: append([]string(nil), c.From...),
 		})
@@ -1705,12 +1715,42 @@ func (m *Model) WritableFields() []Field {
 	return out
 }
 
-// AssignedFields are the ones the server fills from the identity, in spec
-// order. Only an insert writes them.
+// AssignedFields are the ones the server fills rather than the client, in spec
+// order — whatever the source. They are what leaves the write surface.
 func (m *Model) AssignedFields() []Field {
 	var out []Field
 	for _, f := range m.AllOwnerFields() {
 		if f.AssignedFrom != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// IdentityAssignedFields are the subset the GENERATOR writes the assignment
+// for: the ones read from the caller's token. Only an insert writes them.
+//
+// The split matters to the mapper emitters and to nothing else: a `derived`
+// field leaves the write surface exactly like these, but what fills it is a
+// hand-written rule, so emitting an identity block for it would produce a
+// block that assigns nothing — and, when it is the only assigned field, one
+// that does not compile.
+func (m *Model) IdentityAssignedFields() []Field {
+	var out []Field
+	for _, f := range m.AssignedFields() {
+		if f.AssignedFrom == "identity-subject" || f.AssignedFrom == "identity-claim" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// DerivedFields are the server-assigned fields computed from the entity's own
+// state by a hand-written rule.
+func (m *Model) DerivedFields() []Field {
+	var out []Field
+	for _, f := range m.AssignedFields() {
+		if f.AssignedFrom == "derived" {
 			out = append(out, f)
 		}
 	}
@@ -1853,4 +1893,34 @@ func (m *Model) HasPerChildOps() bool {
 		}
 	}
 	return false
+}
+
+// ArchiveWhen is the resolved "this update retires the row" decision: the
+// expressions the emitter compares and assigns, rather than the spec's words.
+type ArchiveWhen struct {
+	// Field is the deciding field, as the entity declares it.
+	Field Field
+	// Equals is the trigger value, and Becomes the value the row is archived
+	// holding. Becomes is empty when the spec left the trigger value in place.
+	Equals  string
+	Becomes string
+	// Description is the spec's line on why, for the generated comment.
+	Description string
+}
+
+func resolveArchiveWhen(s *spec.Spec, m *Model) *ArchiveWhen {
+	aw := s.Delete.ArchiveWhen
+	if aw == nil {
+		return nil
+	}
+	f := lookupField(m, aw.Field)
+	if f == nil {
+		// Validation refuses an unknown field, so this is unreachable in a
+		// generated run; returning nil rather than panicking keeps a `check`
+		// that already has blockers from dying before it prints them.
+		return nil
+	}
+	return &ArchiveWhen{
+		Field: *f, Equals: aw.Equals, Becomes: aw.Becomes, Description: aw.Description,
+	}
 }

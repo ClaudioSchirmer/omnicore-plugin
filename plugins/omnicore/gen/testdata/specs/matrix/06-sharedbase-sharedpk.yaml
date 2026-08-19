@@ -1,5 +1,6 @@
 # Eixos: SharedBase com link shared-PK (o papel usa a MESMA chave da identidade),
-# reuso de VO já existente no projeto, e política de órfão "manter".
+# reuso de VO já existente no projeto, política de órfão "manter", e
+# delete.archiveWhen — um update que termina como archive — sobre um PAPEL.
 specVersion: 1
 entity: Professor
 plural: Professores
@@ -20,9 +21,41 @@ fields:
   - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "123.456.789-00", description: Documento — chave natural da identidade.}
   - {name: NomeCompleto, type: string, column: nome_completo, length: 160, livesOn: base, example: Helena Duarte, description: Nome completo da pessoa.}
   - {name: Titulacao, type: string, column: titulacao, length: 40, livesOn: role, example: Doutorado, description: Titulação acadêmica.}
+  # Situação do VÍNCULO, não da pessoa: por isso vive no papel. É ela que decide
+  # quando o vínculo deixa de estar ativo — ver delete.archiveWhen abaixo.
+  - name: Situacao
+    type: string
+    column: situacao
+    length: 20
+    livesOn: role
+    vo: {kind: enum, ref: SituacaoDocente}
+    example: ativo
+    description: Situação do vínculo docente.
+valueObjects:
+  - name: SituacaoDocente
+    kind: enum
+    backing: string
+    description: As situações possíveis de um vínculo docente.
+    unknownNotification: SituacaoDocenteDesconhecidaNotification
+    members:
+      - {name: Ativo, value: ativo}
+      - {name: Afastado, value: afastado}
+      - {name: Desligado, value: desligado}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: patch}
-delete: {root: soft}
+delete:
+  root: soft
+  # Um update que deixa o vínculo "desligado" É uma remoção: o DOMÍNIO decide, e
+  # o framework roda o archive inteiro a partir do mesmo request.
+  #
+  # Este papel PODE declarar a chave porque nenhuma regra sua tem scope:
+  # [archive] — não há proteção nenhuma sendo pulada, só a permissão troca
+  # (professor:escrever no lugar de professor:arquivar). Compare com 18, que tem
+  # um ownerCheck com scope archive e por isso não declara a chave.
+  archiveWhen:
+    field: Situacao
+    equals: desligado
+    description: Um vínculo desligado não é um registro ativo.
 rules:
   list:
     - {id: doc-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Documento], notification: RequiredFieldNotification}
@@ -33,6 +66,9 @@ rules:
       notification: DocumentoImutavelNotification
       echoValue: true
 notifications:
+  - name: SituacaoDocenteDesconhecidaNotification
+    semantic: validation
+    text: {ptbr: Situação de vínculo fora do conjunto conhecido., eng: Contract situation outside the known set., esp: Situación de vínculo fuera del conjunto conocido., fra: Situation de contrat hors de l'ensemble connu., deu: Vertragsstatus außerhalb der bekannten Menge., ita: Situazione di contratto fuori dall'insieme noto., nld: Contractsituatie buiten de bekende verzameling.}
   - name: DocumentoImutavelNotification
     semantic: validation
     text: {ptbr: O documento não pode ser alterado., eng: The document cannot be changed., esp: El documento no se puede modificar., fra: Le document ne peut pas être modifié., deu: Das Dokument kann nicht geändert werden., ita: Il documento non può essere modificato., nld: Het document kan niet worden gewijzigd.}

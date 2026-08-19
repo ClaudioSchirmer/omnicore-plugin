@@ -176,7 +176,7 @@ func emitBuildRules(s *src, m *ir.Model) {
 	s.L("func (e *%s) BuildRules(actionName string, service domain.Service, r *domain.Rules) {",
 		m.Entity.Pascal)
 
-	if len(m.Clauses) == 0 && !m.HasHookFile {
+	if len(m.Clauses) == 0 && !m.HasHookFile && m.ArchiveWhen == nil {
 		s.L("\t// The spec declares no rule for this aggregate. The method still exists")
 		s.L("\t// because the framework's entity contract requires it.")
 		s.L("\t_ = actionName")
@@ -187,11 +187,27 @@ func emitBuildRules(s *src, m *ir.Model) {
 		return
 	}
 
+	sawUpdate := false
 	for _, clause := range m.Clauses {
 		s.L("\tr.%s(func() {", clause.Gate)
 		for _, rule := range clause.Rules {
 			emitRule(s, m, clause.Gate, rule)
 		}
+		// The lifecycle decision goes LAST in the update clause: every invariant
+		// above it has had its say, and what this reads is the entity as the
+		// write leaves it.
+		if clause.Gate == "IfUpdate" {
+			sawUpdate = true
+			emitArchiveWhen(s, m)
+		}
+		s.L("\t})")
+		s.Blank()
+	}
+	// An entity can declare the decision and no update rules at all, and the
+	// clause has to exist for it to live in.
+	if !sawUpdate && m.ArchiveWhen != nil {
+		s.L("\tr.IfUpdate(func() {")
+		emitArchiveWhen(s, m)
 		s.L("\t})")
 		s.Blank()
 	}
@@ -1374,4 +1390,57 @@ func notifIn(m *ir.Model, name string) string {
 		}
 	}
 	return notifLiteral(name)
+}
+
+// emitArchiveWhen writes the one condition that changes what the write IS.
+//
+// Everything else in BuildRules decides whether a write is ALLOWED. This decides
+// that the row it is writing should not be left active, and hands that to the
+// framework: CompleteAsArchive() makes the same statement carry the archive
+// stamp, run the child cascade, converge the shared identity, emit ARCHIVED
+// rather than UPDATED, and record an archive in the audit trail.
+//
+// The comment it emits is not decoration. A reader of this entity meets a plain
+// update that quietly ends as an archive, and the two things they cannot guess
+// are on the two lines above it: that IfArchive does not fire here, and that the
+// value this closure leaves behind is therefore the one that gets persisted.
+func emitArchiveWhen(s *src, m *ir.Model) {
+	aw := m.ArchiveWhen
+	if aw == nil {
+		return
+	}
+	s.Blank()
+	if aw.Description != "" {
+		for _, line := range wrap(aw.Description, 66) {
+			s.L("\t\t// %s", line)
+		}
+		s.L("\t\t//")
+	}
+	s.L("\t\t// The DOMAIN decides this update retires the row, so the framework runs the")
+	s.L("\t\t// whole archive: the archive stamp, the child cascade, the ARCHIVED event the")
+	s.L("\t\t// read side routes on, and an archive audit entry.")
+	s.L("\t\t//")
+	s.L("\t\t// IfArchive does NOT fire on this path — the rules run once, in ModeUpdate —")
+	s.L("\t\t// so the value left here is the one that gets persisted.")
+
+	ref := "e." + aw.Field.Name
+	read := ref
+	if aw.Field.VOKind != "" {
+		read += ".Value()"
+	}
+	s.L("\t\tif %s == %s {", read, quote(aw.Equals))
+	if aw.Becomes != "" {
+		s.L("\t\t\t%s = %s", ref, entityLiteral(aw.Field, aw.Becomes))
+	}
+	s.L("\t\t\te.CompleteAsArchive()")
+	s.L("\t\t}")
+}
+
+// entityLiteral renders a text value as the field's own type: a value object
+// wraps it, a plain string is itself.
+func entityLiteral(f ir.Field, value string) string {
+	if f.VOKind != "" {
+		return fmt.Sprintf("%s(%s)", f.BaseEntityType, quote(value))
+	}
+	return quote(value)
 }

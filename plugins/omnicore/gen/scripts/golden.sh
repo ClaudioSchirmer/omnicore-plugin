@@ -442,6 +442,43 @@ stage_host "$PRUNE_WORK"
 mkdir -p "$PRUNE_WORK/omnicore-gen"
 cp "$GEN_DIR/internal/cli/example.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml"
 cp "$GEN_DIR/testdata/specs/prune-neighbour.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/"
+# The hand-written half of a `kind: manual` value object. The example declares
+# NationalID as one — a check-digit rule no regex states — so the generator
+# deliberately writes no file for it and the tree does not compile until this
+# exists. Writing it here is what makes this lane prove the whole bargain: the
+# generator types the field as the value object, a human supplies the type, and
+# prune must never offer to delete a file the generator did not write.
+mkdir -p "$PRUNE_WORK/internal/domain/vos"
+cat > "$PRUNE_WORK/internal/domain/vos/national_id.go" <<'VOEOF'
+package vos
+
+import "github.com/ClaudioSchirmer/omnicore/domain"
+
+// NationalID is a national identity document number, valid by its own check
+// digits. Hand-written on purpose: the rule is an algorithm over the digits.
+type NationalID string
+
+// Value unwraps to the underlying type, which is what the wire and the database see.
+func (v NationalID) Value() string { return string(v) }
+
+// IsValid is the framework's entry point, found by TYPE with no registration.
+func (v NationalID) IsValid(fieldName string, ctx *domain.NotificationContext) bool {
+	if len(v) == 0 {
+		return true // absence is the required rule's business, not this one's
+	}
+	var digits int
+	for _, r := range v {
+		if r >= '0' && r <= '9' {
+			digits++
+		}
+	}
+	if digits != 11 {
+		ctx.AddNotification(fieldName, domain.SchemaViolationNotification{})
+		return false
+	}
+	return true
+}
+VOEOF
 prune_ok=1
 # ORDER MATTERS: the neighbour REUSES a value object the first spec declares, so
 # generating it first is refused — the type is not in the project yet.

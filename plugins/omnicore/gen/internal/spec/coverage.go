@@ -18,30 +18,33 @@ import (
 type Capability string
 
 const (
-	CapFlat           Capability = "flat storage"
-	CapSharedBase     Capability = "shared-base role"
-	CapValueObjects   Capability = "value objects"
-	CapChildren       Capability = "child collections"
-	CapSiblings       Capability = "sibling facets (with their clear path on both surfaces)"
-	CapRulesDSL       Capability = "the declarative rule set"
-	CapManualRules    Capability = "hand-written rules (hook file)"
-	CapService        Capability = "domain service"
-	CapMongoView      Capability = "mongo-backed view"
-	CapRelationalView Capability = "relational-backed view"
-	CapREST           Capability = "REST surface"
-	CapGraphQL        Capability = "GraphQL surface"
-	CapExports        Capability = "CSV/XLSX exports"
-	CapFieldRestrict  Capability = "field-level read restriction"
-	CapIdentityView   Capability = "shared identity view"
-	CapOwnerAccess    Capability = "owner-only data access"
-	CapTenantAccess   Capability = "tenant data access"
-	CapGeneratedTests Capability = "generated unit tests"
-	CapPerChild       Capability = "per-entry child operations"
-	CapAssignedField  Capability = "server-assigned fields (from the caller's identity)"
-	CapMountedChild   Capability = "a shared identity's collection, exposed on a second role"
-	CapGroupedFact    Capability = "per-group facts, computed by the database (GROUP BY)"
-	CapCompositeVO    Capability = "composite value objects (a value spanning several columns)"
-	CapComputedRead   Capability = "computed read fields (derived per document, no column)"
+	CapFlat            Capability = "flat storage"
+	CapSharedBase      Capability = "shared-base role"
+	CapValueObjects    Capability = "value objects"
+	CapChildren        Capability = "child collections"
+	CapSiblings        Capability = "sibling facets (with their clear path on both surfaces)"
+	CapRulesDSL        Capability = "the declarative rule set"
+	CapManualRules     Capability = "hand-written rules (hook file)"
+	CapService         Capability = "domain service"
+	CapMongoView       Capability = "mongo-backed view"
+	CapRelationalView  Capability = "relational-backed view"
+	CapREST            Capability = "REST surface"
+	CapGraphQL         Capability = "GraphQL surface"
+	CapExports         Capability = "CSV/XLSX exports"
+	CapFieldRestrict   Capability = "field-level read restriction"
+	CapIdentityView    Capability = "shared identity view"
+	CapOwnerAccess     Capability = "owner-only data access"
+	CapTenantAccess    Capability = "tenant data access"
+	CapGeneratedTests  Capability = "generated unit tests"
+	CapPerChild        Capability = "per-entry child operations"
+	CapAssignedField   Capability = "server-assigned fields (from the caller's identity)"
+	CapDerivedField    Capability = "server-derived fields (computed from the entity's own, kept out of every write DTO)"
+	CapMountedChild    Capability = "a shared identity's collection, exposed on a second role"
+	CapGroupedFact     Capability = "per-group facts, computed by the database (GROUP BY)"
+	CapCompositeVO     Capability = "composite value objects (a value spanning several columns)"
+	CapManualVO        Capability = "hand-written value objects (declared here, written by you)"
+	CapArchiveOnUpdate Capability = "an update that finishes as an archive (CompleteAsArchive)"
+	CapComputedRead    Capability = "computed read fields (derived per document, no column)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -53,25 +56,28 @@ var implemented = map[Capability]bool{
 	CapREST:           true,
 	CapRelationalView: true,
 
-	CapValueObjects:   true,
-	CapService:        true,
-	CapGroupedFact:    true,
-	CapChildren:       true,
-	CapSiblings:       true,
-	CapSharedBase:     true,
-	CapIdentityView:   false, // F3
-	CapMongoView:      true,
-	CapGraphQL:        true,
-	CapExports:        true,
-	CapFieldRestrict:  true,
-	CapOwnerAccess:    true,
-	CapTenantAccess:   true,
-	CapGeneratedTests: true,
-	CapPerChild:       true,
-	CapAssignedField:  true,
-	CapMountedChild:   true,
-	CapCompositeVO:    true,
-	CapComputedRead:   true,
+	CapValueObjects:    true,
+	CapService:         true,
+	CapGroupedFact:     true,
+	CapChildren:        true,
+	CapSiblings:        true,
+	CapSharedBase:      true,
+	CapIdentityView:    false, // F3
+	CapMongoView:       true,
+	CapGraphQL:         true,
+	CapExports:         true,
+	CapFieldRestrict:   true,
+	CapOwnerAccess:     true,
+	CapTenantAccess:    true,
+	CapGeneratedTests:  true,
+	CapPerChild:        true,
+	CapAssignedField:   true,
+	CapDerivedField:    true,
+	CapMountedChild:    true,
+	CapCompositeVO:     true,
+	CapManualVO:        true,
+	CapArchiveOnUpdate: true,
+	CapComputedRead:    true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -90,7 +96,8 @@ func AllCapabilities() []Capability {
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapGeneratedTests, CapPerChild,
-		CapAssignedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
+		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
+		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead,
 	}
 }

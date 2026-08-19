@@ -9,9 +9,15 @@
 # attached. Copy the STRUCTURE, never the domain — the entity below is a
 # student, and yours is not.
 #
-# The human-facing text here is English because `language:` says so, and the two
-# have to agree: descriptions written in the declared language seed the matching
-# label catalog. Write yours in whatever your project speaks, and declare it.
+# The human-facing text here is English because `language:` says so. Write yours
+# in whatever your project speaks, and declare it — the report quotes these
+# descriptions back to a reviewer under that heading.
+#
+# A description and a LABEL are different things. The description is a sentence
+# about what the field means and becomes the column comment; the label is the
+# field's short human NAME — what a 422 payload puts in `fieldLabel` and what a
+# CSV/XLSX export puts in a column header. The label is `text:`, optional and per
+# catalog; a catalog left out falls back to the field's own name.
 specVersion: 1
 entity: Student
 plural: Students
@@ -45,6 +51,12 @@ fields:
     example: "2026-00417"
     description: Enrollment number, unique across the institution.
     labelKey: StudentEnrollmentNumberField
+    # The label, per catalog — a couple of words, never the sentence above. Only
+    # the catalogs you actually speak: the rest fall back to "Enrollment Number".
+    text:
+      eng: Enrollment no.
+      ptbr: Matrícula
+      esp: Matrícula
     unique:
       enforce: service-precheck+constraint
       notification: EnrollmentNumberAlreadyExistsNotification
@@ -58,6 +70,23 @@ fields:
     example: alice.reid@school.edu
     description: The student's contact e-mail address.
     labelKey: StudentEmailField
+
+  # A value object whose rule is a CHECKSUM: no regex says it, no member list
+  # closes it, so the generator cannot write this type — and `kind: manual` is
+  # how the spec says so out loud. The field is still typed as the value object
+  # and the mappers still convert to and from it; what the generator does not do
+  # is write the file. The report asks for it by name, with the exact shape, and
+  # the package does not compile until it is there.
+  - name: NationalID
+    type: string
+    column: national_id
+    length: 14
+    livesOn: root
+    vo: {kind: manual, ref: NationalID}
+    example: "529.982.247-25"
+    description: The student's national identity document.
+    labelKey: StudentNationalIDField
+    text: {eng: National ID, ptbr: CPF}
 
   - name: Status
     type: string
@@ -149,6 +178,17 @@ valueObjects:
     maxLength: 160
     notification: InvalidEmailNotification
 
+  # Declared, not generated: `manual` says the rule is outside what raw and enum
+  # can express — here, a check-digit algorithm. Backing is a CONTRACT (the
+  # mappers write vos.NationalID(x) and read .Value()), and the description is
+  # what the report hands the person who writes it.
+  - name: NationalID
+    kind: manual
+    backing: string
+    description: >-
+      A national identity document number, valid by its own check digits — the
+      rule is an algorithm over the digits, not a shape.
+
   - name: EnrollmentStatus
     kind: enum
     backing: string
@@ -158,6 +198,10 @@ valueObjects:
       - {name: Active,    value: active}
       - {name: Suspended, value: suspended}
       - {name: Graduated, value: graduated}
+      # Two members for ONE ending, and the pair is the point: "withdrawing" is
+      # what a caller asks for, "dropped" is where the record rests. See
+      # delete.archiveWhen — without the pair there is nowhere to rest.
+      - {name: Withdrawing, value: withdrawing}
       - {name: Dropped,   value: dropped}
 
   # A COMPOSITE value object: no backing, because its value is its PARTS. It
@@ -234,6 +278,37 @@ update:
 
 delete:
   root: soft
+  # An ordinary PUT/PATCH that sets the status to "withdrawing" is really a
+  # removal: the DOMAIN says so, not the caller and not the transport. The
+  # framework then runs the whole archive — stamp, child cascade, ARCHIVED event,
+  # archive audit entry — off the same request.
+  #
+  # WHICH GATES THAT WRITE PASSED is the thing to be deliberate about, because
+  # this key changes what a write IS and not which door it came through:
+  #
+  #   - the PERMISSION is the update's. This retires a student under
+  #     `student:update` (below), never `student:archive` — the archive
+  #     permission guards the archive ROUTE, and this write did not use it.
+  #   - the RULES that fire are the update's. IfArchive does not run here (the
+  #     rules run once, in ModeUpdate), so a rule with scope: [archive] —
+  #     an ownerCheck, a state guard — does not see this write at all.
+  #
+  # Declaring it is right when both are the same population, as here: anyone
+  # trusted to edit a student's enrollment is trusted to close it. When they are
+  # NOT — the shared-identity example is that case, and says so where this key
+  # would have gone — either restate the guard with scope: [update], or leave the
+  # key out and keep removal on its own route.
+  #
+  # `becomes` is optional, and this is the case that needs it: the archive rules
+  # do NOT re-fire here, so the row is archived holding whatever this closure
+  # leaves. "withdrawing" is a REQUEST — a record resting in it forever would
+  # read as one still being processed — so the value is restated to the ending
+  # it reached. Leave `becomes` out when the trigger is already a resting state.
+  archiveWhen:
+    field: Status
+    equals: withdrawing
+    becomes: dropped
+    description: A student who withdrew is not an active record.
 
 rules:
   list:

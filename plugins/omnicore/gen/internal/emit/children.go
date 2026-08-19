@@ -397,8 +397,10 @@ func parentColumn(c ir.Child) string { return c.ParentColumn }
 //
 // They exist because the root's update replaces the WHOLE collection: a caller
 // who wants to add one entry would have to resend every other one, and two
-// callers doing that concurrently lose each other's work. Addressing one entry
-// is a different operation, and it needs its own not-found answer.
+// callers doing that concurrently now collide on the root's revision guard —
+// the second one is refused with a 409 and has to reload and reapply. Addressing
+// one entry is a different operation: it touches its own row, and it needs its
+// own not-found answer.
 func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	entity := m.Entity.Pascal
 	// op is what THIS spec's command types are called. It differs from the

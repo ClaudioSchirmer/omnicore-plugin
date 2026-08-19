@@ -666,6 +666,14 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 
 	for _, vo := range m.ValueObjects {
+		// A hand-written value object gets no generated test: the generator does
+		// not know the rule, so anything it asserted here would be its own guess
+		// failing in the author's file. The one property it COULD check — that
+		// the type exists with the right shape — the compiler already checks,
+		// louder, on the same run.
+		if vo.Kind == "manual" {
+			continue
+		}
 		if vo.Kind == "composite" {
 			emitCompositeVOTests(s, m, vo)
 			continue

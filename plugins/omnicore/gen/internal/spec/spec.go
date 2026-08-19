@@ -25,8 +25,12 @@ type Spec struct {
 	// The generator does not invent names — this one is declared.
 	Plural string `yaml:"plural"`
 	// Language is the language the spec's human-facing text is written in, such
-	// as pt-BR: descriptions written in it seed the matching label catalog, and
-	// the other catalogs fall back to the field name.
+	// as pt-BR. Every description, example and label below is read in it, and the
+	// generation report says so at the top — a reviewer checking a Portuguese
+	// domain against English wording is checking the wrong thing.
+	//
+	// It does NOT decide any catalog: a field's label is declared per catalog
+	// under fields[].text, and one left out falls back to the field's own name.
 	Language string `yaml:"language"`
 
 	// Storage says where the entity's rows live: its own table (flat), or a role
@@ -36,7 +40,8 @@ type Spec struct {
 	// runtime-only value the rules read from the caller's token.
 	Fields []Field `yaml:"fields"`
 	// ValueObjects declares the value-object types fields wrap themselves in via
-	// vo: a validated raw shape, or a closed enum.
+	// vo: a validated raw shape, a closed enum, a composite spanning several
+	// columns, or a manual one this language cannot express and you write.
 	ValueObjects []ValueObject `yaml:"valueObjects"`
 	// Children are the owned collections (1:N): rows that live with the root,
 	// are edited through it, and are nested in its read document.
@@ -138,8 +143,10 @@ type Managed struct {
 	// ArchivedAt is the column that marks a soft-deleted row — what soft delete,
 	// unarchive and includeArchived hinge on. Empty = no archived state.
 	ArchivedAt string `yaml:"archivedAt"`
-	// Revision is the optimistic-concurrency counter column, bumped on every
-	// write.
+	// Revision is the optimistic-concurrency column: bumped on every write, and
+	// the value every ROOT update is guarded on — a write built on a stale read
+	// matches no row and is refused rather than reverting what another writer
+	// changed in the meantime. It is MANDATORY on an entity or base schema.
 	Revision string `yaml:"revision"`
 }
 
@@ -183,11 +190,21 @@ type Field struct {
 	// what the generated OpenAPI examples ("try it out") show.
 	Example string `yaml:"example"`
 	// Description is one line on what the field means. It becomes the column
-	// comment in the migration, and in the spec's language it seeds the label.
+	// comment in the migration — what a DBA and a BI tool read. It is NOT the
+	// label: see text.
 	Description string `yaml:"description"`
 	// LabelKey is the translation-catalog key for the field's label — what a
 	// CSV/XLSX column header resolves through. Derived when omitted.
 	LabelKey string `yaml:"labelKey"`
+	// Text is the field's LABEL — its short human name — per language catalog.
+	// It is what a validation payload puts in `fieldLabel` and what a CSV/XLSX
+	// export puts in a column header, so it is a couple of words, never a
+	// sentence: the description explains the field, the label names it.
+	//
+	// Unlike a notification's text it is optional and may be partial: a catalog
+	// left out falls back to the field's own name, spaced out (Workspace,
+	// TenantID → "Tenant ID"), which is a placeholder a translator can find.
+	Text Texts `yaml:"text"`
 	// Runtime marks the field as runtime-only: never persisted, fed from the
 	// caller's token (see claim), existing only for the rules to read.
 	Runtime bool `yaml:"runtime"`
@@ -195,12 +212,21 @@ type Field struct {
 	// for such a field: the framework deliberately does not opine on which custom
 	// claims a token carries, so any convention here would be a guess.
 	Claim string `yaml:"claim"`
-	// AssignedFrom says the SERVER fills this persisted field from the caller's
-	// identity, so the client never sends it: it is absent from every write
-	// request and command, written on insert, and left alone afterwards. Use it
-	// for the field that records who created the row — the one an owner-only
-	// policy then reads.
-	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim
+	// AssignedFrom says the SERVER fills this persisted field, so the client
+	// never sends it: it is absent from every write request, every command and
+	// the OpenAPI request schema.
+	//
+	//   - identity-subject / identity-claim — the value comes from the caller's
+	//     token, and the generator writes the assignment. Written on insert and
+	//     left alone afterwards, which is what makes "who created this row" a
+	//     fact rather than a claim.
+	//   - derived — the value comes from the entity's OWN fields, like a public
+	//     key computed from an immutable handle. The generator writes no
+	//     assignment for it: what computes it is a rules.manual entry scoped to
+	//     insert, and the report lists that as owed. Declared here so the field
+	//     stops being advertised as writable while the server silently
+	//     overwrites whatever a caller sent.
+	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | derived
 }
 
 type FieldVO struct {
@@ -273,12 +299,25 @@ type ValueObject struct {
 	// Name is the value-object type name that fields reference via vo.ref.
 	Name string `yaml:"name"`
 	// Kind is what the value object is: raw = a validated shape; enum = a
-	// closed set of members; composite = a value that spans SEVERAL fields.
+	// closed set of members; composite = a value that spans SEVERAL fields;
+	// manual = one this language cannot express, which YOU write.
+	//
+	// `manual` is the escape hatch, and it is deliberately a declaration rather
+	// than silence: the field is typed as this value object and the mappers
+	// convert to and from its backing, so the type has to exist — the report
+	// asks for it by name, with the exact shape, and the package does not
+	// compile until it is there. Use it when the rule needs something no raw or
+	// enum can say; it is not a way to skip writing a regex.
 	Kind string `yaml:"kind"`
 	// Backing is the underlying representation: string or int. A composite has
 	// none — its value is its parts, not a scalar — so the key is refused there.
+	// For a `manual` value object it is a CONTRACT, not decoration: the emitted
+	// mappers convert with vos.Name(x) and read back with .Value(), so the type
+	// you write has to have exactly this underlying type.
 	Backing string `yaml:"backing"`
-	// Description is one line on what the value object means.
+	// Description is one line on what the value object means. Required for a
+	// `manual` one: it is what the report asks the implementer for, and an
+	// unnamed escape hatch degenerates into an empty TODO.
 	Description string `yaml:"description"`
 
 	// composite
@@ -358,8 +397,13 @@ type VOPart struct {
 	// when omitted.
 	LabelKey string `yaml:"labelKey"`
 	// Description is one line on what the part means. It becomes the column
-	// comment in the migration, and in the spec's language it seeds the label.
+	// comment in the migration. It is NOT the label: see text.
 	Description string `yaml:"description"`
+	// Text is the part's LABEL, per language catalog — same rules as a field's:
+	// a couple of words, optional, and a catalog left out falls back to the
+	// part's own name. It is declared here, on the value object, because the
+	// value object owns its vocabulary for every entity that uses it.
+	Text Texts `yaml:"text"`
 }
 
 type EnumMember struct {
@@ -456,6 +500,39 @@ type Delete struct {
 	// Refused by this build — removal is declared per child, with
 	// children[].softRemove.
 	Children string `yaml:"children"`
+	// ArchiveWhen makes an ORDINARY UPDATE retire the row: when the field
+	// reaches the value named here, the domain finishes that write as an
+	// archive. It is a lifecycle decision, which is why it lives here and not
+	// among the rules — a rule refuses a write, this one changes what the write
+	// IS.
+	ArchiveWhen *ArchiveWhen `yaml:"archiveWhen"`
+}
+
+// ArchiveWhen is "a tenant moving to closing is really being archived": the
+// caller sends a plain PUT/PATCH, and the DOMAIN — not the transport, not the
+// client — decides the row should not be left active.
+//
+// It becomes one condition at the end of the generated IfUpdate clause, calling
+// the framework's CompleteAsArchive(). The framework then runs the whole
+// archive: the archive stamp, the child cascade, the ARCHIVED event the read
+// side routes on, and an archive audit entry.
+type ArchiveWhen struct {
+	// Field is the entity field that decides — one field, the state. It must be
+	// a persisted field of the root.
+	Field string `yaml:"field"`
+	// Equals is the value that means "retire this row".
+	Equals string `yaml:"equals"`
+	// Becomes is the value the field is left at, persisted with the archive.
+	// Optional, and worth thinking about: the archive rules do NOT re-fire on
+	// this path (the write is still an update as far as the rule set is
+	// concerned), so without it the row is archived holding the trigger value —
+	// which is right when that value is a real resting state ("cancelled") and
+	// wrong when it is a request ("closing").
+	Becomes string `yaml:"becomes"`
+	// Description is one line on WHY this update retires the row. It becomes the
+	// comment above the condition, where the next reader of the entity meets a
+	// write that quietly changes verb.
+	Description string `yaml:"description"`
 }
 
 // ---------------------------------------------------------------- rules
@@ -619,6 +696,28 @@ type Texts struct {
 	NLD string `yaml:"nld"`
 }
 
+// CatalogCodes is the framework's catalog set, in the order every listing of it
+// uses. All seven, always — a subset leaves some users reading a raw key.
+//
+// It is the ORDER; Map below is the MAPPING. Both are needed (a map has no
+// order, and a list carries no yaml key), and both are written HERE, once:
+// TestCatalogSetIsWrittenOnce fails if they drift, which is how a catalog added
+// to one and not the other surfaces as a failing build rather than as a
+// language that quietly renders nothing.
+var CatalogCodes = []string{"ptbr", "eng", "esp", "fra", "deu", "ita", "nld"}
+
+// Map renders the seven catalogs keyed by the framework's catalog codes, which
+// is the shape everything downstream reads them in. It exists so the mapping
+// between a yaml key and a catalog code is written ONCE: it used to be spelled
+// out at each consumer, and a catalog added there would have been silently
+// dropped here.
+func (t Texts) Map() map[string]string {
+	return map[string]string{
+		"ptbr": t.PTBR, "eng": t.ENG, "esp": t.ESP, "fra": t.FRA,
+		"deu": t.DEU, "ita": t.ITA, "nld": t.NLD,
+	}
+}
+
 // ---------------------------------------------------------------- service
 
 type Service struct {
@@ -749,6 +848,10 @@ type Computed struct {
 	// LabelKey is the translation-catalog key the tabular exports render as
 	// this column's header; absent, the header is the wire name.
 	LabelKey string `yaml:"labelKey"`
+	// Text is the computed field's LABEL, per language catalog — same rules as
+	// a persisted field's: a couple of words, optional, and a catalog left out
+	// falls back to the field's own name.
+	Text Texts `yaml:"text"`
 	// Example feeds the OpenAPI example, exactly as on a persisted field.
 	Example string `yaml:"example"`
 	// Description is one line on what the value MEANS. It reaches the hook the
