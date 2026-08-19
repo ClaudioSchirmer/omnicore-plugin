@@ -90,3 +90,12 @@ behaviour, and they are **version-agnostic**: they read the framework version fr
 the project's `go.mod` and treat that version's bundled `/docs` as the sole
 authority. When a convention here and the framework's docs disagree, the docs win
 and the convention is stale — fix it, and say so in `CHANGELOG.md`.
+
+**Everything a skill writes into a consumer project goes under `specs/`**, one
+directory per skill — including the generator's, at `specs/omnicore-gen/`
+(`internal/layout` is where that path is decided, once). A new skill that writes
+anything picks `specs/<its-own-name>/` and is added to the table in
+`plugins/omnicore/shared/generated-documents.md`, which is the contract for both
+halves of the rule: where documents live, and that they are committed rather than
+ignored. Never `docs/` — that name belongs to the consumer project's own end-user
+documentation.

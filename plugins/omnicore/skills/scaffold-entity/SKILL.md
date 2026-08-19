@@ -15,7 +15,7 @@ composing** — never by copying code. That is why this is a skill and not a tem
 generator: it writes the entity from understanding, so it works from scratch and cannot
 drift.
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles — read FIRST
@@ -182,7 +182,7 @@ Self-configure by reading the project:
   the project already has. A composite is the easiest to overlook in this sweep, because
   every entity reusing it names the type ONCE and its parts read as ordinary columns
   everywhere else.
-- **A domain map from `scaffold-system`?** Look for `scaffold-system/domain-map.md` —
+- **A domain map from `scaffold-system`?** Look for `specs/scaffold-system/domain-map.md` —
   whether this run was delegated by that skill or invoked directly in a project that has
   one; if it exists, reading it is MANDATORY, not optional. `Status: APPROVED` and it
   lists THIS entity → its §9 block is the dev's already-approved answers: Kind, base
@@ -199,7 +199,7 @@ Self-configure by reading the project:
   it once for the whole system.
 - **The read-side posture (view backing default).** In order: a delegated
   `domain-map.md` §1p / this entity's §9 `View backing` (authoritative when present) →
-  else `scaffold-service/spec.md` in the project root (a fresh project just scaffolded)
+  else `specs/scaffold-service/spec.md` (a fresh project just scaffolded)
   → else INFER from existing per-entity views (do any carry `.RelationalSource()`?). It
   sets the DEFAULT for item 5's view-backing decision; only when NONE of these is on
   record does that item ASK. Never silently pick one when nothing is found.
@@ -233,7 +233,7 @@ request — "a student with name, email, studentNumber" still deserves the quest
 student also become a professor/staff for the same person?"* before you pick flat vs base.
 
 Then **FILL THE SPEC — don't walk a prose checklist from memory.** Copy the template in
-`conventions/spec-template.md` VERBATIM to `scaffold-entity/<entity>/spec.md` and fill
+`conventions/spec-template.md` VERBATIM to `specs/scaffold-entity/<entity>/spec.md` and fill
 EVERY slot: low-risk slots you just decide; each high-risk slot gets your recommended pick
 marked `(proposed)` with the alternative(s) named beside it; a slot you cannot responsibly
 recommend becomes `⚠️ OPEN: <question>`. No section may be deleted — an inapplicable
@@ -471,8 +471,8 @@ corrected. A choice the dev makes — even the plain one — is legitimate; note
 lightly ("a possible outcome, not a problem; switchable later without rework") and move on.
 
 **1b. Write the task PLAN — only AFTER the 1a spec gate passes** — into a VISIBLE working
-dir in the project root:
-**`scaffold-entity/<entity>/`** (e.g. `scaffold-entity/student/`). Not a hidden/UUID dir,
+dir under `specs/` in the project root:
+**`specs/scaffold-entity/<entity>/`** (e.g. `specs/scaffold-entity/student/`). Not a hidden/UUID dir,
 not your scratch dir — the dev must be able to open and read it. **Do NOT delete it on
 success** — leave the plan + per-layer tasks in place, and **do not add it to
 `.gitignore`**. It is not scratch: `spec.md` is the approved model and the `task_*.md`
@@ -524,7 +524,7 @@ exact contradiction this ban exists to kill.
 **1c. Plan-review STOP gate.** After writing `tasks.md` + all `task_<layer>.md`, **and
 BEFORE presenting, SELF-LINT the plan mechanically** — run against your own task files:
 
-    grep -nE '[a-z0-9_]+\.(go|sql)|000[0-9]_' scaffold-entity/<entity>/task_*.md
+    grep -nE '[a-z0-9_]+\.(go|sql)|000[0-9]_' specs/scaffold-entity/<entity>/task_*.md
 
 If 1b was written as things (tables, operations, types), this finds nothing and costs one
 grep — that is the expected outcome, not a fix-up round. Every hit naming a TO-BE-GENERATED
@@ -535,7 +535,7 @@ doc/convention filenames are fine.) Then **STOP and
 present the plan to the dev for approval before executing a single task.** Open the gate
 message with the loud status line — `⏸️ PAUSED at the plan gate — no code generated yet;
 reply "go" to execute.` — never bury the ask at the end of a long summary. Point them at
-`scaffold-entity/<entity>/` and give a short summary (the layers, the per-layer docs you'll
+`specs/scaffold-entity/<entity>/` and give a short summary (the layers, the per-layer docs you'll
 read, the acceptance checks). Say clearly it's a *plan/draft* — a dev who knows the framework
 can validate the direction; a dev who doesn't may just okay it, and that's fine — the point is
 to give them the CHANCE to read and correct before code is generated. **Wait for their go.**
@@ -596,7 +596,7 @@ Two rules about this gate:
   chooses. Ask, then wait. If the dev answers anything other than 1 or 2, ask again
   rather than picking for them.
 - **Nothing about the generator's spec YAML happens before the answer.** That file
-  (`omnicore-gen/<entity>.omnicore.yaml` — not this skill's `spec.md`, which is the MODEL and was
+  (`specs/omnicore-gen/<entity>.omnicore.yaml` — not this skill's `spec.md`, which is the MODEL and was
   already approved at 1a) is large and dense, and writing one the dev never asked for is
   exactly the waste this gate exists to prevent. On option 2 it is never written at all.
 
@@ -611,7 +611,7 @@ applies unchanged — the generator does not exempt the entity from it.
 the generator skill, do not write a spec YAML, and do not mention the generator again for
 this entity — the choice was made.
 
-## Re-entry — `scaffold-entity/<entity>/` already exists
+## Re-entry — `specs/scaffold-entity/<entity>/` already exists
 
 An existing working dir means a previous or interrupted run. Do NOT restart from scratch and
 do NOT overwrite an approved plan. **Record the 1d choice in `spec.md` the moment it is
@@ -750,7 +750,7 @@ Four DISTINCT levels — do not conflate them:
 Functional e2e of the new endpoints (create → wait for CDC → read back → CRUD round-trip →
 204s → OpenAPI/GraphQL) is a **separate** step — its owner is `/omnicore:qa` (generates
 and runs the contract suite); offer it when this run goes green. **Never edit a test to pass** — the test is
-the oracle. **Leave `scaffold-entity/<entity>/` in place** (do not delete it) so the dev can
+the oracle. **Leave `specs/scaffold-entity/<entity>/` in place** (do not delete it) so the dev can
 review the plan against the generated code.
 
 **Offer to run (after a green verify).** Ask ONE question: boot the app so the dev can

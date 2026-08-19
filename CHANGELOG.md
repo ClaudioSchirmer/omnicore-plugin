@@ -7,6 +7,59 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-08-19
+
+### Changed
+
+- **Generated code no longer carries the lines it wrote to appease a compiler that was
+  never complaining.** Two shapes, both noise a reader had to look past:
+
+  `var _ = time.Time{}` closed every generated DTO, command, child input and command
+  test (and `var _ = strings.Repeat` the value-object tests). They existed to excuse a
+  `"time"`/`"strings"` import the emitters wrote unconditionally — but every emitted file
+  passes through the import pruner, which drops what nothing references. Being a selector
+  expression, the sentinel marked the package as used, so it kept the dead import alive
+  and left an inert line behind. Without it the pruner decides: the import stays where a
+  field actually uses it and disappears where none does.
+
+  `_ = actionName` / `_ = service` / `_ = r` closed `BuildRules` and the `customRules`
+  hook — the first thing an author had to delete in a file that is theirs after the first
+  write — and the same shape appeared in `Mount<Entity>` (`_, _, _ = app, repo, view`),
+  `ToEntity`/`ApplyTo` and `ToCriteria` (`_ = ctx`), and the computed-field stubs. All of
+  them blank an unused FUNCTION PARAMETER, which Go has always allowed: only unused local
+  variables and imports are errors. Nothing changes about what the code does; there is
+  simply less of it.
+
+  A hook file with one gate also no longer opens with a blank line under its signature.
+
+- **⚠️ Every document the tooling writes now lives under `specs/`.** Each skill keeps its
+  own directory inside it, so the service root holds the SERVICE and `specs/` holds what
+  was decided about it: `specs/scaffold-service/spec.md`,
+  `specs/scaffold-entity/<entity>/`, `specs/scaffold-system/domain-map.md`,
+  `specs/evolve-entity/<entity>/`, `specs/remove-entity/<entity>/`,
+  `specs/scaffold-view/<view>/`, `specs/evolve-view/<view>/`, `specs/implement/<slug>/`,
+  `specs/configure/plan.md`, `specs/upgrade/migration-plan.md` (+ `specs/upgrade/rollback/`),
+  `specs/qa/` and `specs/omnicore-gen/` (the specs, their gen-reports and `lock.json`).
+
+  Before this, eight working dirs sat loose at the root, interleaved with `internal/`,
+  `bootstrap/`, `migrations/` and `devops/` — and telling the tooling's output from the
+  service's own source meant already knowing which names belonged to which. The name is
+  `specs/` and not `docs/` on purpose: `docs/` belongs to the project's own end-user
+  documentation, which has a different audience and a different lifetime.
+
+  **Upgrading an existing project is a move, not a migration:** shift each of those
+  directories under `specs/` (`git mv omnicore-gen specs/omnicore-gen`, and the same for
+  every working dir the project has) before the next run. Nothing rewrites paths for you,
+  and no skill looks in the old location — the generator that finds no
+  `specs/omnicore-gen/` reports a project it never wrote into. Generated file headers cite
+  the spec by path, so they change on the next regeneration; `lock.json` itself is
+  path-agnostic and moves as it is.
+
+  `qa/` moved wholesale, runner included: the suite is now `specs/qa/run.sh` +
+  `specs/qa/<entity>.sh`, and it resolves the project root from its own location rather
+  than assuming the caller's working directory — a suite two levels down that hard-codes
+  `devops/docker-compose.yml` only runs one way.
+
 ## [0.22.0] — 2026-08-19
 
 ### Changed

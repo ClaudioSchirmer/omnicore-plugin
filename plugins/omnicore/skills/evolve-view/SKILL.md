@@ -16,7 +16,7 @@ Change a read model without breaking its evolution contract: the projected shape
 that is the boundary that keeps this skill safe. The moment the change needs data the
 sources don't carry, STOP: that slice is `evolve-entity`'s job first.
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles — read FIRST
@@ -81,7 +81,7 @@ fields or lifecycle, check whether it FLIPS the segment's ARCHIVE regime
 (`Version` bump ⇒ rebuild) AND it changes what consumers SEE on default reads — call
 it out explicitly in the impact map, per the pin's `views` archived rule.
 
-## Phase 1 — Spec gate: `evolve-view/<view>/spec.md`
+## Phase 1 — Spec gate: `specs/evolve-view/<view>/spec.md`
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` answered, never defaulted; sections
 structural (`N/A — <why>`):
@@ -208,7 +208,7 @@ index for concepts this table doesn't list.
 6. **Offer to run.** Ask ONE question: boot the app to click through the evolved read
    endpoints? Yes → delegate to `/omnicore:run` (never boot inline). No → done.
 
-Leave `evolve-view/<view>/` in place for review.
+Leave `specs/evolve-view/<view>/` in place for review.
 
 ## Re-entry — spec already exists
 

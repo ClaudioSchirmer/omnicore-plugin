@@ -3,10 +3,16 @@
 // Everything this generator reads or writes ABOUT a service — the specs, their
 // reports, the lock — sits together in one directory named after the tool. That
 // is the whole convention, and it exists because the alternative had the three
-// scattered: specs in a generic specs/, the report beside them, the lock loose
-// at the project root as a dotfile. A reader had to already know which of those
+// scattered: the specs in one place, the report beside them, the lock loose at
+// the project root as a dotfile. A reader had to already know which of those
 // belonged to which tool, and the one holding the state that must not be lost
 // was the one hidden from `ls`.
+//
+// That directory sits under specs/, which is where the whole plugin writes: the
+// service root holds the SERVICE, and specs/ holds what was decided about it —
+// this tool's specs are one skill's worth of that, not a second convention. The
+// tool's own name stays on the directory, so `specs/omnicore-gen/` says both who
+// owns the files and that they are documents rather than code.
 //
 // It is a package rather than a constant in whichever file needed it first
 // because four call sites resolve these paths — the spec finder, the sibling
@@ -16,8 +22,12 @@ package layout
 
 import "path/filepath"
 
+// SpecsRoot is the plugin-wide home for generated documents, relative to the
+// service root. Every skill writes under it; this generator is one of them.
+const SpecsRoot = "specs"
+
 // Dir is the directory, relative to the service root, that holds all of it.
-const Dir = "omnicore-gen"
+const Dir = SpecsRoot + "/omnicore-gen"
 
 // LockName is the lock, inside Dir. It is deliberately visible and deliberately
 // short: it does not repeat the directory's name, and a file recording what the

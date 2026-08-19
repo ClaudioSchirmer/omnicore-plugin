@@ -19,7 +19,7 @@ aggregates is the known failure mode (heavy context → copy instead of read, qu
 fatigue → self-answered high-risk slots); the approved map + one-entity-at-a-time
 delegation is the antidote, and the reason this is a skill.
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles — read FIRST
@@ -104,7 +104,7 @@ of this skill: a field group repeated across two requested entities, or an entit
 described as covering a real-world asset other entities will also cover, is invisible to
 per-entity runs and obvious here.
 
-Copy `conventions/domain-map-template.md` VERBATIM to `scaffold-system/domain-map.md`
+Copy `conventions/domain-map-template.md` VERBATIM to `specs/scaffold-system/domain-map.md`
 and fill EVERY slot. Completeness is STRUCTURAL: a section that doesn't apply stays,
 marked `N/A — <why>`; a decision only the dev can make is `⚠️ OPEN: <question>`; a
 blank slot is a visible defect, and delegation cannot start while one exists. Reasoning
@@ -127,7 +127,7 @@ per section:
 - **Read-side posture (system-wide, §1p).** Decide ONCE, neutrally (no default — MVP
   vs solid build, same doctrine as `scaffold-service` #8): entity views relational
   (SoR, read-your-writes, defer the pipeline) or Mongo-projected (canonical). If
-  `scaffold-service` just set it, READ it from `scaffold-service/spec.md` — don't
+  `scaffold-service` just set it, READ it from `specs/scaffold-service/spec.md` — don't
   re-ask; on existing ground, infer from existing views, else ask once. It's the
   DEFAULT view backing handed to every delegated run (per-entity overridable). The
   posture includes the ENGINE/infra choice (a SQLite/zero-infra MVP vs a full-CQRS
@@ -176,13 +176,13 @@ in §7 order, same rules (one per invocation, mark the row, conflicts surface). 
 framework capability is delegated to **`/omnicore:implement`** (it routes the item
 against the pin's docs and runs its own plan gate), same one-per-invocation rules.
 Then the single wrap-up offer: boot the service and click through? Yes → delegate to
-**`/omnicore:run`** (never boot inline). Leave `scaffold-system/domain-map.md` and every
+**`/omnicore:run`** (never boot inline). Leave `specs/scaffold-system/domain-map.md` and every
 delegated run's spec folder in place — together they are the review trail of the whole
 system.
 
 ## Re-entry — a map already exists
 
-`scaffold-system/domain-map.md` present: `Status: DRAFT` → reopen the Phase 1 gate with
+`specs/scaffold-system/domain-map.md` present: `Status: DRAFT` → reopen the Phase 1 gate with
 what's already answered. `Status: APPROVED` → resume Phase 2 at the first row not marked
 `scaffolded`. A changed answer reopens the map; if the change invalidates an entity
 already scaffolded, that is an `evolve-entity` job on that entity — flagged in the map,

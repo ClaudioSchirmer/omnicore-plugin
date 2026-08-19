@@ -224,7 +224,7 @@ can correct it at the gate. It becomes `openapi.Config.Description` — the para
 the title on the `/docs` page. Free to set here, permanent if skipped: NO skill downstream
 revisits this config.
 
-Write the resolved answers to **`scaffold-service/spec.md`** (project root, visible,
+Write the resolved answers to **`specs/scaffold-service/spec.md`** (under `specs/`, visible,
 one small file — no per-layer task files; generation is one pass): every slot filled,
 `Status: DRAFT`. **Hard STOP** until the dev answers; a plain "ok" accepts every
 `(proposed)` pick, but slots with no default (name, module, dialect, transport) MUST
@@ -326,8 +326,9 @@ applies only when any high-risk slot would otherwise be filled by you.
    service stage), and a placeholder would steal the `0001` slot the first entity is
    promised.
 7. **`.gitignore`** — binaries, `go.work*`, `.env*`, OS/editor files, `devops/` local
-   data dirs. **The `scaffold-service/` and `scaffold-entity/` working dirs are NOT
-   ignored, and must not be added.** They are not scratch: they hold the APPROVED model
+   data dirs. **Nothing under `specs/` is ignored, and no pattern matching it may be
+   added** — that is where every skill writes, starting with this one's
+   `specs/scaffold-service/spec.md`. They are not scratch: they hold the APPROVED model
    (`spec.md`) and the per-layer plan the service was built from — the document a
    reviewer reads to see what was decided, and the one a resumed run reads to know what
    is already done. Ignoring them throws away the reasoning and keeps only the result.
@@ -428,7 +429,7 @@ real evidence; an unmet stated target is RED or an explicit dev-accepted deviati
    the handoff line from step 5 still closes: the first entity is `scaffold-entity`'s
    job.
 
-## Re-entry — `scaffold-service/spec.md` already exists
+## Re-entry — `specs/scaffold-service/spec.md` already exists
 
 `Status: DRAFT` → re-open the Phase 1 gate with what's already answered (never re-ask
 answered slots). `Status: APPROVED` → regenerate ONLY the missing/failed artifacts

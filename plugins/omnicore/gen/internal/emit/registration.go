@@ -528,10 +528,7 @@ func RemoveMapEntry(existing, key string) (string, bool) {
 	for end < len(existing) && (existing[end] == '\n' || existing[end] == '\r') {
 		end++
 	}
-	if start > 0 && existing[start-1] == '\n' {
-		// keep the preceding newline: start already sits at the line's first byte
-		_ = start
-	}
+	// The preceding newline is kept: start already sits at the line's first byte.
 	return existing[:start] + existing[end:], true
 }
 

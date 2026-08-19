@@ -64,7 +64,7 @@ func emitRegistrations(m *ir.Model, root string, prior, foreign map[string]map[s
 	entries := catalogEntries(m)
 	for _, c := range catalogs {
 		rel := "internal/application/translations/" + c.Code + ".go"
-		f, added, stale, w, err := mergeCatalog(m, root, c.Code, c.Type, c.Ctor, c.LangConst,
+		f, _, stale, w, err := mergeCatalog(m, root, c.Code, c.Type, c.Ctor, c.LangConst,
 			entries[c.Code], priorFor(rel))
 		if err != nil {
 			return nil, nil, nil, nil, err
@@ -72,7 +72,6 @@ func emitRegistrations(m *ir.Model, root string, prior, foreign map[string]map[s
 		if f != nil {
 			files = append(files, *f)
 		}
-		_ = added
 		staleRegistrations = append(staleRegistrations, stale...)
 		record(rel, w)
 	}

@@ -409,7 +409,7 @@ Three things to get right, because they are the ones that cost a migration later
 
 ## Step 3 — check, and read the refusals as instructions
 
-    omnicore-gen check -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen check -spec specs/omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
 
 Every blocker names the key, what is wrong, and the fix. Fix the SPEC. The two verdicts
 that are not about your YAML:
@@ -474,7 +474,7 @@ panics the moment a rule asks for it. Implement both before you call the entity 
 
 ## Step 5 — generate
 
-    omnicore-gen generate -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen generate -spec specs/omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
 
 It prints created / updated / unchanged / kept-as-is. **`kept as-is` is two different
 things, and the run tells them apart** — read the report rather than the count:
@@ -503,7 +503,7 @@ asymmetry holds inside the shared files: a write inserts and replaces its own en
 never deletes, so a labelKey or notification the spec no longer declares stays in the
 notifications file and in all seven catalogs. Both are cleaned by one command:
 
-    omnicore-gen prune -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen prune -spec specs/omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
     omnicore-gen prune -spec … -project … -apply
 
 It is DRY by default — read the three lists (remove · forget in the lock · left alone with
@@ -515,7 +515,7 @@ the good kind.
 
 ## Step 6 — read the report. It is the handover, not a log
 
-`omnicore-gen/<entity>.gen-report.md` is written every run and is the list of what YOU still owe:
+`specs/omnicore-gen/<entity>.gen-report.md` is written every run and is the list of what YOU still owe:
 
 - **What still needs implementing** — every manual rule and manual fact, by id, with the
   description you wrote and the file it landed in. Missing translations too, if any were

@@ -263,9 +263,6 @@ func emitAssignedFields(s *src, m *ir.Model) {
 // the command feeds it onto the entity, and BuildRules enforces with it.
 func emitIdentityFeed(s *src, m *ir.Model) {
 	if len(m.Runtime) == 0 {
-		if len(m.IdentityAssignedFields()) == 0 {
-			s.L("\t_ = ctx")
-		}
 		return
 	}
 	s.Blank()
@@ -339,8 +336,6 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\treturn out, nil")
 	}
 	s.L("}")
-	s.Blank()
-	s.L("var _ = time.Time{}")
 }
 
 // emitChildAdds routes each collection through the aggregate's own method
@@ -422,7 +417,6 @@ func emitChildResults(m *ir.Model) (fsplan.File, error) {
 		s.Blank()
 	}
 	emitChildProjectors(s, m, entity)
-	s.L("var _ = time.Time{}")
 
 	return goFile("internal/application/commands/"+m.Entity.Snake+"_child_results.go",
 		fsplan.Owned, fmt.Sprintf("the shapes for %d child collection(s)", len(m.Children)), s)
@@ -437,9 +431,6 @@ func emitChildResults(m *ir.Model) (fsplan.File, error) {
 func emitFieldRestrictions(s *src, m *ir.Model, target string) {
 	emitRowScoping(s, m, target)
 	if len(m.Read.FieldRestrict) == 0 {
-		if m.Authz.DataAccess == "anyone-with-permission" {
-			s.L("\t_ = ctx")
-		}
 		return
 	}
 	s.L("\t// A caller without the permission does not receive these fields.")

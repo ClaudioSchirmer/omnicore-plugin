@@ -36,7 +36,7 @@ Commands:
   explain [topic]   document the spec language, offline
 
 Common flags:
-  -spec <path>      the spec file (default: the only *.omnicore.yaml under ./omnicore-gen)
+  -spec <path>      the spec file (default: the only *.omnicore.yaml under ./specs/omnicore-gen)
   -project <dir>    the service root (default: the current directory)
   -json             machine-readable output
   -lang-fallback    emit marked placeholders for missing translations instead of refusing

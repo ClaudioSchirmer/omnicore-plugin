@@ -179,9 +179,6 @@ func emitBuildRules(s *src, m *ir.Model) {
 	if len(m.Clauses) == 0 && !m.HasHookFile && m.ArchiveWhen == nil {
 		s.L("\t// The spec declares no rule for this aggregate. The method still exists")
 		s.L("\t// because the framework's entity contract requires it.")
-		s.L("\t_ = actionName")
-		s.L("\t_ = service")
-		s.L("\t_ = r")
 		s.L("}")
 		s.Blank()
 		return
@@ -216,9 +213,6 @@ func emitBuildRules(s *src, m *ir.Model) {
 		s.L("\t// Invariants the spec could not express declaratively. They live in")
 		s.L("\t// %s_rules_manual.go, which the generator writes once and never touches again.", m.Entity.Snake)
 		s.L("\te.customRules(actionName, service, r)")
-	} else {
-		s.L("\t_ = actionName")
-		s.L("\t_ = service")
 	}
 	s.L("}")
 	s.Blank()
@@ -558,8 +552,12 @@ func writeManualRuleGates(s *src, rules []ir.ManualRule) {
 		return ir.GateRank(order[i]) < ir.GateRank(order[j])
 	})
 
-	for _, gate := range order {
-		s.Blank()
+	for i, gate := range order {
+		// Between the gates, never before the first: with nothing above it, a
+		// leading blank line is just a gap under the signature.
+		if i > 0 {
+			s.Blank()
+		}
 		s.L("\tr.%s(func() {", gate)
 		for i, mr := range byGate[gate] {
 			if i > 0 {
@@ -615,10 +613,6 @@ func emitRulesHook(m *ir.Model) (fsplan.File, error) {
 	s.L("func (e *%s) customRules(actionName string, service domain.Service, r *domain.Rules) {",
 		m.Entity.Pascal)
 	writeManualRuleGates(s, m.ManualRules)
-	s.Blank()
-	s.L("\t_ = actionName")
-	s.L("\t_ = service")
-	s.L("\t_ = r")
 	s.L("}")
 
 	f, err := goFile("internal/domain/"+m.Entity.Snake+"_rules_manual.go", fsplan.Hook,

@@ -25,7 +25,7 @@ instead of a static change→section table. That is why one generic skill works 
 grows with the framework for free: a new release documents a new capability, and this
 skill can already plan it.
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles — read FIRST
@@ -148,7 +148,7 @@ capability the pin lacks — that offer goes through the same skill, same rules.
 2. **Read the owning section(s) BEFORE planning.** The plan cites them; a plan line
    with no section behind it is a defect.
 3. **Fill the plan.** Copy `conventions/plan-template.md` VERBATIM to
-   `implement/<slug>/plan.md` and fill every slot (structural completeness: `N/A —
+   `specs/implement/<slug>/plan.md` and fill every slot (structural completeness: `N/A —
    <why>` stays, `⚠️ OPEN: <question>` for what only the dev knows — the failure
    policy of an external call is ALWAYS the dev's call unless they already said it).
    High-risk slots carry `(proposed)` + alternatives, visible, never buried.
@@ -187,7 +187,7 @@ is executed here like any other artifact, never assumed.
 4. **Offer to run**: one question; yes → delegate to `/omnicore:run` (never boot
    inline).
 
-Leave `implement/<slug>/` in place — the plan is the review trail.
+Leave `specs/implement/<slug>/` in place — the plan is the review trail.
 
 ## Re-entry — a plan already exists
 

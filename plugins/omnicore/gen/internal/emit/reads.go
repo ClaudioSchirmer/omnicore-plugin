@@ -378,7 +378,6 @@ func emitComputedHook(m *ir.Model) (fsplan.File, error) {
 		for _, c := range m.Read.Computed {
 			s.L("\t// TODO: r.%s = … (from %s)", c.Name, strings.Join(prefixed("r.", c.Sources), ", "))
 		}
-		s.L("\t_ = ctx")
 		s.L("\treturn r, nil")
 		s.L("}")
 	}

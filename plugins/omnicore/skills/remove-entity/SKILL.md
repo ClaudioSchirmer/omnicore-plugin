@@ -15,13 +15,13 @@ translations, stale views) and without collateral damage (a shared base another 
 still uses, a composed view of ANOTHER entity that embeds this one). Inventory first,
 approve, then delete — never the reverse.
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles
 
 - **Nothing is deleted before the plan is approved.** The full footprint is inventoried
-  into `remove-entity/<entity>/plan.md`, the dev approves it, and Phase 2 deletes
+  into `specs/remove-entity/<entity>/plan.md`, the dev approves it, and Phase 2 deletes
   exactly that list — nothing more, nothing less.
 - **Docs-first, version-agnostic.** What safely unwires (feature mounting, view
   registration, migration ordering) is defined by the version-pinned `/docs` in the
@@ -82,7 +82,7 @@ session." Never a gate: this run continues on the installed skills.
   honest options: accept a dev-only shell, keep/add a `BeforeServe`, or wait for the
   replacement feature.
 
-## Phase 1 — The gate: `remove-entity/<entity>/plan.md`
+## Phase 1 — The gate: `specs/remove-entity/<entity>/plan.md`
 
 `Status: DRAFT`, hard STOP until the dev approves; `⚠️ OPEN` slots must be answered,
 never defaulted. Sections (structural — `N/A — <why>`, never deleted):
@@ -163,7 +163,7 @@ mandatory-read rule as the scaffold skills.
 6. **Offer to run.** ONE question: boot the app to click through what remains? Yes →
    delegate to `/omnicore:run`. No → done.
 
-Leave `remove-entity/<entity>/` in place for review.
+Leave `specs/remove-entity/<entity>/` in place for review.
 
 ## Re-entry — plan already exists
 
