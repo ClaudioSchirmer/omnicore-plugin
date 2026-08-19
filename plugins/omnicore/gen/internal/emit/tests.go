@@ -8,7 +8,6 @@ import (
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
-	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 // Tests are generated from the same declarations the code is generated from,
@@ -255,9 +254,8 @@ func emitServiceStub(s *src, m *ir.Model) {
 // rather than failing to compile.
 func stubParams(f ir.Fact) string {
 	var out []string
-	for i, p := range f.Params {
+	for _, p := range f.Params {
 		out = append(out, fmt.Sprintf("_ %s", p.GoType))
-		_ = i
 	}
 	return strings.Join(out, ", ")
 }
@@ -548,7 +546,6 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 
 		emitPartialResultTest(s, m, op)
 	}
-	s.L("var _ = time.Time{}")
 
 	for _, op := range m.WriteOps() {
 		if op.Verb == "insert" || op.Verb == "patch" {
@@ -661,8 +658,6 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("\t%s", quote(fwImport("domain")))
 	s.L(")")
-	s.Blank()
-	s.L("var _ = strings.Repeat")
 	s.Blank()
 
 	for _, vo := range m.ValueObjects {
@@ -990,8 +985,6 @@ func invalidSample(vo ir.ValueObject) string {
 	return quote("!!not-valid!!")
 }
 
-var _ = naming.Snake
-
 // pointerize wraps a literal for a nullable field.
 //
 // Assigning a value to a pointer field does not compile, and the case that
@@ -1114,8 +1107,6 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
 	}
 	s.L(")")
-	s.Blank()
-	s.L("var _ = time.Now")
 	s.Blank()
 
 	for _, c := range m.Children {
@@ -1340,8 +1331,6 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
 	s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
 	s.L(")")
-	s.Blank()
-	s.L("var _ = time.Now")
 	s.Blank()
 
 	for _, op := range ops {
@@ -2131,10 +2120,6 @@ func emitChildInputTests(m *ir.Model) (fsplan.File, error) {
 	}
 	s.L(")")
 	s.Blank()
-	if m.UsesVOsInChildren() {
-		s.L("var _ = time.Now")
-		s.Blank()
-	}
 
 	for _, c := range m.Children {
 		if c.Mounted {

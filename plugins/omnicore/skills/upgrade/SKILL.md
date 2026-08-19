@@ -17,7 +17,11 @@ ready if it breaks. The bump itself changes exactly two files — `go.mod` + `go
 Service code is touched ONLY through the **migration gate**: when the upgrade breaks (or
 the changelog declares breaking changes), the skill can OFFER to fix the fallout — it
 reads how the API worked at the old pin and how it works at the new one, writes a
-migration plan to a visible `.md`, and applies it only after the dev's explicit approval.
+migration plan to a visible `.md` under `specs/upgrade/`, and applies it only after the
+dev's explicit approval.
+
+**Every document this run writes lands under `specs/`, and the project keeps it —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles
 - **Show before you touch.** Never bump silently. The target version's own
@@ -31,7 +35,7 @@ migration plan to a visible `.md`, and applies it only after the dev's explicit 
   semantics. Report the changelog's breaking section as follow-up the dev must weigh; do
   not call the upgrade "done and safe" from a green build alone.
 - **Code fixes ONLY through the migration gate.** The bump touches `go.mod`+`go.sum`; any
-  service-code edit exists first as an entry in `upgrade/migration-plan.md` and is applied
+  service-code edit exists first as an entry in `specs/upgrade/migration-plan.md` and is applied
   only after the dev approves the plan — same spec-gate doctrine as the scaffold skills.
   No scaffolding, no git, never framework code. The dev can always decline the gate and
   fix by hand (or via a fresh scaffold-entity run against the new docs).
@@ -105,7 +109,7 @@ tooling; say so if the dev conflates them).
 
 ## Phase 2 — Upgrade (only on yes)
 1. **Snapshot for rollback FIRST** — copy the current `go.mod` + `go.sum` verbatim to
-   `upgrade/rollback/` (beside the migration plan, visible — never a temp dir that
+   `specs/upgrade/rollback/` (beside the migration plan, visible — never a temp dir that
    evaporates) and record the previous version string. This is the exact restore
    point. If the
    project is git-tracked, `git checkout go.mod go.sum` is an equivalent restore —
@@ -151,7 +155,7 @@ tooling; say so if the dev conflates them).
    the NEW pin (how it works now) — `go list -m -f '{{.Dir}}' …/omnicore@<ver>` +
    `docs/content/sections/<name>.html`. The two doc reads are MANDATORY per item; never
    patch from the compile error alone.
-3. **Propose — `upgrade/migration-plan.md`** (project root, visible), `Status: DRAFT`.
+3. **Propose — `specs/upgrade/migration-plan.md`** (under `specs/`, visible), `Status: DRAFT`.
    One section per item: the error (verbatim) or changelog entry · how it worked at vX ·
    how it works at vY (both with section names) · the proposed edit (each file + what
    changes and why) · anything needing the dev's judgment marked `⚠️ OPEN: <question>`.
@@ -208,10 +212,10 @@ owning section per item, at each pin — never sweep either manual.
   - **Or fix forward** — the dev keeps vY and fixes the code (offer to point
     `help`/`scaffold-entity` at the specific breakage). The snapshot stays until they decide.
   - **Or fix forward WITH the skill** → enter Phase 2b: diagnose, propose
-    `upgrade/migration-plan.md`, apply only on approval.
+    `specs/upgrade/migration-plan.md`, apply only on approval.
 
 ## What this skill never does
-No service-code edits outside an APPROVED `upgrade/migration-plan.md`, no scaffolding,
+No service-code edits outside an APPROVED `specs/upgrade/migration-plan.md`, no scaffolding,
 no git commits. It never RUNS DB migrations or rebuilds — but naming the ones the
 version range demands is part of its job (Phase 2b step 1), never omitted as out of
 scope. It bumps the framework pin, verifies, and either lands

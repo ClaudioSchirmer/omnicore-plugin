@@ -4,7 +4,7 @@ description: >-
   omnicore: generate and run a CONTRACT QA SUITE for an omnicore-based service — read the
   project's entities, views, surfaces and infra posture, derive the framework's promised
   behaviors from the pinned docs (verb set per mode, status codes, archive semantics,
-  filter vocabulary, typed 400s), and produce an executable e2e suite (qa/*.sh + a
+  filter vocabulary, typed 400s), and produce an executable e2e suite (specs/qa/*.sh + a
   runner) that PROVES them against the running service. Use when the dev wants e2e tests,
   contract tests, a QA suite, smoke tests, or to "prove the service works". Only for
   projects that import github.com/ClaudioSchirmer/omnicore.
@@ -18,7 +18,7 @@ surfaces), derives what the PINNED framework therefore promises, and generates a
 executable contract suite that exercises those promises against the real running
 service — then runs it and reports GREEN/RED honestly.
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles — read FIRST
@@ -47,7 +47,7 @@ never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-document
   project's rules apply.
 - **User language for talk, English for artifacts** — converse in the dev's language;
   generated scripts, case names and comments in English like the rest of the codebase.
-- **This skill writes ONLY under `qa/`** — never application code, never yaml, never
+- **This skill writes ONLY under `specs/qa/`** — never application code, never yaml, never
   migrations. A case that can't pass because the SERVICE is wrong is a finding to
   report (route `doctor` / the owning skill), never something to "fix" by weakening
   the case. **Never edit a case to pass — the suite is the oracle.**
@@ -99,10 +99,10 @@ Map what the service declares — this inventory IS the test surface:
   for absent ones.
 - **Infra posture** (`shared/read-side.md` + `shared/capabilities.md`): Mongo+CDC
   present, or relational-only/SQLite. Auth mode per profile.
-- **Existing `qa/`**: if the project already has a suite, mirror its conventions and
+- **Existing `specs/qa/`**: if the project already has a suite, mirror its conventions and
   EXTEND it — never generate a parallel second style.
 
-## Phase 1 — Plan gate: `qa/plan.md`
+## Phase 1 — Plan gate: `specs/qa/plan.md`
 
 `Status: DRAFT`, hard STOP until approved. Sections (structural completeness — `N/A —
 <why>`, never deleted):
@@ -147,7 +147,7 @@ Map what the service declares — this inventory IS the test surface:
    live. Options, stated honestly: run against the DEV profile bench with
    uniquely-suffixed records the suite archives at the end (residue: archived rows) ·
    a dedicated throwaway database selected by a SUITE-OWNED config file (generated
-   under `qa/`, picked via `OMNICORE_CONFIG_PATH` — that is how a "dedicated profile"
+   under `specs/qa/`, picked via `OMNICORE_CONFIG_PATH` — that is how a "dedicated profile"
    respects this skill's never-touch-the-project-yaml rule) · SQLite `:memory:`
    (only if the service already runs so). Never silently write into a database the
    dev cares about. **And state HOW state resets between runs/cases** — exact-count
@@ -167,7 +167,12 @@ Map what the service declares — this inventory IS the test surface:
    (receiver → effect, dedup via `omnicore_integration_processed`); without a live
    relay, mark the delivery half `⚠️ OPEN` honestly instead of silently dropping the
    capability from the contract.
-5. **Runner contract**: `qa/run.sh` executes suites **fail-fast by default** (first
+5. **Runner contract**: `specs/qa/run.sh` **resolves the project root from its own
+   location** — `cd "$(dirname "$0")/../.."` as its first act, and every suite does the
+   same — so `devops/docker-compose.yml`, `migrations/` and the build all resolve no
+   matter which directory the dev invoked it from. The suite lives two levels down;
+   a path written as if the CWD were the root is a suite that only runs one way. It
+   executes suites **fail-fast by default** (first
    RED stops the run; an explicit flag for the exhaustive sweep), prints per-suite
    GREEN/RED counts and a final matrix line, and each suite EXITS NON-ZERO when any
    of its cases failed (without that, fail-fast can never trip); every temp file is
@@ -182,7 +187,7 @@ Map what the service declares — this inventory IS the test surface:
 
 ## Phase 2 — Generate + execute
 
-1. Generate `qa/<entity>.sh` per entity + `qa/run.sh` per the approved plan. Style:
+1. Generate `specs/qa/<entity>.sh` per entity + `specs/qa/run.sh` per the approved plan. Style:
    plain POSIX-friendly bash + `curl` (+ the project's own tooling for GraphQL/gRPC
    when enabled — `grpcurl` only if available, else mark those cases SKIPPED loudly);
    each case prints its name, expectation and verdict; a failed assertion shows the
@@ -205,7 +210,7 @@ Map what the service declares — this inventory IS the test surface:
    confirm the relay
    reached streaming BEFORE any CDC-dependent case, else those cases report a bench
    problem, not a service failure.
-4. Execute `qa/run.sh`. Report the real counts.
+4. Execute `specs/qa/run.sh`. Report the real counts.
 
 ## Final verify (the gate)
 
@@ -221,7 +226,7 @@ Map what the service declares — this inventory IS the test surface:
    in the suite).
 3. **Residue as planned**: whatever §2 of the plan promised about data is what
    actually remains; say what was left and where.
-4. Leave `qa/plan.md` in place; offer `/omnicore:run` if the dev wants the service
+4. Leave `specs/qa/plan.md` in place; offer `/omnicore:run` if the dev wants the service
    kept up for manual poking.
 
 ## Knowledge routing — question → source
@@ -239,7 +244,7 @@ Map what the service declares — this inventory IS the test surface:
 
 ## What this skill never does
 
-- Touch anything outside `qa/` — no application code, no yaml, no migrations.
+- Touch anything outside `specs/qa/` — no application code, no yaml, no migrations.
 - Weaken or delete a case to make a run green.
 - Invent tokens, credentials or endpoints.
 - Claim coverage it didn't run — SKIPPED is printed as SKIPPED, never folded into

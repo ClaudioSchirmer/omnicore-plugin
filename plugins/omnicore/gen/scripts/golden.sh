@@ -106,12 +106,12 @@ if [[ ! -d "$HOST" ]]; then
   exit 1
 fi
 stage_host "$WORK"
-mkdir -p "$WORK/omnicore-gen"
-for f in $FIXTURES; do cp "$f" "$WORK/omnicore-gen/"; done
-SPEC="$WORK/omnicore-gen/$(basename "$PRIMARY_FIXTURE")"
+mkdir -p "$WORK/specs/omnicore-gen"
+for f in $FIXTURES; do cp "$f" "$WORK/specs/omnicore-gen/"; done
+SPEC="$WORK/specs/omnicore-gen/$(basename "$PRIMARY_FIXTURE")"
 
 for f in $FIXTURES; do
-  target="$WORK/omnicore-gen/$(basename "$f")"
+  target="$WORK/specs/omnicore-gen/$(basename "$f")"
   if (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$target" -project "$WORK" >/tmp/gg-gen.log 2>&1); then
     ok "generate $(basename "$f" .omnicore.yaml)"
   else
@@ -155,9 +155,9 @@ fi
 # only exist on that backing, and nothing else here would compile them.
 echo "── the mongo-backed shape"
 stage_host "$WORK_MONGO"
-mkdir -p "$WORK_MONGO/omnicore-gen"; cp "$MONGO_FIXTURE" "$WORK_MONGO/omnicore-gen/"
+mkdir -p "$WORK_MONGO/specs/omnicore-gen"; cp "$MONGO_FIXTURE" "$WORK_MONGO/specs/omnicore-gen/"
 if (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
-      -spec "$WORK_MONGO/omnicore-gen/$(basename "$MONGO_FIXTURE")" -project "$WORK_MONGO" \
+      -spec "$WORK_MONGO/specs/omnicore-gen/$(basename "$MONGO_FIXTURE")" -project "$WORK_MONGO" \
       >/tmp/gg-mongo.log 2>&1); then
   ok "generate $(basename "$MONGO_FIXTURE" .omnicore.yaml)"
 else
@@ -174,7 +174,7 @@ echo "  (not booted: a mongo-backed view needs a Mongo, and the boot host is inf
 echo "── regeneration"
 BEFORE=$(cd "$WORK" && find internal bootstrap migrations -type f | sort | while read -r f; do SUM "$f"; done | SUM)
 for f in $FIXTURES; do
-  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$WORK/omnicore-gen/$(basename "$f")" -project "$WORK" >/tmp/gg-regen.log 2>&1)
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$WORK/specs/omnicore-gen/$(basename "$f")" -project "$WORK" >/tmp/gg-regen.log 2>&1)
 done
 AFTER=$(cd "$WORK" && find internal bootstrap migrations -type f | sort | while read -r f; do SUM "$f"; done | SUM)
 if [[ "$BEFORE" == "$AFTER" ]]; then
@@ -439,9 +439,9 @@ fi
 echo "── prune"
 PRUNE_WORK="${PRUNE_WORK:-/tmp/omnicore-gen-prune}"
 stage_host "$PRUNE_WORK"
-mkdir -p "$PRUNE_WORK/omnicore-gen"
-cp "$GEN_DIR/internal/cli/example.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml"
-cp "$GEN_DIR/testdata/specs/prune-neighbour.omnicore.yaml" "$PRUNE_WORK/omnicore-gen/"
+mkdir -p "$PRUNE_WORK/specs/omnicore-gen"
+cp "$GEN_DIR/internal/cli/example.omnicore.yaml" "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml"
+cp "$GEN_DIR/testdata/specs/prune-neighbour.omnicore.yaml" "$PRUNE_WORK/specs/omnicore-gen/"
 # The hand-written half of a `kind: manual` value object. The example declares
 # NationalID as one — a check-digit rule no regex states — so the generator
 # deliberately writes no file for it and the tree does not compile until this
@@ -484,14 +484,14 @@ prune_ok=1
 # generating it first is refused — the type is not in the project yet.
 for f in student.omnicore.yaml prune-neighbour.omnicore.yaml; do
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
-     -spec "$PRUNE_WORK/omnicore-gen/$f" -project "$PRUNE_WORK" \
+     -spec "$PRUNE_WORK/specs/omnicore-gen/$f" -project "$PRUNE_WORK" \
      >>"$PRUNE_WORK/gen.log" 2>&1) || prune_ok=0
 done
 if [[ $prune_ok -eq 1 ]]; then
   # Drop the Email field AND its value object from the declaring spec; the
   # neighbour still reuses the VO. Also drop the Guardian collection, so the
   # ordinary orphan path is exercised in the same run.
-  python3 - "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" <<'PYEOF'
+  python3 - "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" <<'PYEOF'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
 s = re.sub(r'  - name: Email\n(?:    .*\n)+?\n', '', s, count=1)
@@ -501,7 +501,7 @@ s = s.replace("    version: 1", "    version: 2")
 open(p, 'w').write(s)
 PYEOF
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
-     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" \
+     -spec "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" \
      >>"$PRUNE_WORK/gen.log" 2>&1) || prune_ok=0
 fi
 
@@ -509,7 +509,7 @@ if [[ $prune_ok -ne 1 ]]; then
   bad "prune: the fixtures could not be generated — $(tail -3 "$PRUNE_WORK/gen.log" | tr '\n' ' ')"
 else
   PLAN=$(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen prune \
-     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" 2>&1)
+     -spec "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" 2>&1)
   # The assertion is the REASON, not the path: the file appears either way — the
   # question is which list it is in.
   if grep -q "still names this value object" <<<"$PLAN"; then
@@ -524,7 +524,7 @@ else
   fi
 
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen prune \
-     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" -apply \
+     -spec "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" -apply \
      >>"$PRUNE_WORK/prune.log" 2>&1) || bad "prune -apply failed"
   if [[ -f "$PRUNE_WORK/internal/domain/aggregatevos/guardian.go" ]]; then
     bad "prune -apply left the orphaned collection behind"
@@ -538,7 +538,7 @@ else
   fi
 
   AGAIN=$(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen prune \
-     -spec "$PRUNE_WORK/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" 2>&1)
+     -spec "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" -project "$PRUNE_WORK" 2>&1)
   if grep -q "Nothing to prune" <<<"$AGAIN" || ! grep -q "To remove" <<<"$AGAIN"; then
     ok "a second prune finds nothing left"
   else
@@ -640,10 +640,10 @@ for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   esac
   work="$MATRIX_WORK/$name"
   stage_host "$work"
-  mkdir -p "$work/omnicore-gen"; cp "$spec" "$work/omnicore-gen/"
+  mkdir -p "$work/specs/omnicore-gen"; cp "$spec" "$work/specs/omnicore-gen/"
 
   if ! (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
-        -spec "$work/omnicore-gen/$(basename "$spec")" -project "$work" >"$work/gen.log" 2>&1); then
+        -spec "$work/specs/omnicore-gen/$(basename "$spec")" -project "$work" >"$work/gen.log" 2>&1); then
     bad "$name: generate — $(tail -3 "$work/gen.log" | tr '\n' ' ')"
     continue
   fi
@@ -670,10 +670,10 @@ done
 # because it is the only case whose input is another case's OUTPUT: reuse: true
 # means the base schema is expected to be there already.
 work="$MATRIX_WORK/reuse"
-stage_host "$work"; mkdir -p "$work/omnicore-gen"
-cp "$MATRIX_DIR/06-sharedbase-sharedpk.yaml" "$MATRIX_DIR/16-reuso-de-base.yaml" "$work/omnicore-gen/"
+stage_host "$work"; mkdir -p "$work/specs/omnicore-gen"
+cp "$MATRIX_DIR/06-sharedbase-sharedpk.yaml" "$MATRIX_DIR/16-reuso-de-base.yaml" "$work/specs/omnicore-gen/"
 reuse_ok=1
-for f in "$work"/omnicore-gen/*.yaml; do
+for f in "$work"/specs/omnicore-gen/*.yaml; do
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$f" -project "$work" \
      >>"$work/gen.log" 2>&1) || reuse_ok=0
 done
@@ -694,11 +694,11 @@ fi
 # is checked against the spec that declares it, which is found by the
 # *.omnicore.yaml convention a real project always follows.
 work="$MATRIX_WORK/mounted"
-stage_host "$work"; mkdir -p "$work/omnicore-gen"
-cp "$MATRIX_DIR/12-filho-de-base.yaml" "$work/omnicore-gen/bibliotecario.omnicore.yaml"
-cp "$MATRIX_DIR/20-filho-de-base-montado.yaml" "$work/omnicore-gen/estagiario_bib.omnicore.yaml"
+stage_host "$work"; mkdir -p "$work/specs/omnicore-gen"
+cp "$MATRIX_DIR/12-filho-de-base.yaml" "$work/specs/omnicore-gen/bibliotecario.omnicore.yaml"
+cp "$MATRIX_DIR/20-filho-de-base-montado.yaml" "$work/specs/omnicore-gen/estagiario_bib.omnicore.yaml"
 mounted_ok=1
-for f in "$work/omnicore-gen/bibliotecario.omnicore.yaml" "$work/omnicore-gen/estagiario_bib.omnicore.yaml"; do
+for f in "$work/specs/omnicore-gen/bibliotecario.omnicore.yaml" "$work/specs/omnicore-gen/estagiario_bib.omnicore.yaml"; do
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$f" -project "$work" \
      >>"$work/gen.log" 2>&1) || mounted_ok=0
 done

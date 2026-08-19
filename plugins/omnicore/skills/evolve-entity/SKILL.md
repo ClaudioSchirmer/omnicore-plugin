@@ -18,7 +18,7 @@ touches the migration, the TableSchema, the DTOs, the labelKey + all seven trans
 catalogs, the view `Version(N)`, and the OpenAPI surface — **they move together or the
 service breaks in silence**. That lockstep is the whole reason this is a skill.
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles — read FIRST
@@ -104,7 +104,7 @@ migrations history · tests. Mirror the project's local flavor in everything you
 
 **Then discover WHO WROTE the code — the entity may be the generator's.** Run
 `omnicore-gen doctor -project <service-dir>` (read-only, offline, instant; it looks for
-`omnicore-gen/lock.json`). Its answer decides whether Phase 1 offers a generation gateway
+`specs/omnicore-gen/lock.json`). Its answer decides whether Phase 1 offers a generation gateway
 at all:
 - **no lock, or the lock does not record THIS entity** → the entity is hand-written. There
   is no codegen path here: regenerating an entity the lock does not know is not an
@@ -112,7 +112,7 @@ at all:
   not ask you to replace. Do not offer the gateway, do not write a spec YAML, and do not
   mention the generator again for this run.
 - **the lock records it** → the codegen path is available. Read
-  `omnicore-gen/<entity>.omnicore.yaml`: it is the entity's DECLARED shape and, on that
+  `specs/omnicore-gen/<entity>.omnicore.yaml`: it is the entity's DECLARED shape and, on that
   path, the thing you edit — the code is derived FROM it, so it is also a second reading of
   the current shape to check your Phase 0b map against.
 - **carry `doctor`'s findings into the spec VERBATIM** — each line changes what option 1
@@ -125,7 +125,7 @@ at all:
 - **generator unavailable** (`needs a Go toolchain`, `this plugin install is incomplete`) →
   say so plainly and continue on the manual path; never approximate the generator by hand.
 
-## Phase 1 — Spec gate: `evolve-entity/<entity>/spec.md`
+## Phase 1 — Spec gate: `specs/evolve-entity/<entity>/spec.md`
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` slots must be answered, never
 defaulted. The header also carries `Generation: <pending>` — the gateway's answer (item 9),
@@ -145,7 +145,7 @@ of deletion):
    memory. **When item 9's gateway lands on the generator**, annotate each artifact with
    who writes it — generator-owned (regenerated from the spec YAML, never hand-edited) ·
    a `_manual` hook · hand-written on either path (the migration pair, `microservice.*.yaml`,
-   the proto contract, other entities' views, `qa/*.sh`) — and add the spec YAML itself to
+   the proto contract, other entities' views, `specs/qa/*.sh`) — and add the spec YAML itself to
    the list, since editing it IS the change on that path.
 3. **Migration strategy** [high-risk]: additive ALTER vs rename (a "rename" is really
    rename-in-place vs drop+add+backfill — data decides) vs drop. NOT NULL on existing
@@ -180,7 +180,7 @@ of deletion):
    real translations; removed keys leave no orphans.
 7. **Tests** — which existing tests change and why (rule changed ⇒ test changes with it,
    shown here, not discovered later), which new branches need coverage. **The project's
-   generated contract QA (`qa/*.sh`, runner, fixtures) is an entity-shaped artifact,
+   generated contract QA (`specs/qa/*.sh`, runner, fixtures) is an entity-shaped artifact,
    not a frozen oracle**: a deliberate contract change breaks it BY DESIGN — plan its
    update (or a regeneration via `/omnicore:qa`) here, explicitly; that planned update
    is not the "edit a test to pass" sin, silence about it is.
@@ -223,7 +223,7 @@ of deletion):
    > ⏸️ **How should this change be applied?** Two options, and only these two:
    >
    > **1. Change the spec and regenerate — `omnicore-gen` (beta) + review by me**
-   > The change goes into `omnicore-gen/<entity>.omnicore.yaml`; `check` validates it and
+   > The change goes into `specs/omnicore-gen/<entity>.omnicore.yaml`; `check` validates it and
    > `generate` rewrites every file the generator owns — domain, application, web, infra,
    > wiring, translations and its own tests — in **seconds** and at a **fraction of the
    > tokens** the by-hand path costs. It also catches statically what an evolution forgets:
@@ -236,7 +236,7 @@ of deletion):
    > BY HAND — by me, against the shape the generator's report prints. Same for the
    > invariants the spec language cannot express (they live in hook files it never touches)
    > and their tests, and for everything outside its ownership: `microservice.*.yaml`, the
-   > proto contract, views of other entities, `qa/*.sh`. I then review the output against
+   > proto contract, views of other entities, `specs/qa/*.sh`. I then review the output against
    > this spec, read the report, and prove it with build + vet + tests + a real boot.
    > **Beta**: it is still being improved round by round, and its gate covers a lot but can
    > still hit a case nobody has hit — usually a spec that validates and produces something
@@ -319,7 +319,7 @@ The order is not the manual one, and the difference is the point:
 8. **Implement the hooks and everything outside its ownership** — the `_manual` rule and
    fact stubs (an unwritten rule leaves an invariant unenforced and the service runs on; an
    unwritten fact PANICS the moment a rule asks for it), plus `microservice.*.yaml`, the
-   proto contract and its stubs, views of OTHER entities embedding this one, `qa/*.sh`, and
+   proto contract and its stubs, views of OTHER entities embedding this one, `specs/qa/*.sh`, and
    the tests for everything you wrote by hand.
 9. **Review the tree against THIS spec** (omnicore-gen Step 7): the emitted rules against
    what the change was meant to mean, the DDL, authz, the read side. Anything wrong is
@@ -404,7 +404,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 6. **Offer to run.** Ask ONE question: boot the app to click through the changed
    endpoints? Yes → delegate to `/omnicore:run` (never boot inline). No → done.
 
-Leave `evolve-entity/<entity>/` in place so the dev can review the plan against the
+Leave `specs/evolve-entity/<entity>/` in place so the dev can review the plan against the
 diff.
 
 ## Re-entry — spec already exists

@@ -24,7 +24,7 @@ write-side aggregate loader, available on every posture;
 `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` owns that split — route such
 a request to `/omnicore:implement`, never refuse it.)
 
-**Everything this run writes into the project is a document the project keeps —
+**Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Core principles — read FIRST
@@ -104,7 +104,7 @@ now — and "present" means `mongo:` AND `transport:` both: a `mongo:` block wit
 `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`) · local naming flavor. Mirror local
 convention; validate framework usage against the docs.
 
-## Phase 1 — Spec gate: `scaffold-view/<view>/spec.md`
+## Phase 1 — Spec gate: `specs/scaffold-view/<view>/spec.md`
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` slots answered, never defaulted;
 sections structural (`N/A — <why>`, never deleted):
@@ -250,7 +250,7 @@ index for concepts this table doesn't list.
 6. **Offer to run.** ONE question: boot the app to click through the new read endpoints?
    Yes → delegate to `/omnicore:run`. No → done.
 
-Leave `scaffold-view/<view>/` in place for review.
+Leave `specs/scaffold-view/<view>/` in place for review.
 
 ## Re-entry — spec already exists
 

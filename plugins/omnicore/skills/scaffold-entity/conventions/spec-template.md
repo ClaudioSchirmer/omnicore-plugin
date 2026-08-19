@@ -1,6 +1,6 @@
 # conventions/spec-template.md — the Phase 1 spec artifact (load in Phase 1, every run)
 
-> Copy the template below VERBATIM to `scaffold-entity/<entity>/spec.md` and FILL every
+> Copy the template below VERBATIM to `specs/scaffold-entity/<entity>/spec.md` and FILL every
 > slot. **Completeness is STRUCTURAL, not memory:** no section may be deleted or left
 > blank — a section that does not apply stays in place marked `N/A — <why>` (proof it was
 > considered, not forgotten). A slot you cannot responsibly recommend becomes

@@ -176,9 +176,6 @@ func emitChildRules(s *src, m *ir.Model, c ir.Child) {
 	s.L("func (c %s) BuildRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
 	if len(c.Clauses) == 0 && !c.HasHookFile {
 		s.L("\t// No rule beyond what the value objects validate on their own.")
-		s.L("\t_ = actionName")
-		s.L("\t_ = service")
-		s.L("\t_ = r")
 		s.L("}")
 		return
 	}
@@ -200,9 +197,6 @@ func emitChildRules(s *src, m *ir.Model, c ir.Child) {
 		s.L("\t// They live in %s_rules_manual.go, written once and never touched again.",
 			naming.Snake(c.Name))
 		s.L("\tc.customRules(actionName, service, r)")
-	} else {
-		s.L("\t_ = actionName")
-		s.L("\t_ = service")
 	}
 	s.L("}")
 }
@@ -234,10 +228,6 @@ func emitChildRulesHook(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	)
 	s.L("func (c %s) customRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
 	writeManualRuleGates(s, c.ManualRules)
-	s.Blank()
-	s.L("\t_ = actionName")
-	s.L("\t_ = service")
-	s.L("\t_ = r")
 	s.L("}")
 
 	f, err := goFile("internal/domain/aggregatevos/"+naming.Snake(c.Name)+"_rules_manual.go",
@@ -381,8 +371,6 @@ func emitChildInput(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		s.L("\treturn out")
 	}
 	s.L("}")
-	s.Blank()
-	s.L("var _ = time.Time{}")
 
 	return goFile("internal/application/dtos/"+naming.Snake(c.Name)+"_input.go", fsplan.Owned,
 		fmt.Sprintf("the %s input DTO", c.Name), s)

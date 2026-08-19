@@ -1,6 +1,6 @@
 # conventions/plan-template.md — the Phase 1 capability plan skeleton
 
-Copy VERBATIM to `implement/<slug>/plan.md`, then fill. Rules: every section stays
+Copy VERBATIM to `specs/implement/<slug>/plan.md`, then fill. Rules: every section stays
 (inapplicable → `N/A — <why>`); a decision only the dev can make is `⚠️ OPEN:
 <question>`; high-risk picks carry `(proposed)` + the alternative(s) beside them; NO
 code — code shapes live in the routed `/docs` sections cited in §2. Approval flips

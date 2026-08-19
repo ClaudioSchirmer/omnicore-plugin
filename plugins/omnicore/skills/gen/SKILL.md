@@ -48,7 +48,7 @@ the generator is unavailable — say so plainly rather than approximating it by 
 only `check` uses its exit status as a verdict (`0` fine, `1` refused, `2` you called it
 wrong). Quote what the tool said to the dev.
 
-The project must be one the generator wrote into — it looks for `omnicore-gen/lock.json`.
+The project must be one the generator wrote into — it looks for `specs/omnicore-gen/lock.json`.
 If the dev is in the wrong directory, that is what "No generated entity is recorded in this
 project" means; it is not a diagnosis of the project.
 
@@ -78,7 +78,7 @@ does not. It is cheaper than reading the tree, and it answers a question nothing
 
 ## `check` — is this spec generatable?
 
-    omnicore-gen check -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen check -spec specs/omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
     omnicore-gen check -project <service-dir> -json      # machine-readable status
 
 Validates without writing anything. Every blocker names the key, what is wrong and the fix.
@@ -101,7 +101,7 @@ why `explain keys` exists.
 
 ## `prune` — remove what an earlier shape of the spec left behind
 
-    omnicore-gen prune -spec omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
+    omnicore-gen prune -spec specs/omnicore-gen/<entity>.omnicore.yaml -project <service-dir>
     omnicore-gen prune -spec … -project … -apply      # actually remove them
 
 **Dry by default.** It prints three lists and writes nothing until `-apply`: what it would
@@ -135,7 +135,7 @@ who edited it, and `doctor` prints that line back.
 
     omnicore-gen init <Entity> -project <service-dir>
 
-Writes `omnicore-gen/<entity>.omnicore.yaml`, pre-filled from what the project already
+Writes `specs/omnicore-gen/<entity>.omnicore.yaml`, pre-filled from what the project already
 states (dialects, whether there is a Mongo, which value objects exist). Useful on its own
 to SHOW the shape of a spec. If the dev is starting a real entity, hand them to
 `/omnicore:scaffold-entity` instead — the template is the easy part; the model is not.
@@ -145,7 +145,7 @@ to SHOW the shape of a spec. If the dev is starting a real entity, hand them to
 Regenerating after a spec change is legitimate and this skill may do it, on two conditions:
 `doctor` must already know the entity, and the spec edit must be one that **cannot move a
 table** — a wording, a description, a permission string, a filter. Then read the report it
-points at (`omnicore-gen/<entity>.gen-report.md`) and prove the tree with build + vet +
+points at (`specs/omnicore-gen/<entity>.gen-report.md`) and prove the tree with build + vet +
 tests.
 
 If the edit touches the storage — a field, a nullability, a uniqueness, a child — stop:

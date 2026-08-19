@@ -118,8 +118,6 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 		"It reads the entity as STORED, never an echo of the request: the domain may "+
 			"have normalised or defaulted a value, and echoing the input back would hide "+
 			"that from the caller.")
-	s.Blank()
-	s.L("var _ = time.Time{}")
 
 	return goFile("internal/web/requests/"+op.Verb+"_"+m.Entity.Snake+".go", fsplan.Owned,
 		fmt.Sprintf("the %s request and response", op.Verb), s)
@@ -193,8 +191,6 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	s.L("}")
 	s.Blank()
 	emitReadFromResult(s, op.ResponseType, m.Read.ResultByID)
-	s.Blank()
-	s.L("var _ = time.Time{}")
 
 	return goFile("internal/web/requests/find_"+m.Entity.Snake+"_by_id.go", fsplan.Owned,
 		"the by-id request and response", s)
@@ -267,8 +263,6 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 	s.L("}")
 	s.Blank()
 	emitReadFromResult(s, op.ResponseType, m.Read.ResultList)
-	s.Blank()
-	s.L("var _ = time.Time{}")
 
 	return goFile("internal/web/requests/find_"+m.Entity.PluralSnake+"_by_params.go", fsplan.Owned,
 		"the listing request and response", s)
@@ -350,18 +344,11 @@ func emitRoutes(m *ir.Model) (fsplan.File, error) {
 		// route is registered, which is the whole of what the author asked for.
 		s.L("\t// No HTTP routes: surfaces.rest is false, so %s is served through", m.Entity.Pascal)
 		s.L("\t// GraphQL alone. Everything else is wired exactly as it would be.")
-		s.L("\t_, _, _ = app, repo, view")
-		if m.Service != nil {
-			s.L("\t_ = svc")
-		}
-		s.L("\t_ = d")
 		s.L("}")
 	} else {
 		s.L("\tgroup := app.Group(%s)", quote(m.Entity.Route))
 		if m.Read.Enabled {
 			s.L("\tviewName := view.Name()")
-		} else {
-			s.L("\t_ = view")
 		}
 		s.Blank()
 
@@ -576,7 +563,6 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 		s.L("}")
 		s.Blank()
 	}
-	s.L("var _ = time.Time{}")
 
 	return goFile("internal/web/requests/"+m.Entity.Snake+"_children.go", fsplan.Owned,
 		fmt.Sprintf("the wire types for %d child collection(s)", len(m.Children)), s)

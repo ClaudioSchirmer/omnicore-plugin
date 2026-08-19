@@ -19,6 +19,9 @@ read-side backing (relational SoR vs Mongo projection), the broker, the CDC rela
 bench are all **config + devops**, chosen per profile. This skill changes that choice — in either
 direction — and tunes the surrounding configuration.
 
+**Every document this run writes lands under `specs/`, and the project keeps it —
+never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
 The two anchor postures:
 - **Zero-infra / MVP** — SQLite (`-tags sqlite`, `CGO_ENABLED=0`, one binary + `app.db` or
   `:memory:`), **no Docker**, no Mongo, no broker, no CDC relay. All views served relational from
@@ -108,7 +111,7 @@ Map what exists before proposing — this is the whole safety of the run:
 - **Devops** — is there a `devops/` bench (compose + Debezium)? Which dialect × transport?
 - **Surfaces** — REST / GraphQL / gRPC.
 
-## Phase 1 — Plan gate: `configure/plan.md`
+## Phase 1 — Plan gate: `specs/configure/plan.md`
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` slots answered, never defaulted; sections
 structural (`N/A — <why>`):
@@ -128,7 +131,7 @@ structural (`N/A — <why>`):
      **And say WHAT it unlocks** — usually the actual reason for the conversion: the view KINDS
      that were unavailable (identity / `SharedBaseView`, `ComposedView`, the Embed/Link family,
      Upstream) and integration events. Name the ones THIS project was told it could not have —
-     they are on record as `n/a — needs Mongo` in `scaffold-system/domain-map.md` (§3/§5) and in
+     they are on record as `n/a — needs Mongo` in `specs/scaffold-system/domain-map.md` (§3/§5) and in
      the entity specs. Availability in BOTH directions:
      `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` + `shared/read-side.md` (owners) — route to
      them, don't restate.
@@ -232,7 +235,7 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 6. **Offer to run.** ONE question: boot to click through? Yes → delegate `/omnicore:run` (it follows
    the chosen infra). No → done.
 
-Leave `configure/plan.md` in place for review.
+Leave `specs/configure/plan.md` in place for review.
 
 ## Re-entry — plan already exists
 

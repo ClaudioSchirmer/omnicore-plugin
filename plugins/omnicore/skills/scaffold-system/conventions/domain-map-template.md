@@ -1,6 +1,6 @@
 # conventions/domain-map-template.md — the Phase 1 domain map skeleton
 
-Copy VERBATIM to `scaffold-system/domain-map.md`, then fill. Rules: every section
+Copy VERBATIM to `specs/scaffold-system/domain-map.md`, then fill. Rules: every section
 stays (inapplicable → `N/A — <why>`); a decision only the dev can make is
 `⚠️ OPEN: <question>`; high-risk picks carry `(proposed)` + the alternative(s) beside
 them; NO code and NO field-level detail beyond what's needed to place a field group on
@@ -26,7 +26,7 @@ Framework pin: <from `go.mod` — informative only; docs of that pin are the aut
 ## §1p Read-side posture (system-wide)
 
 Full distributed CQRS (Mongo-projected, canonical) · Reduced/MVP (relational, SoR-served)
-— the DEFAULT backing for every entity view below; from `scaffold-service/spec.md` if it
+— the DEFAULT backing for every entity view below; from `specs/scaffold-service/spec.md` if it
 set one, else decided here. Per-entity override allowed (§9), with a reason.
 
 Engine/infra: full-CQRS engine (Mongo + broker + CDC) · SQLite zero-infra (no Docker;
