@@ -441,6 +441,34 @@ func wireValue(f ir.Field, receiver string) string {
 	return ref + ".Value()"
 }
 
+// factArgValue renders ONE argument of a service-fact call, read off the entity.
+//
+// It is wireValue plus the one address wireValue cannot form: a composite's
+// part. The store knows that part as an ordinary column under its exposed name,
+// and the fact's query filters on exactly that — but the ENTITY never carries a
+// field by that name. It carries the value object whole, so the argument is
+// e.<Owner>.<Part>, and the part's own optionality decides the shape, not the
+// field's (every part of an optional composite is a nullable COLUMN while
+// staying a plain value inside the type).
+//
+// A part of an optional composite never reaches here: a rule that would pass one
+// is refused in validation, because an absent value object has no value to pass.
+func factArgValue(f ir.Field, receiver string) string {
+	c := f.Composite
+	if c == nil {
+		return wireValue(f, receiver)
+	}
+	ref := receiver + "." + c.Owner + "." + c.PartName
+	switch {
+	case f.VOKind == "":
+		return ref
+	case c.PartNullable:
+		return fmt.Sprintf("(*%s)(%s)", f.BaseGoType, ref)
+	default:
+		return ref + ".Value()"
+	}
+}
+
 // entityValue is the inverse: a wire scalar becomes the entity's field type.
 // It is a plain conversion, never a constructor — the framework validates the
 // value object itself, so a per-field validate step here would be duplication.

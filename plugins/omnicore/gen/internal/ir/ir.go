@@ -108,7 +108,13 @@ type Field struct {
 	Description string
 	Unique      *Unique
 	Runtime     bool
-	Claim       string
+	// Hidden keeps the field out of every response body while leaving it stored,
+	// filterable, sortable and writable. It is read by the three Response structs
+	// and by nothing else: the Result the query fills stays whole, so a computed
+	// read field can still derive FROM a hidden source and `?fields=` can still
+	// push it down.
+	Hidden bool
+	Claim  string
 	// AssignedFrom names where the server reads this field's value when the
 	// client is not allowed to send it. Empty for an ordinary field.
 	AssignedFrom string
@@ -459,6 +465,7 @@ func resolveField(entity string, f spec.Field) Field {
 		Nullable: f.Nullable, Length: f.Length,
 		JSONName: naming.Camel(f.Name), LabelKey: label, Text: f.Text.Map(),
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
+		Hidden:       f.Hidden,
 		AssignedFrom: f.AssignedFrom,
 		LivesOn:      f.LivesOn,
 	}
@@ -898,6 +905,38 @@ type ValueObject struct {
 	// and the invariants its own IsValid checks over them.
 	Parts []VOPart
 	Rules []Rule
+
+	// Written is whose file the type is: "" or "generated" for the generator's,
+	// "manual" for the author's. It is carried rather than folded into Kind
+	// because a composite keeps its whole declared shape either way — only the
+	// file moves.
+	Written string
+}
+
+// GeneratedValueObjects counts the value objects this run actually writes a file
+// for. It is the number the test emitter asks about: a model whose value objects
+// are all hand-written has nothing for a generated test to assert.
+func (m *Model) GeneratedValueObjects() int {
+	n := 0
+	for _, vo := range m.ValueObjects {
+		if !vo.HandWritten() {
+			n++
+		}
+	}
+	return n
+}
+
+// HandWritten reports that the AUTHOR writes this type, not the generator —
+// either because its shape is beyond the language (kind: manual) or because its
+// shape is declared and only the file was handed over (a composite with
+// written: manual). Everything downstream asks the same question of both: emit
+// no file, assert nothing about a rule it does not know, and ask for the type in
+// the report.
+//
+// It is derived rather than stored so the two spellings cannot disagree with a
+// flag somebody forgot to set.
+func (v ValueObject) HandWritten() bool {
+	return v.Kind == "manual" || (v.IsComposite() && v.Written == "manual")
 }
 
 // IsComposite reports whether the value object's value spans several fields —
@@ -924,6 +963,7 @@ func resolveValueObjects(s *spec.Spec) []ValueObject {
 			MinLength: vo.MinLength, MaxLength: vo.MaxLength,
 			Min: vo.Min, Max: vo.Max, Notification: vo.Notification,
 			UnknownNotification: vo.UnknownNotification,
+			Written:             vo.Written,
 		}
 		if vo.Kind == "composite" {
 			resolveCompositeDeclaration(s, vo, &v)
@@ -1481,6 +1521,28 @@ func (m *Model) AllOwnerFields() []Field {
 	out := append([]Field{}, m.Fields...)
 	for _, sib := range m.SiblingsOn("") {
 		out = append(out, sib.Fields...)
+	}
+	return out
+}
+
+// ResponseFields are the fields a caller RECEIVES: every owned field except the
+// ones declared hidden.
+//
+// It is deliberately narrower than AllOwnerFields and used in exactly three
+// places — the write response, the by-id read response and the listing row.
+// Everything else keeps the whole set: the column is still written, the criteria
+// still filter and sort on it, the Result the query fills still carries it, and a
+// computed read field may still derive from it. Narrowing any of those would turn
+// "you do not receive this" into "this does not exist", which is a different
+// feature and one the spec has other keys for.
+func (m *Model) ResponseFields() []Field {
+	all := m.AllOwnerFields()
+	out := make([]Field, 0, len(all))
+	for _, f := range all {
+		if f.Hidden {
+			continue
+		}
+		out = append(out, f)
 	}
 	return out
 }

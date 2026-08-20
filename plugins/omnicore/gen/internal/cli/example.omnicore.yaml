@@ -77,11 +77,21 @@ fields:
   # and the mappers still convert to and from it; what the generator does not do
   # is write the file. The report asks for it by name, with the exact shape, and
   # the package does not compile until it is there.
+  #
+  # hidden: STORED, filterable, writable — and in no response body. A caller
+  # looks a student up BY the document and never receives it back, on any
+  # surface: not the by-id read, not a listing row, not the write response, not
+  # the CSV/XLSX export. It is a different question from read.fieldRestrict
+  # (below, on Grade), which is about WHO is asking: there, the callers holding
+  # the permission do receive the field. Here nobody does. Everything else is
+  # unchanged — the column exists, the filter reaches it, and a computed read
+  # field may derive FROM it.
   - name: NationalID
     type: string
     column: national_id
     length: 14
     livesOn: root
+    hidden: true
     vo: {kind: manual, ref: NationalID}
     example: "529.982.247-25"
     description: The student's national identity document.
@@ -143,6 +153,19 @@ fields:
     parts:
       - {part: From, column: leave_from, as: LeaveFrom, example: "2026-06-01T00:00:00Z"}
       - {part: To,   column: leave_to,   as: LeaveTo,   example: "2026-08-01T00:00:00Z"}
+
+  # A composite whose TYPE is hand-written (see written: manual on the
+  # declaration below). Nothing changes on this side: the parts are placed in
+  # columns exactly as above, and every consumer downstream sees taxCountry and
+  # taxNumber. What changed is who owns internal/domain/vos/tax_id.go.
+  - name: TaxID
+    livesOn: root
+    vo: {kind: composite, ref: TaxID}
+    description: The student's tax identification, as issued.
+    labelKey: StudentTaxIDField
+    parts:
+      - {part: Country, column: tax_country, as: TaxCountry, length: 2,  example: BR}
+      - {part: Number,  column: tax_number,  as: TaxNumber,  length: 14, example: "39053344705"}
 
   # assignedFrom: PERSISTED, but filled by the server from the caller's
   # identity. The field appears in no write DTO — the client has nothing to
@@ -243,6 +266,36 @@ valueObjects:
       - {name: USD, value: USD}
       - {name: EUR, value: EUR}
       - {name: BRL, value: BRL}
+
+  # written: manual — the SHAPE stays declared here (the schema decomposes these
+  # parts into columns, the mappers fold them, the migration sizes them, the
+  # catalogs translate them) and the FILE becomes yours: no
+  # internal/domain/vos/tax_id.go is written, and the report asks for the type
+  # with the exact struct. It is the escape hatch for a rule this language
+  # cannot state — here, one part's format depends on another part's VALUE —
+  # and it is ordinary Go inside the IsValid you write, which is also where a
+  # String() that renders the concept belongs. A composite that takes its file
+  # declares no rules: there is nowhere left to emit them.
+  #
+  # For a value that occupies ONE column the answer is kind: manual instead
+  # (NationalID, above): a scalar has no shape left to declare once its rule is
+  # yours, only a backing.
+  - name: TaxID
+    kind: composite
+    written: manual
+    description: >-
+      A tax identification number together with the country that issued it. The
+      number is checked by the ISSUING country's own algorithm — Brazil's check
+      digits are not Portugal's — so no regex, range or comparison states it.
+    parts:
+      - name: Country
+        type: string
+        description: The ISO 3166-1 alpha-2 code of the country that issued the number.
+        labelKey: TaxIDCountryField
+      - name: Number
+        type: string
+        description: The identification number, digits only.
+        labelKey: TaxIDNumberField
 
   # The CROSS-FIELD rule is why composites exist: no single-scalar value object
   # can say "the end may not precede the start", because neither field can see
@@ -587,6 +640,10 @@ read:
         ops: [eq, in]
       - field: Status
         ops: [eq, in]
+      # A hidden field filters like any other: the column is there, and the
+      # caller who searches by it still receives no field back.
+      - field: NationalID
+        ops: [eq]
       - field: Grade
         ops: [eq, gte, lte]
       - field: EnrolledAt

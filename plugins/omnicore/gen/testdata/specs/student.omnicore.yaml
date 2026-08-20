@@ -72,6 +72,21 @@ fields:
     description: Data da matrícula.
     labelKey: StudentEnrolledAtField
 
+  # hidden: ARMAZENADO e filtrável, e em nenhuma resposta. Procura-se o aluno
+  # PELO documento e ele nunca volta — nem no by-id, nem na linha da listagem,
+  # nem na resposta de escrita, nem no CSV/XLSX. É outra pergunta que
+  # fieldRestrict (acima, em Grade), que é sobre QUEM pergunta: lá quem tem a
+  # permissão recebe o campo; aqui ninguém recebe.
+  - name: DocumentNumber
+    type: string
+    column: document_number
+    length: 20
+    livesOn: root
+    hidden: true
+    example: "529.982.247-25"
+    description: Documento de identidade do aluno.
+    labelKey: StudentDocumentNumberField
+
   # COMPOSITO obrigatório: um conceito em duas colunas. Um valor sem a moeda não
   # é um preço, que é exatamente quando dois campos são UM value object. O campo
   # não tem `column:` — cada parte tem a sua — e `as:` dá o nome de fora, porque
@@ -503,6 +518,10 @@ read:
         ops: [eq, in]
       - field: Grade
         ops: [eq, gte, lte]
+      # Um campo hidden filtra como qualquer outro: a coluna está lá, e quem
+      # busca por ela continua sem receber campo nenhum de volta.
+      - field: DocumentNumber
+        ops: [eq]
       - field: EnrolledAt
         ops: [gte, lte]
       - field: TuitionAmount

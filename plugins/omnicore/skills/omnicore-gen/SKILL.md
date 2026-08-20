@@ -242,6 +242,21 @@ Three things to get right, because they are the ones that cost a migration later
   - **Each composite type appears ONCE per entity** — across the root, its facets and its
     shared base. A second `Money`-shaped concept on one entity is its own type, not a second
     decomposition; the framework refuses the split at boot and `check` refuses it earlier.
+  - **`written: manual` when the invariant is beyond the five rule kinds.** "If the resource
+    is `*`, the action must be `*` too", a format that depends on ANOTHER part's value, a
+    `String()` that renders the concept: none of that is `required`/`length`/`range`/
+    `comparison`/`requiredIf`, and none of it fits `kind: manual` either — a composite's
+    `parts` are not decoration, they are what the schema decomposes, the mappers fold and
+    the migration sizes. So the SHAPE stays declared and only the FILE moves: the generator
+    writes no `internal/domain/vos/<name>.go` and no test for it, the report asks for the
+    type with the exact struct (field names and types are the contract — the mappers build
+    it as a `vos.<Name>{Part: v, …}` literal), and everything else is unchanged. Such a
+    declaration carries no `rules`: there is nowhere left to emit them, and the refusal says
+    so. Copy the `labelKey` tags the report prints — the catalogs already hold those keys,
+    and a tag left out is a silent fallback, not an error. **The type must NOT declare
+    `Value()`**: its absence is what tells the framework to decompose the value instead of
+    storing a rendering in one column. For a value that occupies ONE column the answer stays
+    `kind: manual`.
 - **Every generated DTO opts into the framework's generic mappers, and that is a claim,
   not a shortcut.** A Response embeds `fwresponses.Auto`, a Request embeds
   `fwrequests.Auto`, and the bodies become one call each. The generator can make that
@@ -271,6 +286,16 @@ Three things to get right, because they are the ones that cost a migration later
     written; an unwritten derivation renders the field absent and nothing reports it —
     the read answers 200 and one column is empty on REST, on GraphQL and in the export at
     once. The gen-report lists them for exactly that reason.
+- **"They query by it and never receive it" is `fields[].hidden`, not `read.fieldRestrict`.**
+  The two look alike and answer different questions. `fieldRestrict` is about WHO is asking:
+  a caller with the permission receives the field, one without it gets a 403 for naming it
+  and silence for not asking. `hidden: true` is about the field: nobody receives it, on any
+  surface — not the by-id read, not a listing row, not the write response, not the CSV/XLSX
+  export. Everything else is untouched: the column exists, the migration writes it, filters,
+  sort and indexes reach it, a write may set it, the rules read it, and a `read.computed`
+  field may derive FROM it — which is the shape this exists for, "filter by these three and
+  return a description plus a derived value". Declaring both on one field is refused: there
+  would be a permission that unlocks nothing.
 - **A 1:1 facet (`siblings`) has one coupling worth knowing before you write it.** It is
   cleared by the ROOT's full update with its fields null — so `update.shape` cannot be
   `patch` alone, or a granted facet could never be revoked. And **with GraphQL on, the
@@ -320,6 +345,14 @@ Three things to get right, because they are the ones that cost a migration later
   - the entries are **what this write carries** → `groupCap`. No query can see them: they
     are not in the table yet. Counting in memory is not a shortcut here, it is the only
     correct answer.
+  - a fact's `field`, `filters` and `groupBy` may name a **composite's exposed part** —
+    it is an ordinary column by the time the store sees it, which is what makes a pre-check
+    over the two halves of a pair ("is this resource:action already taken?") expressible at
+    all. Naming the composite ITSELF is refused: it has no single column. A declarative
+    `factRange` fills the arguments from the entity (`e.<Owner>.<Part>`, unwrapped when the
+    part is a value object), so a part of an **optional** composite is refused there — the
+    value object may be absent and there is nothing to pass; call that fact from
+    `rules.manual`, where the absent case is a branch you write.
 
   So: *"no more than 5 active enrolments per course"* is a fact with `groupBy` — it is about
   rows that exist. *"no more than 30 photos in this listing"* is a `groupCap` — it is about
@@ -444,21 +477,25 @@ hashed**. The same shape exists three times more:
 | a question the service cannot answer declaratively | `service.facts[].kind: manual` | `internal/infra/<entity>_service_manual.go` |
 | a read field no column holds | `read.computed` | `internal/application/queries/<entity>_computed_manual.go` |
 | a VALUE OBJECT whose rule is neither a shape nor a set | `valueObjects[].kind: manual` | `internal/domain/vos/<name>.go` — **you create the file** |
+| a COMPOSITE value object whose invariant no rule kind states | `valueObjects[].written: manual` | `internal/domain/vos/<name>.go` — **you create the file**, and the parts stay declared |
 
-All four are the same bargain — the language declares the shape, a human writes the body —
+All five are the same bargain — the language declares the shape, a human writes the body —
 and they differ only in what an unwritten body does: a rule quietly enforces nothing, a
 fact panics on first use, a derivation renders an empty column, and a missing value object
 **does not compile**. The gen-report says which is which, and for the value object it
-prints the exact shape (`type X <backing>`, `Value()`, `IsValid`) — the backing is a
-contract, because the emitted mappers convert with `vos.X(v)` and read back with
-`.Value()`.
+prints the exact shape: `type X <backing>` with `Value()` and `IsValid` for a scalar — the
+backing is a contract, because the emitted mappers convert with `vos.X(v)` and read back
+with `.Value()` — and for a composite the struct itself, whose FIELD names and types are
+the contract instead, with no `Value()` at all.
 
 **`kind: manual` is the answer to "the generator cannot write this value object", and
 `kind: reuse` is not.** Reuse resolves against types the project ALREADY has, so pointing
 it at one you are about to write is refused with "the project declares no value object
 named X" — which reads like a naming mistake and is not one. When the rule is a checksum,
 a lookup, anything raw and enum cannot say: declare it `manual`, with the `description`
-that tells whoever writes it what to enforce.
+that tells whoever writes it what to enforce. The same trap has a second mouth on the
+composite side: a composite you are about to write is `kind: composite` + `written:
+manual`, never a `ref` to a type that is not there yet.
 
 **The hook file arrives with ONE gate per verb holding every rule scoped to it — keep it
 that way when you implement them.** A gate per rule is the shape that grows by accident,

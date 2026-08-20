@@ -39,6 +39,13 @@ var (
 	VODeclaredKinds = set("raw", "enum", "composite", "manual")
 	VOBackings      = set("string", "int")
 
+	// VOWritings is WHO writes the type, asked separately from what it is. It
+	// exists for the composite: its parts have to stay declared (the schema
+	// decomposes them, the mappers fold them, the migration sizes them) while
+	// the file itself becomes the author's, which is a combination `kind:
+	// manual` — a scalar with a backing and nothing else — cannot express.
+	VOWritings = set("generated", "manual")
+
 	// CompositeRuleKinds is what a COMPOSITE value object's own rules may check.
 	// The set is the rule kinds answerable from the parts alone: a value object
 	// sees its own value and nothing else — no old state, no siblings, no
@@ -199,6 +206,9 @@ func Vocabularies() []Vocabulary {
 		{"valueObjects[].kind", VODeclaredKinds,
 			"raw/enum occupy ONE column; composite spans several and the schema decomposes " +
 				"it; manual is the one the generator does not write — you do."},
+		{"valueObjects[].written", VOWritings,
+			"whose file the type is; manual keeps the parts declared and hands you the " +
+				"IsValid — composite only, since a scalar you write is kind: manual."},
 		{"valueObjects[].parts[].type", FieldTypes,
 			"a composite's part is persisted like any field, so it draws from the same closed set."},
 		{"valueObjects[].rules.list[].kind", CompositeRuleKinds,
@@ -284,9 +294,10 @@ func RefusedKeys() map[string]string {
 			"declare it on a root field, or use businessIdentity for same-entry detection",
 		"siblings[].fields[].unique": "uniqueness of a facet's field is not generated — " +
 			"declare it on a root field",
-		"valueObjects[].rules.manual": "a composite value object has no hook file of its own; " +
-			"a hand-written invariant over it belongs to the entity's rules.manual, which " +
-			"already sees the composite as a field",
+		"valueObjects[].rules.manual": "a GENERATED composite value object has no hook file " +
+			"of its own; a hand-written invariant over it belongs to the entity's " +
+			"rules.manual, which already sees the composite as a field — or take the whole " +
+			"type with written: manual and check it inside your own IsValid",
 		"valueObjects[].rules.manual[].actionName": "describe the condition in the description instead",
 		"valueObjects[].rules.list[].actionName":   "a value object validates its value, not a verb",
 		"valueObjects[].rules.list[].scope": "a value object's rule has no verb to gate on — " +

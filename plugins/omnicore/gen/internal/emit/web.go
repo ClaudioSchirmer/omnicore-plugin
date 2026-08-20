@@ -105,7 +105,7 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	s.L("\t%s", autoResponseEmbed)
 	s.Blank()
 	s.L("\tID domain.ID `json:\"id\" example:\"7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51\"`")
-	for _, f := range m.AllOwnerFields() {
+	for _, f := range m.ResponseFields() {
 		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType, quote(jsonTag(f, false)), quote(f.Example))
 	}
 	for _, c := range m.Children {
@@ -181,7 +181,7 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	s.L("\t%s", autoResponseEmbed)
 	s.Blank()
 	s.L("\tID string `json:\"id\" example:\"7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51\"`")
-	for _, f := range m.AllOwnerFields() {
+	for _, f := range m.ResponseFields() {
 		s.L("\t%s %s `%s`", f.Name, f.GoType, readFieldTag(f, false))
 	}
 	emitComputedResponseFields(s, m, false)
@@ -249,7 +249,7 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 	// read. The whole aggregate is already in hand when the listing is served,
 	// so leaving them out discards data that was fetched anyway and pushes the
 	// caller into one extra request per row to get it back.
-	for _, f := range m.AllOwnerFields() {
+	for _, f := range m.ResponseFields() {
 		typ := f.GoType
 		if pointered {
 			typ = "*" + f.BaseGoType

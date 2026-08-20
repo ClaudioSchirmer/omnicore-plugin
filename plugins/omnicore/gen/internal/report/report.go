@@ -125,7 +125,7 @@ func renderTodo(b *strings.Builder, in Input) {
 	// re-read against a spec that may have moved since.
 	var owedVOs, writtenVOs []ir.ValueObject
 	for _, vo := range m.ValueObjects {
-		if vo.Kind != "manual" {
+		if !vo.HandWritten() {
 			continue
 		}
 		if names(in.ExistingVOs).has(vo.Name) {
@@ -141,12 +141,18 @@ func renderTodo(b *strings.Builder, in Input) {
 	if len(owedVOs) > 0 {
 		empty = false
 		b.WriteString("### Value objects you write\n\n")
-		b.WriteString("Declared as `kind: manual`, so the generator wrote NO file for them — " +
-			"the emitted code already declares fields of these types and converts to and from " +
-			"their backing, so the package does not compile until each one exists:\n\n")
+		b.WriteString("Declared as `kind: manual` (a scalar whose rule is beyond this " +
+			"language) or as a composite with `written: manual` (its shape is declared, its " +
+			"file is yours), so the generator wrote NO file for them — the emitted code " +
+			"already declares fields of these types and converts to and from them, so the " +
+			"package does not compile until each one exists:\n\n")
 		for _, vo := range owedVOs {
 			fmt.Fprintf(b, "- **`%s`** — `internal/domain/vos/%s.go`. %s\n",
 				vo.Name, naming.Snake(vo.Name), vo.Description)
+			if vo.IsComposite() {
+				writeOwedComposite(b, vo)
+				continue
+			}
 			fmt.Fprintf(b, "  ```go\n"+
 				"  type %[1]s %[2]s\n"+
 				"  func (v %[1]s) Value() %[2]s { return %[2]s(v) }\n"+
@@ -168,18 +174,31 @@ func renderTodo(b *strings.Builder, in Input) {
 	if len(writtenVOs) > 0 {
 		empty = false
 		b.WriteString("### Value objects you already wrote\n\n")
-		b.WriteString("Declared as `kind: manual` and already in the project. The generator " +
-			"did not open them and cannot tell whether what they enforce still matches what " +
-			"the spec says they enforce — listed so a description that moved does not leave " +
-			"a stale rule behind it:\n\n")
+		b.WriteString("Written by hand — `kind: manual`, or a composite with `written: " +
+			"manual` — and already in the project. The generator did not open them and " +
+			"cannot tell whether what they enforce still matches what the spec says they " +
+			"enforce — listed so a description that moved does not leave a stale rule " +
+			"behind it:\n\n")
+		var writtenComposite bool
 		for _, vo := range writtenVOs {
 			fmt.Fprintf(b, "- **`%s`** — `internal/domain/vos/%s.go`. %s\n",
 				vo.Name, naming.Snake(vo.Name), vo.Description)
+			writtenComposite = writtenComposite || vo.IsComposite()
 		}
 		b.WriteString("\nThe backing stays a contract across every run: the mappers convert " +
 			"with `vos.<Name>(x)` and read back with `.Value()`, so changing the underlying " +
 			"type of one of these breaks call sites that name neither this report nor the " +
-			"spec.\n\n")
+			"spec.")
+		// A composite is converted by field, not by backing, so the sentence above
+		// names the wrong contract for it — and the wrong contract read as the
+		// right one is how a part gets renamed in a file the generator never opens.
+		if writtenComposite {
+			b.WriteString(" For a composite the contract is its FIELD SET instead: the " +
+				"mappers build it as a `vos.<Name>{Part: v, …}` literal, so a part renamed " +
+				"or retyped there breaks the same way, and the spec's `parts` are what says " +
+				"which names those are.")
+		}
+		b.WriteString("\n\n")
 	}
 
 	// A DERIVED field before the hooks: it is the one thing on this list that
@@ -489,6 +508,27 @@ func renderCheck(b *strings.Builder, in Input) {
 			"imports both packages, so holding one there would be an import cycle, not a "+
 			"style choice.\n\n",
 			strings.Join(moved, ", "))
+	}
+
+	// A field the caller never receives. It is the one shape a reviewer cannot
+	// see by reading the generated DTOs — the field is simply not in them, and
+	// absence looks the same as an oversight. Saying it out loud is also the only
+	// place the CSV/XLSX consequence is written down: the exports render the
+	// listing, so a column somebody used to get is gone with it.
+	var hidden []string
+	for _, f := range m.AllOwnerFields() {
+		if f.Hidden {
+			hidden = append(hidden, fmt.Sprintf("`%s`", f.Name))
+		}
+	}
+	if len(hidden) > 0 {
+		b.WriteString("### Fields nobody receives\n\n")
+		fmt.Fprintf(b, "%s — declared `hidden: true`, so stored, filterable and writable, "+
+			"and absent from every response: the by-id read, each row of the listing, the "+
+			"write responses, and the CSV/XLSX exports that render the listing. This is not "+
+			"`read.fieldRestrict`, which returns the field to callers holding a permission; "+
+			"nobody receives these. Check that a client is not expected to read back what it "+
+			"just wrote.\n\n", strings.Join(hidden, ", "))
 	}
 
 	// Same principle, for rules: one declared on a collection but enforced from
@@ -961,4 +1001,48 @@ func archiveScopedRuleIDs(m *ir.Model) []string {
 		}
 	}
 	return out
+}
+
+// writeOwedComposite prints the exact struct a hand-written COMPOSITE has to be.
+//
+// It is a different shape from the scalar half above and a stricter contract: a
+// scalar is asked for a backing, and this one is asked for a field set, because
+// the field NAMES and TYPES are what the command mappers write into. The
+// generator folds the flat wire fields into a `vos.<Name>{Part: v, …}` literal,
+// so a part renamed or retyped here is a compile error at a call site that names
+// neither this report nor the spec.
+//
+// The two things nothing else would say: no `Value()` — its absence is what
+// tells the framework to decompose the value across columns instead of storing
+// the rendering in one — and the labelKey tags, whose keys are already in the
+// seven catalogs because the parts are declared in the spec. A tag left out is
+// not a compile error; it is a column header and a notification label that
+// silently fall back to the field's own name.
+func writeOwedComposite(b *strings.Builder, vo ir.ValueObject) {
+	b.WriteString("  ```go\n")
+	fmt.Fprintf(b, "  type %s struct {\n", vo.Name)
+	width, typeWidth := 0, 0
+	for _, p := range vo.Parts {
+		if len(p.Name) > width {
+			width = len(p.Name)
+		}
+		if len(p.GoType) > typeWidth {
+			typeWidth = len(p.GoType)
+		}
+	}
+	for _, p := range vo.Parts {
+		fmt.Fprintf(b, "  \t%-*s %-*s `labelKey:%q`\n",
+			width, p.Name, typeWidth, p.GoType, p.LabelKey)
+	}
+	b.WriteString("  }\n")
+	fmt.Fprintf(b, "  func (v %s) IsValid(fieldName string, ctx *domain.NotificationContext) bool\n",
+		vo.Name)
+	b.WriteString("  ```\n")
+	fmt.Fprintf(b, "  The field names and types are the contract: the command mappers build "+
+		"this value with a `vos.%s{…}` literal, part by part. It must NOT declare `Value()` "+
+		"— that absence is what tells the framework its value spans SEVERAL columns and has "+
+		"to be decomposed rather than stored as one. `IsValid` is the framework's entry "+
+		"point, found by TYPE with no registration, and it is where every invariant over "+
+		"the parts lives — including the ones this language cannot state. A rendering "+
+		"(`String()`, `Format()`) is yours to add under any name but `Value()`.\n", vo.Name)
 }

@@ -369,6 +369,14 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 			"set length: N — a zero-length VARCHAR is rejected by postgres, sqlserver and oracle")
 	}
 
+	if f.Hidden && f.Runtime {
+		ps.BlockerFix(where+".hidden",
+			"a runtime-only field is in no response to begin with — it is fed from the "+
+				"caller's token and exists for the rules to read",
+			"drop hidden; it takes a PERSISTED field out of the responses while leaving "+
+				"the column, the filters and the writes alone")
+	}
+
 	if f.Runtime {
 		// A collection entry (or a facet's row) has no request identity of its
 		// own; the lowering kept the field anyway and the migration emitted a
@@ -696,7 +704,7 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 			ps.BlockerFix(where, fmt.Sprintf("%q is not a usable Go type name", vo.Name), "use PascalCase")
 		} else if seen[vo.Name] {
 			ps.Blockerf(where, "the value object %q is declared twice", vo.Name)
-		} else if existing[vo.Name] && opt.VOOwner[vo.Name] != s.Entity && vo.Kind != "manual" {
+		} else if existing[vo.Name] && opt.VOOwner[vo.Name] != s.Entity && !HandWritten(vo) {
 			ps.BlockerFix(where,
 				fmt.Sprintf("the project already declares a value object named %q", vo.Name),
 				fmt.Sprintf("reuse it instead — on the field write vo: {kind: reuse, ref: %s}; "+
@@ -705,11 +713,29 @@ func validateValueObjects(s *Spec, ps *Problems, opt Options) {
 			seen[vo.Name] = true
 		}
 
-		// The `manual` exemption above is the whole point of that kind: the type it
-		// declares is one the author WRITES, so the run AFTER they write it finds
-		// the type in the project and would otherwise be told to reuse the thing
-		// this spec asked for. A declaration has to stay legal once it is
-		// honoured, or the feature works exactly once.
+		// The hand-written exemption above is the whole point of both spellings:
+		// the type a declaration asks for is one the author WRITES, so the run
+		// AFTER they write it finds the type in the project and would otherwise
+		// be told to reuse the thing this spec asked for. A declaration has to
+		// stay legal once it is honoured, or the feature works exactly once.
+
+		// `written` is asked of every kind so a misspelling is refused where it is
+		// written, and answered by exactly one: a scalar you write is `kind:
+		// manual`, which says it with one key and carries the backing contract
+		// that goes with it.
+		if vo.Written != "" && !VOWritings.Has(vo.Written) {
+			ps.BlockerFix(where+".written",
+				fmt.Sprintf("%q does not say who writes the type", vo.Written),
+				"one of: "+VOWritings.String())
+		} else if vo.Written == "manual" && vo.Kind != "composite" {
+			ps.BlockerFix(where+".written",
+				fmt.Sprintf("written: manual keeps a DECLARED shape and hands over the file, "+
+					"and a %s value object has no shape left to declare once its rule is yours",
+					orUnnamed(vo.Kind)),
+				"write kind: manual instead — it says the same thing for a value that "+
+					"occupies one column, and its backing is the contract the mappers convert "+
+					"through")
+		}
 
 		// A composite has no single underlying value — its parts are its value —
 		// so the backing key is refused there rather than demanded.
@@ -1651,6 +1677,26 @@ func validateFactRange(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 			fmt.Sprintf("%s returns %s, which is not a number to compare", r.Fact, found.Returns),
 			"limit a fact that answers int64 or float64")
 	}
+	// A declarative rule fills the fact's arguments from the ENTITY, so every
+	// filter must be a value the entity is holding when the rule runs. A part of
+	// an OPTIONAL composite is not: the value object is absent as a whole, and
+	// there is no zero to pass that would not silently change the query the fact
+	// runs. The service method is still generated and still callable — from
+	// rules.manual, where the absent case is a branch someone writes on purpose.
+	for _, fl := range append(append([]string{}, found.Filters...), found.Field) {
+		if fl == "" {
+			continue
+		}
+		owner := compositePartOwner(s.Fields, fl)
+		if owner == nil || !owner.Nullable {
+			continue
+		}
+		ps.BlockerFix(w+".fact",
+			fmt.Sprintf("%s filters on %q, a part of the OPTIONAL composite value object "+
+				"%q — when it is absent there is no value for this rule to pass", r.Fact, fl, owner.Name),
+			"call the fact from rules.manual, where the absent case is a branch you "+
+				"write — or make the value object mandatory")
+	}
 }
 
 func validateRuleNotification(s *Spec, r Rule, w string, ps *Problems) {
@@ -2084,8 +2130,8 @@ func validateService(s *Spec, ps *Problems) {
 			if fl == "" {
 				continue
 			}
-			if findField(s.Fields, fl) == nil {
-				ps.Blockerf(where, "%q does not name a field of this entity", fl)
+			if factField(s, fl) == nil {
+				reportUnknownFactField(s, fl, where, ps)
 			}
 		}
 		validateAggregatedField(s, f, where, ps)
@@ -2123,9 +2169,9 @@ func validateGroupedFact(s *Spec, f Fact, where string, ps *Problems) {
 			continue
 		}
 		seen[g] = true
-		fld := findField(s.Fields, g)
+		fld := factField(s, g)
 		if fld == nil {
-			ps.Blockerf(where+".groupBy", "%q does not name a field of this entity", g)
+			reportUnknownFactField(s, g, where+".groupBy", ps)
 			continue
 		}
 		if fld.Runtime {
@@ -2154,7 +2200,7 @@ func validateAggregatedField(s *Spec, f Fact, where string, ps *Problems) {
 	if f.Field == "" || f.Kind == "exists" || f.Kind == "count" || f.Kind == "manual" {
 		return
 	}
-	fld := findField(s.Fields, f.Field)
+	fld := factField(s, f.Field)
 	if fld == nil {
 		return // already reported as an unknown field
 	}
@@ -2293,6 +2339,18 @@ func validateRead(s *Spec, ps *Problems) {
 		}
 		if fr.Permission == "" {
 			ps.Blockerf(where+".permission", "a restricted field needs the permission that unlocks it")
+		}
+		// The two keys answer different questions and the answers contradict:
+		// hidden says nobody receives the field, fieldRestrict says the callers
+		// holding a permission do. Emitting both would generate a permission that
+		// unlocks nothing, which reads in an authz review as an exposure that is
+		// not there.
+		if f := findField(s.Fields, fr.Field); f != nil && f.Hidden {
+			ps.BlockerFix(where+".field",
+				fmt.Sprintf("%q is declared hidden, so no caller receives it — there is "+
+					"nothing for a permission to unlock", fr.Field),
+				"drop one of the two: hidden takes the field out of every response, "+
+					"fieldRestrict takes it out only for callers without the permission")
 		}
 	}
 

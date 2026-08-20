@@ -7,6 +7,58 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-08-19
+
+### Added
+
+- **A composite value object can be written by hand: `valueObjects[].written: manual`.**
+  The escape hatch existed for a value that occupies one column (`kind: manual`) and for
+  nothing else, so an invariant a composite could not state — "if the resource is `*`, the
+  action must be `*` too", a format that depends on ANOTHER part's value, a `String()` that
+  renders the concept — had no home: the composite's rule list accepts only `required`,
+  `length`, `range`, `comparison` and `requiredIf`, `rules.manual` is refused there, and the
+  generated file is owned. `kind: manual` could not answer it either, because a composite's
+  `parts` are not decoration: they are what the schema decomposes into columns, what the
+  mappers fold, what the migration sizes and what the catalogs translate.
+
+  So the two questions are now asked separately. `kind` says what the value object IS,
+  `written` says whose file it is: the SHAPE stays declared in full — parts, part value
+  objects, labels, descriptions — and the generator writes no `internal/domain/vos/<name>.go`
+  and no test for it. The gen-report asks for the type with the exact struct, its `labelKey`
+  tags, and the two things nothing else would say: the FIELD names and types are the contract
+  (the mappers build the value as a `vos.<Name>{Part: v, …}` literal), and it must NOT declare
+  `Value()` — that absence is what tells the framework to decompose the value instead of
+  storing a rendering in one column. Such a declaration carries no `rules`: there is no file
+  left to emit them into, and the refusal says where they go.
+
+  Refused on the scalar kinds, where `kind: manual` already says the same thing with one key.
+
+- **A domain-service fact can name a composite's exposed part.** `service.facts[].field`,
+  `filters` and `groupBy` resolved against the entity's DECLARED fields, while filters,
+  indexes, `?fields=` and `orderBy` had long resolved against the expanded set — so a
+  pre-check over the two halves of a pair ("is this resource:action already taken?") was the
+  one uniqueness question the language could not ask, and the refusal read as a naming
+  mistake. A part is an ordinary column by the time the store sees it, and the emitted query
+  filters on it under the name `as:` exposed. Naming the composite ITSELF is now refused with
+  the parts listed — it used to RESOLVE, because the composite is a declared field, and
+  emitted `criteria.Eq("Key", e.Key)`: a logical name the view cannot map, and a struct where
+  a scalar belongs. A declarative `factRange` fills the fact's arguments from the entity
+  — `e.<Owner>.<Part>`, unwrapped when the part is a value object — so a part of an OPTIONAL
+  composite is refused there and pointed at `rules.manual`, where the absent case is a branch
+  someone writes on purpose.
+
+- **`fields[].hidden`: stored, filterable, and in no response.** The only way to keep a field
+  out of what a caller receives was `read.fieldRestrict`, which answers a different question
+  — 403 for callers without a permission, the field for everyone who has it. `hidden: true`
+  is not about who is asking: the field is absent from the by-id read, from every listing
+  row, from the write responses and from the CSV/XLSX exports that render the listing, for
+  everyone. Everything else is unchanged — the column exists, the migration writes it, the
+  filters, sort and indexes reach it, a write may set it, the rules read it, and a
+  `read.computed` field may derive FROM it, which is the shape this exists for: filter by
+  three columns, return a description and a derived value. Refused on a runtime-only field
+  (it is in no response to begin with) and on a field `read.fieldRestrict` also names, which
+  would be a permission that unlocks nothing.
+
 ## [0.23.0] — 2026-08-19
 
 ### Changed
