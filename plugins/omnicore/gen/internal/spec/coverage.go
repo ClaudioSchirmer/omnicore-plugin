@@ -42,7 +42,7 @@ const (
 	CapMountedChild    Capability = "a shared identity's collection, exposed on a second role"
 	CapGroupedFact     Capability = "per-group facts, computed by the database (GROUP BY)"
 	CapCompositeVO     Capability = "composite value objects (a value spanning several columns)"
-	CapManualVO        Capability = "hand-written value objects (declared here, written by you)"
+	CapManualVO        Capability = "hand-written value objects (declared here, written by you): a scalar with kind: manual, a composite with written: manual"
 	CapArchiveOnUpdate Capability = "an update that finishes as an archive (CompleteAsArchive)"
 	CapComputedRead    Capability = "computed read fields (derived per document, no column)"
 )

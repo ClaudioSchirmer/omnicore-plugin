@@ -36,7 +36,11 @@ func emitTests(m *ir.Model) ([]fsplan.File, error) {
 		}
 		out = append(out, cmd)
 	}
-	if len(m.ValueObjects) > 0 {
+	// Only the value objects the generator WROTE can be asserted about. When
+	// every one of them is hand-written the file would carry a header claiming
+	// tests and hold none — a green package that proves nothing, which is worse
+	// than an absent file because it reads as coverage.
+	if m.GeneratedValueObjects() > 0 {
 		vo, err := emitVOTests(m)
 		if err != nil {
 			return nil, err
@@ -666,7 +670,7 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 		// failing in the author's file. The one property it COULD check — that
 		// the type exists with the right shape — the compiler already checks,
 		// louder, on the same run.
-		if vo.Kind == "manual" {
+		if vo.HandWritten() {
 			continue
 		}
 		if vo.Kind == "composite" {
@@ -789,7 +793,7 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 	}
 
 	return goFile("internal/domain/vos/"+m.Entity.Snake+"_vos_test.go", fsplan.Owned,
-		fmt.Sprintf("tests for %d value object(s)", len(m.ValueObjects)), s)
+		fmt.Sprintf("tests for %d value object(s)", m.GeneratedValueObjects()), s)
 }
 
 // ── sample values ──────────────────────────────────────────────────────────

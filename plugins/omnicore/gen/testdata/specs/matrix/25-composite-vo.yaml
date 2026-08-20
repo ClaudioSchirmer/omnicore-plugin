@@ -112,6 +112,19 @@ delete: {root: soft}
 rules:
   list:
     - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    # Um fato sobre PARTES: a query agrega uma parte e filtra por outra, e o
+    # call site le a parte de dentro do value object (e.Valor.Moeda.Value()),
+    # porque a entidade carrega o composto inteiro e nunca um campo ValorMoeda.
+    - {id: soma-por-moeda-limitada, kind: factRange, scope: [insertOrUpdate], fact: SomaPorMoeda, max: 100000000, attachTo: Codigo, notification: SchemaViolationNotification}
+service:
+  required: true
+  facts:
+    - name: SomaPorMoeda
+      kind: sum
+      field: ValorQuantia
+      filters: [ValorMoeda]
+      activeOnly: true
+      description: Soma das quantias contratadas na mesma moeda.
 notifications:
   - name: QuantiaNegativaNotification
     package: vos

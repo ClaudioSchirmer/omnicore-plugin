@@ -1,0 +1,70 @@
+# Eixo: VALUE OBJECT COMPOSTO ESCRITO À MÃO (written: manual).
+#
+# A forma continua declarada aqui — é ela que o schema decompõe em colunas, que
+# os mappers dobram e desdobram, que a migration dimensiona e que os catálogos
+# traduzem. O que muda de dono é o ARQUIVO: o gerador não escreve
+# internal/domain/vos/chave_permissao.go, e a árvore só compila depois que
+# alguém escreve o tipo. Essa metade vem de 27-composite-vo-manual.hand/.
+#
+# É o caso que o gerador não alcança de outro jeito: a regra "se o recurso é *,
+# a ação também precisa ser *" olha uma parte em função da OUTRA, e não é regex,
+# nem faixa, nem comparação. Junto com ela vem o String() que rende o conceito —
+# um composto pode expor qualquer nome menos Value(), cuja AUSÊNCIA é o que diz
+# ao framework para decompor em vez de guardar a renderização numa coluna.
+specVersion: 1
+entity: Permissao
+plural: Permissoes
+language: pt-BR
+storage:
+  kind: flat
+  table: permissoes
+  description: Permissões concedidas, na forma recurso:acao.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Descricao, type: string, column: descricao, length: 120, livesOn: root, example: "Leitura de alunos", description: O que a permissão concede.}
+  # O composto à mão ocupa DUAS colunas, exatamente como um gerado: quem lê,
+  # filtra ou ordena vê chaveRecurso e chaveAcao e nunca sabe que existe um
+  # value object.
+  - name: Chave
+    livesOn: root
+    vo: {kind: composite, ref: ChavePermissao}
+    description: A permissão em si.
+    parts:
+      - {part: Recurso, column: chave_recurso, as: ChaveRecurso, length: 60, example: aluno}
+      - {part: Acao,    column: chave_acao,    as: ChaveAcao,    length: 30, example: ler}
+valueObjects:
+  - name: ChavePermissao
+    kind: composite
+    written: manual
+    description: >-
+      Um par recurso:acao. O curinga é o motivo de a regra ser escrita à mão —
+      um recurso "*" só faz sentido com uma ação "*", e nenhuma chave desta
+      linguagem diz "se a parte A vale X, a parte B precisa valer Y".
+    parts:
+      - name: Recurso
+        type: string
+        description: O recurso que a permissão alcança, ou * para todos.
+        labelKey: ChavePermissaoRecursoField
+      - name: Acao
+        type: string
+        description: A ação permitida sobre o recurso, ou * para todas.
+        labelKey: ChavePermissaoAcaoField
+modes: [display, insert, update, archive]
+update: {shape: patch}
+read:
+  backing: relational
+  view: {name: permissoes, version: 1}
+  byId: true
+  byParams:
+    filters:
+      - {field: ChaveRecurso, ops: [eq]}
+      - {field: ChaveAcao, ops: [eq]}
+surfaces: {rest: true}
+authz:
+  resource: permissao
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: "permissao:escrever"
+    patch: "permissao:escrever"
+    archive: "permissao:escrever"
+    read: "permissao:ler"

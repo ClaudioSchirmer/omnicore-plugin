@@ -25,14 +25,17 @@ func emitValueObjects(m *ir.Model) ([]fsplan.File, error) {
 			f   fsplan.File
 			err error
 		)
-		switch vo.Kind {
-		case "manual":
-			// Declared so the field can BE this type and so the report can ask
-			// for it; written by hand, because its rule is outside what this
-			// language expresses. Emitting a stub would be worse than emitting
-			// nothing: a type that exists and validates nothing passes every
-			// check the framework runs, silently.
+		// Declared so the field can BE this type and so the report can ask for
+		// it; written by hand, because its rule is outside what this language
+		// expresses — the whole rule for a `manual` scalar, the whole IsValid for
+		// a composite that kept its shape declared and gave up its file.
+		// Emitting a stub would be worse than emitting nothing: a type that
+		// exists and validates nothing passes every check the framework runs,
+		// silently.
+		if vo.HandWritten() {
 			continue
+		}
+		switch vo.Kind {
 		case "enum":
 			f, err = emitEnumVO(m, vo)
 		case "composite":

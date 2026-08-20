@@ -38,6 +38,21 @@ func ExposedName(p FieldPart) string {
 // IsComposite reports whether a field holds a composite value object.
 func IsComposite(f Field) bool { return f.VO != nil && f.VO.Kind == "composite" }
 
+// HandWritten reports whether the AUTHOR writes this value object's type rather
+// than the generator.
+//
+// The two spellings answer the same question about different things, which is
+// why they are read through one function: `kind: manual` is a scalar whose SHAPE
+// the language cannot state beyond its backing, and `written: manual` is a
+// composite whose shape is stated in full — parts, part value objects, labels —
+// with only the file handed over. Everything that reacts to ownership (the
+// emitters that write nothing, the generated tests that assert nothing, the
+// report that asks for the type, the guard that must not call a declaration a
+// duplicate of the type it asked for) reacts to both.
+func HandWritten(vo ValueObject) bool {
+	return vo.Kind == "manual" || (vo.Kind == "composite" && vo.Written == "manual")
+}
+
 // FindVOPart looks up one part of a composite declaration by its name inside
 // the value object.
 func FindVOPart(vo *ValueObject, name string) *VOPart {
@@ -182,6 +197,47 @@ func findLogicalField(fields []Field, s *Spec, name string) *Field {
 		}
 	}
 	return nil
+}
+
+// factField resolves the name a domain-service fact addresses.
+//
+// A fact is a question the DATABASE answers — "does another active row hold this
+// pair?", "what is the total?" — so it names columns, and a composite's part is
+// a column like any other. Everything else that reaches the store this way
+// (filters, indexes, ?fields=, orderBy) already resolves through the expanded
+// set; facts did not, which made a pre-check over the two halves of a composite
+// the one uniqueness question the language could not ask.
+//
+// The declared set answers FIRST so nothing that resolved before resolves
+// differently now: a runtime-only field is not in the logical set, and a fact
+// naming one keeps whatever answer it had.
+func factField(s *Spec, name string) *Field {
+	// The composite's OWN name is a declared field and has no column, so it is
+	// taken out before the declared set is consulted. Left in, it resolved — a
+	// fact filtering on `Key` emitted criteria.Eq("Key", e.Key), a logical name
+	// the view cannot map and a struct where a scalar belongs.
+	if compositeOwnerNamed(s, name) != nil {
+		return nil
+	}
+	if f := findField(s.Fields, name); f != nil {
+		return f
+	}
+	return findLogicalField(s.Fields, s, name)
+}
+
+// reportUnknownFactField refuses a name no field answers to, and says WHY when
+// the name is the composite itself rather than one of its parts — the mistake
+// that is easy to make precisely because the composite IS a field of the entity.
+func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
+	if owner := compositeOwnerNamed(s, name); owner != nil {
+		ps.BlockerFix(where,
+			fmt.Sprintf("%q is a composite value object, so it has no single column for a "+
+				"query to filter or aggregate", name),
+			fmt.Sprintf("name one of the parts it exposes: %s — each is an ordinary "+
+				"column by the time the store sees it", exposedNamesOf(*owner)))
+		return
+	}
+	ps.Blockerf(where, "%q does not name a field of this entity", name)
 }
 
 // compositeOwnerNamed reports the composite field a name addresses AS A WHOLE —
@@ -653,6 +709,17 @@ func validateCompositeDeclaration(s *Spec, vo ValueObject, where string, ps *Pro
 	if len(vo.Members) > 0 {
 		ps.Blockerf(where+".members", "members belong to an enum value object, not a composite")
 	}
+	// A hand-written composite still declares its shape — that is the whole
+	// difference from `kind: manual` — so the only thing the generator loses is
+	// the file, and the only thing it must gain is a sentence saying what the
+	// type it asks for enforces. Without it the report degenerates into a TODO
+	// with a struct attached.
+	if vo.Written == "manual" && vo.Description == "" {
+		ps.BlockerFix(where+".description",
+			"a hand-written value object needs to say what it enforces",
+			"one line, precise enough to implement — it is what the report asks the "+
+				"implementer for, and the generator will never open the file to check")
+	}
 
 	if len(vo.Parts) == 0 {
 		ps.BlockerFix(where+".parts",
@@ -757,12 +824,29 @@ func validatePartVO(s *Spec, p VOPart, where string, ps *Problems, opt Options) 
 // not a rule this type can answer.
 func validateCompositeRules(s *Spec, vo ValueObject, where string, ps *Problems) {
 	rw := where + ".rules"
+	// A hand-written composite owns its whole IsValid, so a declared rule has no
+	// file left to be emitted into. Refusing it here is not a limitation being
+	// announced: the rule is not lost, it is written where it now belongs, in
+	// ordinary Go over the parts — which is what the author asked for by taking
+	// the file.
+	if vo.Written == "manual" {
+		if len(vo.Rules.List) > 0 || len(vo.Rules.Manual) > 0 {
+			ps.BlockerFix(rw,
+				"this value object is written by hand, so there is no file for the "+
+					"generator to put a rule in",
+				"check it inside the IsValid you write — every part is in hand there, "+
+					"including the ones this language could not state; or drop written: "+
+					"manual and let the generator own the type and its rules")
+		}
+		return
+	}
 	if len(vo.Rules.Manual) > 0 {
 		ps.BlockerFix(rw+".manual",
 			"a composite value object has no hook file of its own in this build",
 			"declare the hand-written invariant under the ENTITY's rules.manual — it "+
 				"already sees the composite as a field, and it is the file the generator "+
-				"never rewrites")
+				"never rewrites; or take the whole type with written: manual and check it "+
+				"inside your own IsValid")
 	}
 
 	scope := make([]Field, 0, len(vo.Parts))

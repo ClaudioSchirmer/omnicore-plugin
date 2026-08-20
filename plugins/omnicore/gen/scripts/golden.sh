@@ -442,12 +442,18 @@ stage_host "$PRUNE_WORK"
 mkdir -p "$PRUNE_WORK/specs/omnicore-gen"
 cp "$GEN_DIR/internal/cli/example.omnicore.yaml" "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml"
 cp "$GEN_DIR/testdata/specs/prune-neighbour.omnicore.yaml" "$PRUNE_WORK/specs/omnicore-gen/"
-# The hand-written half of a `kind: manual` value object. The example declares
-# NationalID as one — a check-digit rule no regex states — so the generator
-# deliberately writes no file for it and the tree does not compile until this
-# exists. Writing it here is what makes this lane prove the whole bargain: the
+# The hand-written half of the value objects the generator deliberately does not
+# write. The example declares one of each: NationalID as `kind: manual` — a
+# check-digit rule no regex states — and TaxID as a composite with `written:
+# manual`, whose parts stay declared (the schema decomposes them, the mappers
+# fold them) while the FILE is the author's. Neither tree compiles until these
+# exist. Writing them here is what makes this lane prove the whole bargain: the
 # generator types the field as the value object, a human supplies the type, and
 # prune must never offer to delete a file the generator did not write.
+#
+# The composite half also pins the shape the report asks for: a struct whose
+# FIELD NAMES are what the command mappers write into, and no Value() — its
+# absence is what tells the framework to decompose the value across columns.
 mkdir -p "$PRUNE_WORK/internal/domain/vos"
 cat > "$PRUNE_WORK/internal/domain/vos/national_id.go" <<'VOEOF'
 package vos
@@ -478,6 +484,45 @@ func (v NationalID) IsValid(fieldName string, ctx *domain.NotificationContext) b
 	}
 	return true
 }
+VOEOF
+cat > "$PRUNE_WORK/internal/domain/vos/tax_id.go" <<'VOEOF'
+package vos
+
+import (
+	"strings"
+
+	"github.com/ClaudioSchirmer/omnicore/domain"
+)
+
+// TaxID is a tax identification number together with the country that issued
+// it. Hand-written on purpose (written: manual): the number is checked by the
+// ISSUING country's algorithm, so one part's format depends on another part's
+// VALUE — not a regex, not a range, not a comparison.
+type TaxID struct {
+	Country string `labelKey:"TaxIDCountryField"`
+	Number  string `labelKey:"TaxIDNumberField"`
+}
+
+// IsValid is the framework's entry point, found by TYPE with no registration.
+// There is deliberately no Value(): its absence is what tells the framework this
+// value spans SEVERAL columns and has to be decomposed.
+func (v TaxID) IsValid(fieldName string, ctx *domain.NotificationContext) bool {
+	digits := map[string]int{"BR": 11, "PT": 9}
+	want, known := digits[v.Country]
+	if !known {
+		ctx.AddNotification("Country", domain.SchemaViolationNotification{})
+		return false
+	}
+	if len(v.Number) != want {
+		ctx.AddNotification("Number", domain.SchemaViolationNotification{})
+		return false
+	}
+	return true
+}
+
+// String renders the concept. A composite may expose a rendering under any name
+// but Value(), and this is the other half of what written: manual buys.
+func (v TaxID) String() string { return strings.ToUpper(v.Country) + ":" + v.Number }
 VOEOF
 prune_ok=1
 # ORDER MATTERS: the neighbour REUSES a value object the first spec declares, so
@@ -641,6 +686,12 @@ for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   work="$MATRIX_WORK/$name"
   stage_host "$work"
   mkdir -p "$work/specs/omnicore-gen"; cp "$spec" "$work/specs/omnicore-gen/"
+  # A case whose spec asks for a type the generator deliberately does not write
+  # (kind: manual, or a composite with written: manual) ships that half beside
+  # it, in <case>.hand/, laid over the staged host BEFORE generating. Without it
+  # the lane would prove the opposite of what it is for: that the tree does not
+  # build. The directory is optional and most cases have none.
+  [[ -d "$MATRIX_DIR/$name.hand" ]] && cp -R "$MATRIX_DIR/$name.hand/." "$work/"
 
   if ! (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \
         -spec "$work/specs/omnicore-gen/$(basename "$spec")" -project "$work" >"$work/gen.log" 2>&1); then

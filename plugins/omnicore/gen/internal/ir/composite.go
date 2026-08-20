@@ -206,6 +206,10 @@ func expandComposite(s *spec.Spec, entity string, f spec.Field) []Field {
 			JSONName: naming.Camel(lf.Name), LabelKey: lf.LabelKey, Text: lf.Text.Map(),
 			Example: lf.Example, Description: lf.Description,
 			LivesOn: f.LivesOn,
+			// Hidden is the OWNER's answer: a value object is one concept, so it
+			// leaves the responses whole or not at all. Declaring it per part
+			// would expose half a value and call it the value.
+			Hidden: f.Hidden,
 			Composite: &CompositePart{
 				VOName: voName, VOType: "vos." + voName,
 				Owner: f.Name, OwnerNullable: f.Nullable,

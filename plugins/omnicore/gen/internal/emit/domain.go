@@ -651,7 +651,7 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 			args = append(args, "selfID")
 			continue
 		}
-		args = append(args, wireValue(fieldNamed(m, p.Field), "e"))
+		args = append(args, factArgValue(fieldNamed(m, p.Field), "e"))
 	}
 	if needsSelf {
 		s.L("\t\t\t// On an insert there is no row yet, so there is nothing to exclude —")
@@ -1183,7 +1183,7 @@ func factCallArgs(s *src, m *ir.Model, f *ir.Fact) []string {
 			args = append(args, "selfID")
 			continue
 		}
-		args = append(args, wireValue(fieldNamed(m, p.Field), "e"))
+		args = append(args, factArgValue(fieldNamed(m, p.Field), "e"))
 	}
 	if needsSelf {
 		s.L("\t\t// On an insert there is no row yet, so there is nothing to exclude —")

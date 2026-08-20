@@ -205,6 +205,22 @@ type Field struct {
 	// left out falls back to the field's own name, spaced out (Workspace,
 	// TenantID → "Tenant ID"), which is a placeholder a translator can find.
 	Text Texts `yaml:"text"`
+	// Hidden keeps a PERSISTED field out of every response body: the by-id read,
+	// each row of the listing, the write results, and the CSV/XLSX exports that
+	// render the listing. Everything else is unchanged — the column exists, the
+	// filters, sort and indexes reach it, a write may set it, the rules read it,
+	// and a computed read field may derive FROM it.
+	//
+	// It is the answer to "callers query by this, and receive something else":
+	// three columns narrow the search, and what comes back is a description and
+	// a derived value. Without it the only way to say that was read.fieldRestrict,
+	// which answers something different — 403 to a caller who lacks a permission,
+	// and the field to everyone who has it. This one is not about who is asking.
+	//
+	// Refused on a runtime-only field, which is in no response to begin with, and
+	// on a field read.fieldRestrict also names: a field nobody receives cannot be
+	// the one some callers may.
+	Hidden bool `yaml:"hidden"`
 	// Runtime marks the field as runtime-only: never persisted, fed from the
 	// caller's token (see claim), existing only for the rules to read.
 	Runtime bool `yaml:"runtime"`
@@ -309,6 +325,29 @@ type ValueObject struct {
 	// compile until it is there. Use it when the rule needs something no raw or
 	// enum can say; it is not a way to skip writing a regex.
 	Kind string `yaml:"kind"`
+	// Written says WHO writes the type: generated (the default) or manual —
+	// you do. It is declared separately from kind because the two questions are
+	// separate: kind says what the value object IS, written says whose file it
+	// is, and a COMPOSITE is the case where the answers must be independent.
+	//
+	// A composite's parts are not decoration: they are what the schema
+	// decomposes into columns, what the mappers fold and unfold, what the
+	// migration sizes and what the catalogs translate. So "I write this one" and
+	// "the generator does not know its shape" cannot be the same statement —
+	// which is exactly what `kind: manual` says, and why it is a scalar answer
+	// only. With `written: manual` the shape stays declared and the FILE becomes
+	// yours: the generator emits no vos/<type>.go and no test for it, and the
+	// report asks for it by name with the exact struct.
+	//
+	// That is the escape hatch a composite needs, because everything a composite
+	// cannot express in this language — a regex over one part, "if Resource is
+	// *, Action must be *", a String() that renders the concept — is ordinary Go
+	// inside an IsValid you own. The rules block is refused for the same reason:
+	// there is no file left for the generator to write them into.
+	//
+	// Refused on the scalar kinds: a raw or an enum you write yourself is
+	// `kind: manual`, which already says it with one key instead of two.
+	Written string `yaml:"written"`
 	// Backing is the underlying representation: string or int. A composite has
 	// none — its value is its parts, not a scalar — so the key is refused there.
 	// For a `manual` value object it is a CONTRACT, not decoration: the emitted
