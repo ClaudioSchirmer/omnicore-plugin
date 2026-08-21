@@ -240,7 +240,12 @@ func constraintKeys(c ir.Constraint, dialects []string) []string {
 		case "unique":
 			switch d {
 			case "sqlite":
-				add(c.Table + "." + c.Columns[0])
+				// SQLite names the COLUMN LIST rather than the index, and for a
+				// multi-column constraint it lists every column, comma-separated,
+				// in the index's own order: "t.a, t.b". The framework's dialect
+				// hands that string through verbatim, so the key is built the same
+				// way here or the binding silently never matches.
+				add(sqliteUniqueKey(c))
 			case "mysql":
 				add(uniqueName(c))
 			default:
@@ -251,8 +256,21 @@ func constraintKeys(c ir.Constraint, dialects []string) []string {
 	return out
 }
 
+// sqliteUniqueKey renders the violation key SQLite reports: every constrained
+// column, qualified by the table, in declaration order.
+func sqliteUniqueKey(c ir.Constraint) string {
+	parts := make([]string, 0, len(c.Columns))
+	for _, col := range c.Columns {
+		parts = append(parts, c.Table+"."+col)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// uniqueName is the index name, which is also the violation key on every engine
+// but SQLite. A multi-column constraint names every column, in order — the
+// convention Postgres itself uses for a composite unique.
 func uniqueName(c ir.Constraint) string {
-	return c.Table + "_" + c.Columns[0] + "_key"
+	return c.Table + "_" + strings.Join(c.Columns, "_") + "_key"
 }
 
 func emitView(m *ir.Model) (fsplan.File, error) {

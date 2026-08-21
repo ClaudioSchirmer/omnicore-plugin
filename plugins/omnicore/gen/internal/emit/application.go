@@ -2,6 +2,7 @@ package emit
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
@@ -46,6 +47,10 @@ func commandImports(s *src, m *ir.Model, needsDomain bool) {
 		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
 		s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
 		s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
+		// The derivations behind computed fields live on the read side and are
+		// called from BOTH, so a write response renders the same value a read
+		// does. The import is pruned when this entity computes nothing.
+		s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
 	}
 	s.L(")")
 	s.Blank()
@@ -298,6 +303,16 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 	for _, f := range m.AllOwnerFields() {
 		s.L("\t%s %s", f.Name, f.GoType)
 	}
+	// The computed fields a write CAN answer. A read derives them from the
+	// projected document; here the entity is in hand, which is strictly more —
+	// the exception is a derivation reading a framework-stamped column, which the
+	// entity does not carry, and those stay off the write shapes.
+	writeComputed := writeComputedFields(m)
+	for _, c := range writeComputed {
+		s.L("\t// %s is COMPUTED: no column backs it, and FromEntity fills it", c.Name)
+		s.L("\t// from %s.", strings.Join(c.Sources, "+"))
+		s.L("\t%s %s", c.Name, c.GoType)
+	}
 	for _, c := range m.Children {
 		s.L("\t%s []%sResult", c.GoPlural, c.Name)
 	}
@@ -305,19 +320,29 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 
 	s.Blank()
 
-	s.Doc(
+	doc := []string{
 		"FromEntity projects the aggregate AFTER it was validated and written.",
 		"",
-		"It reads the entity, never the command: the domain may have normalised or "+
-			"defaulted a value, and echoing the input back would hide that from the caller.")
-	s.L("func (c *%s) FromEntity(_ *configuration.AppContext, e *%s) (%s, error) {",
-		op.CommandType, entity, op.ResultType)
+		"It reads the entity, never the command: the domain may have normalised or " +
+			"defaulted a value, and echoing the input back would hide that from the caller.",
+	}
+	ctxParam := "_"
+	if len(writeComputed) > 0 {
+		ctxParam = "ctx"
+		doc = append(doc, "",
+			"The computed fields are derived through the SAME function the reads call, "+
+				"in internal/application/queries. Deriving them a second time here is how "+
+				"one question grows two answers.")
+	}
+	s.Doc(doc...)
+	s.L("func (c *%s) FromEntity(%s *configuration.AppContext, e *%s) (%s, error) {",
+		op.CommandType, ctxParam, entity, op.ResultType)
 	// With no composite in play the projection is ONE expression, which is how
 	// this has always read. A composite needs statements — an optional one is a
 	// nil check — so the literal is bound to a local and filled in after.
 	plain, groups := ir.PlainAndComposites(m.AllOwnerFields())
 	head, tail := "\treturn "+op.ResultType+"{", "\t}, nil"
-	if len(groups) > 0 {
+	if len(groups) > 0 || len(writeComputed) > 0 {
 		head, tail = "\tout := "+op.ResultType+"{", "\t}"
 	}
 	s.L("%s", head)
@@ -329,13 +354,72 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\t\t%s: %s,", c.GoPlural, c.Projector+"(e)")
 	}
 	s.L("%s", tail)
-	if len(groups) > 0 {
+	if len(groups) > 0 || len(writeComputed) > 0 {
 		for _, g := range groups {
 			emitCompositeUnfold(s, g, "\t", "out", "e")
 		}
+		emitWriteComputedCalls(s, m, writeComputed, "out", "e")
 		s.L("\treturn out, nil")
 	}
 	s.L("}")
+}
+
+// writeComputedFields are the computed read fields a WRITE response can carry.
+//
+// A read derives from the projected document; a write has the entity, which
+// holds strictly more — except for the framework-stamped columns, which are
+// stamped by the engine and are on no entity. A derivation that reads one of
+// those is served by the reads alone, and the write shapes leave it out rather
+// than rendering it empty.
+func writeComputedFields(m *ir.Model) []ir.ComputedField {
+	var out []ir.ComputedField
+	for _, c := range m.Read.Computed {
+		ok := true
+		for _, src := range c.Sources {
+			if _, found := entitySourceField(m, src); !found {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// entitySourceField resolves a derivation source against the fields the ENTITY
+// carries — a composite's part included, since the aggregate holds the value
+// object it belongs to.
+func entitySourceField(m *ir.Model, name string) (ir.Field, bool) {
+	for _, f := range m.AllOwnerFields() {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return ir.Field{}, false
+}
+
+// emitWriteComputedCalls fills the write Result's computed fields by calling the
+// SAME derivation the reads call, reading each source off the entity.
+func emitWriteComputedCalls(s *src, m *ir.Model, computed []ir.ComputedField, target, recv string) {
+	for _, c := range computed {
+		var args []string
+		for _, src := range c.Sources {
+			f, ok := entitySourceField(m, src)
+			if !ok {
+				continue
+			}
+			args = append(args, factArgValue(f, recv))
+		}
+		s.L("\t{")
+		s.L("\t\tv, err := appqueries.%s(ctx, %s)", computedFuncName(c), strings.Join(args, ", "))
+		s.L("\t\tif err != nil {")
+		s.L("\t\t\treturn %s, err", target)
+		s.L("\t\t}")
+		s.L("\t\t%s.%s = v", target, c.Name)
+		s.L("\t}")
+	}
 }
 
 // emitChildAdds routes each collection through the aggregate's own method

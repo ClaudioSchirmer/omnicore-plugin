@@ -314,6 +314,11 @@ func labelledFields(m *ir.Model) []ir.Field {
 	// defect the collections had: the export succeeds and the heading is an
 	// internal name.
 	add(computedLabels(m))
+	// The framework-stamped columns a read exposes. They are columns of the
+	// tabular export like any other and their headers resolve through the same
+	// key, so leaving them out heads a column with an internal name — the defect
+	// the computed fields above were added here to close.
+	add(m.Read.Managed)
 	return out
 }
 

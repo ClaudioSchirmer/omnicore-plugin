@@ -6,6 +6,7 @@ import (
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 // The read side, application half.
@@ -234,7 +235,8 @@ func emitFromQueryResult(s *src, m *ir.Model, query, result string) {
 	if computed {
 		s.L("func (q %s) FromQueryResult(ctx *configuration.AppContext, r %s) (%s, error) {",
 			query, result, result)
-		s.L("\treturn %s(ctx, r)", computeFuncName(result))
+		emitComputedCalls(s, m, "r", result == m.Read.ResultList && listShape(m).sparse)
+		s.L("\treturn r, nil")
 		s.L("}")
 		return
 	}
@@ -251,6 +253,13 @@ func emitResultStruct(s *src, m *ir.Model, name string, sh readShape) {
 	s.L("type %s struct {", name)
 	s.L("\tID %s", sh.idType())
 	for _, f := range m.AllOwnerFields() {
+		s.L("\t%s %s", f.Name, sh.resultType(f))
+	}
+	// The framework-stamped columns the read declared. They sit with the entity's
+	// own fields because that is what they are by the time a document is read —
+	// the schema resolves their logical names itself — and they are absent from
+	// every WRITE shape, where the entity carries no field to fill them from.
+	for _, f := range m.Read.Managed {
 		s.L("\t%s %s", f.Name, sh.resultType(f))
 	}
 	for _, c := range m.Read.Computed {
@@ -333,9 +342,15 @@ func computedHookFile(m *ir.Model) string {
 // instead of a name no column has, `?orderBy=<computed>` is a typed 400 on
 // every surface, and the tabular exports keep the column under its label.
 //
-// Two functions rather than one because the two reads have two shapes: the
-// listing's Result is sparse when it serves `?fields=`, the by-id read's is
-// not. Sharing one signature would mean lying about one of them.
+// ONE function per computed FIELD, taking the sources it declared. It used to be
+// one function per READ SHAPE, each handed a whole Result — which made the
+// author write the same derivation twice, once against plain values and once
+// against the listing's sparse pointers, and kept them in step by hand. The
+// shapes are the generator's problem: it unwraps what it has and calls this.
+//
+// The functions are EXPORTED because the write side calls them too: a POST that
+// returns the record renders the same derived field, and deriving it a second
+// time somewhere else is how two answers to one question start to differ.
 func emitComputedHook(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
 	s.Blank()
@@ -354,31 +369,32 @@ func emitComputedHook(m *ir.Model) (fsplan.File, error) {
 		"Until a body is written the field renders ABSENT, quietly. The framework "+
 			"cannot detect that: as far as it is concerned the derivation ran and "+
 			"produced nothing.")
-	for _, c := range m.Read.Computed {
-		s.L("//")
-		s.L("//\t%s (%s) ← %s", c.Name, c.GoType, strings.Join(c.Sources, ", "))
-		if c.Description != "" {
-			for _, line := range wrap(c.Description, 66) {
-				s.L("//\t    %s", line)
-			}
-		}
-	}
 
-	for _, pair := range readResultShapes(m) {
+	for _, c := range m.Read.Computed {
+		params := computedParams(m, c)
 		s.Blank()
-		s.Doc(fmt.Sprintf("%s fills the computed fields of %s.", computeFuncName(pair.result), pair.result),
-			"",
-			pair.note,
-			"",
-			"Return the Result with the derived fields set. An error here fails the "+
-				"whole read, so return one only when the derivation genuinely cannot "+
-				"produce a value — a missing source is absence, not a failure.")
-		s.L("func %s(ctx *configuration.AppContext, r %s) (%s, error) {",
-			computeFuncName(pair.result), pair.result, pair.result)
-		for _, c := range m.Read.Computed {
-			s.L("\t// TODO: r.%s = … (from %s)", c.Name, strings.Join(prefixed("r.", c.Sources), ", "))
+		doc := []string{
+			fmt.Sprintf("%s derives %s from %s.", computedFuncName(c), c.Name,
+				strings.Join(c.Sources, ", ")),
 		}
-		s.L("\treturn r, nil")
+		if c.Description != "" {
+			doc = append(doc, "", c.Description)
+		}
+		doc = append(doc,
+			"",
+			"A source declared NULLABLE arrives as a pointer, and nil is a value the "+
+				"derivation has to decide about; the rest arrive as values, and the caller "+
+				"has already established they were fetched.",
+			"",
+			"An error here fails the whole read, so return one only when the derivation "+
+				"genuinely cannot produce a value — a missing source is absence, not a "+
+				"failure.")
+		s.Doc(doc...)
+		s.L("func %s(ctx *configuration.AppContext, %s) (%s, error) {",
+			computedFuncName(c), strings.Join(params.decls, ", "), c.GoType)
+		s.L("\t// TODO: derive %s from %s.", c.Name, strings.Join(params.names, ", "))
+		s.L("\tvar %s %s", naming.Camel(c.Name), c.GoType)
+		s.L("\treturn %s, nil", naming.Camel(c.Name))
 		s.L("}")
 	}
 
@@ -390,6 +406,102 @@ func emitComputedHook(m *ir.Model) (fsplan.File, error) {
 	f.Consequence = "every computed read field renders absent until its derivation is written — " +
 		"quietly, because an empty derivation is indistinguishable from one that had nothing to say"
 	return f, nil
+}
+
+// computedParams renders one derivation's parameter list: the sources it
+// declared, under camelCase names, typed as the source itself is.
+type computedParamSet struct {
+	decls []string // "chaveRecurso string"
+	names []string // "chaveRecurso"
+	src   []ir.Field
+}
+
+func computedParams(m *ir.Model, c ir.ComputedField) computedParamSet {
+	var out computedParamSet
+	for _, name := range c.Sources {
+		f, ok := readSourceField(m, name)
+		if !ok {
+			continue
+		}
+		param := naming.Camel(name)
+		out.decls = append(out.decls, param+" "+f.GoType)
+		out.names = append(out.names, param)
+		out.src = append(out.src, f)
+	}
+	return out
+}
+
+// readSourceField resolves the field a computed derivation reads. It is not
+// m.Fields alone: a framework-stamped column the read exposes is a legitimate
+// source, and it lives on the read model instead.
+func readSourceField(m *ir.Model, name string) (ir.Field, bool) {
+	for _, f := range m.AllOwnerFields() {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	for _, f := range m.Read.Managed {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return ir.Field{}, false
+}
+
+func computedFuncName(c ir.ComputedField) string { return "Compute" + c.Name }
+
+// ComputedSignature renders one derivation's Go signature, for the report to ask
+// the implementer for. It is derived from the same place the file is written, so
+// the two cannot describe different functions.
+func ComputedSignature(m *ir.Model, c ir.ComputedField) string {
+	p := computedParams(m, c)
+	return fmt.Sprintf("func %s(ctx *configuration.AppContext, %s) (%s, error)",
+		computedFuncName(c), strings.Join(p.decls, ", "), c.GoType)
+}
+
+// emitComputedCalls writes the derivations for one Result shape: unwrap what
+// this shape holds, call the derivation, assign what it returned.
+//
+// sparse says every field of the Result is a pointer because the read serves
+// `?fields=`. There a source that was not selected is nil, and the derivation
+// does not run at all — the field stays absent, which is what the caller asked
+// for by not selecting the source.
+func emitComputedCalls(s *src, m *ir.Model, recv string, sparse bool) {
+	for _, c := range m.Read.Computed {
+		p := computedParams(m, c)
+		var args, guards []string
+		for i, f := range p.src {
+			ref := recv + "." + f.Name
+			switch {
+			case !sparse || f.Nullable:
+				// Either the shape holds values, or the source is a pointer on both
+				// sides; nothing to unwrap in either case.
+				args = append(args, ref)
+			default:
+				guards = append(guards, ref+" != nil")
+				args = append(args, "*"+ref)
+			}
+			_ = i
+		}
+		indent := "\t"
+		if len(guards) > 0 {
+			s.L("\tif %s {", strings.Join(guards, " && "))
+			indent = "\t\t"
+		} else {
+			s.L("\t{")
+			indent = "\t\t"
+		}
+		s.L("%sv, err := %s(ctx, %s)", indent, computedFuncName(c), strings.Join(args, ", "))
+		s.L("%sif err != nil {", indent)
+		s.L("%s\treturn %s, err", indent, recv)
+		s.L("%s}", indent)
+		if sparse {
+			s.L("%s%s.%s = &v", indent, recv, c.Name)
+		} else {
+			s.L("%s%s.%s = v", indent, recv, c.Name)
+		}
+		s.L("\t}")
+	}
 }
 
 // resultShape pairs a Result type with the sentence that tells the author what
@@ -430,6 +542,9 @@ func prefixed(p string, names []string) []string {
 func resultTypeNames(m *ir.Model, sh readShape) []string {
 	out := []string{sh.idType()}
 	for _, f := range m.AllOwnerFields() {
+		out = append(out, sh.resultType(f))
+	}
+	for _, f := range m.Read.Managed {
 		out = append(out, sh.resultType(f))
 	}
 	for _, c := range m.Read.Computed {
@@ -678,4 +793,67 @@ func emitFromQueryResultTest(s *src, m *ir.Model) {
 	}
 	s.L("}")
 	s.Blank()
+
+	emitDerivationRunsTest(s, m)
+}
+
+// emitDerivationRunsTest is the other half of the seat's coverage: the empty
+// Result above proves the derivation SURVIVES nothing, and this proves it RUNS.
+//
+// The two are different code paths, not two spellings of one. The generator
+// guards each source the listing may not have selected, so an empty Result
+// exercises only the branch where the derivation is skipped — the unwrapping,
+// the call and the assignment would go untested, on the one seat whose body is
+// written by hand.
+func emitDerivationRunsTest(s *src, m *ir.Model) {
+	if len(m.Read.Computed) == 0 {
+		return
+	}
+	s.Doc(
+		"The derivations RUN when the sources they declared are there.",
+		"",
+		"The bodies are hand-written and may legitimately return nothing yet; what is "+
+			"under test is the seat around them — that the generated unwrapping, the call "+
+			"and the assignment hold together for a Result that carries every source.")
+	s.L("func Test%sDerivationsRun(t *testing.T) {", m.Entity.Pascal)
+	s.L("\tctx := &configuration.AppContext{}")
+	if m.Read.ByID {
+		emitFilledResultCase(s, m, m.Read.QueryByID, m.Read.ResultByID, readShape{}, "by-id")
+	}
+	if m.Read.ByParams {
+		emitFilledResultCase(s, m, m.Read.QueryList, m.Read.ResultList, listShape(m), "listing")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitFilledResultCase builds one Result with every declared source present and
+// drives the seat with it. A pointer field needs an addressable value, so those
+// sources land in a local first.
+func emitFilledResultCase(s *src, m *ir.Model, query, result string, sh readShape, label string) {
+	seen := map[string]bool{}
+	var assigns []string
+	s.L("\t{")
+	for _, c := range m.Read.Computed {
+		for _, name := range c.Sources {
+			f, ok := readSourceField(m, name)
+			if !ok || seen[name] {
+				continue
+			}
+			seen[name] = true
+			lit := literalFor(f)
+			if sh.sparse || f.Nullable {
+				local := naming.Camel(name)
+				s.L("\t\t%s := %s(%s)", local, f.BaseGoType, lit)
+				assigns = append(assigns, fmt.Sprintf("%s: &%s", name, local))
+				continue
+			}
+			assigns = append(assigns, fmt.Sprintf("%s: %s", name, lit))
+		}
+	}
+	s.L("\t\tr := %s{%s}", result, strings.Join(assigns, ", "))
+	s.L("\t\tif _, err := (%s{}).FromQueryResult(ctx, r); err != nil {", query)
+	s.L("\t\t\tt.Errorf(%s, err)", quote("the "+label+" derivation failed on a filled result: %v"))
+	s.L("\t\t}")
+	s.L("\t}")
 }

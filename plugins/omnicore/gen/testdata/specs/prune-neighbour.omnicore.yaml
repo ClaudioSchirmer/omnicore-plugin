@@ -29,6 +29,7 @@ read:
   byId: true
   byParams:
     filters: [{field: Name, ops: [eq, contains]}]
+    sort: [Name]
     controls: {pagination: true, orderBy: true}
 surfaces: {rest: true}
 authz:

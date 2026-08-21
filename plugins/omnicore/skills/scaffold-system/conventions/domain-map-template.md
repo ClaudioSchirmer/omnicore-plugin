@@ -11,8 +11,8 @@ a table — those belong to the delegated per-entity specs. Approval flips `Stat
 
 # Domain map — <system name>
 
-Status: DRAFT
-Framework pin: <from `go.mod` — informative only; docs of that pin are the authority>
+- **Status:** DRAFT
+- **Framework pin:** <from `go.mod` — informative only; docs of that pin are the authority>
 
 ## §0 Source request (verbatim)
 

@@ -624,6 +624,17 @@ read:
   #
   # It is therefore neither filterable nor sortable, and declaring it under
   # byParams.filters is refused for the same reason.
+  # The framework's OWN stamps on the read side. They are declared under
+  # storage.managed and belong to no fields[] entry — the aggregate carries no Go
+  # field for them — so the read side names them here, by the fixed logical names
+  # the framework resolves: CreatedAt, UpdatedAt, DeletedAt. Listing one projects
+  # it into the view, returns it from the by-id read and every listing row, keeps
+  # it in the CSV/XLSX export, and makes it filterable like any other field.
+  #
+  # It is DECLARED rather than automatic because it changes the view's SHAPE:
+  # adding one to a view that already exists needs read.view.version bumped in
+  # the same edit, or the framework refuses to boot against the older projection.
+  managed: [CreatedAt, UpdatedAt]
   computed:
     - name: EnrollmentLabel
       type: string
@@ -648,9 +659,25 @@ read:
         ops: [eq, gte, lte]
       - field: EnrolledAt
         ops: [gte, lte]
+      # A framework-stamped column filters like any other, once read.managed
+      # exposes it: "created between these dates" needs no field of its own.
+      - field: CreatedAt
+        ops: [gte, lte]
       # A part filters like any other field, under the name `as:` exposed it by.
       - field: TuitionAmount
         ops: [eq, gte, lte]
+    # The ordering VOCABULARY: which paths ?orderBy= accepts. It travels with
+    # controls.orderBy below and neither half is legal alone — the control is the
+    # SWITCH that decides whether the endpoint takes the parameter at all, this
+    # decides which paths it admits, and the framework fails the boot on either
+    # by itself. Nothing is orderable until it is named here: an unindexed sort
+    # is a blocking sort whose cost grows with the matching set, so "every field
+    # the response renders" was the wrong default.
+    #
+    # A path does NOT need a filter of its own. UpdatedAt below is filtered by
+    # nobody and orderable by everybody, which emits a leaf that carries no value
+    # on the wire and no query parameter of its own.
+    sort: [Name, EnrollmentNumber, EnrolledAt, UpdatedAt]
     controls:
       pagination: true
       orderBy: true

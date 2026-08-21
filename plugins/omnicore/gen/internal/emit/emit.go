@@ -532,6 +532,13 @@ func ViewShape(m *ir.Model) string {
 	for _, f := range m.AllOwnerFields() {
 		fmt.Fprintf(&b, "%s:%s\n", f.Name, f.GoType)
 	}
+	// A framework-stamped column the read exposes is part of the projected shape
+	// like any other field: adding one to an existing view is exactly the change
+	// this hash exists to catch, and the framework refuses to boot against a
+	// projection built before it.
+	for _, f := range m.Read.Managed {
+		fmt.Fprintf(&b, "%s:%s\n", f.Name, f.GoType)
+	}
 	for _, c := range m.Children {
 		fmt.Fprintf(&b, "%s[\n", c.GoPlural)
 		for _, f := range c.Fields {

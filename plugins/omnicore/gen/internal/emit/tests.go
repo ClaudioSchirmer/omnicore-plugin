@@ -358,8 +358,15 @@ func emitRuleCase(s *src, m *ir.Model, gate string, rule ir.Rule, seen map[strin
 				"value, and on an insert there is no previous value to read.")
 		s.L("func Test%s_%s_IsImmutable(t *testing.T) {", m.Entity.Pascal, f.Name)
 		s.L("\te := valid%s()", m.Entity.Pascal)
+		// A composite is assigned as a whole — the entity carries the concept,
+		// not the columns — so the alternate is a value object literal rather
+		// than a scalar. Without this the test assigned 99 to a struct.
+		alt := alternateValue(f)
+		if g := compositeGroupNamed(m, f.Name); g != nil {
+			alt = compositeAlternate(*g)
+		}
 		s.L("\t_, err := domain.GetUpdatable(e, func(x *%s) error {", m.Entity.Pascal)
-		s.L("\t\tx.%s = %s", f.Name, alternateValue(f))
+		s.L("\t\tx.%s = %s", f.Name, alt)
 		s.L("\t\treturn nil")
 		s.L("\t}, %s, %s)", serviceArg(m), quote("GetUpdatable"))
 		s.L("\tif err == nil {")

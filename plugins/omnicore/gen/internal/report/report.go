@@ -294,20 +294,32 @@ func renderTodo(b *strings.Builder, in Input) {
 		// blank on every surface at once.
 		if createdThisRun(in.Decisions, path) {
 			b.WriteString("The spec declared these read fields as DERIVED — no column holds " +
-				"them, so the framework fetches their sources and hands the filled Result to " +
-				"you. The file was just created, with a stub per read shape; the bodies are " +
-				"yours, and regeneration will never touch them.\n\n")
+				"them, so the framework fetches their sources and hands them to you. The file " +
+				"was just created, with one stub per FIELD taking the sources it declared; the " +
+				"bodies are yours, and regeneration will never touch them.\n\n")
 		} else {
 			b.WriteString("This file already exists and is YOURS — the generator did not open " +
 				"it and cannot tell whether these are filled. It lists them so you can check " +
 				"the file still covers what the spec declares, which is where a field added " +
 				"to the spec later goes unnoticed.\n\n")
+			// The shape changed once, and a file written before that change no
+			// longer satisfies the call sites. The compiler says so — loudly, at
+			// the exact line — but it names a symbol and not a decision, so the
+			// report says what the decision was and what the fix looks like.
+			b.WriteString("**If this file predates the one-function-per-field shape, the build " +
+				"will not find these.** The derivations used to be one function per READ SHAPE, " +
+				"each handed a whole Result, which meant writing the same derivation twice and " +
+				"keeping the two in step by hand. Each is now one exported function taking the " +
+				"sources it declared — the generator unwraps whatever the shape holds and calls " +
+				"it, and the WRITE responses call the same one. Move each body into the " +
+				"signature below and delete the old per-shape functions.\n\n")
 		}
 		for _, c := range m.Read.Computed {
 			fmt.Fprintf(b, "**`%s` (%s)** ← `%s`\n\n", c.Name, c.GoType, strings.Join(c.Sources, "`, `"))
 			if c.Description != "" {
 				fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(c.Description, "\n", " "))
 			}
+			fmt.Fprintf(b, "```go\n%s\n```\n\n", emit.ComputedSignature(m, c))
 		}
 		b.WriteString("**Until a body is written the field renders absent, and nothing says so** " +
 			"— unlike a manual fact, which panics. The read answers 200, the other columns are " +

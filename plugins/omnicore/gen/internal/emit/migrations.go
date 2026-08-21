@@ -514,15 +514,19 @@ func upSQL(m *ir.Model, d dialect) string {
 		}
 		b.WriteString("\n")
 		fmt.Fprintf(&b, "%s the repository binds this constraint's violation to a clean 409.\n", d.Comment)
+		if len(c.Columns) > 1 {
+			fmt.Fprintf(&b, "%s Over the TUPLE: this constraint belongs to a composite value object,\n", d.Comment)
+			fmt.Fprintf(&b, "%s whose parts identify together and mean nothing apart.\n", d.Comment)
+		}
 		if c.Scope == "active-only" && m.Managed.ArchivedAt != "" {
 			fmt.Fprintf(&b, "%s Scoped to the ACTIVE rows: an archived row releases the value, so it\n", d.Comment)
 			fmt.Fprintf(&b, "%s can be taken again while the old row stays as history.\n", d.Comment)
-			writeActiveOnlyUnique(&b, c.Table, uniqueName(c), c.Columns[0],
-				constraintColumnType(m, c, d), m.Managed.ArchivedAt, d)
+			writeActiveOnlyUnique(&b, c.Table, uniqueName(c), c.Columns,
+				constraintColumnTypes(m, c, d), m.Managed.ArchivedAt, d)
 			continue
 		}
 		fmt.Fprintf(&b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",
-			d.Quote(uniqueName(c)), d.Quote(c.Table), d.Quote(c.Columns[0]))
+			d.Quote(uniqueName(c)), d.Quote(c.Table), quoteAll(c.Columns, d))
 	}
 	return b.String()
 }
@@ -822,20 +826,38 @@ func writeRoleUniqueness(b *strings.Builder, m *ir.Model, d dialect) {
 
 	fmt.Fprintf(b, "%s one ACTIVE role row per identity. Archived rows are excluded, so the\n", d.Comment)
 	fmt.Fprintf(b, "%s identity can hold this role again later while the old rows stay as history.\n", d.Comment)
-	writeActiveOnlyUnique(b, m.Table, name, col, d.ID, m.Managed.ArchivedAt, d)
+	writeActiveOnlyUnique(b, m.Table, name, []string{col}, []string{d.ID}, m.Managed.ArchivedAt, d)
 }
 
 // constraintColumnType answers the engine type of the column a unique
 // constraint covers, so MySQL's generated shadow column can mirror it exactly.
-func constraintColumnType(m *ir.Model, c ir.Constraint, d dialect) string {
+func constraintColumnTypes(m *ir.Model, c ir.Constraint, d dialect) []string {
+	out := make([]string, 0, len(c.Columns))
+	for _, col := range c.Columns {
+		out = append(out, constraintColumnType(m, col, d))
+	}
+	return out
+}
+
+func constraintColumnType(m *ir.Model, column string, d dialect) string {
 	for _, f := range m.Fields {
-		if f.Column == c.Columns[0] {
+		if f.Column == column {
 			return d.Column(f)
 		}
 	}
 	// The constraint was resolved from m.Fields, so this is unreachable — but
 	// an id-typed fallback beats a panic inside a migration writer.
 	return d.ID
+}
+
+// quoteAll renders a column list for an index, each name quoted in the engine's
+// own way. One column reads exactly as it did before this was a list.
+func quoteAll(cols []string, d dialect) string {
+	out := make([]string, 0, len(cols))
+	for _, c := range cols {
+		out = append(out, d.Quote(c))
+	}
+	return strings.Join(out, ", ")
 }
 
 // writeActiveOnlyUnique spells "unique among the rows that are not archived" in
@@ -846,24 +868,36 @@ func constraintColumnType(m *ir.Model, c ir.Constraint, d dialect) string {
 // row keeps blocking the value forever) or absent. So the four live together,
 // where they can be compared.
 //
-// colType is the SQL type of the constrained column ON THIS ENGINE. Only MySQL
-// reads it — its spelling materialises the condition as a generated column, and
-// that column must carry the value's own type. It used to be hard-wired to the
-// id type, which applied cleanly and then rejected any active VARCHAR value
-// longer than 16 bytes at INSERT.
-func writeActiveOnlyUnique(b *strings.Builder, table, name, col, colType, archived string, d dialect) {
+// colTypes are the SQL types of the constrained columns ON THIS ENGINE, in the
+// same order. Only MySQL reads them — its spelling materialises the condition as
+// generated columns, and each must carry its own value's type. It used to be
+// hard-wired to the id type, which applied cleanly and then rejected any active
+// VARCHAR value longer than 16 bytes at INSERT.
+//
+// The list is a list because a composite value object is unique as a TUPLE. Two
+// of the four spellings do not generalise for free: MySQL needs one generated
+// column PER part (their types differ, so one concatenated column would be a
+// different constraint), and Oracle needs one CASE per part — it omits an index
+// entry only when every indexed expression is NULL, which is exactly what an
+// archived row produces.
+func writeActiveOnlyUnique(b *strings.Builder, table, name string, cols, colTypes []string, archived string, d dialect) {
 	switch d.Name {
 	case "postgres", "sqlite", "sqlserver":
 		fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (%s) WHERE %s IS NULL;\n",
-			d.Quote(name), d.Quote(table), d.Quote(col), d.Quote(archived))
+			d.Quote(name), d.Quote(table), quoteAll(cols, d), d.Quote(archived))
 	case "oracle":
 		// Oracle has no partial index, but it does ignore all-NULL entries: a
 		// function-based index that yields NULL for an archived row leaves those
 		// rows out of the constraint entirely.
 		fmt.Fprintf(b, "%s Oracle has no partial index; an all-NULL entry is simply not indexed,\n", d.Comment)
 		fmt.Fprintf(b, "%s so the expression yields NULL for archived rows and they drop out.\n", d.Comment)
-		fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (CASE WHEN %s IS NULL THEN %s END);\n",
-			d.Quote(name), d.Quote(table), d.Quote(archived), d.Quote(col))
+		exprs := make([]string, 0, len(cols))
+		for _, col := range cols {
+			exprs = append(exprs, fmt.Sprintf("CASE WHEN %s IS NULL THEN %s END",
+				d.Quote(archived), d.Quote(col)))
+		}
+		fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",
+			d.Quote(name), d.Quote(table), strings.Join(exprs, ", "))
 	case "mysql":
 		// MySQL has neither partial nor function-based indexes here, so the
 		// condition is materialised as a generated column: it equals the value
@@ -872,10 +906,15 @@ func writeActiveOnlyUnique(b *strings.Builder, table, name, col, colType, archiv
 		fmt.Fprintf(b, "%s MySQL has no partial index, so the condition becomes a column: it\n", d.Comment)
 		fmt.Fprintf(b, "%s mirrors the value while active and turns NULL once archived, and NULLs\n", d.Comment)
 		fmt.Fprintf(b, "%s do not collide with each other.\n", d.Comment)
-		fmt.Fprintf(b, "ALTER TABLE %s ADD COLUMN %s %s GENERATED ALWAYS AS (CASE WHEN %s IS NULL THEN %s END) STORED;\n",
-			d.Quote(table), d.Quote("active_"+col), colType, d.Quote(archived), d.Quote(col))
+		mirrors := make([]string, 0, len(cols))
+		for i, col := range cols {
+			mirror := "active_" + col
+			mirrors = append(mirrors, mirror)
+			fmt.Fprintf(b, "ALTER TABLE %s ADD COLUMN %s %s GENERATED ALWAYS AS (CASE WHEN %s IS NULL THEN %s END) STORED;\n",
+				d.Quote(table), d.Quote(mirror), colTypes[i], d.Quote(archived), d.Quote(col))
+		}
 		fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",
-			d.Quote(name), d.Quote(table), d.Quote("active_"+col))
+			d.Quote(name), d.Quote(table), quoteAll(mirrors, d))
 	}
 }
 

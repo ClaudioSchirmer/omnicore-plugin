@@ -837,6 +837,19 @@ type Read struct {
 	// View names, versions and bounds the read view — on a mongo backing, the
 	// projection's collection.
 	View View `yaml:"view"`
+	// Managed exposes the framework-stamped columns on the READ side, by their
+	// fixed logical names: CreatedAt, UpdatedAt, DeletedAt. Each one listed is
+	// projected into the view, returned by the by-id read and by every listing
+	// row, carried into the CSV/XLSX export, and may be named under
+	// byParams.filters like any other field — "created between these dates" is a
+	// question every listing eventually gets asked.
+	//
+	// It is DECLARED rather than automatic for the same reason a control is: a
+	// field that appears in the reads without anyone asking changes the view's
+	// shape, and the framework refuses to boot against a projection built to an
+	// older one. Listing a column the storage does not declare is refused; the
+	// stamped values themselves are the framework's business either way.
+	Managed []string `yaml:"managed"`
 	// Indexes are the indexes declared on the view's projected documents (mongo
 	// backing only); controls.search requires a text index among them.
 	Indexes []Index `yaml:"indexes"`
@@ -942,8 +955,24 @@ type ByParams struct {
 	// Filters declares each field the listing is filterable by, with its
 	// allowed operators.
 	Filters []Filter `yaml:"filters"`
-	// Sort would declare a sort allowlist. Refused by this build —
-	// controls.orderBy decides whether ?orderBy= is served at all.
+	// Sort is the ordering VOCABULARY: the paths `?orderBy=` accepts. Nothing is
+	// orderable until it is listed here — an unindexed sort is a blocking sort
+	// whose cost grows with the matching set, so "every field the response
+	// happens to render" is the wrong default and is no longer what the framework
+	// does.
+	//
+	// It travels with controls.orderBy, and neither half is legal alone: the
+	// control is the SWITCH that decides whether the endpoint takes the parameter
+	// at all, this is WHICH paths it admits. A switch with no vocabulary would
+	// accept `?orderBy=` and refuse every token it could be given; a vocabulary
+	// with no switch tags paths that reach no wire. The framework fails the boot
+	// on either, so both are refused here, where the spec can still say which
+	// half is missing.
+	//
+	// A path may be any stored field the listing can resolve — a filter of its
+	// own is not required, and one that is not filtered becomes a leaf that is
+	// orderable and carries no value on the wire. A computed field is refused:
+	// ordering happens in the store and there is no column to order by.
 	Sort []string `yaml:"sort"`
 	// Controls turns on the framework's reserved query controls (pagination,
 	// orderBy, fields, search, onlyTotal, includeArchived).

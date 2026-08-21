@@ -470,9 +470,7 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 	if engine := ReservedWord(f.Column); engine != "" {
 		ps.BlockerFix(where,
 			fmt.Sprintf("the column name %q is a reserved word (%s)", f.Column, engine),
-			"identifiers are emitted unquoted in places the generator does not control, "+
-				"so this would apply on some engines and be rejected on others; rename the "+
-				"column (a column cannot be renamed once it holds data)")
+			reservedWordFix)
 	}
 	// The underscore namespace is reserved by the framework; a column starting
 	// with it fails at boot.
@@ -581,13 +579,23 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild bool
 		// enforce string validated, the report repeated it, and the generated
 		// service quietly had constraint-only behaviour.
 		if f.Unique.Enforce == "service-precheck+constraint" && !hasExistsFactFor(s, f.Name) {
+			// A composite is unique as a tuple, so the fact the message asks for
+			// filters by its PARTS: naming the composite there is refused, and a
+			// fix that cannot be pasted is worse than none.
+			filters := f.Name
+			if IsComposite(f) {
+				names := make([]string, 0, len(f.Parts))
+				for _, p := range f.Parts {
+					names = append(names, ExposedName(p))
+				}
+				filters = strings.Join(names, ", ")
+			}
 			ps.BlockerFix(where+".unique.enforce",
 				fmt.Sprintf("the precheck needs a domain service with an exists fact "+
 					"filtered by %s, and this spec has none — only the constraint would "+
-					"be generated", f.Name),
-				fmt.Sprintf("declare service with a fact {kind: exists, field: %s, "+
-					"filters: [%s], excludeSelf: true}, or use enforce: constraint-only",
-					f.Name, f.Name))
+					"be generated", filters),
+				fmt.Sprintf("declare service with a fact {kind: exists, filters: [%s], "+
+					"excludeSelf: true}, or use enforce: constraint-only", filters))
 		}
 		if f.Unique.Scope != "" && !UniqueScopes.Has(f.Unique.Scope) {
 			ps.BlockerFix(where+".unique.scope",
@@ -2332,6 +2340,35 @@ func validateRead(s *Spec, ps *Problems) {
 		validateByParams(s, r, ps)
 	}
 
+	seenManaged := map[string]bool{}
+	for i, n := range r.Managed {
+		where := fmt.Sprintf("read.managed[%d]", i)
+		if !ManagedReads.Has(n) {
+			ps.BlockerFix(where,
+				fmt.Sprintf("%q is not a framework-stamped column", n),
+				"one of: "+ManagedReads.String()+" — an entity's own column is declared "+
+					"under fields[] and read like any other")
+			continue
+		}
+		if seenManaged[n] {
+			ps.Blockerf(where, "%q is listed twice", n)
+			continue
+		}
+		seenManaged[n] = true
+		// The logical name resolves to a column the storage declares, and only
+		// then. Listing one the table does not have would project a field the
+		// framework answers nothing for, on every row.
+		if ManagedColumn(s, n) == "" {
+			key := "storage.managed." + strings.ToLower(n[:1]) + n[1:]
+			if n == "DeletedAt" {
+				key = "storage.managed.archivedAt"
+			}
+			ps.BlockerFix(where,
+				fmt.Sprintf("%s is exposed on the reads and this entity declares no such column", n),
+				"declare "+key+", or drop it here")
+		}
+	}
+
 	for i, fr := range r.FieldRestrict {
 		where := fmt.Sprintf("read.fieldRestrict[%d]", i)
 		if !readableField(s, fr.Field) {
@@ -2445,8 +2482,9 @@ func validateComputed(s *Spec, r Read, ps *Problems) {
 		for _, sf := range bp.Sort {
 			if seen[sf] {
 				ps.BlockerFix("read.byParams.sort",
-					fmt.Sprintf("%q is computed — ordering happens in the store and the "+
-						"keyset cursor is built from stored values", sf),
+					fmt.Sprintf("%q is computed, so it backs no column to order by — "+
+						"ordering happens in the store and the keyset cursor is built from "+
+						"stored values", sf),
 					"sort on the stored fields it is derived from")
 			}
 		}
@@ -2527,10 +2565,49 @@ func validateByParams(s *Spec, r Read, ps *Problems) {
 			checkOpAgainstType(*fld, op, where, ps)
 		}
 	}
+	// The two halves of the ordering contract travel together, and the framework
+	// fails the BOOT on either alone. Refusing them here is the same verdict
+	// reached where the spec can still name which half is missing — and where the
+	// author has not yet built a service that panics on start.
+	switch {
+	case bp.Controls.OrderBy && len(bp.Sort) == 0:
+		ps.BlockerFix("read.byParams.sort",
+			"controls.orderBy is the SWITCH for ?orderBy= and nothing declares the "+
+				"vocabulary it switches on — the endpoint would accept the parameter and "+
+				"then refuse every token it could be given",
+			"list the orderable paths under sort: — nothing is orderable until it is "+
+				"named, because an unindexed sort is a blocking sort whose cost grows with "+
+				"the matching set")
+	case !bp.Controls.OrderBy && len(bp.Sort) > 0:
+		ps.BlockerFix("read.byParams.controls.orderBy",
+			fmt.Sprintf("sort declares %s orderable and this listing does not serve "+
+				"?orderBy=, so the vocabulary reaches no wire", strings.Join(bp.Sort, ", ")),
+			"set controls.orderBy: true, or drop sort")
+	}
+	seenSort := map[string]bool{}
 	for _, sf := range bp.Sort {
-		if !readableField(s, sf) {
-			reportUnreadable(s, sf, "read.byParams.sort", ps)
+		if seenSort[sf] {
+			ps.BlockerFix("read.byParams.sort",
+				fmt.Sprintf("%q is listed twice", sf),
+				"a repeated path is not a harmless duplicate: the terms become the "+
+					"reader's sort document, where a duplicated key is malformed")
+			continue
 		}
+		seenSort[sf] = true
+		// Ordering happens in the STORE, so the path needs a column there — the
+		// same requirement a filter has, and the same set it draws from.
+		if filterableField(s, sf) != nil {
+			continue
+		}
+		if readableField(s, sf) {
+			ps.BlockerFix("read.byParams.sort",
+				fmt.Sprintf("%q is readable but has no column this listing can order by", sf),
+				"order by a field of the entity's own row (its facets and the "+
+					"framework-stamped columns under read.managed included) — a "+
+					"collection's field has no single value per row to sort on")
+			continue
+		}
+		reportUnreadable(s, sf, "read.byParams.sort", ps)
 	}
 	for _, sf := range bp.Controls.Search {
 		if !readableField(s, sf) {
@@ -2823,6 +2900,18 @@ func findAnyField(s *Spec, name string) *Field {
 // table gets. Every table a spec declares must come through here — the base,
 // child and sibling tables used to skip it, which is precisely where a
 // reserved name fails on SOME engines and passes on others.
+// reservedWordFix is one sentence, in one place, because the refusal is the one
+// an author is most likely to read as overreach: the word is reserved on an
+// engine this project does not target, and renaming a column reads as busywork.
+//
+// It is not. The list is the UNION across the five engines on purpose, and the
+// reason is that the decision is not reversible on the same terms: adding an
+// engine later is a config change, while renaming a column that already holds
+// data is a migration, a deploy and a window where the two names disagree.
+const reservedWordFix = "rename it — the reserved list is the UNION across the five " +
+	"engines, not the ones this project targets today, because adding an engine later " +
+	"is a config change while renaming a column that already holds data is not"
+
 func checkTableName(name, where string, ps *Problems) {
 	if name == "" {
 		return // required-ness is the caller's message; this checks the value
@@ -2830,7 +2919,7 @@ func checkTableName(name, where string, ps *Problems) {
 	if engine := ReservedWord(name); engine != "" {
 		ps.BlockerFix(where,
 			fmt.Sprintf("the table name %q is a reserved word (%s)", name, engine),
-			"rename it — it would apply on some engines and be rejected on others")
+			reservedWordFix)
 	} else if !columnRe.MatchString(name) {
 		ps.BlockerFix(where,
 			fmt.Sprintf("%q is not a usable table name", name),
@@ -2846,7 +2935,7 @@ func checkColumnName(name, where string, ps *Problems) {
 	if engine := ReservedWord(name); engine != "" {
 		ps.BlockerFix(where,
 			fmt.Sprintf("the column name %q is a reserved word (%s)", name, engine),
-			"rename it — it would apply on some engines and be rejected on others")
+			reservedWordFix)
 	} else if !columnRe.MatchString(name) {
 		ps.BlockerFix(where,
 			fmt.Sprintf("%q is not a usable column name", name),
@@ -2883,6 +2972,14 @@ func checkFieldDups(fields []Field, where string, ps *Problems) {
 // a collection. Validation and lowering disagreeing here is exactly how a
 // blessed filter used to vanish from the generated request type.
 func filterableField(s *Spec, name string) *Field {
+	// A framework-stamped column the read exposes is filterable for the same
+	// reason it is projectable: it lives on the ROOT's table and the schema
+	// resolves its logical name itself. It is not in s.Fields — nothing declares
+	// it there — so it is answered before the declared set is walked.
+	if managedRead(s, name) {
+		return &Field{Name: name, Type: "time", Column: ManagedColumn(s, name),
+			Nullable: name == "DeletedAt", LivesOn: "root"}
+	}
 	if f := findLogicalField(s.Fields, s, name); f != nil {
 		return f
 	}
@@ -2934,8 +3031,30 @@ func hasExistsFactFor(s *Spec, field string) bool {
 	if s.Service == nil {
 		return false
 	}
+	// A COMPOSITE is unique as a tuple, so the precheck that answers for it is
+	// the fact filtered by every one of its parts — the composite's own name
+	// names no column and cannot appear in a fact at all. Anything less than the
+	// full set answers a different question ("is this resource taken?" instead of
+	// "is this resource:action taken?") and would refuse writes the model allows.
+	want := []string{field}
+	if owner := compositePartOwner(s.Fields, field); owner != nil && owner.Name == field {
+		want = want[:0]
+		for _, p := range owner.Parts {
+			want = append(want, ExposedName(p))
+		}
+	}
 	for _, fa := range s.Service.Facts {
-		if fa.Kind == "exists" && contains(fa.Filters, field) {
+		if fa.Kind != "exists" {
+			continue
+		}
+		all := true
+		for _, w := range want {
+			if !contains(fa.Filters, w) {
+				all = false
+				break
+			}
+		}
+		if all {
 			return true
 		}
 	}
@@ -2952,7 +3071,36 @@ func sortedTransitionKeys(m map[string][]string) []string {
 	return out
 }
 
+// managedRead reports whether the read side declared this framework-stamped
+// column. It is the gate for everything else: a name not listed under
+// read.managed is not readable, not filterable and not exportable, exactly as if
+// the column did not exist.
+func managedRead(s *Spec, name string) bool {
+	for _, n := range s.Read.Managed {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ManagedColumn answers the physical column behind a managed logical name.
+func ManagedColumn(s *Spec, name string) string {
+	switch name {
+	case "CreatedAt":
+		return s.Storage.Managed.CreatedAt
+	case "UpdatedAt":
+		return s.Storage.Managed.UpdatedAt
+	case "DeletedAt":
+		return s.Storage.Managed.ArchivedAt
+	}
+	return ""
+}
+
 func readableField(s *Spec, name string) bool {
+	if managedRead(s, name) {
+		return true
+	}
 	// The LOGICAL set, not the declared one: a composite's parts are what the
 	// read side can name, and the composite itself is not — it has no single
 	// value to project, sort or restrict.

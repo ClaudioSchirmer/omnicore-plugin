@@ -152,6 +152,8 @@ read:
       - {field: ValorQuantia, ops: [eq, gte, lte]}
       - {field: ValorMoeda, ops: [eq, in]}
       - {field: VigenciaDe, ops: [gte, lte]}
+    # Uma PARTE de composto ordena como qualquer campo, pelo nome exposto.
+    sort: [Codigo, ValorQuantia, VigenciaDe]
     controls: {pagination: true, orderBy: true, fields: true, onlyTotal: true, includeArchived: true}
 surfaces:
   rest: true

@@ -494,6 +494,11 @@ read:
       - {field: Name, ops: [eq, contains, icontains]}
       - {field: RegistrationNumber, ops: [eq]}
       - {field: Status, ops: [eq, in]}
+    # The ordering vocabulary, which travels with controls.orderBy below: the
+    # control is the SWITCH, this is WHICH paths ?orderBy= admits. Neither half
+    # is legal alone — the framework fails the boot on a switch with nothing to
+    # switch on, and on tags that reach no wire.
+    sort: [Name, RegistrationNumber]
     controls:
       pagination: true
       orderBy: true

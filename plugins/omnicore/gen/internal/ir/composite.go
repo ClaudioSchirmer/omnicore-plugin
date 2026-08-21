@@ -210,6 +210,11 @@ func expandComposite(s *spec.Spec, entity string, f spec.Field) []Field {
 			// leaves the responses whole or not at all. Declaring it per part
 			// would expose half a value and call it the value.
 			Hidden: f.Hidden,
+			// Uniqueness is the owner's too, and it lands on the FIRST part alone
+			// so the constraint is built once, over the whole run, rather than
+			// once per column. A value object is unique as a tuple: a constraint
+			// on one part would refuse rows the domain accepts.
+			Unique: uniqueOfOwner(f, i == 0),
 			Composite: &CompositePart{
 				VOName: voName, VOType: "vos." + voName,
 				Owner: f.Name, OwnerNullable: f.Nullable,
@@ -304,4 +309,19 @@ func (m *Model) UsesComposites() bool {
 		}
 	}
 	return false
+}
+
+// uniqueOfOwner carries a composite field's uniqueness onto the head of its run
+// of parts, and onto nothing else. The constraint spans every part column, so
+// exactly one part must claim it — attaching it to each would emit one
+// single-column constraint per part, which is the opposite of what the key says.
+func uniqueOfOwner(f spec.Field, head bool) *Unique {
+	if !head || f.Unique == nil {
+		return nil
+	}
+	scope := f.Unique.Scope
+	if scope == "" {
+		scope = "all"
+	}
+	return &Unique{Enforce: f.Unique.Enforce, Notification: f.Unique.Notification, Scope: scope}
 }

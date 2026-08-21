@@ -528,6 +528,10 @@ read:
         ops: [eq, gte, lte]
       - field: LeaveFrom
         ops: [gte, lte]
+    # O vocabulario de ordenacao. Viaja com controls.orderBy: o controle e o
+    # INTERRUPTOR, isto e QUAIS caminhos ?orderBy= aceita. Nenhuma metade sozinha
+    # e legal — o framework derruba o boot nas duas.
+    sort: [Name, EnrollmentNumber, EnrolledAt, TuitionAmount]
     controls:
       pagination: true
       orderBy: true

@@ -7,6 +7,124 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-08-20
+
+### Added
+
+- **`unique` on a composite value object: one multi-column constraint, and the 409 binding
+  that goes with it.** Uniqueness over a tuple was refused — "it would need a multi-column
+  constraint, and none is emitted" — so a `UNIQUE(resource, action)` had to be split three
+  ways: the pre-check into a hand-written rule, the index into a hand-written migration, and
+  the binding that turns a duplicate into a typed 409 into a hand EDIT of the generated
+  repository, adopted forever. The last one was the expensive half, and none of it was a
+  framework limit: `ConstraintBinding` has always taken any key, and the SQLite dialect has
+  always parsed the multi-column form (`"t.a, t.b"`) the engine reports.
+
+  Declaring `unique` on the composite now means uniqueness over the TUPLE, which is the only
+  reading a value object admits — "neither half means anything alone" is what made it one
+  field. The migration writes one constraint over every part column, `scope: active-only`
+  included, in each engine's own spelling: a partial index on Postgres, SQLite and SQL
+  Server; one CASE expression per part on Oracle, which omits an entry only when all of them
+  are NULL; one generated column per part on MySQL, each carrying its own part's type. The
+  repository binds both key forms. With `enforce: service-precheck+constraint` the fact it
+  asks for is the one filtered by EVERY part, the gate reads the parts off the value object,
+  and the notification lands on the concept rather than on whichever part came first.
+
+- **`immutable` on a composite value object.** It is the one invariant of the entity a value
+  object can answer, because it is the only one that asks about the VALUE rather than about a
+  part, and Go compares a struct of comparable fields by value — so the rule the DSL already
+  had was the right rule, refused for being on the wrong shape. It is refused, with the
+  reason, exactly where `==` would compare addresses instead: an optional value object, or
+  one with an optional part. The generated immutability test assigns a value object literal
+  with one part moved, instead of the scalar it used to invent.
+
+- **`read.managed`: the framework's own timestamps on the read side.** `createdAt`,
+  `updatedAt` and `deletedAt` are stamped by the framework and belong to no `fields[]` entry,
+  so filtering a listing by them was impossible and the reads returned neither — twice noted
+  as a deviation in one project before it was reported. Listing them under `read.managed`
+  projects them into the view, returns them from the by-id read and every listing row, keeps
+  them in the CSV/XLSX export under a translated header, and makes them filterable like any
+  other field. The framework resolved these names on the read path all along; the spec had no
+  way to ask. They are declared rather than automatic because they change the view's shape,
+  and they are part of the shape hash for the same reason.
+
+### Changed
+
+- **⚠️ The generator targets framework v0.55.0, where the ordering vocabulary moved from the
+  Response to the Request.** Every service this generator wrote before now fails its BOOT on
+  that framework: the listing declares `query:"orderBy"` — the switch — and no leaf declares
+  the vocabulary it switches on, so `ExtractRequestSchema` panics naming the DTO. Regenerating
+  against this build is the fix, and the spec needs one new line to do it.
+
+  `read.byParams.sort` was refused by every previous build ("a declared sort allowlist is not
+  generated") because ordering came free from whatever the Response happened to render. That
+  is exactly what v0.55.0 removed — an unindexed sort is a blocking sort whose cost grows with
+  the matching set — so the key is now the ordering VOCABULARY and is required wherever
+  `controls.orderBy` is on. The two halves are refused apart, at `check` time, with the half
+  that is missing named: a switch with no vocabulary would accept `?orderBy=` and refuse every
+  token it could be given; a vocabulary with no switch tags paths that reach no wire.
+
+  A path listed there does not need a filter. One that is filtered gets `sort:"asc,desc"`
+  beside its `filter:` tag; one that is not becomes a leaf of its own — orderable, carrying no
+  value on the wire and emitting no query parameter — which is how "order by it, do not search
+  by it" is now said. The vocabulary draws from the set a filter draws from: the entity's own
+  row, its facets, a composite's exposed parts and the columns `read.managed` exposes. A
+  collection's field is refused (no single value per row) and a computed field stays refused
+  (no column at all), now with that as the stated reason rather than the removed
+  `ComputedFieldNotSortableNotification`.
+
+- **A computed read field is now ONE exported function per field, and the write responses
+  call it.** The derivation used to be one function per READ SHAPE, each handed a whole
+  Result — so an author wrote the same derivation twice, once against plain values and once
+  against the listing's sparse pointers, and kept the two in step by hand. Each is now
+  `Compute<Field>(ctx, <sources…>)`: a source declared nullable arrives as a pointer, the
+  rest as values, and unwrapping whatever a shape holds is the generator's problem — it
+  guards a source the caller did not select and leaves the field absent, exactly as before.
+
+  Because there is one function, the WRITE responses call it too: a POST or PATCH now returns
+  the derived field it just created instead of forcing a second GET to see it. The exception
+  is a derivation reading a `read.managed` column, which no entity carries; that one is
+  served by the reads alone.
+
+  ⚠️ **A hook file written before this does not satisfy the new call sites** — the build fails
+  naming `Compute<Field>` as undefined. Move each body into the signature the gen-report
+  prints and delete the old per-shape functions.
+
+### Fixed
+
+- **The archive endpoint documented an undo that does not exist.** Its OpenAPI summary ended
+  in `(reversible)` and its description in "Reversible through unarchive", both fixed strings
+  written without consulting `modes`. An entity that archives without unarchiving is a
+  legitimate model — the row survives as history and nothing brings it back — and there the
+  generator wrote no route, no mutation and no command for the undo it was advertising, in
+  the one place a caller looks to find out whether an action can be taken back. Both now
+  depend on the unarchive operation existing, and its absence is stated instead of implied.
+
+- **A service fact naming a composite AS A WHOLE resolved instead of being refused.** The
+  composite is a declared field, so the filter passed validation and emitted
+  `criteria.Eq("Key", e.Key)`: a logical name the view cannot map, and a struct where a
+  scalar belongs. It is refused now, with the parts listed.
+
+- **The header of every document a skill writes rendered as ONE run-on paragraph.** The three
+  templates opened with consecutive `Label: value` lines aligned by spaces — a table to the
+  eye in an editor, and nothing at all to a markdown renderer, which joins consecutive lines
+  into a single paragraph. Because the instruction beside them is "copy VERBATIM", every spec
+  the skills ever wrote inherited it: `specs/scaffold-entity/<entity>/spec.md` collapsed four
+  labels into one line (the worst of the three — `Approved:` is filled with the whole history
+  of the gate decisions, so the run-on is long), and `specs/scaffold-system/domain-map.md`
+  and `specs/implement/<slug>/plan.md` collapsed two. The `<!-- … -->` comment ending each
+  line disappears in rendering too, leaving even less of a visual seam. They are list items
+  now (`- **Status:** DRAFT`), which renders as the four lines it always looked like in the
+  editor. `scaffold-service` was never affected: its `Status:` stands alone between blank
+  lines.
+
+- **`Approved: <pending>` rendered as `Approved:` and nothing else.** The placeholder survives
+  in the file until the dev approves, and `<pending>` is an unknown HTML tag to a renderer,
+  which drops it — so the one slot whose whole job is to say "nobody has approved this yet"
+  read as an empty label. Both surviving placeholders (`Approved:`, `Generation:`) are in
+  backticks now; the ones replaced while the spec is written (`<Entity>`, `<x>`) are not,
+  because they never reach a rendered document.
+
 ## [0.24.0] — 2026-08-19
 
 ### Added

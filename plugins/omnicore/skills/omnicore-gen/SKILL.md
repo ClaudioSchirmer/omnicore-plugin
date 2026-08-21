@@ -239,6 +239,15 @@ Three things to get right, because they are the ones that cost a migration later
     read as all-NULL); on a part it means that one part is optional INSIDE a value object
     that is present. Both reach the DDL, and getting them backwards is a column that refuses
     a legitimate row.
+  - **`unique` and `immutable` address the composite AS A WHOLE, and only as a whole.**
+    `fields[].unique` on a composite is uniqueness over the TUPLE: one multi-column
+    constraint, `scope: active-only` included, plus the 409 binding the repository
+    registers — and with `enforce: service-precheck+constraint` the fact it asks for is the
+    one filtered by every part. `rules.list[].kind: immutable` naming the composite compares
+    the value object against the pre-write snapshot, which is what `==` means for a struct of
+    comparable fields; it is refused when the value object is optional or a part is, because
+    there `==` would compare addresses. Naming a PART in either is still refused: half a
+    value object frozen, or unique on its own, is not a rule anyone means.
   - **Each composite type appears ONCE per entity** — across the root, its facets and its
     shared base. A second `Money`-shaped concept on one entity is its own type, not a second
     decomposition; the framework refuses the split at boot and `check` refuses it earlier.
@@ -270,12 +279,32 @@ Three things to get right, because they are the ones that cost a migration later
 - **`read.byParams.controls`.** A control is served ONLY if declared, and an undeclared
   one arriving on the wire is answered with a typed 400. That is a contract, not an
   omission.
+- **`?orderBy=` is declared in TWO halves, and neither is legal alone.** `controls.orderBy`
+  is the SWITCH — whether the endpoint accepts the parameter at all — and `read.byParams.sort`
+  is the VOCABULARY: which paths it admits. Declaring one without the other fails the
+  FRAMEWORK's boot, so `check` refuses it first, naming the missing half. **Nothing is
+  orderable until `sort:` names it** — ordering used to come free from whatever the Response
+  rendered, and an unindexed sort is a blocking sort whose cost grows with the matching set.
+  - A path in `sort:` does **not** need a filter of its own. One that is filtered gets its
+    ordering tag beside the filter; one that is not becomes a leaf that is orderable, carries
+    no value on the wire and emits no query parameter — "order by it, do not search by it" is
+    an ordinary ask.
+  - It draws from the same set a filter does: the entity's own row, its facets, a composite's
+    exposed parts, and the framework-stamped columns `read.managed` exposes. A collection's
+    field and a computed field are refused — the first has no single value per row, the
+    second no column at all.
 - **`read.computed` is the read side's `manual` fact: a field no column holds.** You
   declare the shape — `name`, `type`, and `from:` naming the STORED fields the derivation
   reads — and the body is yours, in
   `internal/application/queries/<entity>_computed_manual.go`, written once and never
-  rewritten. Two functions, one per read shape, because the listing's Result is a sparse
-  pointer shape when it serves `?fields=` and the by-id one is not.
+  rewritten. **ONE exported function per FIELD**, taking the sources it declared — a source
+  declared nullable arrives as a pointer, the rest as values. The read shapes are the
+  generator's problem: it unwraps the listing's sparse pointers, guards the ones that were
+  not selected, and calls the same function the by-id read calls.
+  - **The WRITE responses call it too.** A POST or PATCH returns the field it just created,
+    derived through the same function rather than a second time somewhere else. The one
+    exception is a derivation reading a framework-stamped column (`read.managed`): the entity
+    does not carry those, so that field is served by the reads alone.
   - What the declaration alone buys: `?fields=<name>` fetches `from:` instead of a name
     no column has, `?orderBy=<name>` is a typed 400 on every surface, and the CSV/XLSX
     export keeps the column under its `labelKey`.
@@ -286,6 +315,15 @@ Three things to get right, because they are the ones that cost a migration later
     written; an unwritten derivation renders the field absent and nothing reports it —
     the read answers 200 and one column is empty on REST, on GraphQL and in the export at
     once. The gen-report lists them for exactly that reason.
+- **`read.managed` puts the framework's own timestamps on the reads.** `createdAt`,
+  `updatedAt` and `deletedAt` are stamped by the framework and declared under
+  `storage.managed`, so no `fields[]` entry describes them and the aggregate carries no Go
+  field for them. Listing them under `read.managed` projects them into the view, returns them
+  from the by-id read and every listing row, keeps them in the CSV/XLSX export, and makes
+  them filterable like any other field — `{field: CreatedAt, ops: [gte, lte]}` is the
+  "created between these dates" every listing eventually needs. It is declared rather than
+  automatic because it changes the view's SHAPE: bump `read.view.version` in the same edit,
+  or the framework refuses to boot against a projection built to the older one.
 - **"They query by it and never receive it" is `fields[].hidden`, not `read.fieldRestrict`.**
   The two look alike and answer different questions. `fieldRestrict` is about WHO is asking:
   a caller with the permission receives the field, one without it gets a 403 for naming it

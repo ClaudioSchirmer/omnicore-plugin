@@ -39,6 +39,13 @@ var (
 	VODeclaredKinds = set("raw", "enum", "composite", "manual")
 	VOBackings      = set("string", "int")
 
+	// ManagedReads are the framework-stamped columns a read may expose, under the
+	// fixed logical names the framework itself resolves them by. They are not
+	// entity fields — nothing declares them under fields[], the aggregate carries
+	// no Go field for them, and no write DTO accepts one — so the read side names
+	// them here instead.
+	ManagedReads = set("CreatedAt", "UpdatedAt", "DeletedAt")
+
 	// VOWritings is WHO writes the type, asked separately from what it is. It
 	// exists for the composite: its parts have to stay declared (the schema
 	// decomposes them, the mappers fold them, the migration sizes them) while
@@ -206,6 +213,9 @@ func Vocabularies() []Vocabulary {
 		{"valueObjects[].kind", VODeclaredKinds,
 			"raw/enum occupy ONE column; composite spans several and the schema decomposes " +
 				"it; manual is the one the generator does not write — you do."},
+		{"read.managed", ManagedReads,
+			"which framework-stamped columns the reads expose and may filter on; each " +
+				"one needs its column declared under storage.managed."},
 		{"valueObjects[].written", VOWritings,
 			"whose file the type is; manual keeps the parts declared and hands you the " +
 				"IsValid — composite only, since a scalar you write is kind: manual."},
@@ -272,8 +282,6 @@ func Vocabularies() []Vocabulary {
 // not demand that a refused key be demonstrated.
 func RefusedKeys() map[string]string {
 	return map[string]string{
-		"read.byParams.sort": "declared sort allowlists are not generated; controls.orderBy " +
-			"decides whether ?orderBy= is served at all",
 		"read.indexes[].partial": "the framework takes a document filter there, and this " +
 			"language has no way to write one",
 		"read.identityView":                    "the shared identity's own view is not generated yet",
