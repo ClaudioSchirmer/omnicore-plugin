@@ -76,12 +76,8 @@ root; the domain-service implementation in its own file here.
      **Implement it with the loader's hydration-free `Exists` probe** (the PK is
      criteria-addressable as the fixed field `"ID"` for exclude-self) — never a
      FindAll-and-filter workaround, which pays full aggregate hydration to answer yes/no.
-     Confirm the pinned version's loader surface in `custom-command-handler.html`
-     (Loading by criteria); a version without the probes falls back to a
-     FindOne/FindAll-based check. For scalar facts beyond existence (counts, totals,
-     extremes), the same hydration-free family has an aggregate DSL
-     (Count/Sum/Avg/Min/Max in one SELECT) — never FindAll-and-count; exact specs at
-     the pin;
+     Which primitive answers which question, and the pin check that settles it, are
+     `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md`;
   1. migration `UNIQUE` constraint (active-only variants per `table-schema.html` when
      archived remnants must not block);
   2. repo `Constraints` binding (violation KEY → notification + field) — the match is
@@ -128,13 +124,15 @@ root; the domain-service implementation in its own file here.
 The domain port's implementation lives here (own file). Channel by
 `service-to-service.html`'s matrix: a fact THIS service owns → a direct repo/engine query;
 external world → httpclient; another microservice → grpcclient. Injected at the wiring
-(see application.md — enforced pairing). For SCALAR facts this service owns — existence,
-cardinality, totals, averages, extremes, and their PER-GROUP breakdowns (counts/totals
-per key, distinct-key cardinality) — use the loader's hydration-free surface
-(`Exists` plus the aggregate facts, whatever shape the pinned version's
-`custom-command-handler.html`, "Loading by criteria", ships — newer versions compute
-several facts in ONE query, grouped or ungrouped); loading aggregates to answer a scalar
-question is the anti-pattern that surface exists to kill.
+(see application.md — enforced pairing).
+
+**Which primitive answers it is not a free choice — read
+`${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` BEFORE writing this file.** It owns the
+decision: existence, cardinality, totals, averages, extremes and their per-group
+breakdowns are the loader's hydration-free surface (`Exists`, the aggregate DSL, its
+grouped form), a list load is for rows you will iterate, and `FindAll`-and-fold-in-Go is
+the anti-pattern that surface exists to kill. That file also carries what bites here:
+fail-loud, `Found` vs the value, `SumInt` for money, one spec instance per call site.
 
 - **On an infra error the impl FAILS LOUD — it never swallows, and never pushes the error up
   to the domain.** The domain port returns pure values (no `error`), so an unrecoverable query

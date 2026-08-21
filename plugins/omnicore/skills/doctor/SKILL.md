@@ -187,6 +187,7 @@ for concepts this table doesn't list.
 | migrations state / numbering / dirty | migrations |
 | outbox / relay / broker contract | transport |
 | infra-free / relational-view posture (views by design, no relay) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
+| a write that got slower as the table grew · a hand-written Service/finder that lists rows to answer a scalar · `Old()` empty on a write loaded by hand (a list load does not snapshot) | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner) · custom-command-handler · old-state |
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
 | parked events / failed ripples / `omnicore_projection_failures` / `ProjectionHealth` / `parkedRetry`·`reconcile` knobs | views · auto-query-handlers · yaml-reference |
 | declaration boot panics (undeclared field, reserved names, depth, `Modes()`⟺archive column, index guards — the write/read schema guard families) | table-schema · views |

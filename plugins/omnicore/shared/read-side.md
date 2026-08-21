@@ -42,6 +42,8 @@ Never let a read-side limit leak backwards into the domain model.
   (`custom-command-handler` at the pin — the AggregateLoader section) — computed on the SoR, never a Mongo view, and
   therefore available on EVERY posture, SQLite included. Refusing "give me totals"
   on an infra-free project (or pushing a Mongo conversion for it) is a wrong refusal.
+  Which primitive answers which question, once the request lands in hand-written code,
+  is `query-primitives.md` — the owner beside this one.
 - A **plain single-aggregate view is relational-ELIGIBLE — whatever its aggregate's
   write-side shape**. In particular, a plain view rooted at a shared-base ROLE stays
   eligible: its served document carries the full aggregate — the role's fields, the

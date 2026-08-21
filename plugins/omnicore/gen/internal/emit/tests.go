@@ -192,9 +192,14 @@ func emitTestIdentity(s *src, m *ir.Model, indent string) {
 		switch f.IdentitySource {
 		case "tenant":
 			claims["tenant_id"] = testScopeValue(m)
-		case "subject", "permission":
-			// Subject is a field of the Identity, and a permission question is
-			// answered from the permissions claim; neither is a custom claim.
+		case "subject", "permission", "super-admin", "present":
+			// None of these is a custom claim. Subject is a field of the
+			// Identity; both permission questions — the concrete one and the
+			// super-admin one — are answered from the permissions claim; and
+			// PRESENCE is the nil check itself, so it has no claim name at all.
+			// Falling through would put an entry keyed on the empty string into
+			// the map, which reads as though the framework looked something up
+			// by that name.
 		default:
 			if f.BaseGoType == "bool" {
 				claims[f.Claim] = "true"
@@ -2174,8 +2179,8 @@ func emitScopeIsForcedTest(s *src, m *ir.Model) {
 //
 // That matters most for the WILDCARD bypass, where the question cannot be the
 // obvious one: `*:*` panics as an argument to HasPermission, so the guard asks
-// two reserved concrete permissions instead, and this test is what proves a
-// wildcard claim answers them — against the framework, not against a comment.
+// IsSuperAdmin instead, and this test is what proves a wildcard claim answers
+// it — against the framework, not against a comment.
 func emitBypassCrossesTheReadTest(s *src, m *ir.Model) {
 	if !m.Read.ByParams || m.Authz.Bypass == "" {
 		return

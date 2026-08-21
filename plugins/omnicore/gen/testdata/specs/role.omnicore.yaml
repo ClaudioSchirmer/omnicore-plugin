@@ -230,10 +230,12 @@ authz:
   resource: role
   dataAccess: tenant
   tenantField: TenantID
-  # A CONCRETE permission. A wildcard cannot be asked about: the framework's
-  # HasPermission panics on one, because the claim wildcards and the question
-  # does not. Without this key a `*:*` holder is filtered to their own tenant
-  # like anybody else, so supporting a customer through the API is impossible.
+  # A CONCRETE permission, so crossing is delegable on its own — `*:*` is the
+  # other spelling and it grants nothing new, being the claim a super-admin
+  # already carries (that one is asked with Identity.IsSuperAdmin, since
+  # HasPermission panics on a wildcard). Without this key a `*:*` holder is
+  # filtered to their own tenant like anybody else, so supporting a customer
+  # through the API is impossible.
   bypass: platform:cross-tenant
   # authz.noIdentity is DELIBERATELY not declared: the default is stand-down,
   # and the boot lane below proves what that buys — a tenant-scoped entity that

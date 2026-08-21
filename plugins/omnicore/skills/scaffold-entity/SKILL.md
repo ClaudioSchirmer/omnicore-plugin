@@ -785,11 +785,11 @@ only a genuinely missing docs file does.
 | rules / notifications / Old / actionName | rules-dsl · old-state · status-mapping |
 | value objects: raw vs enum vs **composite** (a value spanning several columns), auto-validation, EnumByValue, Ignore/Validate | value-objects |
 | decomposing a composite value object (`Composite`/`As`, the once rule, absence semantics) | table-schema · value-objects |
-| domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | custom-command-handler · service-to-service |
+| domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner — WHICH primitive answers the question) · custom-command-handler · service-to-service |
 | aggregate children / cascade | aggregate-persistence |
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |
 | what one write touches end-to-end (SQL ↔ outbox ↔ Mongo op ↔ audit verb; PUT/PATCH share verb `update` — `actionName` tells them apart) | lifecycle-map |
-| ctx-bound domain Service probe in rules | auto-handlers · custom-command-handler |
+| ctx-bound domain Service probe in rules | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner) · auto-handlers · custom-command-handler |
 | schema (Go↔column) | table-schema |
 | view: the ViewDefinition surface itself (declaration, `Version`, SharedBaseView contract, DeleteOnArchive, archived rule) | views |
 | view: indexes / options / Version bump rules | auto-query-handlers · mongo-schema-evolution |
