@@ -293,6 +293,19 @@ Three things to get right, because they are the ones that cost a migration later
     exposed parts, and the framework-stamped columns `read.managed` exposes. A collection's
     field and a computed field are refused — the first has no single value per row, the
     second no column at all.
+  - **`ID` is in that set on every entity, and is declared nowhere.** It is not a `fields[]`
+    entry (the name is reserved — the framework's managed carrier owns the aggregate id) and
+    not a `read.managed` name (that key is the three timestamps); the framework resolves the
+    logical name against the root's `TableSchema` and the projector writes it as the
+    document's `_id`. So `sort: [ID, …]` and `filters: [{field: ID, ops: [eq, in]}]` are
+    both ordinary declarations. Reach for it when the listing needs a **deterministic**
+    order rather than a meaningful one: it is the only path indexed before anybody asks,
+    and it is already the tie-break the keyset cursor appends to every key. Its operators
+    are an opaque value's — `eq/ne/in/nin`; a range over an id is refused.
+  - The id is orderable and filterable and **not** projectable: `read.indexes`,
+    `read.fieldRestrict`, `read.computed.from` and `controls.search` refuse it, because
+    those name a column in the PROJECTION and the id is not one — every response already
+    carries it, put there by the framework rather than by the field pipeline.
 - **`read.computed` is the read side's `manual` fact: a field no column holds.** You
   declare the shape — `name`, `type`, and `from:` naming the STORED fields the derivation
   reads — and the body is yours, in

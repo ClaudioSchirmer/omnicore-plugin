@@ -666,6 +666,17 @@ read:
       # A part filters like any other field, under the name `as:` exposed it by.
       - field: TuitionAmount
         ops: [eq, gte, lte]
+      # The aggregate id, which is declared NOWHERE — not under fields[] (the
+      # name is reserved: the framework's managed carrier owns it) and not under
+      # read.managed (that key is for the three timestamps). It filters and
+      # orders anyway: the column is on the root's row whatever this spec says,
+      # the framework resolves the logical name ID against the TableSchema, and
+      # the projector writes it as the document's _id.
+      #
+      # The operators are an opaque value's — eq/ne/in/nin. `in` is the useful
+      # one: fetch a known set of rows in a single call.
+      - field: ID
+        ops: [eq, in]
     # The ordering VOCABULARY: which paths ?orderBy= accepts. It travels with
     # controls.orderBy below and neither half is legal alone — the control is the
     # SWITCH that decides whether the endpoint takes the parameter at all, this
@@ -677,7 +688,13 @@ read:
     # A path does NOT need a filter of its own. UpdatedAt below is filtered by
     # nobody and orderable by everybody, which emits a leaf that carries no value
     # on the wire and no query parameter of its own.
-    sort: [Name, EnrollmentNumber, EnrolledAt, UpdatedAt]
+    #
+    # ID is orderable on every entity, declared here or not: it is the one path
+    # indexed before anybody asks for it, and it is already the tie-break the
+    # keyset cursor appends to every key — so it is the cheapest total order a
+    # listing can offer, and the one to reach for when the listing needs a
+    # deterministic sequence rather than a meaningful one.
+    sort: [ID, Name, EnrollmentNumber, EnrolledAt, UpdatedAt]
     controls:
       pagination: true
       orderBy: true

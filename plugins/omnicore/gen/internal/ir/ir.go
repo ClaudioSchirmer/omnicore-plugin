@@ -688,6 +688,13 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 	if s.Read.ByParams != nil {
 		r.Controls = s.Read.ByParams.Controls
 		for _, f := range s.Read.ByParams.Filters {
+			// The identity is not in m.Fields and never will be — nothing declares
+			// it — so it is resolved before the declared set, exactly as the
+			// validator resolves it before the declared set on its own side.
+			if fld := identityReadField(m, f.Field); fld != nil {
+				r.Filters = append(r.Filters, Filter{Field: *fld, Ops: f.Ops})
+				continue
+			}
 			// The managed set is consulted from the READ being built, not through
 			// lookupField: m.Read is still the previous (empty) value at this
 			// point, so a filter on CreatedAt resolved to nothing and the query
@@ -701,6 +708,10 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 			}
 		}
 		for _, name := range s.Read.ByParams.Sort {
+			if fld := identityReadField(m, name); fld != nil {
+				r.Sortable = append(r.Sortable, *fld)
+				continue
+			}
 			if fld := managedNamed(r.Managed, name); fld != nil {
 				r.Sortable = append(r.Sortable, *fld)
 				continue
@@ -922,6 +933,30 @@ func managedNamed(managed []Field, name string) *Field {
 		}
 	}
 	return nil
+}
+
+// identityReadField renders the aggregate id as the query leaf a listing filters
+// or orders by.
+//
+// Every type here is the WIRE type, string, and none of them is the aggregate's:
+// there is no Go field on the entity for the id — the framework's managed
+// carrier holds it — and the only emitter that reads this leaf is the one
+// writing the request struct, where the framework binds `?id=` and `?orderBy=id`
+// out of the query string. That is the same shape a hand-written service
+// declares, `ID *string ` + "`" + `query:"id" sort:"asc,desc"` + "`" + `, and the framework resolves
+// the name against the root's TableSchema.ID for both questions.
+func identityReadField(m *Model, name string) *Field {
+	if name != spec.IdentityName {
+		return nil
+	}
+	return &Field{
+		Name: spec.IdentityName, Column: "id", SpecType: "id",
+		GoType: "string", BaseGoType: "string",
+		EntityType: "string", BaseEntityType: "string",
+		JSONName: "id", LabelKey: m.Entity.Pascal + "IDField",
+		Example:     "7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51",
+		Description: "The row's identity, minted by the framework.",
+	}
 }
 
 // managedReadField renders a framework-stamped column as the field every read

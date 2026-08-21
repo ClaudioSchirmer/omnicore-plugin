@@ -2972,6 +2972,12 @@ func checkFieldDups(fields []Field, where string, ps *Problems) {
 // a collection. Validation and lowering disagreeing here is exactly how a
 // blessed filter used to vanish from the generated request type.
 func filterableField(s *Spec, name string) *Field {
+	// The aggregate id is answered first and unconditionally: it is on the
+	// root's row before any field is declared, and nothing in the spec can put
+	// it into — or keep it out of — the declared set.
+	if f := identityRead(name); f != nil {
+		return f
+	}
 	// A framework-stamped column the read exposes is filterable for the same
 	// reason it is projectable: it lives on the ROOT's table and the schema
 	// resolves its logical name itself. It is not in s.Fields — nothing declares
@@ -3069,6 +3075,31 @@ func sortedTransitionKeys(m map[string][]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// IdentityName is the logical name the aggregate id answers to. The framework's
+// managed carrier resolves it on the root's schema (TableSchema.ID) and the
+// projector writes it as the view's _id, so a listing may narrow and order by it
+// without anything declaring it.
+const IdentityName = "ID"
+
+// identityRead renders the aggregate id as the field a filter or a sort needs.
+//
+// It is deliberately NOT part of the readable set. The id is not projected
+// through the field pipeline — every response carries it because the framework
+// puts it there — so the three keys that address a PROJECTED column (indexes,
+// fieldRestrict, computed.from) have nothing here to address: an index would be
+// declared over `id` while the document's key is `_id`, a restriction would be
+// asked to scrub the handle the response is required to carry, and a derivation
+// would read a value the reader never selects. Filtering and ordering are the
+// two questions the STORE answers, and those the framework resolves by name.
+func identityRead(name string) *Field {
+	if name != IdentityName {
+		return nil
+	}
+	// No Length: an id column is sized by the engine's own id type, and no
+	// Nullable: a row without one does not exist.
+	return &Field{Name: IdentityName, Type: "id", Column: "id", LivesOn: "root"}
 }
 
 // managedRead reports whether the read side declared this framework-stamped

@@ -335,7 +335,9 @@ read:
         ops: [eq, gte, lte]
       - field: EnrolledAt
         ops: [gte, lte]
-    sort: [Name, EnrollmentNumber, EnrolledAt]
+    # ID ordena numa view Mongo pelo mesmo motivo que numa relacional: o
+    # projetor escreve a identidade como _id do documento.
+    sort: [ID, Name, EnrollmentNumber, EnrolledAt]
     controls:
       pagination: true
       orderBy: true
