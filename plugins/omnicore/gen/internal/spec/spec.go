@@ -525,6 +525,30 @@ type Child struct {
 	// is still stored, still projected and still validated the same way, and the
 	// root's own verbs still carry the whole of it.
 	Operations []string `yaml:"operations"`
+	// Permissions gates the PER-ENTRY verbs on their own, keyed by the same
+	// names operations uses: add, change, remove. Per-child only, and every key
+	// must name a verb the collection actually mounts.
+	//
+	// Absent — and absent per verb, since the map may be partial — the entry
+	// verbs keep requiring what the root's update requires. That is the
+	// inheritance every per-child collection has always had, and it stays the
+	// default: re-gating a mounted route behind a permission the deployment does
+	// not grant would start refusing callers who hold exactly what they were
+	// told to hold, and the 403 would not say why.
+	//
+	// It exists because the collection edge is sometimes a DIFFERENT job from
+	// editing the root. On an RBAC entity, "may rename the group" and "may
+	// change what the group confers" are the same permission only by accident:
+	// the second is the one that lets an administrator hand themselves power
+	// they were not given. The large platforms separate them for that reason —
+	// Entra ID guards a role-assignable group behind Privileged Role
+	// Administrator rather than Groups Administrator, and IAM spells
+	// AttachGroupPolicy as its own action, not as part of UpdateGroup.
+	//
+	// It is per COLLECTION and not per entity because an entity with two
+	// collections has two edges, and gating both because one of them needed it
+	// is how a permission stops meaning anything.
+	Permissions map[string]string `yaml:"permissions"`
 	// BusinessIdentity names the fields that make two entries THE SAME entry —
 	// the duplicate detector, and the match key per-child operations use.
 	BusinessIdentity []string `yaml:"businessIdentity"`
@@ -570,6 +594,46 @@ func MountsPerChildOp(c Child, op string) bool {
 		}
 	}
 	return false
+}
+
+// PerChildPermission is what the collection DECLARES for one per-entry verb,
+// or "" when it declares nothing for it.
+//
+// It answers only half the question on purpose: "" is not "no permission", it
+// is "inherit", and what is inherited is the root's — which this package cannot
+// see from a Child alone. The resolution happens once, in the IR, so every
+// consumer reads the same answer.
+func PerChildPermission(c Child, op string) string {
+	if c.EditStrategy != "per-child" {
+		return ""
+	}
+	return c.Permissions[op]
+}
+
+// InheritedChildPermission is what a per-entry verb falls back to: the
+// permission the root's own update requires.
+//
+// The order mirrors the emitter's, and the emitter's order is the aggregate's:
+// editing one entry is editing the aggregate, so it asks for what replacing the
+// whole of it asks for. PUT before PATCH because a spec serving both gives them
+// the same permission anyway, and insert last because a write-only entity has
+// no update to borrow from.
+//
+// It is "" when the spec serves none of the three — a real shape (a collection
+// on a display-and-archive entity), and the one case where inheritance has
+// nothing to inherit. validateChildPermissions refuses it rather than letting
+// the emitter write a route no permission can satisfy.
+func InheritedChildPermission(s *Spec) string {
+	ops := mountedOperations(s)
+	for _, verb := range []string{"update", "patch", "insert"} {
+		if !ops[verb] {
+			continue
+		}
+		if p := s.Authz.Permissions[verb]; p != "" {
+			return p
+		}
+	}
+	return ""
 }
 
 type Sibling struct {

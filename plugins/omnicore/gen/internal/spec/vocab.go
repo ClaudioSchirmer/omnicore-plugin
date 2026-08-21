@@ -255,6 +255,10 @@ func Vocabularies() []Vocabulary {
 			"WHICH per-entry verbs a per-child collection mounts; absent = all three. " +
 				"Drop `change` where every field is the business identity — replacing " +
 				"such an entry is a removal plus an addition wearing an edit's clothes."},
+		{"children[].permissions keys", ChildOperations,
+			"WHICH per-entry verb a permission is required for; a verb left out keeps " +
+				"inheriting the root's update permission, which is what every per-child " +
+				"collection required before this key existed."},
 		{"delete.children", DeleteChild,
 			"soft = the entry is archived and can come back; hard = the row is gone."},
 		{"modes", Modes,

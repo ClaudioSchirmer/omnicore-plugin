@@ -7,6 +7,62 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-08-21
+
+One key, reported from a consumer that had written its spec, got `✓ this spec can be
+generated`, and still could not say the one thing its approved model required.
+
+### Added
+
+- **`children[].permissions` — a per-child collection can gate its own verbs.** Until now
+  the add/change/remove routes of a `per-child` collection took whatever the root's update
+  took, and there was no key to say otherwise: `authz.permissions` is a closed set of the
+  seven ROOT operations, and declaring an unused `update` beside `patch` to smuggle a
+  second value in was correctly refused as a permission for an operation nobody serves.
+
+  The map is keyed by the same verbs `operations` uses, and may be partial —
+  `permissions: {add: group:grant}` gates the add and leaves change and remove inheriting.
+  It is per COLLECTION, so an entity with two of them can gate one and not the other.
+
+  The gap matters because the collection edge is sometimes a different job from editing
+  the record. On an RBAC entity, "may rename the group" and "may change what the group
+  confers" are one permission only by accident, and the second is the one that lets an
+  administrator hand themselves power they were not granted — which is why Entra ID guards
+  a role-assignable group behind Privileged Role Administrator rather than Groups
+  Administrator, and IAM spells `AttachGroupPolicy` as its own action instead of folding it
+  into `UpdateGroup`.
+
+  **Absent, nothing changes, and that is the point.** A collection that declares nothing
+  keeps requiring the root's update permission. Re-gating those routes behind something new
+  would start refusing callers who hold exactly what they were told to hold, on a
+  regeneration that changed no key — so the three existing fixtures regenerate byte for byte
+  (the only difference anywhere in the tree is the new gen-report row below).
+
+  `check` refuses, each naming the key and the fix: a verb the collection does not mount, a
+  name outside `add | change | remove`, any of it under `atomic-replace`, an empty map, and
+  an empty permission.
+
+### Fixed
+
+- **A per-entry verb with nothing to inherit no longer generates a route no permission can
+  satisfy.** The collection's routes are mounted from the COLLECTION, not from the root's
+  modes, so an entity serving no `insert`, `update` or `patch` — a display-and-archive
+  record that still owns an editable collection — published them anyway and inherited the
+  empty string. The emitter wrote `RequirePermission("")`, which fails closed at runtime
+  and said nothing at generation time; `check` had the same refusal for the root's own
+  permissions and no equivalent here. It is now a blocker, and `children[].permissions` is
+  the fix it names.
+
+### Changed
+
+- **The gen-report shows what gates each collection.** The decisions table listed the
+  root's operations and said each one is a route with a permission; the per-entry verbs are
+  routes with permissions too and appeared in no table at all. A reviewer had no way to see
+  what guarded the collection edge, or that it was the root's update by inheritance. There
+  is now one row per `per-child` collection naming the permission per verb and whether it
+  was **declared** or **inherited** — the value alone cannot say which, since a collection
+  may deliberately declare the very permission it would have inherited.
+
 ## [0.30.0] — 2026-08-21
 
 The two `Fixed` entries come from the same report, the same agent and the same entity as

@@ -725,6 +725,21 @@ func renderCheck(b *strings.Builder, in Input) {
 	fmt.Fprintf(b, "| Operations | %s | Each one is a route with a permission; an unwanted "+
 		"one is a surface you did not mean to expose. |\n", "`"+strings.Join(modes, "`, `")+"`")
 
+	// The per-entry verbs are routes with permissions too, and the row above
+	// does not carry them — they are not operations of the root, so they were in
+	// no table at all. A reviewer had no way to see what gates the collection
+	// edge, which is precisely the edge where the answer is sometimes meant to
+	// be different: adding a role to a group is not renaming the group, and one
+	// permission for both is how an administrator widens their own.
+	for _, c := range m.Children {
+		if !c.PerChild {
+			continue
+		}
+		fmt.Fprintf(b, "| Collection `%s` | %s | These routes hang off `/%s/:id/%s`. %s |\n",
+			c.Plural, childPermissionCells(c), m.Entity.PluralSnake, c.Segment,
+			childPermissionAdvice(c))
+	}
+
 	if m.Managed.Archiving {
 		fmt.Fprintf(b, "| Removal | archive (reversible) | `DELETE` is a permanent purge and is "+
 			"%s. |\n", presence(m.Op("delete") != nil, "also mounted", "not mounted"))
@@ -1034,6 +1049,60 @@ func factSignature(f ir.Fact) string {
 // is about one FILE: every collection's per-entry tests land in the same
 // generated test file. Saying "add, change, remove" there when a collection
 // dropped one sends the reader looking for a test that was never written.
+// childPermissionCells says, per mounted per-entry verb, which permission its
+// route requires AND where that permission came from.
+//
+// The origin is half the information. "role:update" on an add route means one
+// thing if the spec chose it and another if it fell out of the root's update by
+// default, and the reviewer's question — is this edge gated on purpose? — can
+// only be answered by the second half.
+func childPermissionCells(c ir.Child) string {
+	var parts []string
+	for _, v := range mountedPerChildOps(c) {
+		origin := "inherited"
+		if c.Declared[v] {
+			origin = "declared"
+		}
+		parts = append(parts, fmt.Sprintf("`%s` → `%s` (%s)", v, c.Permissions[v], origin))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// childPermissionAdvice is the line that turns the cell into a decision.
+//
+// Inheritance is the default and stays the default, so saying it is present is
+// not enough: the reader has to be told that separating them is available and
+// what it is for. When the spec HAS separated them, the note flips to what that
+// costs at deployment — a permission nobody has been granted refuses a route
+// that used to answer.
+func childPermissionAdvice(c ir.Child) string {
+	for _, v := range mountedPerChildOps(c) {
+		if c.Declared[v] {
+			return "Gated on its own through `children[].permissions`, not by the root's " +
+				"update. Grant that permission before the routes go live — a holder of the " +
+				"root's update alone now gets a 403 here."
+		}
+	}
+	return "They inherit the root's update permission, which is the default. If changing " +
+		"what this collection holds is a different job from editing the record — a role " +
+		"assignment, a grant — declare `children[].permissions` so one does not carry the " +
+		"other."
+}
+
+// mountedPerChildOps lists the verbs of ONE collection, in route order.
+func mountedPerChildOps(c ir.Child) []string {
+	var out []string
+	for _, v := range []struct {
+		on   bool
+		name string
+	}{{c.MountsAdd, "add"}, {c.MountsChange, "change"}, {c.MountsRemove, "remove"}} {
+		if v.on {
+			out = append(out, v.name)
+		}
+	}
+	return out
+}
+
 func perChildVerbs(m *ir.Model) string {
 	var add, change, remove bool
 	for _, c := range m.Children {

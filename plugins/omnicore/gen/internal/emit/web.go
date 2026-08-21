@@ -657,7 +657,6 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		seg := c.Segment
 		opName := c.OpBase // qualified when the collection is mounted from a shared identity
 		idParam := lowerFirst(c.Name) + "Id"
-		perm := updatePermission(m)
 		// The Go type string is for the CODE positions below; the OpenAPI
 		// summaries are read by an API consumer, who got "a appdomain.Person".
 		human := m.Entity.Pascal
@@ -715,25 +714,16 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			s.L("\t\t\tDescription: %s,", quote(op.doc))
 			s.L("\t\t\tTags: []string{%s},", quote(m.Entity.PluralPascal))
 			s.L("\t\t},")
-			s.L("\t\tfwopenapi.RequirePermission(%s))", quote(perm))
+			// Per VERB, not per collection: the entry verbs inherit the root's
+			// update permission unless children[].permissions says otherwise, and
+			// a collection may gate only the one that widens privilege. The IR
+			// resolved both cases into one map, so this position never repeats
+			// the fallback and never disagrees with the report.
+			s.L("\t\tfwopenapi.RequirePermission(%s))",
+				quote(c.Permissions[strings.ToLower(op.verb)]))
 			s.Blank()
 		}
 	}
-}
-
-// updatePermission is what a per-entry verb requires.
-//
-// Editing one entry is editing the aggregate, so it asks for the same
-// permission the root's update asks for: a caller allowed to replace the whole
-// collection but not to add one entry to it would be a distinction nobody
-// asked for.
-func updatePermission(m *ir.Model) string {
-	for _, verb := range []string{"update", "patch", "insert"} {
-		if op := m.Op(verb); op != nil && op.Permission != "" {
-			return op.Permission
-		}
-	}
-	return ""
 }
 
 func lowerFirst(s string) string {

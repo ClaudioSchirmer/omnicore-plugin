@@ -476,6 +476,10 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	}
 	m.Read = resolveRead(s, m)
 	m.Ops = resolveOps(s, m)
+	// After the ops, not with the children: what an undeclared per-entry verb
+	// inherits is the root's update permission, and that only exists once the
+	// root's operations are resolved.
+	resolveChildPermissions(s, m)
 	m.Constraints = resolveConstraints(s, m)
 	m.Surfaces = resolveSurfaces(s)
 	if f := lookupField(m, s.Authz.OwnerField); f != nil {
@@ -1750,6 +1754,22 @@ type Child struct {
 	MountsAdd    bool
 	MountsChange bool
 	MountsRemove bool
+	// Permissions is what each MOUNTED per-entry verb requires, keyed add,
+	// change, remove — already resolved, so no consumer repeats the fallback.
+	//
+	// The value is the collection's own children[].permissions entry when it
+	// declares one, and the root's update permission otherwise. Resolving it
+	// here rather than at the route is what keeps the report and the emitted
+	// guard from ever disagreeing about which permission a route actually got:
+	// the reviewer's copy and the running one come from the same map.
+	Permissions map[string]string
+	// Declared is the subset of Permissions the SPEC asked for, as opposed to
+	// inherited. The emitters do not care — a permission is a string either way
+	// — but the report does: "inherited from the root's update" and "gated on
+	// its own" are the two answers a reviewer is checking between, and a
+	// resolved map alone cannot tell them apart, since a collection may
+	// deliberately declare the very value it would have inherited.
+	Declared     map[string]bool
 	ChangeMethod string
 	RemoveMethod string
 	// DuplicateNotification is what an ADD raises when the entry is already
@@ -1806,6 +1826,58 @@ type Sibling struct {
 	// declared over a type other than its owner's.
 	OwnerChild string
 	Fields     []Field
+}
+
+// UpdatePermission is what editing the aggregate requires.
+//
+// It is the permission a per-entry verb INHERITS when its collection declares
+// none, and the one the GraphQL facet-clear mutation requires outright: both
+// are the root being edited through a narrower door, so both ask for what
+// replacing the whole of it asks for.
+//
+// The order is PUT, then PATCH, then insert. A spec serving both shapes gives
+// them the same permission anyway, and insert is last because a write-only
+// entity has no update to borrow from.
+func (m *Model) UpdatePermission() string {
+	for _, verb := range []string{"update", "patch", "insert"} {
+		if op := m.Op(verb); op != nil && op.Permission != "" {
+			return op.Permission
+		}
+	}
+	return ""
+}
+
+// resolveChildPermissions decides, once, what each mounted per-entry verb
+// requires.
+//
+// The default is inheritance and stays inheritance: a collection that declares
+// nothing keeps requiring the root's update permission, which is what every
+// per-child collection has required since the verbs existed. Re-gating those
+// routes behind something new would refuse callers holding exactly what they
+// were granted, on a regeneration that changed no key.
+//
+// What children[].permissions buys is the case where the collection edge is a
+// different job from editing the root — a role assignment, a grant — and one
+// permission for both is how an administrator ends up able to widen their own.
+func resolveChildPermissions(s *spec.Spec, m *Model) {
+	inherited := m.UpdatePermission()
+	for i := range m.Children {
+		if !m.Children[i].PerChild {
+			continue
+		}
+		perms := map[string]string{}
+		declared := map[string]bool{}
+		for _, op := range spec.PerChildOperations(s.Children[i]) {
+			if own := spec.PerChildPermission(s.Children[i], op); own != "" {
+				perms[op] = own
+				declared[op] = true
+				continue
+			}
+			perms[op] = inherited
+		}
+		m.Children[i].Permissions = perms
+		m.Children[i].Declared = declared
+	}
 }
 
 func resolveChildren(s *spec.Spec, m *Model) []Child {
