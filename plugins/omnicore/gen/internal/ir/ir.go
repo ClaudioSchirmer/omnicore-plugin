@@ -118,7 +118,8 @@ type Field struct {
 	// IdentitySource says WHICH part of the identity fills a runtime field, for
 	// the ones this resolver synthesises rather than the author declaring:
 	// "tenant" (the framework's configured tenant claim, via Identity.TenantID),
-	// "subject", or "permission" (whether the caller holds Claim). Empty for an
+	// "subject", "permission" (whether the caller holds Claim), or "super-admin"
+	// (whether the caller holds `*:*`, via Identity.IsSuperAdmin). Empty for an
 	// author-declared runtime field, which is read from Claims by name — the
 	// framework does not opine on custom claim names, so there is no convention
 	// to fall back on there.
@@ -323,9 +324,9 @@ type Authz struct {
 	Bypass string
 	// BypassWildcard says the bypass is the SUPER-ADMIN WILDCARD rather than a
 	// permission anybody can be granted. It changes how the question is asked
-	// and nothing else: HasPermission panics on a wildcard, so the guard tests
-	// for the wildcard indirectly, and the two emitters that write that guard
-	// have to know which of the two they are writing.
+	// and nothing else: HasPermission panics on a wildcard, so the guard asks
+	// Identity.IsSuperAdmin() instead, and the two emitters that write that
+	// guard have to know which of the two they are writing.
 	BypassWildcard bool
 	NoIdentity     string
 	// ScopeField and BypassField are RUNTIME fields this resolver synthesises
@@ -342,30 +343,20 @@ type Authz struct {
 	PresenceField *Field
 }
 
-// SuperAdminProbes are the two concrete permissions a generated guard asks when
-// what crosses the row scope is the SUPER-ADMIN WILDCARD rather than a
-// permission somebody was granted.
+// SuperAdminMethod is the framework method a generated guard calls when what
+// crosses the row scope is the SUPER-ADMIN WILDCARD rather than a permission
+// somebody was granted.
 //
-// The framework's HasPermission panics on a wildcard — the claim wildcards, the
-// question does not — so "does this caller hold `*:*`?" cannot be asked
-// straight. It can be asked indirectly, because a `*:*` claim answers true to
-// EVERY concrete question: these two permissions live under reserved resources
-// no catalog contains, so the only claim set that says yes to both is one
-// carrying the wildcard — or one that deliberately granted both of these, which
-// is not something anybody does by accident.
+// HasPermission panics on a wildcard — the claim wildcards, the question does
+// not — so "does this caller hold `*:*`?" is not asked through it. It has its
+// own method: IsSuperAdmin reports the `*:*` grant directly, is nil-safe,
+// honours the configured permissions claim name, and shares the parsed-claim
+// cache with HasPermission.
 //
-// Two probes and not one, and the second is the load-bearing half: a single
-// probe is also satisfied by a `<its resource>:*` grant, because HasPermission
-// matches a resource wildcard too. Two probes under two different resources
-// cannot both be covered by one resource wildcard.
-//
-// They live here rather than in the emitter because the REPORT names them: a
-// reviewer who meets these strings in the generated code has to be able to find
-// out what they are, and the answer must not be two answers.
-var SuperAdminProbes = [2]string{
-	"superadmin.probe.a:cross-scope",
-	"superadmin.probe.b:cross-scope",
-}
+// The name lives here rather than in the emitter because the REPORT names it
+// too: a reviewer who meets the call in the generated code has to be able to
+// find out what it is, and the answer must not be two answers.
+const SuperAdminMethod = "IsSuperAdmin"
 
 // Scoped reports whether the rows are narrowed by who is asking.
 func (a Authz) Scoped() bool {
@@ -587,10 +578,11 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 		return
 	}
 	// A wildcard bypass is fed by a DIFFERENT question, so it is a different
-	// source: the feed cannot hand `*:*` to HasPermission, which panics on it.
+	// source: the feed cannot hand `*:*` to HasPermission, which panics on it —
+	// the framework answers that one with Identity.IsSuperAdmin.
 	asked, held := "permission", "holds "+m.Authz.Bypass
 	if m.Authz.BypassWildcard {
-		asked, held = "wildcard-permission", "is a super-admin ("+spec.SuperAdminClaim+")"
+		asked, held = "super-admin", "is a super-admin ("+spec.SuperAdminClaim+")"
 	}
 	m.Authz.BypassField = &Field{
 		Name: "RequestingMayCrossScope", GoType: "bool", BaseGoType: "bool",

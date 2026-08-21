@@ -1142,7 +1142,7 @@ type XLSXExport struct {
 // It is a constant rather than a literal because two halves of the build have
 // to agree on it — the validator, which accepts it as an authz.bypass and
 // refuses every other wildcard, and the emitters, which must never pass it to
-// HasPermission (that panics) and ask an equivalent question instead.
+// HasPermission (that panics) and call Identity.IsSuperAdmin instead.
 const SuperAdminClaim = "*:*"
 
 type Authz struct {
@@ -1203,12 +1203,11 @@ type Authz struct {
 	// who is not a superadmin, which is not the policy that was approved. Take
 	// the concrete permission when crossing is meant to be delegable on its own.
 	//
-	// A wildcard cannot simply be ASKED about: the framework's HasPermission
-	// panics on one (the claim wildcards; the question does not), which is why
-	// `bypass: role:*` is still refused. `*:*` is the one the generator can
-	// answer honestly, because whoever holds it answers true to EVERY concrete
-	// question — so the emitted guard asks two reserved concrete permissions no
-	// catalog grants, and only a claim set carrying `*:*` says yes to both.
+	// A wildcard cannot be asked of HasPermission: it panics on one (the claim
+	// wildcards; the question does not), which is why `bypass: role:*` is still
+	// refused — there is nothing to ask it with. `*:*` is the exception because
+	// the framework gives that one question its own method: the emitted guard
+	// calls Identity.IsSuperAdmin(), which reports the grant directly.
 	//
 	// Refused unless dataAccess scopes the rows at all.
 	Bypass string `yaml:"bypass"`

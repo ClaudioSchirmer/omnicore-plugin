@@ -574,6 +574,12 @@ hashed**. The same shape exists three times more:
 | a VALUE OBJECT whose rule is neither a shape nor a set | `valueObjects[].kind: manual` | `internal/domain/vos/<name>.go` — **you create the file** |
 | a COMPOSITE value object whose invariant no rule kind states | `valueObjects[].written: manual` | `internal/domain/vos/<name>.go` — **you create the file**, and the parts stay declared |
 
+A `manual` fact is usually manual because the truth lives ELSEWHERE (another service, an
+external API, an upstream mirror). When it is local instead — a question this database can
+answer that the DSL could not phrase — the primitive is still the hydration-free one:
+`${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` owns that choice, and the generated
+declarative facts next to it are what the right shape looks like.
+
 All five are the same bargain — the language declares the shape, a human writes the body —
 and they differ only in what an unwritten body does: a rule quietly enforces nothing, a
 fact panics on first use, a derivation renders an empty column, and a missing value object
@@ -696,12 +702,13 @@ Do not re-read every file. Read against the plan the dev approved and against th
    for `*:*` too. `bypass: "*:*"` is the other one: the super-admin wildcard itself, and
    nothing new becomes grantable, which is the right spelling when the approved policy was
    "a super-admin crosses the tenant" and minting a permission would widen it. The
-   generated guard cannot ASK about a wildcard — `HasPermission` panics on one, because
-   the claim wildcards and the question does not — so for `*:*` it asks two reserved
-   concrete permissions no catalog contains, which only a wildcard claim set answers both
-   of; the gen-report names them, and a generated test proves it against the framework's
-   own `HasPermission` rather than against a comment. Every OTHER wildcard is still
-   refused: `role:*` cannot be a bypass.
+   generated guard cannot ask `HasPermission` about a wildcard — it panics on one, because
+   the claim wildcards and the question does not — so for `*:*` it calls
+   `Identity.IsSuperAdmin()`, the framework's own question for that grant (nil-safe, and
+   honouring the configured permissions claim); the gen-report names it, and a generated
+   test proves it against the framework with a real wildcard claim rather than against a
+   comment. Every OTHER wildcard is still refused: `role:*` cannot be a bypass — it has no
+   question of its own.
 
    **The generated guards ask whether an identity was PRESENT, never whether the scope
    came out empty**, and that distinction is the whole reason the default is safe. They

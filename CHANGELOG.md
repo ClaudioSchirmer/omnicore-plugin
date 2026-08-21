@@ -7,6 +7,86 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-08-21
+
+### Added
+
+- **`shared/query-primitives.md` — which QUESTION you are asking the database, one owner.**
+  Reported from the outside: an agent implementing a domain `Service` reaches for the list
+  load and folds the answer in Go — `len(...)`, `> 0`, a running total, a loop that buckets
+  rows by a key — when the framework ships a hydration-free primitive for every one of
+  those, on the same criteria surface. The generator itself cannot make this mistake (a
+  declarative `service.facts` entry emits the existence probe or the aggregate DSL), so the
+  gap was entirely in what the skills TELL somebody writing the file by hand.
+
+  It was also, until now, badly placed: the only sentence in the plugin that said "never
+  FindAll-and-filter" lived inside `scaffold-entity`'s numbered unique-field chain, where
+  it reads as uniqueness guidance rather than as data-access guidance — and `implement`,
+  which `scaffold-view` and `scaffold-system` explicitly route report scalars TO, named no
+  primitive at all.
+
+  The new owner carries the decision table (existence · scalar aggregates · grouped facts ·
+  one aggregate · rows you will iterate · the user-facing listing and its `onlyTotal`
+  count), the four things that bite in a hand-written impl (fail loud, `Found` vs the
+  value, `SumInt` for money, a spec instance is stateful), and the argument that is about
+  CORRECTNESS rather than latency: `FindOne` is the framework's birth point and stamps the
+  old-state snapshot, the list load deliberately does not — so an entity loaded with
+  `FindAll(…)[0]` and then written has no `Old()`, and every rule and audit line reading it
+  is quietly wrong.
+
+  Routed from `scaffold-entity` (SKILL doc-map ×2 and `conventions/infra.md`, whose two
+  restatements became pointers), `implement` (a Core principle, since it is where report
+  scalars land), `evolve-entity`, `doctor` (a diagnosis row: a write that got slower as the
+  table grew, an empty `Old()` on a hand-loaded write), `omnicore-gen` (a `manual` fact
+  whose truth turns out to be local) and `shared/read-side.md`. The generated
+  `<entity>_service_manual.go` header says it too — that file is the last place the choice
+  is made, and it is made by hand.
+
+### Changed
+
+- **`authz.bypass: "*:*"` now asks the framework's own question — `Identity.IsSuperAdmin()`.**
+  When `0.28.0` shipped the wildcard bypass there was no way to ask "is this caller a
+  super-admin?": `HasPermission` panics on a wildcard (the CLAIM wildcards; the question
+  does not), so the emitted guard asked **two reserved concrete permissions** under
+  resources no catalog contains — `superadmin.probe.a:cross-scope` and
+  `superadmin.probe.b:cross-scope` — on the reasoning that a `*:*` claim answers yes to
+  every concrete question and nothing else answers yes to both.
+
+  It worked, and it was still a workaround: two invented permission strings that read as
+  a bug in generated code, a bypass that a permission catalog could hand out by accident
+  (granting both probes IS crossing the scope), and an argument that had to be repeated
+  in four places for the reader to know why one probe was not enough. Framework `v0.56.0`
+  gives the question a method of its own, so the guard now calls it — nil-safe, honouring
+  `authorization.permissionsClaim`, and sharing the parsed-claim cache with
+  `HasPermission`. A resource wildcard like `role:*` does not answer it, which the pair of
+  probes only achieved by construction.
+
+  Both halves of the scope moved together — the read filter in the query and the runtime
+  field the write guard reads — and so did the gen-report's **Crossing the scope** row,
+  which used to name the two probes for a reviewer who would otherwise meet them cold.
+  The generated proof is unchanged in shape and stronger in what it proves: a real `*:*`
+  claim set, put through the framework itself. One wart went with the probes — the
+  mappers' generated test fed the identity a claim literally named `*:*`, as though the
+  wildcard were a custom claim looked up by name; the super-admin question is answered
+  from the permissions claim, like the concrete one, so nothing is invented there now.
+
+- **The supported framework line is now `v0.56.0`** (`compat.Supported`, and the vendored
+  host the golden gate builds), because that is the release carrying
+  `Identity.IsSuperAdmin` — generated code calling it does not compile against an older
+  pin. A project still on `v0.55.0` is `behind` and refused by default with the fix named,
+  as any older line always was; `omnicore-gen` says so before generating anything.
+
+### Fixed
+
+- **The generated mapper tests carried a claim with no name.** An entity under
+  `authz.noIdentity: stand-down` synthesises a runtime field recording that the request
+  carried an identity AT ALL — the fact an empty scope cannot distinguish from a token
+  without the claim. It is the nil check itself, so it has no claim name; the test-identity
+  emitter did not know that and fell through to the branch for author-declared claims,
+  putting `"": "true"` into every generated `Claims` map. Harmless at runtime and wrong to
+  read: it looks like the framework resolves something by that name. Presence is now
+  excluded there alongside the two permission questions, which never were claims either.
+
 ## [0.28.0] — 2026-08-21
 
 Both entries came from the same report as `[0.27.0]`, from the same agent and the

@@ -434,6 +434,13 @@ func emitServiceStubFile(m *ir.Model) (fsplan.File, error) {
 			"client, and data you need to filter and sort locally is usually better "+
 			"mirrored in through an upstream subscription than fetched per request.",
 		"",
+		"If the truth is THIS database — a question the spec could not phrase "+
+			"declaratively — ask it the way the generated facts beside this file do: "+
+			"the loader's existence probe for a yes/no, its aggregate DSL for a count, "+
+			"total, average or extreme, and the grouped form for per-key facts. Loading "+
+			"the rows and folding the answer in Go reads a whole table to compute what "+
+			"one SELECT computes, on the write path.",
+		"",
 		"Two constraints the port imposes. The method returns a plain value and NO "+
 			"error, so decide here what an unavailable source means — failing loudly is "+
 			"the safe default, because returning a plausible answer skips the very rule "+

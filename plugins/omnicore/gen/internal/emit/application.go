@@ -280,12 +280,11 @@ func emitAssignedFields(s *src, m *ir.Model) {
 }
 
 // superAdminTest is the expression that answers "is the caller a super-admin",
-// over an *Identity the generated code has already checked for nil. The two
-// probes it asks about, and why there are two, are ir.SuperAdminProbes.
+// over an *Identity the generated code has already checked for nil. Which
+// framework method that is, and why it is not HasPermission, is
+// ir.SuperAdminMethod.
 func superAdminTest(recv string) string {
-	p := ir.SuperAdminProbes
-	return fmt.Sprintf("%s.HasPermission(%s) && %s.HasPermission(%s)",
-		recv, quote(p[0]), recv, quote(p[1]))
+	return recv + "." + ir.SuperAdminMethod + "()"
 }
 
 // emitIdentityFeed populates the runtime-only fields the rules read.
@@ -320,11 +319,10 @@ func emitIdentityFeed(s *src, m *ir.Model) {
 		case "permission":
 			s.L("\t\te.%s = id.HasPermission(%s)", f.Name, quote(f.Claim))
 			continue
-		case "wildcard-permission":
-			s.L("\t\t// A super-admin crosses the scope. The question is asked")
-			s.L("\t\t// INDIRECTLY: HasPermission panics on the wildcard the claim")
-			s.L("\t\t// carries, so the guard asks two concrete permissions no catalog")
-			s.L("\t\t// grants — and only a claim set holding %s answers both.", f.Claim)
+		case "super-admin":
+			s.L("\t\t// A super-admin crosses the scope. Not asked through")
+			s.L("\t\t// HasPermission, which panics on the %s the claim carries —", f.Claim)
+			s.L("\t\t// the wildcard has its own question, and this is it.")
 			s.L("\t\te.%s = %s", f.Name, superAdminTest("id"))
 			continue
 		case "present":
@@ -623,21 +621,21 @@ func emitRowScoping(s *src, m *ir.Model, target string) {
 	switch {
 	case m.Authz.BypassWildcard:
 		// The same exception, asked of the wildcard itself. It cannot be handed
-		// to HasPermission — that panics — so the question becomes the two
-		// reserved probes only a wildcard claim answers. See superAdminProbes.
+		// to HasPermission — that panics — so it is asked with the framework's
+		// own question for it. See ir.SuperAdminMethod.
 		s.L("\t\t// A super-admin crosses the scope: the operator supporting a customer")
-		s.L("\t\t// reads across tenants. Asked INDIRECTLY — the framework panics when a")
-		s.L("\t\t// wildcard is the QUESTION, so the guard asks two concrete permissions")
-		s.L("\t\t// no catalog grants, and only a claim set holding %s answers both.", m.Authz.Bypass)
-		s.L("\t\tif !(%s) {", superAdminTest("id"))
+		s.L("\t\t// reads across tenants. Not asked through HasPermission — the framework")
+		s.L("\t\t// panics when a wildcard is the QUESTION, so the %s a super-admin", m.Authz.Bypass)
+		s.L("\t\t// carries has a question of its own, and this is it.")
+		s.L("\t\tif !%s {", superAdminTest("id"))
 		s.L("\t\t\t%s.Filter[%s] = %s", target, quote(field.Name), from)
 		s.L("\t\t}")
 	case m.Authz.Bypass != "":
 		// Without this, a platform operator holding every permission there is
 		// was still filtered to their own tenant, so supporting a customer
-		// through the API was impossible — and they could not even ASK for the
-		// exception, because HasPermission panics on the wildcard a superadmin
-		// claim carries.
+		// through the API was impossible. The permission is named CONCRETELY
+		// here on purpose: a wildcard is not a legal argument to HasPermission,
+		// and the policy "a super-admin crosses" is the other case above.
 		s.L("\t\t// %s crosses the scope: the operator supporting a customer", m.Authz.Bypass)
 		s.L("\t\t// reads across tenants. Asked as a CONCRETE permission — the framework")
 		s.L("\t\t// panics on a wildcard here, since the claim wildcards and the question")

@@ -15,11 +15,10 @@
 #                              atravessa o tenant". Escrevê-la com uma
 #                              permissão concreta cunha uma string concedível a
 #                              quem não é super-admin, que é um superconjunto
-#                              da política. O curinga não pode ser PERGUNTADO
-#                              ao framework (HasPermission entra em panic), e é
-#                              por isso que o gerador pergunta por duas
-#                              permissões concretas reservadas que só um
-#                              conjunto de claims com `*:*` responde.
+#                              da política. O curinga não pode ser perguntado
+#                              ao HasPermission (que entra em panic com ele), e
+#                              é por isso que o gerador chama o método que o
+#                              framework dá a essa pergunta: IsSuperAdmin().
 specVersion: 1
 entity: PerfilPC
 plural: PerfisPC

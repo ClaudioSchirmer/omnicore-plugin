@@ -838,16 +838,16 @@ func dataAccessNote(kind string) string {
 // For a concrete permission it is that HOLDING it is not the same as being
 // granted it: a resource wildcard covers it too, so `platform:*` crosses the
 // scope as surely as the permission itself. For the wildcard form it is that
-// the generated code asks about two permissions nobody has ever heard of —
-// which reads as a bug until you know why they are there.
+// the guard calls a method the reader may not know is there, since every other
+// authorization question in the generated code goes through HasPermission.
 func bypassNote(m *ir.Model) string {
 	if m.Authz.BypassWildcard {
 		return "Only a super-admin crosses the scope, and nothing new became grantable — " +
 			"what crosses is the claim they already carry. The wildcard cannot be handed " +
 			"to the framework's HasPermission (it panics on one), so the generated guard " +
-			"asks two reserved concrete permissions instead — `" + ir.SuperAdminProbes[0] +
-			"` and `" + ir.SuperAdminProbes[1] + "` — which only a `*:*` claim set answers " +
-			"both of. Never add either to a permission catalog: granting both IS the bypass."
+			"calls `Identity." + ir.SuperAdminMethod + "()` instead — the framework's own " +
+			"question for the `*:*` grant, nil-safe and honouring the configured " +
+			"permissions claim. A resource wildcard like `role:*` does NOT answer it."
 	}
 	res := m.Authz.Bypass
 	if i := strings.Index(res, ":"); i > 0 {

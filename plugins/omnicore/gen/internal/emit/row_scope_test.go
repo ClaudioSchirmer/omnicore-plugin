@@ -193,8 +193,7 @@ func TestOwnerCheckAsksAboutPresenceNotAboutAnEmptyPrincipal(t *testing.T) {
 }
 
 // authz.bypass — the platform operator. Before it there was no way to ask at
-// all: a `*:*` holder was filtered like anybody else, and HasPermission panics
-// on the wildcard such a claim carries.
+// all: a `*:*` holder was filtered like anybody else.
 func TestBypassCrossesTheScopeOnBothSides(t *testing.T) {
 	m := rowScopeModel(t, "  bypass: platform:cross-tenant\n")
 	q := fileNamed(t, m, "internal/application/queries/find_papeis_by_params_query.go")
@@ -217,11 +216,10 @@ func TestBypassCrossesTheScopeOnBothSides(t *testing.T) {
 // string that can be granted to somebody who is NOT a super-admin, which is a
 // wider policy than the one that was approved. The wildcard says the policy —
 // and it cannot be handed to HasPermission, which panics on one, so what has to
-// be proven here is that the emitters ask an equivalent question instead of the
-// literal one.
+// be proven here is that the emitters ask the framework's OWN question for it
+// rather than the literal one.
 func TestWildcardBypassIsAskedWithoutPanicking(t *testing.T) {
 	m := rowScopeModel(t, "  bypass: \"*:*\"\n")
-	a, b := ir.SuperAdminProbes[0], ir.SuperAdminProbes[1]
 
 	for _, side := range []struct{ what, path string }{
 		{"the listing", "internal/application/queries/find_papeis_by_params_query.go"},
@@ -234,12 +232,12 @@ func TestWildcardBypassIsAskedWithoutPanicking(t *testing.T) {
 			t.Errorf("%s hands the wildcard to HasPermission, which panics on the first "+
 				"request that reaches it:\n%s", side.what, got)
 		}
-		// ANDed, and both: one probe alone is satisfied by a `<resource>:*`
-		// grant, which is a narrower claim than the one meant to cross.
-		want := `id.HasPermission("` + a + `") && id.HasPermission("` + b + `")`
+		// The framework's own question for the wildcard, and the only one that
+		// tells a `*:*` holder from a `<resource>:*` one.
+		want := "id." + ir.SuperAdminMethod + "()"
 		if !strings.Contains(got, want) {
-			t.Errorf("%s does not ask the pair of probes, so nothing tells a super-admin "+
-				"from anybody else:\n%s", side.what, got)
+			t.Errorf("%s does not ask %s, so nothing tells a super-admin "+
+				"from anybody else:\n%s", side.what, want, got)
 		}
 	}
 
@@ -253,9 +251,23 @@ func TestWildcardBypassIsAskedWithoutPanicking(t *testing.T) {
 	// that is the whole question.
 	qt := fileNamed(t, m, "internal/application/queries/papel_queries_test.go")
 	if !strings.Contains(qt, "func TestPapelBypassCrossesTheReadScope(t *testing.T) {") {
-		t.Errorf("nothing proves the probes answer for a real wildcard claim:\n%s", qt)
+		t.Errorf("nothing proves the question answers for a real wildcard claim:\n%s", qt)
 	}
 	if !strings.Contains(qt, `"permissions": []any{"*:*"}`) {
 		t.Errorf("the generated proof does not use a wildcard claim set:\n%s", qt)
+	}
+
+	// The super-admin question is answered from the permissions claim, like the
+	// concrete one — it is not a custom claim named after the grant. Feeding the
+	// mappers' test identity a `"*:*": "true"` entry proves nothing and reads as
+	// though the framework looked the wildcard up by that name.
+	ct := fileNamed(t, m, "internal/application/commands/papel_commands_test.go")
+	if strings.Contains(ct, `"*:*":`) {
+		t.Errorf("the generated mapper test invents a claim named after the wildcard:\n%s", ct)
+	}
+	// The same mistake one field over: presence is the nil check, not a claim,
+	// so nothing may key the map on the empty string.
+	if strings.Contains(ct, `"": `) {
+		t.Errorf("the generated mapper test carries a claim with no name:\n%s", ct)
 	}
 }

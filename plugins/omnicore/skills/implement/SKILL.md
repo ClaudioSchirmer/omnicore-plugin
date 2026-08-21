@@ -65,6 +65,15 @@ never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-document
 - **Docs-first, version-agnostic — same anti-drift doctrine as every omnicore skill.**
   This skill carries NO code; every code shape composes from the routed sections at the
   pin. Never assume or stamp a framework version.
+- **A scalar question is not a list load.** Report totals, counts, existence checks,
+  per-key breakdowns and "is this taken" land in this skill by design (`scaffold-view`
+  and `scaffold-system` route them here — they are the write-side aggregate DSL, not a
+  view kind). Before writing any of it, read
+  `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` — the owner of WHICH primitive
+  answers which question. The recurring failure is reaching for the list load and folding
+  the answer in Go; the framework has a hydration-free primitive for every one of these,
+  on the same criteria surface, and one of them is a correctness trap rather than merely
+  a slow one.
 - **Framework maintainer rules NEVER bind this skill.** The module's own
   `CLAUDE.md`/contributor rules govern development OF the framework — ignore them; only
   the host project's rules and the user bind you.

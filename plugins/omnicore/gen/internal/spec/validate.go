@@ -2882,8 +2882,7 @@ func validateSurfaces(s *Spec, ps *Problems) {
 //
 // Both used to be hardcoded. The bypass did not exist at all, so a platform
 // operator was filtered to their own tenant like anybody else and could not
-// support a customer through the API — and could not even ASK, because
-// HasPermission panics on the wildcard a superadmin claim carries. The absent
+// support a customer through the API. The absent
 // identity was an `else` branch scoping the read to "", so a freshly generated
 // tenant-scoped entity answered every listing empty on the dev bench, which is
 // the first place anybody runs it.
@@ -2900,8 +2899,9 @@ func validateRowScopePolicy(a Authz, ps *Problems) {
 		case a.Bypass == SuperAdminClaim:
 			// The superadmin wildcard, and the reason this is a `case` with no
 			// body: it is the one wildcard a caller CAN be tested for, so the
-			// refusal below must not swallow it. How the test is written without
-			// panicking is Authz.Bypass's own documentation.
+			// refusal below must not swallow it. Which framework question the
+			// guard asks instead of HasPermission is Authz.Bypass's own
+			// documentation.
 		case strings.Contains(a.Bypass, "*"):
 			// The mistake this exists to catch, because it is the natural way to
 			// write the intent and it does not fail until a request arrives.
@@ -2909,10 +2909,10 @@ func validateRowScopePolicy(a Authz, ps *Problems) {
 				fmt.Sprintf("%q cannot be asked about — the framework's HasPermission "+
 					"panics on a wildcard, since the CLAIM wildcards and the question "+
 					"does not", a.Bypass),
-				`"*:*" is the one exception, because a superadmin answers true to every `+
-					`concrete question and the generated guard can test for exactly that. `+
-					`Anything narrower has to be a concrete permission: grant something `+
-					`like platform:cross-tenant and name it here`)
+				`"*:*" is the one exception, because the framework answers that question `+
+					`with its own method (Identity.IsSuperAdmin) rather than with `+
+					`HasPermission. Anything narrower has to be a concrete permission: `+
+					`grant something like platform:cross-tenant and name it here`)
 		case !strings.Contains(a.Bypass, ":"):
 			ps.BlockerFix("authz.bypass",
 				fmt.Sprintf("%q is not a permission", a.Bypass),
