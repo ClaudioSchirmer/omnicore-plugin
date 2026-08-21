@@ -329,16 +329,21 @@ notifications:
       ita: Il voto deve essere compreso tra {min} e {max}.
       nld: Het cijfer moet tussen {min} en {max} liggen.
 
+  # The bound is INTERPOLATED rather than spelled out in seven places. Writing
+  # the number into the sentence is what an author does when the variable comes
+  # back empty, and it is a copy of the cap that no regeneration keeps in step:
+  # raising `cap:` to 5 would leave seven catalogs still saying 4.
   - name: TooManyGuardiansNotification
     semantic: validation
+    tvars: [max]
     text:
-      ptbr: Um aluno pode ter no máximo 4 responsáveis.
-      eng: A student may have at most 4 guardians.
-      esp: Un alumno puede tener como máximo 4 responsables.
-      fra: Un élève ne peut avoir plus de 4 responsables.
-      deu: Ein Schüler darf höchstens 4 Erziehungsberechtigte haben.
-      ita: Uno studente può avere al massimo 4 tutori.
-      nld: Een leerling mag maximaal 4 voogden hebben.
+      ptbr: Um aluno pode ter no máximo {max} responsáveis.
+      eng: A student may have at most {max} guardians.
+      esp: Un alumno puede tener como máximo {max} responsables.
+      fra: Un élève ne peut avoir plus de {max} responsables.
+      deu: Ein Schüler darf höchstens {max} Erziehungsberechtigte haben.
+      ita: Uno studente può avere al massimo {max} tutori.
+      nld: Een leerling mag maximaal {max} voogden hebben.
 
   - name: InvalidEmailNotification
     package: vos

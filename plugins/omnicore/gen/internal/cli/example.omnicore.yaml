@@ -255,7 +255,6 @@ valueObjects:
           fields: [Amount]
           min: 0
           notification: NegativeAmountNotification
-          echoValue: true
 
   - name: Currency
     kind: enum
@@ -382,7 +381,6 @@ rules:
       scope: [update]
       fields: [EnrollmentNumber]
       notification: EnrollmentNumberCannotChangeNotification
-      echoValue: true
 
     - id: grade-range
       kind: range
@@ -391,7 +389,6 @@ rules:
       min: 0
       max: 10
       notification: GradeOutOfRangeNotification
-      echoValue: true
 
   manual:
     - id: enrollment-window

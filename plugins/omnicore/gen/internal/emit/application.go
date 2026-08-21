@@ -287,6 +287,24 @@ func superAdminTest(recv string) string {
 	return recv + "." + ir.SuperAdminMethod + "()"
 }
 
+// identityParam names the AppContext parameter of a write mapper.
+//
+// A mapper that carries nothing from the request onto the entity leaves it `_`,
+// which says so at the signature. One that does has to name it — and the set of
+// verbs that do is wider than the root's own: a per-entry child verb and the
+// facet-clearing mutation both write the ROOT, under ModeUpdate, so a row
+// scope's guard runs for them exactly as it runs for a patch. Leaving the
+// context unnamed there generated the guard and then never fed it, and the
+// guard stands down on an absent identity — so a caller holding nothing but the
+// update permission wrote into another tenant's aggregate one entry at a time,
+// with a green build and a green generated suite.
+func identityParam(m *ir.Model) string {
+	if len(m.Runtime) == 0 {
+		return "_"
+	}
+	return "ctx"
+}
+
 // emitIdentityFeed populates the runtime-only fields the rules read.
 //
 // This is the one place below the web layer that touches the request identity:

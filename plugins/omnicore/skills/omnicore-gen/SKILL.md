@@ -668,6 +668,38 @@ Read it fully. It is the reason the codegen path does not lose the review.
 
 ## Step 7 — review the generated code (this is your job, and it is not a formality)
 
+**You are asking TWO questions, not one, and the second is the one that gets skipped.**
+
+1. *Does the SPEC say what the model meant?* A spec that validates can still be wrong,
+   because the generator wrote exactly what you declared. This is the question the
+   checklist below is mostly about.
+2. *Does the OUTPUT say what the SPEC declared?* The generator can be wrong too. Read the
+   emitted code against the yaml that produced it, key by key, for the keys that carry a
+   promise — not just for plausibility.
+
+Question 2 is not theoretical, and it does not announce itself. Every defect found this
+way so far survived `gofmt`, `go vet`, `go build` AND the generated test suite, because
+none of them is a Go error:
+
+- a `groupCap` whose notification declared `tvars: [max]` got the struct field, the seven
+  catalogs and the hard-coded cap in the comparison — and raised `Notification{}`, so the
+  422 read "at most  permissions", with a hole, in every language. Only an end user ever
+  saw it;
+- `authz.dataAccess: tenant` generated its write guard and fed it on the root's mappers
+  and not on the per-entry child ones, so a caller holding the update permission could
+  grant into and revoke from another tenant's aggregate. The build was green, the
+  generated suite was green, and the read filter hid the damage from the caller's own
+  side.
+
+So: for every key in the spec that promises RUNTIME behaviour — an authz scope, an
+interpolated message, a cap, a unique scope, a cascade — find the line that keeps the
+promise and read it. "The file exists and looks reasonable" is not the check.
+
+**When question 2 answers badly, that is a generator defect and it is worth reporting.**
+Say so in the hand-back, with the spec fragment, the emitted fragment, and what you
+expected. Three of the language's newest capabilities exist because somebody did that
+instead of hand-patching the output and moving on.
+
 Do not re-read every file. Read against the plan the dev approved and against the report:
 
 1. **The domain type + `BuildRules`** — do the emitted rules say what the model meant?
@@ -756,20 +788,54 @@ this order — each step is cheap and most problems die at the first:
 3. **If the invariant genuinely cannot be declared, use `rules.manual`** — a named item,
    a stub in a file regeneration never touches. That is the designed escape, and it does
    not fight the generator.
-4. **Only then** consider editing a generated file — and then `omnicore-gen adopt <path>
-   -why "<what the spec could not express>"` so the edit is recorded rather than silently
-   refused on the next run.
+4. **Only then** consider editing a generated file — and that is a GATE, below. You never
+   take this step on your own.
 
-**Adoption has a permanent cost, and it is not "the file is dirty".** An adopted file
-STOPS TRACKING THE SPEC: every later improvement to the emitters — a bug fixed, a verb
-corrected, a boot-trap closed — lands everywhere except there, quietly, forever. That is
-why it goes last, and why the `-why` is worth writing: the next person to meet the file is
-usually not the one who edited it, and "adopted" alone does not say whether the reason
-still holds.
+### ⏸️ GATE — a generated file is never edited without the dev's yes
 
-**And say it out loud.** Any file you adopt goes in the hand-back with what the spec could
-not express — that list is how the generator gets better. A hand edit nobody hears about
-is a gap that stays open.
+Editing generated code is a legitimate move. `omnicore-gen adopt` exists precisely for it:
+it is part of the generator's plan, not an admission of defeat, and being timid about it
+is how a project ends up with a spec that quietly lies about what is on disk. So do not
+refuse the idea.
+
+But the cost is permanent and it lands on somebody who is not in this conversation, so
+**the decision is the dev's, every single time.** Stop, ask, and wait. Never edit first
+and mention it after; never fold it into a larger "here is what I did".
+
+Ask in one message, carrying all five of these:
+
+1. **The divergence, concretely** — the spec fragment, the emitted fragment, and what you
+   expected instead. Not "the authz output looks off": the two snippets, side by side.
+2. **Which of the two questions it answers.** A spec that cannot express the need is one
+   conversation; a generator that did not keep a promise the spec made is a different one,
+   and the second should usually be REPORTED and worked around temporarily rather than
+   adopted permanently.
+3. **What you already ruled out** — which `explain` topics you read, which key you looked
+   for, why `rules.manual` does not cover it. Step 1–3 above, named, so the dev can
+   disagree with a step rather than with a conclusion.
+4. **What `adopt` costs.** Say it plainly: `omnicore-gen adopt <path> -why "<reason>"`
+   marks the file hand-owned, and from that moment it **STOPS TRACKING THE SPEC**. Every
+   later improvement to the emitters — a bug fixed, a verb corrected, a security guard
+   closed — lands everywhere except there, silently, forever. The two defects at the top
+   of Step 7 were fixed for every project on the next release; a project that had adopted
+   those files kept both bugs and nobody was told.
+5. **The alternatives you can offer**, so it is a decision and not a rubber stamp:
+   *(a)* adopt the file and hand-edit it; *(b)* leave the output as generated, report the
+   defect, and carry the gap in a `*_manual.go` hook or in the caller until a release
+   fixes it; *(c)* change the model so the question does not arise.
+
+Then wait for an explicit answer. Silence is not a yes, and "faz o que for melhor" is
+worth one clarifying sentence rather than a guess — the whole reason this gate exists is
+that the person who pays the cost is the one who should choose it.
+
+Whatever the answer, **it goes in the hand-back**: every adopted file with its `-why`, and
+every divergence you reported instead of adopting. That list is how the generator gets
+better; a hand edit nobody hears about is a gap that stays open.
+
+One more thing about the `-why`, since it is the only part of an adoption that survives
+the conversation: write it for the next person, who will not be the one who edited the
+file. "adopted" alone does not say whether the reason still holds — `-why "the framework
+has no key for X; revisit after <version>"` does.
 
 ## Step 8 — prove it
 

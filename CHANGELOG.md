@@ -7,6 +7,108 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-08-21
+
+The two `Fixed` entries come from the same report, the same agent and the same entity as
+`[0.27.0]` and `[0.28.0]` — a tenant-scoped `Role` whose one collection holds catalog ids.
+Both survive `gofmt`, `go vet`, `go build` and the generated suite, which is the property
+that kept them alive across three rounds of review.
+
+The two `Changed` entries are the answer to that pattern rather than to that report: a
+refusal that never said what it refused, and a review step that read the spec and took the
+emitted code on trust.
+
+### Changed
+
+- **A refusal now carries the value it refused, by default.** `rules.list[].echoValue`
+  existed, the framework has carried the value as `NotificationMessage.FieldValue` since
+  the beginning, and almost no spec ever wrote the key — so a 422 stated the rule and
+  never what broke it. "At most 4 guardians" without "you sent 6"; "that key is taken"
+  without which key. The half a caller can act on was the half being dropped.
+
+  The key defaults to TRUE and became a pointer, so `echoValue: false` still says
+  otherwise — which is the spelling to reach for on a value that should not travel back in
+  a response, since nothing in the language marks a field as sensitive and the generator
+  cannot guess. The printed shared-identity example now demonstrates the opt-out on a
+  national id rather than demonstrating the opt-IN, which is no longer a thing to write.
+
+  Four refusals that could never echo learned to. Three of them have no rules entry to
+  carry the key at all, so they simply do it: the unique pre-check (which value is taken),
+  the per-entry add door and the whole-collection duplicate check (which entry came
+  twice — only when the business identity is a single field; a tuple echoes nothing,
+  because one half of a key points at the wrong thing). The fourth is `groupCap`, which
+  echoes the COUNT that broke the cap, on the same argument `factRange` already made: the
+  limit plus where you are is a message someone can act on.
+
+  Two defects surfaced with the default, both invisible while every fixture left the key
+  off: a `comparison` rule declared on a COLLECTION emitted `e.Field` into a method that
+  has no `e` (it went through the root-receiver helper), and a unique pre-check on a
+  COMPOSITE key echoed the part's logical name, which is not a field of the entity. Both
+  produced code that did not compile, so they were reachable by any spec that had written
+  `echoValue: true`.
+
+- **`scaffold-entity`, `evolve-entity` and `omnicore-gen` review the OUTPUT against the
+  spec, and stop before editing it.** The review step said what to check about the spec
+  and treated the emitted code as correct by construction. It is not: every generator
+  defect found so far — the two below among them — survived gofmt, vet, build and the
+  generated suite, because none of them is a Go error. Step 7 now asks two questions
+  explicitly (does the spec say what the model meant; does the OUTPUT say what the spec
+  declared), names the failure shape, and says to report a divergence rather than quietly
+  work around it.
+
+  It also gains a real gate: **a generated file is never edited without the dev's yes.**
+  Editing generated code is supported — `adopt` is part of the generator's plan, and being
+  timid about it produces a spec that lies about what is on disk — but the cost is
+  permanent and lands on somebody who is not in the conversation, so the choice is the
+  dev's every time. The gate asks with the two snippets side by side, what was ruled out,
+  what `adopt` costs (the file stops tracking the spec forever, so later emitter fixes
+  land everywhere except there), and the alternatives, so it is a decision rather than a
+  rubber stamp. Both scaffolding skills state the promise at their generation gateway, so
+  a dev sees it when they approve the path.
+
+### Fixed
+
+- **A tenant-scoped entity generated its write guard and then left it unfed on four
+  mappers.** `authz.dataAccess: tenant` synthesises three runtime fields, a
+  `refuseForeignTenant` guard under every write gate, and the block that carries the
+  caller onto the entity. The block reached the root's own mappers — insert, patch,
+  archive — and none of the others: the three per-entry child verbs
+  (`children[].editStrategy: per-child`) and the GraphQL facet-clear mutation all
+  discarded the `AppContext` as `_`. All four dispatch through `UpdateCommandHandler`, so
+  the guard RUNS for them; it just runs on zeroed fields, and `noIdentity: stand-down` —
+  the default — makes an absent identity stand down. Net: a caller holding nothing but the
+  entity's update permission could add an entry to, change an entry of, revoke an entry
+  from, and clear the facet of an aggregate owned by ANOTHER TENANT. The read filter never
+  covered it, because a child verb loads the root through the repository, which the read
+  side never touches — so the damage was invisible from the caller's side too.
+
+  It is the same defect the bodyless archive verb had, fixed one release earlier and never
+  propagated: the fix there taught the archive mapper to name its context, and the four
+  mappers emitted elsewhere kept the flat no-op. What let it survive is that the fixture
+  the write guard was built against is FLAT — no children, no siblings — so every
+  assertion about the guard read mappers that were already fed. The fixture now carries a
+  per-entry collection and a 1:1 facet, and the generated tests for those verbs supply an
+  identity and assert the caller's scope arrived, which is also what puts them back above
+  the coverage floor.
+
+- **A `groupCap` declared its bound, emitted the field for it, and raised the notification
+  empty.** A cap whose notification declares `tvars: [max]` got the struct field, the seven
+  catalogs and the hard-coded number in the comparison one line above the raise site — and
+  `TooManyThingsNotification{}` at the raise site itself. The 422 rendered "A role may
+  grant at most  permissions.", with a hole, in all seven languages. Nothing in a build, a
+  vet or a generated test is capable of noticing: the only reader of the gap is an end
+  user, in production. `range`, `length` and `factRange` were binding correctly; `groupCap`
+  was the one kind with a bound that reached for the literal helper that cannot fill
+  anything. Its bound lives under `cap:` rather than `max:`, so the binding now sources
+  `{max}` from a cap as well — writing the number into the sentence to work around this was
+  a copy no regeneration kept in step, and the golden fixture that did exactly that has
+  been converted to `{max}` so the gate compiles the bound end to end.
+
+  Spelling and qualification were separated in the same change: the helper that fills
+  variables answers with a BARE type name, because the kinds that use it emit inside `vos`
+  and `aggregatevos`, where that is the only spelling that compiles — a rule emitted in the
+  root's package needs the qualified one, and `groupCap` is emitted there.
+
 ## [0.29.0] — 2026-08-21
 
 ### Added

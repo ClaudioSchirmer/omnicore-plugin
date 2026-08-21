@@ -288,8 +288,8 @@ func emitFacetClearCommands(m *ir.Model) ([]fsplan.File, error) {
 		s.L("\tpipeline.CommandWithBodyIDBase")
 		s.L("}")
 		s.Blank()
-		s.L("func (cmd *Clear%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {",
-			sib.Name, m.Entity.Pascal)
+		s.L("func (cmd *Clear%sCommand) ApplyTo(%s *configuration.AppContext, e *appdomain.%s) error {",
+			sib.Name, identityParam(m), m.Entity.Pascal)
 		s.L("\t// ApplyTo, not ApplyPartiallyTo: the framework's sibling write leaves an")
 		s.L("\t// all-nil facet UNTOUCHED on a partial update and DELETES its row on a")
 		s.L("\t// full one. Everything this command does not assign keeps the value it")
@@ -303,6 +303,7 @@ func emitFacetClearCommands(m *ir.Model) ([]fsplan.File, error) {
 		for _, g := range groups {
 			s.L("\te.%s = nil", g.Owner())
 		}
+		emitIdentityFeed(s, m)
 		s.L("\treturn nil")
 		s.L("}")
 		s.Blank()
