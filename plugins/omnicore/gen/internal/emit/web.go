@@ -639,7 +639,8 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 		fmt.Sprintf("the wire types for %d child collection(s)", len(m.Children)), s)
 }
 
-// emitPerChildRoutes mounts the three verbs that address ONE entry.
+// emitPerChildRoutes mounts the verbs that address ONE entry — up to three of
+// them, and exactly the ones children[].operations names.
 //
 // They hang off the owner's path because the entry has no life of its own: it
 // is loaded, changed and saved as part of the aggregate, in one transaction, so
@@ -661,8 +662,15 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		// summaries are read by an API consumer, who got "a appdomain.Person".
 		human := m.Entity.Pascal
 
-		for _, op := range []perChildOp{
-			{
+		// Which of the three the collection mounts is the spec's decision
+		// (children[].operations), and a verb it does not mount leaves NO trace:
+		// no route, no OpenAPI entry, no permission line. A collection whose only
+		// field is its identity has no change to offer, and mounting one anyway
+		// would publish an endpoint whose single effect is to turn one entry into
+		// another while keeping the first one's row id.
+		var ops []perChildOp
+		if c.MountsAdd {
+			ops = append(ops, perChildOp{
 				verb: "Add", method: "fiber.MethodPost", path: "/:id/" + seg,
 				request: "Add" + opName + "Request", response: "Add" + opName + "Response",
 				result: "Add" + opName + "Result", status: "fiber.StatusCreated",
@@ -672,8 +680,10 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 					"response carries the entry AS STORED, including the id the server "+
 					"minted for it — that id is how the caller addresses it afterwards.",
 					c.Segment, human),
-			},
-			{
+			})
+		}
+		if c.MountsChange {
+			ops = append(ops, perChildOp{
 				verb: "Change", method: "fiber.MethodPut", path: "/:id/" + seg + "/:" + idParam,
 				request: "Change" + opName + "Request", response: "Change" + opName + "Response",
 				result: "Change" + opName + "Result", status: "fiber.StatusOK",
@@ -682,9 +692,13 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 					"is updated rather than removed and re-added, so the audit trail reads " +
 					"as a change. 404 when the owner is not there, and 404 when the owner " +
 					"exists but holds no entry with that id."),
-			},
-			removeOp(c, human, seg, idParam, opName),
-		} {
+			})
+		}
+		if c.MountsRemove {
+			ops = append(ops, removeOp(c, human, seg, idParam, opName))
+		}
+
+		for _, op := range ops {
 			hv := "h" + op.verb + opName
 			sv := "s" + op.verb + opName
 			s.L("\t%s, %s := fwweb.CommandWithBodyIDSpec(d.Pipeline,", hv, sv)

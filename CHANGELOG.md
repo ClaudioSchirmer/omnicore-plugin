@@ -7,6 +7,72 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-08-21
+
+Both entries came from the same report as `[0.27.0]`, from the same agent and the
+same entity — a tenant-scoped `Role` whose one collection holds catalog ids. They
+are the two places where that model could be generated only by changing the model:
+the spec language could not say what had been approved, and the two ways out on
+offer each meant approving something else.
+
+### Added
+
+- **`children[].operations` — WHICH per-entry verbs a collection mounts.** Absent
+  means all three, so nothing regenerates differently; any non-empty subset of
+  `[add, change, remove]` is legal.
+
+  The trio is sometimes a pair. A collection whose every field IS its business
+  identity — a grant holding one permission id and nothing else — has nothing a
+  change verb can change and still leave it the same entry: the `PUT` turns entry A
+  into entry B while keeping A's row id, which an audit trail reads as one grant
+  BECOMING another rather than as a revocation and a grant. `check` had warned about
+  exactly that for a release, and both exits it offered were worse than the model:
+  `atomic-replace`, which is a different contract rather than a smaller one (the
+  root's update carries the whole collection, so every partial client silently
+  revokes what it omits), or inventing a mutable field the domain does not have so
+  the verb has something to change. An author took the second one to satisfy the
+  generator, which is the failure this key exists to end.
+
+  A verb left out leaves **no trace**: no route and no OpenAPI entry, no command, no
+  request/response pair, no domain method on the aggregate, no generated test. The
+  domain method matters most — a leftover `ChangeXByID` compiles, is callable, and is
+  an invitation to hand-mount the verb the spec decided against. The warning stops
+  once the key answers it, and `duplicateNotification` is now refused on a collection
+  that mounts no `add`: it names a conflict nothing can raise.
+
+- **`authz.bypass: "*:*"` — the super-admin wildcard as the thing that crosses the
+  row scope.** Until now the key took a concrete permission only, because the
+  framework's `HasPermission` panics on a wildcard (the CLAIM wildcards; the question
+  does not). So a spec whose approved policy was "a `*:*` holder crosses the tenant"
+  had to mint a grantable string like `role:cross-tenant` to say it — a permission
+  that can be handed to somebody who is not a super-admin, which is a wider policy
+  than the one that was approved.
+
+  The wildcard cannot be asked about, but it can be ANSWERED: a `*:*` claim says yes
+  to every concrete question. The generated guard therefore asks two reserved
+  concrete permissions under resources no catalog contains, and only a claim set
+  carrying the wildcard says yes to both. Two and not one, because a single probe is
+  also satisfied by a `<its resource>:*` grant. Both halves of the scope use it — the
+  read filter in the query and the write guard's runtime field — and a **generated
+  test proves it against the framework's own `HasPermission`** with a real wildcard
+  claim, rather than against a comment. That test is new for the concrete form too:
+  the domain's bypass test sets the runtime flag by hand and so could never see
+  whether anything ever raised it.
+
+  Every other wildcard is still refused, now saying which one is the exception. And
+  the gen-report gained a **Crossing the scope** row, because a scope with an
+  exception is two decisions and only one of them was being reported: for a concrete
+  permission it says that HOLDING it is wider than being granted it (`platform:*` and
+  `*:*` both answer yes), and for the wildcard it names the two probes, so a reviewer
+  meeting those strings in the generated code can find out what they are.
+
+### Changed
+
+- The coverage matrix gained case 28 — a per-child collection with `operations:
+  [add, remove]` and a wildcard bypass, i.e. the reported entity — so both features
+  are generated, built, vetted and tested by the gate rather than by a unit test
+  alone.
+
 ## [0.27.0] — 2026-08-21
 
 Everything in this section came out of ONE report: an agent generating a single

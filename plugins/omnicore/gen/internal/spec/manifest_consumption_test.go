@@ -87,6 +87,9 @@ var deliberatelyUnread = map[string]string{
 	"FieldPart.As": "consumed through spec.ExposedName, which resolves the alias " +
 		"against the part's own name; the resolver reads the RESOLVED exposed name, " +
 		"which is the only form anything downstream may see",
+	"Child.Operations": "consumed through spec.MountsPerChildOp, which defaults an " +
+		"absent list to the whole trio; the resolver asks it one verb at a time and " +
+		"never reads the raw list, so no emitter mentions the field by name",
 	"Rule.ID":       "identifies the rule in messages and in the report, not in emitted code",
 	"ManualRule.ID": "same: it names the item in the hook file and the report",
 	"Notification.Description": "documentation for the spec reader; the emitted " +

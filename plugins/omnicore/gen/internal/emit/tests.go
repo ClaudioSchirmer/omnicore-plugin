@@ -1839,6 +1839,7 @@ func emitQueryTests(m *ir.Model) (fsplan.File, error) {
 
 	emitFromQueryResultTest(s, m)
 	emitScopeIsForcedTest(s, m)
+	emitBypassCrossesTheReadTest(s, m)
 
 	if m.Read.ByParams && len(m.Read.FieldRestrict) > 0 {
 		s.Blank()
@@ -2161,6 +2162,76 @@ func emitScopeIsForcedTest(s *src, m *ir.Model) {
 	emitByIDScopeTest(s, m, field, from, a)
 }
 
+// emitBypassCrossesTheReadTest proves the row scope steps aside for whoever
+// authz.bypass says may cross it — asked of a REAL identity, not of a boolean
+// somebody set.
+//
+// The domain side already has a bypass test, and it sets the runtime field by
+// hand: it proves the rule honours the flag, and nothing about whether anything
+// ever raises it. This one goes through the framework's own HasPermission with
+// a claim set on the context, so it fails if the question the generator emits
+// is the wrong question.
+//
+// That matters most for the WILDCARD bypass, where the question cannot be the
+// obvious one: `*:*` panics as an argument to HasPermission, so the guard asks
+// two reserved concrete permissions instead, and this test is what proves a
+// wildcard claim answers them — against the framework, not against a comment.
+func emitBypassCrossesTheReadTest(s *src, m *ir.Model) {
+	if !m.Read.ByParams || m.Authz.Bypass == "" {
+		return
+	}
+	var field, sample string
+	switch m.Authz.DataAccess {
+	case "owner-only":
+		if m.Authz.OwnerField == nil {
+			return
+		}
+		field, sample = m.Authz.OwnerField.Name, "ana@example.test"
+	case "tenant":
+		if m.Authz.TenantField == nil {
+			return
+		}
+		field, sample = m.Authz.TenantField.Name, "tenant-a"
+	default:
+		return
+	}
+
+	held := m.Authz.Bypass
+	who := "A holder of " + held
+	if m.Authz.BypassWildcard {
+		who = "A super-admin (" + held + ")"
+	}
+	s.Blank()
+	s.Doc(
+		fmt.Sprintf("%s reads across the %s scope.", who, field),
+		"",
+		"The identity is a real one and the question is the framework's own "+
+			"HasPermission, so what is under test is the QUESTION the criteria asks — "+
+			"the domain's bypass test sets the flag by hand and cannot see it.")
+	s.L("func Test%sBypassCrossesTheReadScope(t *testing.T) {", m.Entity.Pascal)
+	s.L("\tctx := &configuration.AppContext{}")
+	s.L("\tctx.SetIdentity(&configuration.Identity{")
+	if m.Authz.DataAccess == "owner-only" {
+		s.L("\t\tSubject: %s,", quote(sample))
+	}
+	s.L("\t\tClaims: map[string]any{")
+	if m.Authz.DataAccess == "tenant" {
+		s.L("\t\t\t%s: %s,", quote("tenant_id"), quote(sample))
+	}
+	s.L("\t\t\t%s: []any{%s},", quote("permissions"), quote(held))
+	s.L("\t\t},")
+	s.L("\t})")
+	s.L("\tout, err := (%s{}).ToCriteria(ctx)", m.Read.QueryList)
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("the listing criteria failed: %v"))
+	s.L("\t}")
+	s.L("\tif got, ok := out.Filter[%s]; ok {", quote(field))
+	s.L("\t\tt.Errorf(%s, got)",
+		quote("the bypass holder was scoped to %v anyway — they cannot support a customer"))
+	s.L("\t}")
+	s.L("}")
+}
+
 // emitByIDScopeTest covers the OTHER read.
 //
 // The listing and the by-id read are written by the same emitter and asserted by
@@ -2222,7 +2293,8 @@ func notificationRef(m *ir.Model, n ir.Notification) string {
 	}
 }
 
-// emitPerChildOpTests covers the three verbs that address ONE entry.
+// emitPerChildOpTests covers the verbs that address ONE entry — the ones
+// children[].operations mounts, which is all three unless the spec says less.
 //
 // They had no generated tests at all, and the gap was invisible in the usual
 // way: the root's command tests are thorough, so a coverage report looked
@@ -2241,9 +2313,18 @@ func emitPerChildOpTests(s *src, m *ir.Model) {
 		if !c.PerChild {
 			continue
 		}
-		emitAddChildOpTest(s, m, c)
-		emitChangeChildOpTest(s, m, c)
-		emitRemoveChildOpTest(s, m, c)
+		// One test per verb the collection actually mounts. A test for a command
+		// that was not generated does not compile, which is the loudest possible
+		// way to discover a spec key — and the wrong one.
+		if c.MountsAdd {
+			emitAddChildOpTest(s, m, c)
+		}
+		if c.MountsChange {
+			emitChangeChildOpTest(s, m, c)
+		}
+		if c.MountsRemove {
+			emitRemoveChildOpTest(s, m, c)
+		}
 	}
 }
 
@@ -2632,142 +2713,178 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 			continue
 		}
 
-		s.Doc(
-			fmt.Sprintf("Add%sRequest carries the entry into its command.", op),
-			"",
-			"The body is the same entry shape the root's own body carries, so a field "+
-				"forgotten here is saved as missing on a request that answered 201.")
-		s.L("func TestAdd%sRequest_CarriesEveryField(t *testing.T) {", op)
-		s.L("\tr := Add%sRequest{%sRequest: %sRequest{", op, c.Name, c.Name)
-		for _, f := range fields {
-			s.L("\t\t%s: %s,", f.Name, wireSample(f))
+		// A verb the collection does not mount has no wire types to assert
+		// about, and a test naming them would not compile.
+		if c.MountsAdd {
+			emitAddChildRequestTest(s, c, op, fields)
 		}
-		s.L("\t}}")
-		s.L("\tcmd := r.ToCommand()")
-		for _, f := range fields {
-			s.L("\tif cmd.%s != %s {", f.Name, wireSample(f))
-			s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
-			s.L("\t}")
+		if c.MountsChange {
+			emitChangeChildRequestTest(s, c, op, fields)
 		}
-		s.L("}")
-		s.Blank()
-
-		s.Doc(
-			fmt.Sprintf("Change%sRequest names the entry AND carries the replacement.", op),
-			"",
-			"The id comes from the path and the body is a full replacement, so both "+
-				"halves have to arrive: an id that does not reach the command changes the "+
-				"wrong entry, or none.")
-		s.L("func TestChange%sRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
-		s.L("\tr := Change%sRequest{%sID: %s, %sRequest: %sRequest{", op, c.Name,
-			quote("01890000-0000-7000-8000-000000000000"), c.Name, c.Name)
-		for _, f := range fields {
-			s.L("\t\t%s: %s,", f.Name, wireSample(f))
+		if c.MountsAdd {
+			emitAddChildResponseTest(s, m, c, op, fields)
 		}
-		s.L("\t}}")
-		s.L("\tcmd := r.ToCommand()")
-		// The command carries the id as the WIRE type — a string; the conversion to
-		// domain.ID happens further in. Comparing it as an ID would not compile.
-		s.L("\tif cmd.%sID != %s {", c.Name, quote("01890000-0000-7000-8000-000000000000"))
-		s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be replaced\")")
-		s.L("\t}")
-		for _, f := range fields {
-			s.L("\tif cmd.%s != %s {", f.Name, wireSample(f))
-			s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
-			s.L("\t}")
+		if c.MountsChange {
+			emitChangeChildResponseTest(s, m, c, op, fields)
 		}
-		s.L("}")
-		s.Blank()
-
-		s.Doc(
-			fmt.Sprintf("The %s responses carry the stored entry back to the caller.", op),
-			"",
-			"The entry comes back with the id the SERVER minted, which is how the caller "+
-				"addresses it afterwards — a response mapper that drops it answers 201 with "+
-				"nothing to act on.")
-		s.L("func TestAdd%sResponse_CarriesTheStoredEntry(t *testing.T) {", op)
-		s.L("	ownerID := domain.NewRandomID()")
-		s.L("	entryID := domain.NewRandomID()")
-		s.L("	res := Add%sResponse{}.FromResult(commands.Add%sResult{", op, op)
-		s.L("		%sID: ownerID,", m.Entity.Pascal)
-		// The ENTRY result type is the COLLECTION's own, never the qualified
-		// operation name: for a collection mounted from a shared identity, the
-		// entry type belongs to the spec that declares the identity, and
-		// `<Entity><Child>Result` names a type nothing declares.
-		s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
-		for _, f := range fields {
-			s.L("			%s: %s,", f.Name, wireSample(f))
+		if c.MountsRemove {
+			emitRemoveChildWireTest(s, m, c, op)
 		}
-		s.L("		},")
-		s.L("	})")
-		s.L("	if res.%sID != ownerID {", m.Entity.Pascal)
-		s.L("		t.Error(\"the owner id did not reach the response\")")
-		s.L("	}")
-		s.L("	if res.%s.ID != entryID {", c.Name)
-		s.L("		t.Error(\"the entry id the server minted did not reach the response\")")
-		s.L("	}")
-		for _, f := range fields {
-			s.L("	if res.%s.%s != %s {", c.Name, f.Name, wireSample(f))
-			s.L("		t.Errorf(\"%s did not reach the response\")", f.Name)
-			s.L("	}")
-		}
-		s.L("}")
-		s.Blank()
-
-		// The CHANGE verb's response mapper had a request test and no response
-		// test, while both its siblings had one — so the coverage report read 0%
-		// for that one function, about code the other two paths prove is
-		// reachable. A number that says "untested" about tested code is worse
-		// than a low number: it is the one a reviewer stops trusting.
-		s.Doc(
-			fmt.Sprintf("The Change%s response carries the entry back with the id it KEEPS.", op),
-			"",
-			"A change replaces the entry's values and holds on to its row — so the id "+
-				"coming back is the one the caller addressed, and a mapper that drops it "+
-				"answers 200 with nothing to address next.")
-		s.L("func TestChange%sResponse_CarriesTheStoredEntry(t *testing.T) {", op)
-		s.L("	ownerID := domain.NewRandomID()")
-		s.L("	entryID := domain.NewRandomID()")
-		s.L("	res := Change%sResponse{}.FromResult(commands.Change%sResult{", op, op)
-		s.L("		%sID: ownerID,", m.Entity.Pascal)
-		s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
-		for _, f := range fields {
-			s.L("			%s: %s,", f.Name, wireSample(f))
-		}
-		s.L("		},")
-		s.L("	})")
-		s.L("	if res.%sID != ownerID {", m.Entity.Pascal)
-		s.L("		t.Error(\"the owner id did not reach the response\")")
-		s.L("	}")
-		s.L("	if res.%s.ID != entryID {", c.Name)
-		s.L("		t.Error(\"the entry kept its id and the response did not carry it\")")
-		s.L("	}")
-		for _, f := range fields {
-			s.L("	if res.%s.%s != %s {", c.Name, f.Name, wireSample(f))
-			s.L("		t.Errorf(\"%s did not reach the response\")", f.Name)
-			s.L("	}")
-		}
-		s.L("}")
-		s.Blank()
-
-		s.Doc(fmt.Sprintf("Remove%s answers with the owner, which is all it has to carry.", op))
-		s.L("func TestRemove%sRequestAndResponse(t *testing.T) {", op)
-		s.L("	r := Remove%sRequest{%sID: %s}", op, c.Name,
-			quote("01890000-0000-7000-8000-000000000000"))
-		s.L("	if r.ToCommand().%sID != %s {", c.Name,
-			quote("01890000-0000-7000-8000-000000000000"))
-		s.L("		t.Error(\"the entry id did not reach the command, so the wrong entry would be removed\")")
-		s.L("	}")
-		s.L("	ownerID := domain.NewRandomID()")
-		// The composite literal is PARENTHESISED: at the head of an `if`, Go reads
-		// the opening brace of `T{}` as the start of the block and refuses the file.
-		s.L("	if (Remove%sResponse{}).FromResult(commands.Remove%sResult{%sID: ownerID}).%sID != ownerID {",
-			op, op, m.Entity.Pascal, m.Entity.Pascal)
-		s.L("		t.Error(\"the owner id did not reach the response\")")
-		s.L("	}")
-		s.L("}")
-		s.Blank()
 	}
+}
+
+// emitAddChildRequestTest proves the entry reaches the command that stores it.
+func emitAddChildRequestTest(s *src, c ir.Child, op string, fields []ir.Field) {
+	s.Doc(
+		fmt.Sprintf("Add%sRequest carries the entry into its command.", op),
+		"",
+		"The body is the same entry shape the root's own body carries, so a field "+
+			"forgotten here is saved as missing on a request that answered 201.")
+	s.L("func TestAdd%sRequest_CarriesEveryField(t *testing.T) {", op)
+	s.L("\tr := Add%sRequest{%sRequest: %sRequest{", op, c.Name, c.Name)
+	for _, f := range fields {
+		s.L("\t\t%s: %s,", f.Name, wireSample(f))
+	}
+	s.L("\t}}")
+	s.L("\tcmd := r.ToCommand()")
+	for _, f := range fields {
+		s.L("\tif cmd.%s != %s {", f.Name, wireSample(f))
+		s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitChangeChildRequestTest proves BOTH halves arrive: the id from the path
+// and the replacement from the body.
+func emitChangeChildRequestTest(s *src, c ir.Child, op string, fields []ir.Field) {
+	s.Doc(
+		fmt.Sprintf("Change%sRequest names the entry AND carries the replacement.", op),
+		"",
+		"The id comes from the path and the body is a full replacement, so both "+
+			"halves have to arrive: an id that does not reach the command changes the "+
+			"wrong entry, or none.")
+	s.L("func TestChange%sRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
+	s.L("\tr := Change%sRequest{%sID: %s, %sRequest: %sRequest{", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"), c.Name, c.Name)
+	for _, f := range fields {
+		s.L("\t\t%s: %s,", f.Name, wireSample(f))
+	}
+	s.L("\t}}")
+	s.L("\tcmd := r.ToCommand()")
+	// The command carries the id as the WIRE type — a string; the conversion to
+	// domain.ID happens further in. Comparing it as an ID would not compile.
+	s.L("\tif cmd.%sID != %s {", c.Name, quote("01890000-0000-7000-8000-000000000000"))
+	s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be replaced\")")
+	s.L("\t}")
+	for _, f := range fields {
+		s.L("\tif cmd.%s != %s {", f.Name, wireSample(f))
+		s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitAddChildResponseTest proves the stored entry — and the id the server
+// minted for it — reach the caller.
+func emitAddChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fields []ir.Field) {
+	s.Doc(
+		fmt.Sprintf("The %s responses carry the stored entry back to the caller.", op),
+		"",
+		"The entry comes back with the id the SERVER minted, which is how the caller "+
+			"addresses it afterwards — a response mapper that drops it answers 201 with "+
+			"nothing to act on.")
+	s.L("func TestAdd%sResponse_CarriesTheStoredEntry(t *testing.T) {", op)
+	s.L("	ownerID := domain.NewRandomID()")
+	s.L("	entryID := domain.NewRandomID()")
+	s.L("	res := Add%sResponse{}.FromResult(commands.Add%sResult{", op, op)
+	s.L("		%sID: ownerID,", m.Entity.Pascal)
+	// The ENTRY result type is the COLLECTION's own, never the qualified
+	// operation name: for a collection mounted from a shared identity, the
+	// entry type belongs to the spec that declares the identity, and
+	// `<Entity><Child>Result` names a type nothing declares.
+	s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+	for _, f := range fields {
+		s.L("			%s: %s,", f.Name, wireSample(f))
+	}
+	s.L("		},")
+	s.L("	})")
+	s.L("	if res.%sID != ownerID {", m.Entity.Pascal)
+	s.L("		t.Error(\"the owner id did not reach the response\")")
+	s.L("	}")
+	s.L("	if res.%s.ID != entryID {", c.Name)
+	s.L("		t.Error(\"the entry id the server minted did not reach the response\")")
+	s.L("	}")
+	for _, f := range fields {
+		s.L("	if res.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+		s.L("		t.Errorf(\"%s did not reach the response\")", f.Name)
+		s.L("	}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitChangeChildResponseTest proves the entry comes back with the id it KEPT.
+func emitChangeChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fields []ir.Field) {
+	// The CHANGE verb's response mapper had a request test and no response
+	// test, while both its siblings had one — so the coverage report read 0%
+	// for that one function, about code the other two paths prove is
+	// reachable. A number that says "untested" about tested code is worse
+	// than a low number: it is the one a reviewer stops trusting.
+	s.Doc(
+		fmt.Sprintf("The Change%s response carries the entry back with the id it KEEPS.", op),
+		"",
+		"A change replaces the entry's values and holds on to its row — so the id "+
+			"coming back is the one the caller addressed, and a mapper that drops it "+
+			"answers 200 with nothing to address next.")
+	s.L("func TestChange%sResponse_CarriesTheStoredEntry(t *testing.T) {", op)
+	s.L("	ownerID := domain.NewRandomID()")
+	s.L("	entryID := domain.NewRandomID()")
+	s.L("	res := Change%sResponse{}.FromResult(commands.Change%sResult{", op, op)
+	s.L("		%sID: ownerID,", m.Entity.Pascal)
+	s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+	for _, f := range fields {
+		s.L("			%s: %s,", f.Name, wireSample(f))
+	}
+	s.L("		},")
+	s.L("	})")
+	s.L("	if res.%sID != ownerID {", m.Entity.Pascal)
+	s.L("		t.Error(\"the owner id did not reach the response\")")
+	s.L("	}")
+	s.L("	if res.%s.ID != entryID {", c.Name)
+	s.L("		t.Error(\"the entry kept its id and the response did not carry it\")")
+	s.L("	}")
+	for _, f := range fields {
+		s.L("	if res.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+		s.L("		t.Errorf(\"%s did not reach the response\")", f.Name)
+		s.L("	}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitRemoveChildWireTest covers the pair of the verb that answers with the
+// owner alone.
+func emitRemoveChildWireTest(s *src, m *ir.Model, c ir.Child, op string) {
+	s.Doc(fmt.Sprintf("Remove%s answers with the owner, which is all it has to carry.", op))
+	s.L("func TestRemove%sRequestAndResponse(t *testing.T) {", op)
+	s.L("	r := Remove%sRequest{%sID: %s}", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"))
+	s.L("	if r.ToCommand().%sID != %s {", c.Name,
+		quote("01890000-0000-7000-8000-000000000000"))
+	s.L("		t.Error(\"the entry id did not reach the command, so the wrong entry would be removed\")")
+	s.L("	}")
+	s.L("	ownerID := domain.NewRandomID()")
+	// The composite literal is PARENTHESISED: at the head of an `if`, Go reads
+	// the opening brace of `T{}` as the start of the block and refuses the file.
+	s.L("	if (Remove%sResponse{}).FromResult(commands.Remove%sResult{%sID: ownerID}).%sID != ownerID {",
+		op, op, m.Entity.Pascal, m.Entity.Pascal)
+	s.L("		t.Error(\"the owner id did not reach the response\")")
+	s.L("	}")
+	s.L("}")
+	s.Blank()
 }
 
 // writableChildFields are the entry fields a CALLER sends: the nullable ones are

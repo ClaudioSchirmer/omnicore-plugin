@@ -204,6 +204,16 @@ func CheckCoverage(s *Spec) *Problems {
 				"remove it, or set editStrategy: per-child if entries are meant to be "+
 					"added one at a time")
 		}
+		// Same notification, the other way of not having an ADD: the collection
+		// IS per-child and operations left the add verb out, so the only code
+		// that would raise this is not generated.
+		if c.DuplicateNotification != "" && c.EditStrategy == "per-child" &&
+			!MountsPerChildOp(c, "add") {
+			ps.BlockerFix(fmt.Sprintf("children[%d].duplicateNotification", i),
+				"the notification a per-entry ADD raises, on a collection whose "+
+					"operations do not mount one",
+				"name add in operations, or drop the notification")
+		}
 		refuseRuleKinds(c.Rules, fmt.Sprintf("children[%d].rules", i), ps)
 	}
 	refuseRuleKinds(s.Rules, "rules", ps)
