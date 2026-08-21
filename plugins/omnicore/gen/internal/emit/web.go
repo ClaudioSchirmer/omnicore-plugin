@@ -108,6 +108,13 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	for _, f := range m.ResponseFields() {
 		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType, quote(jsonTag(f, false)), quote(f.Example))
 	}
+	// The derived fields this verb can answer. A caller that just created the
+	// record gets the same rendering a read would give it, instead of having to
+	// fetch it again to see what it made.
+	for _, c := range writeComputedFields(m) {
+		s.L("\t%s %s `json:%s computed:%s example:%s`", c.Name, c.GoType,
+			quote(c.JSONName), quote(strings.Join(c.Sources, ",")), quote(c.Example))
+	}
 	for _, c := range m.Children {
 		s.L("\t%s []%sResponse `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
 	}
@@ -184,6 +191,9 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	for _, f := range m.ResponseFields() {
 		s.L("\t%s %s `%s`", f.Name, f.GoType, readFieldTag(f, false))
 	}
+	for _, f := range m.Read.Managed {
+		s.L("\t%s %s `%s`", f.Name, f.GoType, readFieldTag(f, false))
+	}
 	emitComputedResponseFields(s, m, false)
 	for _, c := range m.Children {
 		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
@@ -213,8 +223,24 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 			"without it.")
 	s.L("type %s struct {", op.RequestType)
 	for _, f := range m.Read.Filters {
-		s.L("\t%s *%s `query:%s filter:%s`", f.Field.Name, f.Field.BaseGoType,
-			quote(f.Field.JSONName), quote(strings.Join(f.Ops, ",")))
+		// `sort:` beside `filter:` when this leaf is in the ordering vocabulary.
+		// The two tags answer different questions about the same path — which
+		// operations it accepts, and which directions it may be ordered in — and
+		// the framework reads them independently.
+		s.L("\t%s *%s `query:%s filter:%s%s`", f.Field.Name, f.Field.BaseGoType,
+			quote(f.Field.JSONName), quote(strings.Join(f.Ops, ",")),
+			sortTagFor(m, f.Field.Name))
+	}
+	// A path that is orderable and NOT filtered is a leaf of its own: it declares
+	// the vocabulary, carries no value on the wire, and emits no query parameter
+	// of its own. Ordering by a field nobody filters by is an ordinary ask, and
+	// before v0.55.0 it came free from whatever the Response rendered.
+	for _, f := range m.Read.Sortable {
+		if filteredBy(m, f.Name) {
+			continue
+		}
+		s.L("\t%s *%s `query:%s sort:%s`", f.Name, f.BaseGoType,
+			quote(f.JSONName), quote(sortDirections))
 	}
 	emitReadControls(s, m)
 	s.L("}")
@@ -256,6 +282,13 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 		}
 		s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
 	}
+	for _, f := range m.Read.Managed {
+		typ := f.GoType
+		if pointered {
+			typ = "*" + f.BaseGoType
+		}
+		s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
+	}
 	emitComputedResponseFields(s, m, pointered)
 	for _, c := range m.Children {
 		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment+",omitempty"))
@@ -273,6 +306,35 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 // The vocabulary is closed and checked at boot: a key that is not one of the
 // framework's controls panics when the wrapper is built, which is why these
 // names are never improvised.
+// sortDirections is what a declared path admits. Both directions, always: the
+// spec names the PATHS that may be ordered by, and a listing that can be sorted
+// newest-first can be sorted oldest-first for the same index. Narrowing to one
+// direction is a real capability of the tag (`sort:"asc"`), kept in reserve for
+// a key that asks for it rather than guessed at per field.
+const sortDirections = "asc,desc"
+
+// sortTagFor renders the ` sort:"…"` half of a filter leaf's tag, or nothing
+// when the path is not in the ordering vocabulary.
+func sortTagFor(m *ir.Model, name string) string {
+	for _, f := range m.Read.Sortable {
+		if f.Name == name {
+			return " sort:" + quote(sortDirections)
+		}
+	}
+	return ""
+}
+
+// filteredBy reports whether a path already has a filter leaf, so the ordering
+// vocabulary adds its tag there instead of declaring the field twice.
+func filteredBy(m *ir.Model, name string) bool {
+	for _, f := range m.Read.Filters {
+		if f.Field.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func emitReadControls(s *src, m *ir.Model) {
 	c := m.Read.Controls
 	if c.Pagination {
@@ -439,8 +501,17 @@ func routeDescription(m *ir.Model, op ir.Operation) string {
 		return fmt.Sprintf("Permanently removes the %s. This is irreversible — the "+
 			"reversible removal is the archive endpoint.", e)
 	case "archive":
-		return fmt.Sprintf("Archives the %s: the row stays but is hidden from reads "+
-			"unless they ask for archived rows. Reversible through unarchive.", e)
+		// The second sentence describes the unarchive endpoint, so it is written
+		// only when that endpoint is mounted. Documenting an undo that no route,
+		// mutation or command implements is worse than saying nothing: Swagger is
+		// where a caller checks whether the action can be taken back.
+		d := fmt.Sprintf("Archives the %s: the row stays but is hidden from reads "+
+			"unless they ask for archived rows.", e)
+		if m.Op("unarchive") != nil {
+			return d + " Reversible through unarchive."
+		}
+		return d + " This service mounts no unarchive: the row stays as history and " +
+			"nothing brings it back into the active set."
 	case "unarchive":
 		return fmt.Sprintf("Restores a previously archived %s.", e)
 	case "byId":

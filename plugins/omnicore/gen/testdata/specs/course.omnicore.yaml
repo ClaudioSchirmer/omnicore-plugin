@@ -335,6 +335,7 @@ read:
         ops: [eq, gte, lte]
       - field: EnrolledAt
         ops: [gte, lte]
+    sort: [Name, EnrollmentNumber, EnrolledAt]
     controls:
       pagination: true
       orderBy: true

@@ -376,6 +376,56 @@ func compositeSample(g ir.CompositeGroup) string {
 	return lit
 }
 
+// compositeAlternate builds a value object that DIFFERS from compositeSample —
+// what an immutability test assigns to prove the change is refused.
+//
+// Exactly one part moves, and it is the first part that is not itself a value
+// object when there is one. Moving every part would work too, but a part typed
+// as an enum has no "other value" this emitter can invent: the alternate would
+// be outside the declared set, and the enum's own notification would fire beside
+// the one under test. One part is enough — a tuple differs when any member does.
+func compositeAlternate(g ir.CompositeGroup) string {
+	move := 0
+	for i, p := range g.Parts {
+		if p.VOKind == "" {
+			move = i
+			break
+		}
+	}
+	parts := make([]string, 0, len(g.Parts))
+	for i, p := range g.Parts {
+		lit := literalFor(p)
+		if i == move {
+			lit = alternateValue(ir.Field{SpecType: p.SpecType})
+		}
+		if p.VOKind != "" {
+			lit = fmt.Sprintf("%s(%s)", p.Composite.PartBaseType, lit)
+		}
+		if p.Composite.PartNullable {
+			lit = fmt.Sprintf("func() *%s { v := %s(%s); return &v }()",
+				p.Composite.PartBaseType, p.Composite.PartBaseType, lit)
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s", p.Composite.PartName, lit))
+	}
+	lit := fmt.Sprintf("%s{%s}", g.Head.VOType, strings.Join(parts, ", "))
+	if g.Optional() {
+		return "&" + lit
+	}
+	return lit
+}
+
+// compositeGroupNamed finds the composite a rule addressed as a whole, or nil
+// when the name is an ordinary field.
+func compositeGroupNamed(m *ir.Model, owner string) *ir.CompositeGroup {
+	for _, g := range ir.Composites(m.AllOwnerFields()) {
+		if g.Owner() == owner {
+			out := g
+			return &out
+		}
+	}
+	return nil
+}
+
 // emitEntityLiteralFields writes the members of an aggregate's struct literal:
 // one entry per ordinary field, and one whole value object per composite.
 func emitEntityLiteralFields(s *src, fields []ir.Field, indent string) {

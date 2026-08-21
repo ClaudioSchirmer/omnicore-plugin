@@ -249,10 +249,21 @@ type ReadModel struct {
 	MaxLimit        int
 	ByID            bool
 	ByParams        bool
-	Filters         []Filter
-	Controls        spec.Controls
-	QueryByID       string
-	QueryList       string
+	Filters []Filter
+	// Sortable is the ordering VOCABULARY, in declaration order: the leaves that
+	// carry a `sort:` tag on the Request DTO. A leaf that is also filtered gets
+	// the tag beside its `filter:`; one that is not becomes a leaf of its own,
+	// orderable and carrying no value on the wire.
+	Sortable []Field
+	// Managed are the framework-stamped columns this read exposes, resolved into
+	// ordinary-looking fields so the Result, the Responses and the exports need
+	// no special case. They are deliberately NOT in m.Fields: the aggregate
+	// declares no Go field for them, no write DTO carries them, and the migration
+	// already created the columns.
+	Managed   []Field
+	Controls  spec.Controls
+	QueryByID string
+	QueryList string
 	// ResultByID / ResultList are the application-layer Result types the two
 	// reads declare — the read-side twin of a command's Result. The framework
 	// fills one per document and the Query's FromQueryResult hook sees it
@@ -671,11 +682,31 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 			Sources: append([]string(nil), c.From...),
 		})
 	}
+	for _, n := range s.Read.Managed {
+		r.Managed = append(r.Managed, managedReadField(s, m, n))
+	}
 	if s.Read.ByParams != nil {
 		r.Controls = s.Read.ByParams.Controls
 		for _, f := range s.Read.ByParams.Filters {
+			// The managed set is consulted from the READ being built, not through
+			// lookupField: m.Read is still the previous (empty) value at this
+			// point, so a filter on CreatedAt resolved to nothing and the query
+			// parameter was silently never emitted.
+			if fld := managedNamed(r.Managed, f.Field); fld != nil {
+				r.Filters = append(r.Filters, Filter{Field: *fld, Ops: f.Ops})
+				continue
+			}
 			if fld := lookupField(m, f.Field); fld != nil {
 				r.Filters = append(r.Filters, Filter{Field: *fld, Ops: f.Ops})
+			}
+		}
+		for _, name := range s.Read.ByParams.Sort {
+			if fld := managedNamed(r.Managed, name); fld != nil {
+				r.Sortable = append(r.Sortable, *fld)
+				continue
+			}
+			if fld := lookupField(m, name); fld != nil {
+				r.Sortable = append(r.Sortable, *fld)
 			}
 		}
 	}
@@ -731,9 +762,17 @@ func resolveOps(s *spec.Spec, m *Model) []Operation {
 			"Permanently delete "+article(e)+" "+strings.ToLower(e)))
 	}
 	if has("archive") {
+		// "(reversible)" is a claim about ANOTHER endpoint, so it may only be made
+		// when that endpoint exists. Archiving without unarchive is a legitimate
+		// model — the row survives as history and nothing brings it back — and
+		// promising an undo the spec never asked for documented a route the
+		// generator did not write.
+		summary := "Archive " + article(e) + " " + strings.ToLower(e)
+		if has("unarchive") {
+			summary += " (reversible)"
+		}
 		ops = append(ops, byIDWriteOp("archive", e, "fiber.MethodPatch", "/:id/archive",
-			perm("archive"), "handlers.ArchiveCommandHandler",
-			"Archive "+article(e)+" "+strings.ToLower(e)+" (reversible)"))
+			perm("archive"), "handlers.ArchiveCommandHandler", summary))
 	}
 	if has("unarchive") {
 		ops = append(ops, byIDWriteOp("unarchive", e, "fiber.MethodPatch", "/:id/unarchive",
@@ -804,15 +843,41 @@ func resolveConstraints(s *spec.Spec, m *Model) []Constraint {
 		Kind: "primary-key", Table: m.Table, Columns: []string{"id"},
 		Notification: "domain.EntityAlreadyAddedNotification{}", Field: "id",
 	}}
-	for _, f := range m.Fields {
+	for i, f := range m.Fields {
 		if f.Unique == nil {
 			continue
 		}
+		// An ordinary field constrains its own column; a composite constrains the
+		// TUPLE, so the constraint gathers the whole run of parts. The key the
+		// violation is reported under, and the notification's field, then name the
+		// value object rather than whichever part the database happened to
+		// mention.
+		cols := []string{f.Column}
+		field := f.JSONName
+		if f.Composite != nil {
+			cols = compositeRunColumns(m.Fields, i)
+			field = naming.Camel(f.Composite.Owner)
+		}
 		out = append(out, Constraint{
-			Kind: "unique", Table: m.Table, Columns: []string{f.Column},
-			Notification: f.Unique.Notification + "{}", Field: f.JSONName,
+			Kind: "unique", Table: m.Table, Columns: cols,
+			Notification: f.Unique.Notification + "{}", Field: field,
 			Scope: f.Unique.Scope,
 		})
+	}
+	return out
+}
+
+// compositeRunColumns lists the columns of the composite whose run starts at
+// fields[start], in declaration order — the order the constraint, the index name
+// and the SQLite violation key must all agree on.
+func compositeRunColumns(fields []Field, start int) []string {
+	owner := fields[start].Composite.Owner
+	var out []string
+	for _, f := range fields[start:] {
+		if f.Composite == nil || f.Composite.Owner != owner {
+			break
+		}
+		out = append(out, f.Column)
 	}
 	return out
 }
@@ -840,6 +905,80 @@ func lookupField(m *Model, name string) *Field {
 				return &m.Siblings[i].Fields[j]
 			}
 		}
+	}
+	for i := range m.Read.Managed {
+		if m.Read.Managed[i].Name == name {
+			return &m.Read.Managed[i]
+		}
+	}
+	return compositeWhole(m, name)
+}
+
+// managedNamed finds a framework-stamped read field by its logical name.
+func managedNamed(managed []Field, name string) *Field {
+	for i := range managed {
+		if managed[i].Name == name {
+			return &managed[i]
+		}
+	}
+	return nil
+}
+
+// managedReadField renders a framework-stamped column as the field every read
+// emitter already knows how to write.
+//
+// The framework resolves these names itself — its schema maps CreatedAt,
+// UpdatedAt and DeletedAt to their columns on the read path — so a filter or a
+// projection naming one needs nothing beyond the Go field being there under the
+// same name. DeletedAt is the only optional one: a row that was never archived
+// has none.
+func managedReadField(s *spec.Spec, m *Model, name string) Field {
+	nullable := name == "DeletedAt"
+	goType := "time.Time"
+	if nullable {
+		goType = "*time.Time"
+	}
+	return Field{
+		Name: name, Column: spec.ManagedColumn(s, name), SpecType: "time",
+		GoType: goType, BaseGoType: "time.Time",
+		EntityType: goType, BaseEntityType: "time.Time",
+		Nullable: nullable, JSONName: naming.Camel(name),
+		LabelKey: m.Entity.Pascal + name + "Field",
+		Example:  "2026-02-01T09:00:00Z",
+		Description: "Stamped by the framework: " + map[string]string{
+			"CreatedAt": "when the row was inserted.",
+			"UpdatedAt": "when the row was last written.",
+			"DeletedAt": "when the row was archived, when it was.",
+		}[name],
+	}
+}
+
+// compositeWhole answers for a composite value object addressed AS A WHOLE.
+//
+// m.Fields holds the expanded parts, because that is what the table, the wire
+// and every read consumer see. The one thing that does not is the aggregate: it
+// carries the concept, one field of the value object's type. A rule that
+// compares the VALUE — immutability is the only one the language allows there —
+// needs that field and finds nothing under its name, so it is synthesised here
+// from what the parts already record about their owner.
+//
+// Validation decides WHICH rules may reach this: anything that would emit an
+// operator no struct answers to (a range, a length) is refused before it gets
+// here, and refused with the reason.
+func compositeWhole(m *Model, name string) *Field {
+	for _, f := range m.AllOwnerFields() {
+		if f.Composite == nil || f.Composite.Owner != name {
+			continue
+		}
+		c := f.Composite
+		whole := Field{
+			Name: c.Owner, GoType: c.VOType, BaseGoType: c.VOType,
+			EntityType: c.VOType, BaseEntityType: c.VOType,
+			Nullable: c.OwnerNullable, LabelKey: c.OwnerLabelKey, Text: c.OwnerText,
+			JSONName: naming.Camel(c.Owner), Description: c.OwnerDescription,
+			LivesOn: f.LivesOn,
+		}
+		return &whole
 	}
 	return nil
 }

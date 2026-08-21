@@ -10,8 +10,8 @@ code — code shapes live in the routed `/docs` sections cited in §2. Approval 
 
 # Capability plan — <slug>
 
-Status: DRAFT
-Framework pin: <from `go.mod` — informative; that pin's docs are the authority>
+- **Status:** DRAFT
+- **Framework pin:** <from `go.mod` — informative; that pin's docs are the authority>
 
 ## §1 The request (restated)
 

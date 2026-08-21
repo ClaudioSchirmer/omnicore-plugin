@@ -24,6 +24,7 @@ read:
     filters:
       - {field: Ocorrido, ops: [gte, lte]}
       - {field: ValorCentavos, ops: [gte, lte]}
+    sort: [Ocorrido, ValorCentavos]
     controls: {pagination: true, orderBy: true}
 surfaces: {rest: true}
 authz:

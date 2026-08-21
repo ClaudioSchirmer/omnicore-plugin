@@ -639,10 +639,19 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 		return
 	}
 	f := rule.Fields[0]
+	// A composite is unique as a TUPLE, so the rule was synthesised on the first
+	// part — the one carrying the key — and everything the reader sees has to
+	// name the value object instead: the gate reads every part off it, and the
+	// notification lands on the concept rather than on whichever part came
+	// first, which is the same name the constraint binding reports.
+	gate, attach := notEmpty(f, "e"), f.Name
+	if f.Composite != nil {
+		gate, attach = compositeNotEmpty(m, f.Composite.Owner, "e"), f.Composite.Owner
+	}
 	s.L("\t\t// The database unique index is the backstop for the race between this")
 	s.L("\t\t// check and the commit; asking here is what lets the duplicate be")
 	s.L("\t\t// reported together with the other problems instead of alone, later.")
-	s.L("\t\tif %s {", notEmpty(f, "e"))
+	s.L("\t\tif %s {", gate)
 	var args []string
 	needsSelf := false
 	for _, p := range rule.Fact.Params {
@@ -666,9 +675,32 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\tif service.(%sService).%s(%s) {",
 		m.Entity.Pascal, rule.Fact.Name, strings.Join(args, ", "))
 	s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-		quote(f.Name), notifIn(m, rule.Notification), echoArg(rule, f))
+		quote(attach), notifIn(m, rule.Notification), echoArg(rule, f))
 	s.L("\t\t\t}")
 	s.L("\t\t}")
+}
+
+// compositeNotEmpty gates the probe on the value object carrying a value, part
+// by part. There is no single reference to test — the entity holds the concept
+// and the parts live inside it — so the run is read off the owner and joined,
+// which also matches what the query is about to ask: the whole tuple.
+func compositeNotEmpty(m *ir.Model, owner, recv string) string {
+	var conds []string
+	for _, f := range m.AllOwnerFields() {
+		if f.Composite == nil || f.Composite.Owner != owner {
+			continue
+		}
+		part := f
+		part.Name = f.Composite.PartName
+		part.Nullable = f.Composite.PartNullable
+		if c := notEmpty(part, recv+"."+owner); c != "true" {
+			conds = append(conds, c)
+		}
+	}
+	if len(conds) == 0 {
+		return "true"
+	}
+	return strings.Join(conds, " && ")
 }
 
 // notEmpty gates the probe on there being a value to look up — asking the

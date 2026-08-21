@@ -98,6 +98,7 @@ read:
       - {field: Nome, ops: [eq, contains, icontains]}
       - {field: Situacao, ops: [eq, in]}
       - {field: CargaHoraria, ops: [gte, lte]}
+    sort: [Codigo, Nome, CargaHoraria]
     controls: {pagination: true, orderBy: true, fields: true, onlyTotal: true, includeArchived: true, search: [Nome, Ementa]}
 
 surfaces:

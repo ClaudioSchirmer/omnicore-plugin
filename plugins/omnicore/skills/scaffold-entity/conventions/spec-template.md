@@ -18,10 +18,10 @@ Marking convention inside the filled spec:
 ```markdown
 # Spec: <Entity>
 
-Status: DRAFT            <!-- flip to APPROVED only after the dev's explicit ok -->
-Approved: <pending>      <!-- who/when -->
-Language: <x>            <!-- working language for human-facing text (descriptions, COMMENTs, examples) — detected from the user's own words (invocation args count, even one word); edit to override -->
-Generation: <pending>    <!-- omnicore-gen | manual — the dev's answer at gate 1d; written the moment they answer, so a resumed run does not ask again -->
+- **Status:** DRAFT <!-- flip to APPROVED only after the dev's explicit ok -->
+- **Approved:** `<pending>` <!-- who/when -->
+- **Language:** <x> <!-- working language for human-facing text (descriptions, COMMENTs, examples) — detected from the user's own words (invocation args count, even one word); edit to override -->
+- **Generation:** `<pending>` <!-- omnicore-gen | manual — the dev's answer at gate 1d; written the moment they answer, so a resumed run does not ask again -->
 
 ## 1. Storage model                                    [high-risk — confirm]
 - Kind: flat | sharedbase-role — <pick> (proposed; alternative: <other> — <one-line why>)

@@ -121,6 +121,7 @@ read:
         ops: [eq, contains, icontains]
       - field: RegistrationCode
         ops: [eq, in]
+    sort: [FullName, RegistrationCode]
     controls:
       pagination: true
       orderBy: true
