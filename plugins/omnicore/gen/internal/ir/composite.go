@@ -137,7 +137,7 @@ func resolveCompositeRules(rs spec.Rules, lookup func(string) *Field) []Rule {
 		rule := Rule{
 			ID: r.ID, Kind: r.Kind, Operator: r.Operator,
 			Min: r.Min, Max: r.Max, Notification: r.Notification,
-			AttachTo: r.AttachTo, EchoValue: r.EchoValue, Description: r.Description,
+			AttachTo: r.AttachTo, EchoValue: r.Echoes(), Description: r.Description,
 			SkipWhen: r.SkipWhen,
 		}
 		for _, fn := range r.Fields {

@@ -295,6 +295,12 @@ rules:
       scope: [update]
       fields: [Document]
       notification: DocumentCannotChangeNotification
+      # echoValue defaults to TRUE: a refusal carries the value that was refused,
+      # because "that is not allowed" and "1234 is not allowed" are different
+      # messages and only the second one can be acted on. It is turned off HERE
+      # because a national id has no business travelling back in a 422 — nothing
+      # in the language marks a field as sensitive, so this is the author's call.
+      echoValue: false
     - id: weekly-hours-valid
       kind: range
       scope: [insertOrUpdate]
@@ -302,7 +308,6 @@ rules:
       min: 1
       max: 44
       notification: WeeklyHoursOutOfRangeNotification
-      echoValue: true
     # comparison relates two fields; skipWhen stands down when the subject is
     # absent — "valid IF given" rather than "required".
     - id: termination-after-hiring

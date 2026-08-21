@@ -572,6 +572,11 @@ Present it like this, verbatim in substance:
 > tests for those are mine to write. I then review the output against the plan you just
 > approved, read the generator's report, and prove it with build + vet + tests + a real
 > boot.
+> That review reads the emitted code against the spec that produced it, not just for
+> plausibility — the generator can be wrong too, and its mistakes compile. If I find one,
+> **I stop and ask you before touching a single generated file**: what diverges, what I
+> ruled out, and what `omnicore-gen adopt` would cost (an adopted file stops tracking the
+> spec forever). Editing generated code is a supported move, never a silent one.
 > **Beta**: it is still being improved round by round; `scaffold-entity` and
 > `evolve-entity` are the skills that use it. Its gate covers a lot, and it can still hit a case nobody has
 > hit yet — usually a spec that validates and produces something that does not compile.

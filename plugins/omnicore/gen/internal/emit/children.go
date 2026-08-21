@@ -423,7 +423,7 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		emitChangeChildCommand(s, m, c, entity, op)
 	}
 	if c.MountsRemove {
-		emitRemoveChildCommand(s, c, entity, op)
+		emitRemoveChildCommand(s, m, c, entity, op)
 	}
 
 	if c.Mounted {
@@ -486,8 +486,10 @@ func emitAddChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	emitChildFieldsFlat(s, c)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Add%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
+	s.L("func (cmd *Add%sCommand) ApplyTo(%s *configuration.AppContext, e *appdomain.%s) error {",
+		op, identityParam(m), entity)
 	s.L("\te.%s(%s)", c.AddMethod, childInputFold(c, "cmd", "\t"))
+	emitIdentityFeed(s, m)
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
@@ -523,8 +525,10 @@ func emitChangeChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) 
 	emitChildFieldsFlat(s, c)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Change%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
+	s.L("func (cmd *Change%sCommand) ApplyTo(%s *configuration.AppContext, e *appdomain.%s) error {",
+		op, identityParam(m), entity)
 	s.L("\te.%s(cmd.%sID, %s)", c.ChangeMethod, c.Name, childInputFold(c, "cmd", "\t"))
+	emitIdentityFeed(s, m)
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
@@ -542,9 +546,11 @@ func emitChangeChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) 
 	s.Blank()
 }
 
-// emitRemoveChildCommand writes the verb that takes ONE entry out. It needs no
-// model: the entry is named by the path and nothing about it is projected back.
-func emitRemoveChildCommand(s *src, c ir.Child, entity, op string) {
+// emitRemoveChildCommand writes the verb that takes ONE entry out. Nothing
+// about the entry is projected back — the model is here for the identity feed
+// alone, which a REVOKE needs as much as a grant: taking an entry out of
+// another tenant's aggregate is the same write, in the other direction.
+func emitRemoveChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	s.Doc(
 		fmt.Sprintf("Remove%sCommand takes ONE entry out of the collection.", op),
 		"",
@@ -555,8 +561,10 @@ func emitRemoveChildCommand(s *src, c ir.Child, entity, op string) {
 	s.L("\t%sID string", c.Name)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Remove%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
+	s.L("func (cmd *Remove%sCommand) ApplyTo(%s *configuration.AppContext, e *appdomain.%s) error {",
+		op, identityParam(m), entity)
 	s.L("\te.%s(cmd.%sID)", c.RemoveMethod, c.Name)
+	emitIdentityFeed(s, m)
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()

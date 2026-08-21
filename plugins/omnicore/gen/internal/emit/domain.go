@@ -3,6 +3,7 @@ package emit
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
@@ -581,7 +582,7 @@ func emitComparison(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	conds = append(conds, comparisonExpr(left, right, rule.Operator, recv))
 	s.L("\t\tif %s {", strings.Join(conds, " && "))
 	s.L("\t\t\tr.AddNotification(%s, %s%s)",
-		quote(left.Name), notifIn(m, rule.Notification), echoArg(rule, left))
+		quote(left.Name), notifIn(m, rule.Notification), echoArgOn(rule, left, recv))
 	s.L("\t\t}")
 }
 
@@ -703,6 +704,12 @@ var frameworkNotifications = map[string]bool{
 }
 
 // echoArg passes the rejected value back so the caller sees what was refused.
+//
+// It hardcodes the ROOT's receiver. A rule declared on a collection is emitted
+// inside aggregatevos against the entry's own receiver, where `e` does not
+// exist — reach for echoArgOn there. A comparison rule on a child went through
+// this one and emitted `e.Field` into a method that has no `e`, which nothing
+// noticed while every fixture left echoValue off.
 func echoArg(rule ir.Rule, f ir.Field) string { return echoArgOn(rule, f, "e") }
 
 func echoArgOn(rule ir.Rule, f ir.Field, recv string) string {
@@ -845,9 +852,14 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 	// name the value object instead: the gate reads every part off it, and the
 	// notification lands on the concept rather than on whichever part came
 	// first, which is the same name the constraint binding reports.
-	gate, attach := notEmpty(f, "e"), f.Name
+	gate, attach, echo := notEmpty(f, "e"), f.Name, echoArg(rule, f)
 	if f.Composite != nil {
-		gate, attach = compositeNotEmpty(m, f.Composite.Owner, "e"), f.Composite.Owner
+		// And the echo goes silent: the part's logical name is not a field of the
+		// entity (the entity holds the value object), and echoing the owner hands
+		// back a formatted struct. What was refused is the TUPLE, which no single
+		// value stands for — the same reason a multi-field business identity
+		// echoes nothing.
+		gate, attach, echo = compositeNotEmpty(m, f.Composite.Owner, "e"), f.Composite.Owner, ""
 	}
 	s.L("\t\t// The database unique index is the backstop for the race between this")
 	s.L("\t\t// check and the commit; asking here is what lets the duplicate be")
@@ -876,7 +888,7 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\tif service.(%sService).%s(%s) {",
 		m.Entity.Pascal, rule.Fact.Name, strings.Join(args, ", "))
 	s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-		quote(attach), notifIn(m, rule.Notification), echoArg(rule, f))
+		quote(attach), notifIn(m, rule.Notification), echo)
 	s.L("\t\t\t}")
 	s.L("\t\t}")
 }
@@ -1010,7 +1022,8 @@ func emitChildMethods(s *src, m *ir.Model) {
 			s.L("\t// the collision is an answer, not a silent merge.")
 			s.L("\tfor _, existing := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 			s.L("\t\tif existing.IsSameBusinessIdentity(item) {")
-			s.L("\t\t\te.AddNotification(%s, %s)", quote(c.GoPlural), notifIn(m, c.DuplicateNotification))
+			s.L("\t\t\te.AddNotification(%s, %s%s)", quote(c.GoPlural),
+				notifIn(m, c.DuplicateNotification), addedEcho(c))
 			s.L("\t\t\treturn")
 			s.L("\t\t}")
 			s.L("\t}")
@@ -1079,34 +1092,74 @@ func emitRemoveChildMethod(s *src, m *ir.Model, c ir.Child) {
 	s.Blank()
 }
 
-// notifLiteralFor builds the notification value, filling the interpolation
-// variables the rule can supply.
+// notifLiteralFor builds the notification value for a rule emitted where the
+// type is spelled BARE — inside vos, or inside aggregatevos, which is where the
+// kinds that fill variables mostly land.
+func notifLiteralFor(rule ir.Rule, m *ir.Model) string {
+	return bindTVars(notifLiteral(rule.Notification), rule, m)
+}
+
+// notifInFor is the same thing for a rule emitted in the ROOT's package, where a
+// notification the resolver moved has to be qualified.
+//
+// The two exist separately because the qualification is relative to the package
+// DOING the emitting, not to the notification: notifIn's answer is right in
+// domain and wrong in vos, where it would spell vos.X inside vos itself.
+func notifInFor(m *ir.Model, rule ir.Rule) string {
+	return bindTVars(notifIn(m, rule.Notification), rule, m)
+}
+
+// bindTVars fills the interpolation variables the rule can supply onto an
+// already-spelled literal.
 //
 // Declaring a variable and never setting it is worse than not declaring it: the
 // catalog keeps its {min}, the renderer substitutes nothing, and the end user
 // reads "between  and ." — a message that looks written rather than broken.
-func notifLiteralFor(rule ir.Rule, m *ir.Model) string {
+func bindTVars(base string, rule ir.Rule, m *ir.Model) string {
 	name := rule.Notification
 	if name == "" || frameworkNotifications[name] || m == nil {
-		return notifLiteral(name)
+		return base
 	}
 	var parts []string
 	for _, v := range tvarsOf(m, name) {
-		switch v {
-		case "min":
-			if rule.Min != nil {
-				parts = append(parts, fmt.Sprintf("Min: %q", trimNumber(*rule.Min)))
-			}
-		case "max":
-			if rule.Max != nil {
-				parts = append(parts, fmt.Sprintf("Max: %q", trimNumber(*rule.Max)))
-			}
+		if arg, ok := tvarValue(rule, v); ok {
+			parts = append(parts, arg)
 		}
 	}
 	if len(parts) == 0 {
-		return name + "{}"
+		return base
 	}
-	return name + "{" + strings.Join(parts, ", ") + "}"
+	return strings.TrimSuffix(base, "{}") + "{" + strings.Join(parts, ", ") + "}"
+}
+
+// tvarValue answers where ONE declared variable gets its value from, or says it
+// cannot be sourced. It is the whole binding vocabulary in one place, so a kind
+// that gains a bound cannot quietly leave the placeholder empty.
+//
+// A cap answers {max} as well as {cap}: "at most {max} permissions" is how a
+// domain writes the message, and refusing to fill it because the KEY in the
+// spec is spelled `cap` would be the generator arguing about vocabulary with
+// the end user's sentence. It fills {cap} too, for a spec that names the bound
+// after the key.
+func tvarValue(rule ir.Rule, v string) (string, bool) {
+	switch v {
+	case "min":
+		if rule.Min != nil {
+			return fmt.Sprintf("Min: %q", trimNumber(*rule.Min)), true
+		}
+	case "max":
+		if rule.Max != nil {
+			return fmt.Sprintf("Max: %q", trimNumber(*rule.Max)), true
+		}
+		if rule.Cap > 0 {
+			return fmt.Sprintf("Max: %q", strconv.Itoa(rule.Cap)), true
+		}
+	case "cap":
+		if rule.Cap > 0 {
+			return fmt.Sprintf("Cap: %q", strconv.Itoa(rule.Cap)), true
+		}
+	}
+	return "", false
 }
 
 func tvarsOf(m *ir.Model, name string) []string {
@@ -1270,8 +1323,8 @@ func emitChildTransition(s *src, m *ir.Model, rule ir.Rule) {
 		s.L("\t\t\t\t\t\t\t}")
 		s.L("\t\t\t\t\t\t}")
 		s.L("\t\t\t\t\t\tif !ok {")
-		s.L("\t\t\t\t\t\t\tr.AddNotification(%s, %s)",
-			quote(rule.AttachTo), notifIn(m, rule.Notification))
+		s.L("\t\t\t\t\t\t\tr.AddNotification(%s, %s%s)",
+			quote(rule.AttachTo), notifIn(m, rule.Notification), echoOf(rule, read(cur)))
 		s.L("\t\t\t\t\t\t}")
 		s.L("\t\t\t\t\t}")
 	})
@@ -1295,8 +1348,8 @@ func emitChildImmutable(s *src, m *ir.Model, rule ir.Rule) {
 			cmp = pointerNeq(fmt.Sprintf("%s.%s", old, f.Name), fmt.Sprintf("%s.%s", cur, f.Name))
 		}
 		s.L("\t\t\t\t\tif %s {", cmp)
-		s.L("\t\t\t\t\t\tr.AddNotification(%s, %s)",
-			quote(rule.AttachTo), notifIn(m, rule.Notification))
+		s.L("\t\t\t\t\t\tr.AddNotification(%s, %s%s)",
+			quote(rule.AttachTo), notifIn(m, rule.Notification), echoOf(rule, childEcho(f, cur)))
 		s.L("\t\t\t\t\t}")
 	})
 }
@@ -1327,8 +1380,8 @@ func emitChildDuplicate(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\tfor i := range items {")
 	s.L("\t\t\t\tfor j := i + 1; j < len(items); j++ {")
 	s.L("\t\t\t\t\tif items[i].IsSameBusinessIdentity(items[j]) {")
-	s.L("\t\t\t\t\t\tr.AddNotification(%s, %s)",
-		quote(c.GoPlural), notifIn(m, rule.Notification))
+	s.L("\t\t\t\t\t\tr.AddNotification(%s, %s%s)",
+		quote(c.GoPlural), notifIn(m, rule.Notification), duplicateEcho(rule, *c))
 	s.L("\t\t\t\t\t\tbreak")
 	s.L("\t\t\t\t\t}")
 	s.L("\t\t\t\t}")
@@ -1365,7 +1418,7 @@ func emitFactRange(s *src, m *ir.Model, rule ir.Rule) {
 		s.L("\t\tfor _, g := range %s {", call)
 		s.L("\t\t\tif %s {", factBoundCond("g.Value", rule))
 		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(rule.AttachTo), notif, factEcho(rule, "g.Value"))
+			quote(rule.AttachTo), notif, echoOf(rule, "g.Value"))
 		s.L("\t\t\t\tbreak")
 		s.L("\t\t\t}")
 		s.L("\t\t}")
@@ -1374,24 +1427,64 @@ func emitFactRange(s *src, m *ir.Model, rule ir.Rule) {
 		s.L("\t\t// down rather than treating the zero as an answer.")
 		s.L("\t\tif v, ok := %s; ok && %s {", call, factBoundCond("v", rule))
 		s.L("\t\t\tr.AddNotification(%s, %s%s)",
-			quote(rule.AttachTo), notif, factEcho(rule, "v"))
+			quote(rule.AttachTo), notif, echoOf(rule, "v"))
 		s.L("\t\t}")
 	default:
 		s.L("\t\tif v := %s; %s {", call, factBoundCond("v", rule))
 		s.L("\t\t\tr.AddNotification(%s, %s%s)",
-			quote(rule.AttachTo), notif, factEcho(rule, "v"))
+			quote(rule.AttachTo), notif, echoOf(rule, "v"))
 		s.L("\t\t}")
 	}
 }
 
-// factEcho passes the ANSWER back when the rule asked for it.
+// childEcho reads ONE field off a collection entry, unwrapping a value object
+// so what travels back is the value the caller sent rather than the type
+// wrapping it. A nullable field is passed as the pointer: the framework formats
+// a nil as an absent value, which is exactly what the caller sent.
+func childEcho(f ir.Field, recv string) string {
+	v := recv + "." + f.Name
+	if f.VOKind != "" && !f.Nullable {
+		v += ".Value()"
+	}
+	return v
+}
+
+// addedEcho names the entry the collection ALREADY held, on the per-entry add
+// door. Same single-field rule as duplicateEcho, and the same reason: the
+// caller sent one entry, so telling them which value collided is the whole
+// actionable part of the answer.
 //
-// What comes back is the number the service computed, not a field of the entity
-// — that is the whole difference from an ordinary echo, and it is the useful
-// half: "the limit is 50" plus "you are at 51" is a message someone can act on.
-// In the grouped form the offending group's own value is echoed, and WHICH group
-// it was is carried by attachTo, which is normally the key field itself.
-func factEcho(rule ir.Rule, v string) string {
+// It is not gated on echoValue, because this refusal has no rules.list entry to
+// carry the key — it comes from children[].duplicateNotification.
+func addedEcho(c ir.Child) string {
+	if len(c.Identity) != 1 {
+		return ""
+	}
+	return ", " + childEcho(c.Identity[0], "item")
+}
+
+// duplicateEcho names WHICH entry came twice, when the collection's business
+// identity is a single field.
+//
+// A composite identity is deliberately left silent: echoing one half of a
+// two-field key points at the wrong thing, and echoing the whole entry hands
+// back a formatted struct nobody asked for. The message still says which
+// collection, and attachTo says which field.
+func duplicateEcho(rule ir.Rule, c ir.Child) string {
+	if len(c.Identity) != 1 {
+		return ""
+	}
+	return echoOf(rule, childEcho(c.Identity[0], "items[i]"))
+}
+
+// echoOf passes a value back with the refusal when the rule allows it.
+//
+// echoArgOn covers the common case — the subject field of the entity being
+// written. This one takes an arbitrary expression, for the refusals whose
+// useful value is not a field: the number a service fact computed, or the count
+// that broke a cap. That is the half of the message someone can act on: "the
+// limit is 50" alone states the rule, "and you are at 51" says what to change.
+func echoOf(rule ir.Rule, v string) string {
 	if !rule.EchoValue {
 		return ""
 	}
@@ -1487,8 +1580,8 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 		// owes it code that compiles.
 		if rule.OnlyField == nil {
 			s.L("\t\t\tif len(items) > %d {", rule.Cap)
-			s.L("\t\t\t\tr.AddNotification(%s, %s)",
-				quote(c.GoPlural), notifIn(m, rule.Notification))
+			s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
+				quote(c.GoPlural), notifInFor(m, rule), echoOf(rule, "len(items)"))
 			s.L("\t\t\t}")
 			s.L("\t\t}")
 			return
@@ -1498,8 +1591,8 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 		countOne("\t\t\t\t", "n++")
 		s.L("\t\t\t}")
 		s.L("\t\t\tif n > %d {", rule.Cap)
-		s.L("\t\t\t\tr.AddNotification(%s, %s)",
-			quote(c.GoPlural), notifIn(m, rule.Notification))
+		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
+			quote(c.GoPlural), notifInFor(m, rule), echoOf(rule, "n"))
 		s.L("\t\t\t}")
 		s.L("\t\t}")
 		return
@@ -1515,8 +1608,8 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\t}")
 	s.L("\t\t\tfor _, n := range perKey {")
 	s.L("\t\t\t\tif n > %d {", rule.Cap)
-	s.L("\t\t\t\t\tr.AddNotification(%s, %s)",
-		quote(c.GoPlural), notifIn(m, rule.Notification))
+	s.L("\t\t\t\t\tr.AddNotification(%s, %s%s)",
+		quote(c.GoPlural), notifInFor(m, rule), echoOf(rule, "n"))
 	s.L("\t\t\t\t\tbreak")
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t}")

@@ -700,7 +700,19 @@ type Rule struct {
 	AttachTo string `yaml:"attachTo"`
 	// EchoValue passes the rejected value back in the notification, so the
 	// caller sees what was refused.
-	EchoValue bool `yaml:"echoValue"`
+	//
+	// It DEFAULTS TO TRUE, and is a pointer so that `echoValue: false` can say
+	// otherwise. The framework carries the value as NotificationMessage.
+	// FieldValue and has since the beginning; leaving it out was the generator's
+	// omission, not the framework's limit, and it costs the caller the only half
+	// of the message they can act on — "at most 4 guardians" tells them the rule,
+	// "you sent 6" tells them what to change.
+	//
+	// Turn it off for a value that should not travel back in a 422: a secret, a
+	// document number, anything the response is not already allowed to carry.
+	// The generator cannot tell — nothing in the language marks a field as
+	// sensitive — so that judgement is the spec author's.
+	EchoValue *bool `yaml:"echoValue"`
 	// Description is one optional line on why the rule exists.
 	Description string `yaml:"description"`
 
@@ -751,6 +763,11 @@ type Rule struct {
 	AdminField string `yaml:"adminField"`
 }
 
+// Echoes answers whether this rule sends the rejected value back, applying the
+// default an absent key means. It is the only reader of the pointer, so nothing
+// downstream has to know that "unset" and "true" are the same answer.
+func (r Rule) Echoes() bool { return r.EchoValue == nil || *r.EchoValue }
+
 // RuleOnly narrows a set-wide rule to the entries whose field carries one
 // value. It is deliberately a single equality: anything richer is a query, and a
 // query in a rule is the point where the language stops being readable.
@@ -777,6 +794,13 @@ type Notification struct {
 	Semantic string `yaml:"semantic"`
 	// TVars are the placeholder names the texts interpolate, like {min} and
 	// {max}.
+	//
+	// A variable is filled by the RULE that raises the notification, from the
+	// bound it already declares: `min`/`max` from a range or a length, and `max`
+	// or `cap` from a groupCap's `cap:`. A name outside that vocabulary has
+	// nothing to source it, so the message reaches the end user with a hole
+	// where the value belongs — write the bound into the sentence only when no
+	// rule owns it.
 	TVars []string `yaml:"tvars"`
 	// Text is the message in each of the seven catalogs.
 	Text Texts `yaml:"text"`

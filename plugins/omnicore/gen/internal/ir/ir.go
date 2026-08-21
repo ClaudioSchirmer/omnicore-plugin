@@ -732,7 +732,7 @@ func resolveClauseSet(rs spec.Rules, lookup func(string) *Field) []Clause {
 		rule := Rule{
 			ID: r.ID, Kind: r.Kind, Operator: r.Operator,
 			Min: r.Min, Max: r.Max, Notification: r.Notification,
-			AttachTo: r.AttachTo, EchoValue: r.EchoValue, Description: r.Description,
+			AttachTo: r.AttachTo, EchoValue: r.Echoes(), Description: r.Description,
 			Transitions: r.Transitions, GroupBy: r.GroupBy, Cap: r.Cap,
 			SkipWhen: r.SkipWhen, FactName: r.Fact,
 		}
@@ -1637,8 +1637,14 @@ func appendUniqueClauses(m *Model) []Clause {
 			continue
 		}
 		extra = append(extra, Rule{
-			ID:           "unique-" + f.Name,
-			Kind:         "uniquePrecheck",
+			ID:   "unique-" + f.Name,
+			Kind: "uniquePrecheck",
+			// The synthesised rules have no spec entry to carry echoValue, so the
+			// default rules.list gets from an absent key is applied here instead.
+			// This one earns it more than most: "that handle is taken" is a
+			// different message from "administrator is taken", and the caller
+			// picked the word.
+			EchoValue:    true,
 			Fields:       []Field{f},
 			Notification: f.Unique.Notification,
 			AttachTo:     f.Name,

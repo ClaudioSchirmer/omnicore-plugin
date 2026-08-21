@@ -106,7 +106,10 @@ a clause the framework dispatches by verb.
   groupCap        at most N entries per key — counted IN GO, over what this
                   write carries. Use it for the collection being written; for a
                   cap over rows already in the TABLE, declare a service fact
-                  with groupBy and let the database group them.
+                  with groupBy and let the database group them. The cap reaches
+                  the message: declare tvars: [max] (or [cap]) on the
+                  notification and write {max} in the seven texts instead of
+                  spelling the number into each one.
   factRange       a service fact's ANSWER must stay within min/max. It is the
                   other half of service.facts: the fact asks the database the
                   number, this says what the number may be, and the call, the
