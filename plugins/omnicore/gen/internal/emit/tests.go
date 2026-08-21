@@ -2,12 +2,14 @@ package emit
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 // Tests are generated from the same declarations the code is generated from,
@@ -117,6 +119,7 @@ func emitDomainTests(m *ir.Model) (fsplan.File, error) {
 	emitServiceStub(s, m)
 	emitValidEntityBuilder(s, m)
 	emitAggregateContractTest(s, m)
+	emitRowScopeCases(s, m)
 	emitNotificationSemantics(s, m)
 	emitRuleCases(s, m)
 
@@ -172,6 +175,251 @@ func emitTestHelpers(s *src, m *ir.Model) {
 	s.Blank()
 }
 
+// emitTestIdentity attaches an identity to a command test's context.
+//
+// Without one, `ctx.Identity()` is nil and every mapper's identity feed is
+// skipped — so the test exercises the empty branch of the one thing that decides
+// whether a scoped write is the caller's to make. That is exactly the code a
+// bodyless verb consists of: its mapper used to be a flat no-op, and giving it a
+// body without giving the test an identity would leave the new body unrun and
+// the coverage number saying so.
+func emitTestIdentity(s *src, m *ir.Model, indent string) {
+	if len(m.Runtime) == 0 {
+		return
+	}
+	claims := map[string]string{}
+	for _, f := range m.Runtime {
+		switch f.IdentitySource {
+		case "tenant":
+			claims["tenant_id"] = testScopeValue(m)
+		case "subject", "permission":
+			// Subject is a field of the Identity, and a permission question is
+			// answered from the permissions claim; neither is a custom claim.
+		default:
+			if f.BaseGoType == "bool" {
+				claims[f.Claim] = "true"
+			} else {
+				claims[f.Claim] = "someone@example.test"
+			}
+		}
+	}
+	s.L("%s// A request has a caller. With no identity the mappers' identity feed is", indent)
+	s.L("%s// skipped entirely, and what a scoped write is checked against is exactly", indent)
+	s.L("%s// what the feed carries.", indent)
+	s.L("%sctx.SetIdentity(&configuration.Identity{", indent)
+	if m.Authz.ScopeField != nil && m.Authz.DataAccess == "owner-only" {
+		s.L("%s\tSubject: %s,", indent, quote(testScopeValue(m)))
+	}
+	if len(claims) > 0 {
+		s.L("%s\tClaims: map[string]any{", indent)
+		for _, k := range sortedClaimNames(claims) {
+			s.L("%s\t\t%s: %s,", indent, quote(k), quote(claims[k]))
+		}
+		s.L("%s\t},", indent)
+	}
+	s.L("%s})", indent)
+}
+
+// emitIdentityArrived asserts the feed actually ran. Coverage alone would be
+// satisfied by calling the mapper; what matters is that the value landed, since
+// a feed that assigns nothing leaves a scoped write comparing against "".
+func emitIdentityArrived(s *src, m *ir.Model, indent string) {
+	caller := m.Authz.ScopeField
+	if caller == nil {
+		return
+	}
+	s.L("%sif e.%s != %s {", indent, caller.Name, quote(testScopeValue(m)))
+	s.L("%s\tt.Errorf(%s, e.%s)", indent,
+		quote("the caller's scope did not reach the entity (%q) — a write outside it could not be refused"),
+		caller.Name)
+	s.L("%s}", indent)
+}
+
+// testScopeValue is the caller's own scope in the generated tests. It matches
+// what the domain fixture uses, so a test that builds both halves agrees with
+// itself.
+func testScopeValue(m *ir.Model) string {
+	if f := m.Authz.ScopeSubject(); f != nil {
+		return strings.Trim(scopeFixtureValue(*f), `"`)
+	}
+	return "caller"
+}
+
+// sortedClaimNames keeps a generated map literal stable run to run — an emitter
+// that ranges a Go map writes a different file every time and turns every
+// regeneration into a diff.
+func sortedClaimNames(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// emitRowScopeCases proves the WRITE half of a scoped dataAccess, verb by verb.
+//
+// This is the assertion the security finding asked for by name: generate a
+// tenant-scoped entity and check that a write carrying a FOREIGN scope is
+// refused — on insert, on update and on archive — with the caller's identity
+// supplied. Each verb is listed separately because each used to be a separate
+// hole, and archive is the one that surprises: it does not dispatch under
+// IfUpdate, and it loads through the repository, which the read filter never
+// touches.
+//
+// The positive direction is covered by valid<Entity>() itself, which sets the
+// caller's scope to the row's — so if the guard ever fires on a legitimate
+// write, every case in this file fails at once.
+func emitRowScopeCases(s *src, m *ir.Model) {
+	subject, caller := m.Authz.ScopeSubject(), m.Authz.ScopeField
+	if subject == nil || caller == nil {
+		return
+	}
+	what := "tenant"
+	if m.Authz.DataAccess == "owner-only" {
+		what = "owner"
+	}
+	e := m.Entity.Pascal
+	// Any value that is not the fixture's. What matters is only that the two
+	// differ: the guard compares them and nothing else.
+	foreign := quote("somebody-else")
+
+	verbs := [][2]string{}
+	seen := map[string]bool{}
+	for _, op := range m.Ops {
+		switch op.Verb {
+		case "insert":
+			if !seen["insert"] {
+				seen["insert"] = true
+				verbs = append(verbs, [2]string{"Insert", "insert"})
+			}
+		case "update", "patch":
+			if !seen["update"] {
+				seen["update"] = true
+				verbs = append(verbs, [2]string{"Update", "update"})
+			}
+		case "archive":
+			if !seen["archive"] {
+				seen["archive"] = true
+				verbs = append(verbs, [2]string{"Archive", "archive"})
+			}
+		case "unarchive":
+			if !seen["unarchive"] {
+				seen["unarchive"] = true
+				verbs = append(verbs, [2]string{"Unarchive", "unarchive"})
+			}
+		case "delete":
+			if !seen["delete"] {
+				seen["delete"] = true
+				verbs = append(verbs, [2]string{"Delete", "delete"})
+			}
+		}
+	}
+
+	for _, v := range verbs {
+		s.Doc(
+			fmt.Sprintf("A %s of a row in another %s is refused.", v[1], what),
+			"",
+			fmt.Sprintf("The caller holds the %s permission — that is a different question, "+
+				"and it is already answered by the route. This is about WHICH ROW: the read "+
+				"side would never have shown it to them, and without this the write side "+
+				"would let them have it anyway.", v[1]))
+		s.L("func Test%s_%sOutside%s_IsRefused(t *testing.T) {", e, v[0], naming.Pascal(what))
+		s.L("\te := valid%s()", e)
+		s.L("\te.%s = %s", caller.Name, foreign)
+		switch v[0] {
+		case "Insert":
+			s.L("\t_, err := domain.GetInsertable(e, %s, %s)", serviceArg(m), quote("GetInsertable"))
+		case "Update":
+			s.L("\t_, err := domain.GetUpdatable(e, func(*%s) error { return nil }, %s, %s)",
+				e, serviceArg(m), quote("GetUpdatable"))
+		case "Archive":
+			s.L("\t_, err := domain.GetArchivable(e, %s, %s)", serviceArg(m), quote("GetArchivable"))
+		case "Unarchive":
+			s.L("\t_, err := domain.GetUnarchivable(e, %s, %s)", serviceArg(m), quote("GetUnarchivable"))
+		case "Delete":
+			s.L("\t_, err := domain.GetDeletable(e, %s, %s)", serviceArg(m), quote("GetDeletable"))
+		}
+		s.L("\tif err == nil {")
+		s.L("\t\tt.Fatal(%s)",
+			quote("a "+v[1]+" into another "+what+" was accepted — the caller cannot even read this row back"))
+		s.L("\t}")
+		s.L("\tif !%sBlames(err, %s) {", m.Entity.Camel, quote(subject.Name))
+		s.L("\t\tt.Errorf(%s, %sRejectedFields(err))",
+			quote("the rejection should name "+subject.Name+", it named %v"), m.Entity.Camel)
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
+	}
+
+	if m.Authz.BypassField != nil {
+		s.Doc(
+			fmt.Sprintf("The %s bypass crosses the %s scope.", m.Authz.Bypass, what),
+			"",
+			"It is the operator supporting a customer: they have to be able to repair a "+
+				"row that is not theirs. Without a test the key can be declared, read off "+
+				"the identity and never consulted — which looks exactly like it working.")
+		s.L("func Test%s_BypassCrossesTheScope(t *testing.T) {", e)
+		s.L("\te := valid%s()", e)
+		s.L("\te.%s = %s", caller.Name, foreign)
+		s.L("\te.%s = true", m.Authz.BypassField.Name)
+		s.L("\tif _, err := domain.GetInsertable(e, %s, %s); err != nil {",
+			serviceArg(m), quote("GetInsertable"))
+		s.L("\t\tt.Fatalf(%s, err)",
+			quote("the bypass holder was refused a row outside their "+what+": %v"))
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
+	}
+
+	if m.Authz.NoIdentity == "stand-down" {
+		s.Doc(
+			"With no identity at all the guard stands down, as authz.noIdentity says.",
+			"",
+			"Only a dev bench reaches it — the middleware is bypassable solely with "+
+				"auth.mode disabled, which the framework refuses outside APP_PROFILE=dev — "+
+				"and without it a scoped entity refuses every write on the machine it is "+
+				"first tried on.")
+		s.L("func Test%s_NoIdentityStandsDown(t *testing.T) {", e)
+		s.L("\te := valid%s()", e)
+		s.L("\t// No caller at all — NOT merely an empty scope. A token that simply")
+		s.L("\t// carries no such claim is an ordinary production request and is")
+		s.L("\t// refused; the case below it proves that.")
+		s.L("\te.%s = false", m.Authz.PresenceField.Name)
+		s.L("\te.%s = \"\"", caller.Name)
+		s.L("\tif _, err := domain.GetInsertable(e, %s, %s); err != nil {",
+			serviceArg(m), quote("GetInsertable"))
+		s.L("\t\tt.Fatalf(%s, err)",
+			quote("an anonymous write was refused under stand-down: %v"))
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
+
+		// The other half of the same value, and the one that is NOT a bench: a
+		// real, signed, valid token that carries no such claim reaches the
+		// domain with the same empty scope and must still be refused. Standing
+		// down on the VALUE instead of on PRESENCE is what handed the whole
+		// guard to anyone holding a claimless token.
+		s.Doc(
+			fmt.Sprintf("A caller WITH an identity but no %s claim is still refused.", what),
+			"",
+			"It arrives at the domain looking exactly like the anonymous case above — "+
+				"an empty scope — and it is the opposite situation: an authenticated "+
+				"request that simply cannot be placed in any "+what+". Standing down for "+
+				"it would let any claimless token write anywhere.")
+		s.L("func Test%s_IdentityWithoutTheClaim_IsRefused(t *testing.T) {", e)
+		s.L("\te := valid%s()", e)
+		s.L("\te.%s = \"\"", caller.Name)
+		s.L("\tif _, err := domain.GetInsertable(e, %s, %s); err == nil {",
+			serviceArg(m), quote("GetInsertable"))
+		s.L("\t\tt.Fatal(%s)",
+			quote("a token carrying no "+what+" claim wrote into a "+what+" that is not theirs"))
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
+	}
+}
+
 // emitValidEntityBuilder produces an aggregate that passes every declared rule.
 //
 // Every negative case starts from it and breaks exactly ONE thing, so a failure
@@ -187,6 +435,7 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 	s.L("func valid%s() *%s {", m.Entity.Pascal, m.Entity.Pascal)
 	s.L("\treturn &%s{", m.Entity.Pascal)
 	emitEntityLiteralFields(s, m.AllOwnerFields(), "\t\t")
+	emitScopeFixture(s, m, "\t\t")
 	s.L("\t}")
 	s.L("}")
 	s.Blank()
@@ -201,6 +450,79 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 	s.L("\t}")
 	s.L("}")
 	s.Blank()
+}
+
+// emitScopeFixture makes the valid aggregate one the CALLER is entitled to
+// write.
+//
+// A row-scoped entity has a rule nobody declared: the row's tenant (or owner)
+// must be the caller's. The fixture builds the entity directly, with no request
+// behind it, so the caller's scope is the zero value and the guard refuses —
+// which would ship a red generated test on every scoped entity, and teach the
+// author to distrust the suite rather than to read it.
+//
+// So the fixture states what it is: a write by someone entitled to make it. The
+// negative case — a write into a scope that is not the caller's — is an
+// end-to-end question (it needs a request, an identity and a route), and it
+// belongs to the contract suite, not here.
+func emitScopeFixture(s *src, m *ir.Model, indent string) {
+	if m.Authz.PresenceField == nil {
+		return
+	}
+	s.L("%s// A REQUEST made this, by a caller entitled to make it. Every rule that", indent)
+	s.L("%s// stands down for an absent principal reads the flag below, so a fixture", indent)
+	s.L("%s// that left it false would test those rules standing down rather than", indent)
+	s.L("%s// running — which is how a negative case passes while proving nothing.", indent)
+	s.L("%s%s: true,", indent, m.Authz.PresenceField.Name)
+
+	if subject, caller := m.Authz.ScopeSubject(), m.Authz.ScopeField; subject != nil && caller != nil {
+		s.L("%s// The row is in the caller's own %s.", indent, subject.Name)
+		s.L("%s%s: %s,", indent, caller.Name, scopeFixtureValue(*subject))
+	}
+	// An ownerCheck compares a runtime field against a column, and both halves
+	// have to agree for the aggregate to be VALID. Leaving the runtime half
+	// empty used to pass only because the check stood down on it — the very
+	// shape that let a claimless token through in production.
+	for _, owned := range ownerCheckPairs(m) {
+		s.L("%s// The caller owns this row: %s matches %s.",
+			indent, owned.runtime.Name, owned.column.Name)
+		s.L("%s%s: %s,", indent, owned.runtime.Name, scopeFixtureValue(owned.column))
+	}
+}
+
+// ownerCheckPairs lists the (runtime principal, row's owner column) pairs an
+// ownerCheck compares, so the fixture can make them agree.
+func ownerCheckPairs(m *ir.Model) []struct{ runtime, column ir.Field } {
+	var out []struct{ runtime, column ir.Field }
+	seen := map[string]bool{}
+	for _, c := range m.Clauses {
+		for _, r := range c.Rules {
+			if r.Kind != "ownerCheck" || r.OwnerField == nil || len(r.Fields) == 0 {
+				continue
+			}
+			if seen[r.OwnerField.Name] {
+				continue
+			}
+			seen[r.OwnerField.Name] = true
+			out = append(out, struct{ runtime, column ir.Field }{*r.OwnerField, r.Fields[0]})
+		}
+	}
+	return out
+}
+
+// scopeFixtureValue is the same value the fixture gave the scope COLUMN,
+// rendered as the text a claim carries.
+//
+// It has to track literalFor exactly: the guard compares the two, so a fixture
+// whose caller and whose row disagree by one character produces a red test that
+// says nothing about the rule under it.
+func scopeFixtureValue(f ir.Field) string {
+	lit := literalFor(f)
+	// An id's literal is a constructor call; the claim is the string inside it.
+	if inner := strings.TrimSuffix(strings.TrimPrefix(lit, "domain.NewID("), ")"); inner != lit {
+		return inner
+	}
+	return lit
 }
 
 // insertAction is the label the framework passes for the insert path. A shared
@@ -452,6 +774,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 				"succeeds and the value is simply not there.")
 		s.L("func TestInsert%sMapsEveryField(t *testing.T) {", m.Entity.Pascal)
 		s.L("\tctx := &configuration.AppContext{}")
+		emitTestIdentity(s, m, "\t")
 		s.L("\tc := &%s{", op.CommandType)
 		// The command carries what a CLIENT may send. A server-assigned field is
 		// not in the type at all, so naming it here would not compile.
@@ -474,6 +797,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 			s.L("\tif err != nil {")
 			s.L("\t\tt.Fatalf(%s, err)", quote("ToEntity: %v"))
 			s.L("\t}")
+			emitIdentityArrived(s, m, "\t")
 		} else {
 			s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 			s.L("\tif err := c.ApplyTo(ctx, e); err != nil {")
@@ -507,6 +831,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 				"anything out.")
 		s.L("func TestPatch%sLeavesAbsentFieldsAlone(t *testing.T) {", m.Entity.Pascal)
 		s.L("\tctx := &configuration.AppContext{}")
+		emitTestIdentity(s, m, "\t")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 		first := *patchWitness
 		// The sample is HOISTED so the assertion compares against the very
@@ -532,6 +857,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 				"contract, and a mapper that leaves everything alone passes that half.")
 		s.L("func TestPatch%sAppliesWhatItCarries(t *testing.T) {", m.Entity.Pascal)
 		s.L("\tctx := &configuration.AppContext{}")
+		emitTestIdentity(s, m, "\t")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 		s.L("\tc := &%s{", op.CommandType)
 		for _, f := range m.PatchableFields() {
@@ -570,6 +896,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 				"errors here turns a legitimate verb into a 400.")
 		s.L("func Test%sApplies(t *testing.T) {", op.CommandType)
 		s.L("\tctx := &configuration.AppContext{}")
+		emitTestIdentity(s, m, "\t")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 		s.L("\t// The result carries the id, and a verb that reaches this mapper has always")
 		s.L("\t// loaded the row first — so the entity under test has one too.")
@@ -587,6 +914,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\tif err := c.%s(ctx, e); err != nil {", applyMethod(op))
 		s.L("\t\tt.Fatalf(%s, err)", quote("the mapper failed: %v"))
 		s.L("\t}")
+		emitIdentityArrived(s, m, "\t")
 		s.L("\tif _, err := c.FromEntity(ctx, e); err != nil {")
 		s.L("\t\tt.Errorf(%s, err)", quote("projecting the result failed: %v"))
 		s.L("\t}")
@@ -1796,6 +2124,28 @@ func emitScopeIsForcedTest(s *src, m *ir.Model) {
 	s.L("\t\t}")
 	s.L("\t}")
 	s.Blank()
+	// What an ABSENT identity means is the spec's decision, so the assertion is
+	// the spec's decision too. Asserting the empty scope under stand-down would
+	// ship a red test for a policy the author declared on purpose — and, worse,
+	// teach them the suite is wrong rather than the code.
+	if m.Authz.NoIdentity == "stand-down" {
+		s.L("\t// No identity: the scope STANDS DOWN, as authz.noIdentity says. Only a")
+		s.L("\t// dev bench reaches this — auth.mode disabled is refused outside")
+		s.L("\t// APP_PROFILE=dev — and it is what makes a scoped entity usable there")
+		s.L("\t// at all, instead of answering every listing empty.")
+		s.L("\tanon := &configuration.AppContext{}")
+		s.L("\tout, err := (%s{}).ToCriteria(anon)", m.Read.QueryList)
+		s.L("\tif err != nil {")
+		s.L("\t\tt.Fatalf(%s, err)", quote("the anonymous listing criteria failed: %v"))
+		s.L("\t}")
+		s.L("\tif _, ok := out.Filter[%s]; ok {", quote(field))
+		s.L("\t\tt.Error(%s)",
+			quote("an anonymous read was scoped anyway — stand-down means no scope, not an empty one"))
+		s.L("\t}")
+		s.L("}")
+		emitByIDScopeTest(s, m, field, from, a)
+		return
+	}
 	s.L("\t// No identity: the EMPTY scope, which matches nothing. Leaving the")
 	s.L("\t// filter out here would answer with every row in the table.")
 	s.L("\tanon := &configuration.AppContext{}")
@@ -1806,6 +2156,46 @@ func emitScopeIsForcedTest(s *src, m *ir.Model) {
 	s.L("\tif got, ok := out.Filter[%s]; !ok || got != \"\" {", quote(field))
 	s.L("\t\tt.Errorf(%s, got, ok)",
 		quote("an anonymous read scoped to %v (present=%v) — with no identity it must match nothing"))
+	s.L("\t}")
+	s.L("}")
+	emitByIDScopeTest(s, m, field, from, a)
+}
+
+// emitByIDScopeTest covers the OTHER read.
+//
+// The listing and the by-id read are written by the same emitter and asserted by
+// different tests, and only the listing had one — so the scope on the read a
+// caller uses to open ONE record was never checked. That is the read where a
+// leak is most direct: the caller already has the id.
+func emitByIDScopeTest(s *src, m *ir.Model, field, from, sample string) {
+	if !m.Read.ByID {
+		return
+	}
+	s.Blank()
+	s.Doc(
+		fmt.Sprintf("Opening one record is scoped too, and %s is not the caller's to choose.", field),
+		"",
+		"The by-id read and the listing are two functions written by one emitter, and "+
+			"for a while only the listing was asserted. It is the read where a missing "+
+			"scope leaks most directly: the caller already holds the id.")
+	s.L("func Test%sByIDScopeIsForced(t *testing.T) {", m.Entity.Pascal)
+	s.L("\tctx := &configuration.AppContext{}")
+	if from == "Subject" {
+		s.L("\tctx.SetIdentity(&configuration.Identity{Subject: %s})", quote(sample))
+	} else {
+		s.L("\tctx.SetIdentity(&configuration.Identity{Claims: map[string]any{%s: %s}})",
+			quote("tenant_id"), quote(sample))
+	}
+	s.L("\tq := %s{}", m.Read.QueryByID)
+	s.L("\t// What a caller fishing for someone else's record would send.")
+	s.L("\tq.Criteria.Filter = map[string]any{%s: %s}", quote(field), quote("somebody-else"))
+	s.L("\tout, err := q.ToCriteria(ctx)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("the by-id criteria failed: %v"))
+	s.L("\t}")
+	s.L("\tif got := out.Filter[%s]; got != %s {", quote(field), quote(sample))
+	s.L("\t\tt.Errorf(%s, got)",
+		quote("the by-id read is scoped to %v — the caller's own scope is not what it forced"))
 	s.L("\t}")
 	s.L("}")
 }
@@ -2126,6 +2516,10 @@ func emitChildInputTests(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("import (")
 	s.L("\t%s", quote("testing"))
+	// Same reason as the DTO this covers: a `type: id` entry field samples as
+	// domain.NewID(...), so the package is needed here too. Unconditional, and
+	// pruned when unused.
+	s.L("\t%s", quote(fwImport("domain")))
 	if m.UsesVOsInChildren() {
 		s.L("\t%s", quote("time"))
 	}
@@ -2311,6 +2705,42 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 		s.L("	}")
 		s.L("	if res.%s.ID != entryID {", c.Name)
 		s.L("		t.Error(\"the entry id the server minted did not reach the response\")")
+		s.L("	}")
+		for _, f := range fields {
+			s.L("	if res.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+			s.L("		t.Errorf(\"%s did not reach the response\")", f.Name)
+			s.L("	}")
+		}
+		s.L("}")
+		s.Blank()
+
+		// The CHANGE verb's response mapper had a request test and no response
+		// test, while both its siblings had one — so the coverage report read 0%
+		// for that one function, about code the other two paths prove is
+		// reachable. A number that says "untested" about tested code is worse
+		// than a low number: it is the one a reviewer stops trusting.
+		s.Doc(
+			fmt.Sprintf("The Change%s response carries the entry back with the id it KEEPS.", op),
+			"",
+			"A change replaces the entry's values and holds on to its row — so the id "+
+				"coming back is the one the caller addressed, and a mapper that drops it "+
+				"answers 200 with nothing to address next.")
+		s.L("func TestChange%sResponse_CarriesTheStoredEntry(t *testing.T) {", op)
+		s.L("	ownerID := domain.NewRandomID()")
+		s.L("	entryID := domain.NewRandomID()")
+		s.L("	res := Change%sResponse{}.FromResult(commands.Change%sResult{", op, op)
+		s.L("		%sID: ownerID,", m.Entity.Pascal)
+		s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+		for _, f := range fields {
+			s.L("			%s: %s,", f.Name, wireSample(f))
+		}
+		s.L("		},")
+		s.L("	})")
+		s.L("	if res.%sID != ownerID {", m.Entity.Pascal)
+		s.L("		t.Error(\"the owner id did not reach the response\")")
+		s.L("	}")
+		s.L("	if res.%s.ID != entryID {", c.Name)
+		s.L("		t.Error(\"the entry kept its id and the response did not carry it\")")
 		s.L("	}")
 		for _, f := range fields {
 			s.L("	if res.%s.%s != %s {", c.Name, f.Name, wireSample(f))

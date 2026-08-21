@@ -514,15 +514,39 @@ func upSQL(m *ir.Model, d dialect) string {
 		}
 		b.WriteString("\n")
 		fmt.Fprintf(&b, "%s the repository binds this constraint's violation to a clean 409.\n", d.Comment)
-		if len(c.Columns) > 1 {
+		// WHY there is more than one column matters, and the three reasons are
+		// different rules: a composite is one value spread over columns, a
+		// scope says the uniqueness is per something, and a collection entry is
+		// always identified inside its owner. Saying "composite value object"
+		// over a scoped index — which is what one shared line did — describes a
+		// value object that is not there.
+		switch {
+		case c.Collection != "":
+			// Said below, where the owner column can be named.
+		case len(c.Within) > 0:
+			fmt.Fprintf(&b, "%s Scoped by %s: the value is unique WITHIN that, not across the\n",
+				d.Comment, strings.Join(c.Within, " + "))
+			fmt.Fprintf(&b, "%s table. The domain's pre-check asks exactly this question, and\n", d.Comment)
+			fmt.Fprintf(&b, "%s check refuses the two disagreeing.\n", d.Comment)
+		case len(c.Columns) > 1:
 			fmt.Fprintf(&b, "%s Over the TUPLE: this constraint belongs to a composite value object,\n", d.Comment)
 			fmt.Fprintf(&b, "%s whose parts identify together and mean nothing apart.\n", d.Comment)
 		}
-		if c.Scope == "active-only" && m.Managed.ArchivedAt != "" {
+		if c.Collection != "" {
+			fmt.Fprintf(&b, "%s Scoped by %s, the owner: an entry has no identity outside its\n",
+				d.Comment, c.Columns[0])
+			fmt.Fprintf(&b, "%s collection, and the same value under a different owner is a\n", d.Comment)
+			fmt.Fprintf(&b, "%s different, legitimate row. This is the backstop businessIdentity\n", d.Comment)
+			fmt.Fprintf(&b, "%s cannot be: that check sees ONE write, never the concurrent one.\n", d.Comment)
+		}
+		// The archive column is the CONSTRAINT's, not the model's: a collection
+		// entry is freed for reuse by being soft-removed itself, which has
+		// nothing to do with whether the root is archived.
+		if c.Scope == "active-only" && c.Archived != "" {
 			fmt.Fprintf(&b, "%s Scoped to the ACTIVE rows: an archived row releases the value, so it\n", d.Comment)
 			fmt.Fprintf(&b, "%s can be taken again while the old row stays as history.\n", d.Comment)
 			writeActiveOnlyUnique(&b, c.Table, uniqueName(c), c.Columns,
-				constraintColumnTypes(m, c, d), m.Managed.ArchivedAt, d)
+				constraintColumnTypes(m, c, d), c.Archived, d)
 			continue
 		}
 		fmt.Fprintf(&b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",
@@ -845,8 +869,20 @@ func constraintColumnType(m *ir.Model, column string, d dialect) string {
 			return d.Column(f)
 		}
 	}
-	// The constraint was resolved from m.Fields, so this is unreachable — but
-	// an id-typed fallback beats a panic inside a migration writer.
+	// A COLLECTION's constraint names the entry's own columns, which are not in
+	// the root's set. Without this the fallback below applied — the id type —
+	// and MySQL's active-only spelling mirrored a VARCHAR entry field into a
+	// generated column of the wrong type, which applies cleanly and then
+	// rejects any value longer than the id at INSERT.
+	for _, c := range m.Children {
+		for _, f := range c.Fields {
+			if f.Column == column {
+				return d.Column(f)
+			}
+		}
+	}
+	// Every other column a constraint can name is an id: the aggregate's own,
+	// or a collection's parent key.
 	return d.ID
 }
 
@@ -905,12 +941,17 @@ func writeActiveOnlyUnique(b *strings.Builder, table, name string, cols, colType
 		// enforce uniqueness across NULLs.
 		fmt.Fprintf(b, "%s MySQL has no partial index, so the condition becomes a column: it\n", d.Comment)
 		fmt.Fprintf(b, "%s mirrors the value while active and turns NULL once archived, and NULLs\n", d.Comment)
-		fmt.Fprintf(b, "%s do not collide with each other.\n", d.Comment)
+		fmt.Fprintf(b, "%s do not collide with each other. VIRTUAL, not STORED: a stored\n", d.Comment)
+		fmt.Fprintf(b, "%s generated column cannot be added in place, so the ALTER rebuilds the\n", d.Comment)
+		fmt.Fprintf(b, "%s whole table -- which is refused outright on a table that is the CHILD\n", d.Comment)
+		fmt.Fprintf(b, "%s of a foreign key (ERROR 1215), and is an expensive copy everywhere\n", d.Comment)
+		fmt.Fprintf(b, "%s else. A unique index over virtual columns enforces exactly the same\n", d.Comment)
+		fmt.Fprintf(b, "%s thing at no storage cost.\n", d.Comment)
 		mirrors := make([]string, 0, len(cols))
 		for i, col := range cols {
 			mirror := "active_" + col
 			mirrors = append(mirrors, mirror)
-			fmt.Fprintf(b, "ALTER TABLE %s ADD COLUMN %s %s GENERATED ALWAYS AS (CASE WHEN %s IS NULL THEN %s END) STORED;\n",
+			fmt.Fprintf(b, "ALTER TABLE %s ADD COLUMN %s %s GENERATED ALWAYS AS (CASE WHEN %s IS NULL THEN %s END) VIRTUAL;\n",
 				d.Quote(table), d.Quote(mirror), colTypes[i], d.Quote(archived), d.Quote(col))
 		}
 		fmt.Fprintf(b, "CREATE UNIQUE INDEX %s ON %s (%s);\n",

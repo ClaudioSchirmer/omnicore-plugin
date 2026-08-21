@@ -131,7 +131,7 @@ func emitGroupTypes(s *src, m *ir.Model) {
 
 func factDoc(f ir.Fact) string {
 	if f.Description != "" {
-		return f.Description
+		return f.Description + perEntryNote(f)
 	}
 	switch f.Kind {
 	case "exists":
@@ -153,6 +153,32 @@ func factDoc(f ir.Fact) string {
 		}
 		return doc
 	}
+}
+
+// perEntryNote says, once, that a fact is asked about ONE ENTRY of a collection
+// rather than about the write as a whole.
+//
+// It matters to whoever writes the body: the question arrives once per entry, so
+// a remote call inside it multiplies by the size of the collection, and the
+// answer must be about THAT entry rather than about the aggregate. Nothing in
+// the signature says so on its own — a `permissionID domain.ID` reads exactly
+// like a root field would.
+func perEntryNote(f ir.Fact) string {
+	var of []string
+	seen := map[string]bool{}
+	for _, p := range f.Params {
+		if p.PerEntry == "" || seen[p.PerEntry] {
+			continue
+		}
+		seen[p.PerEntry] = true
+		of = append(of, p.PerEntry)
+	}
+	if len(of) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" Asked ONCE PER ENTRY of %s, so the answer is about that entry "+
+		"and the cost of the body is multiplied by the size of the collection.",
+		strings.Join(of, " and "))
 }
 
 // factResults renders what a fact answers with. The second return exists only
@@ -416,6 +442,13 @@ func emitServiceStubFile(m *ir.Model) (fsplan.File, error) {
 	)
 	s.Blank()
 	s.L("package infra")
+	s.Blank()
+	// The stub is a HOOK — written once and owned by the author — but what is
+	// handed over still has to compile, or a first run reads as a broken
+	// generation rather than as a TODO. A fact filtered by an id, and every
+	// excludeSelf fact, take a domain.ID; the block was missing entirely.
+	// gofile prunes it for the specs whose facts take none.
+	s.L("import %s", quote(fwImport("domain")))
 	s.Blank()
 
 	impl := m.Service.Impl

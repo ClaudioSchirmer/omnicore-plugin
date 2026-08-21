@@ -55,10 +55,9 @@ func explainKeys() string {
 		width = 44
 	}
 
-	refused := spec.RefusedKeys()
 	for _, f := range fields {
 		line := fmt.Sprintf("  %-*s  %s", width, f.Path, f.Type)
-		if why, no := refused[f.Path]; no {
+		if why, no := spec.RefusalFor(f.Path); no {
 			// Marked, not hidden. Hiding it would make a spec written for a later
 			// build look like it contains a typo; listing it unmarked sends an
 			// author to write it, run, and get blocked — which is a round trip

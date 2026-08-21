@@ -122,6 +122,22 @@ description is what the generated report tells the implementer to write, and the
 hook file <entity>_rules_manual.go is where they write it. An entry without a
 description is refused — an unnamed escape hatch is an empty TODO.
 
+NAME A FACT FOR THE PROBLEM, NOT FOR THE HEALTHY STATE. The generated test suite
+stubs the service so every probe answers "nothing found" — which is what lets a
+valid fixture through, so each negative case fails for the rule it is testing
+rather than for a duplicate the stub invented. A fact named for the problem
+(TenantIsUnavailable, WorkspaceTaken, PermissionKeyTaken) reads false under that
+stub and the happy path passes. The same question named for the healthy state
+(TenantIsActive) reads false too — and now means the tenant is gone, so the
+generated happy-path test fails against a spec that is perfectly correct. The
+convention is not a style preference; it is what makes the generated suite green
+on the day it is written.
+
+A fact may also ask about ONE ENTRY of a collection: filters: [<collection>.<field>]
+— the collection being children[].plural — emits a method taking that entry
+field's type, asked once per entry. Only on kind: manual: a computed fact is a
+query over this entity's own table, and the entry's column is on another one.
+
 Two things the DSL deliberately does NOT cover, because the framework already
 does them:
   • format, length and closed-set checks on a value-object field — declare the

@@ -307,6 +307,26 @@ type Unique struct {
 	// Scope decides whether an archived row keeps holding the value: all =
 	// forever; active-only = archiving frees it for reuse.
 	Scope string `yaml:"scope"`
+	// Within names the fields the uniqueness is scoped BY — "unique per tenant",
+	// "unique per workspace". Empty means unique across the whole table.
+	//
+	// It exists because the two halves of `service-precheck+constraint` used to
+	// be able to disagree, silently and in the worst direction. The pre-check
+	// came from the fact's filters (`[TenantID, Key]` → per tenant) and the
+	// index came from the FIELD ALONE (`role_key` → global), so the domain
+	// accepted a handle the database then refused, and the binding turned the
+	// violation into "this handle is taken" for a tenant where it was not. Every
+	// multi-tenant entity with a per-tenant natural key landed there, on exactly
+	// the handles two customers both pick — administrator, owner, viewer.
+	//
+	// So the scope is DECLARED rather than inferred from a block that reads as
+	// being about the service port, and the pre-check fact must filter by
+	// exactly `within` + this field: check refuses either half disagreeing with
+	// the other, in both directions.
+	//
+	// Each name is a persisted, non-nullable field of the root — a scope column
+	// that can be NULL scopes nothing, because NULLs do not collide.
+	Within []string `yaml:"within"`
 }
 
 // ---------------------------------------------------------------- value objects
@@ -1086,6 +1106,17 @@ type Authz struct {
 	// DataAccess is who may reach which rows: anyone-with-permission = every
 	// holder sees every row; owner-only = only their own; tenant = only their
 	// tenant's.
+	//
+	// owner-only and tenant scope BOTH SIDES. The read side narrows what a
+	// caller sees; the write side refuses a caller who creates, edits or
+	// archives a row outside their scope, with the framework's
+	// TenantMismatchNotification (403). Both halves are generated together on
+	// purpose: for a while only the read half was, and the result looked
+	// complete — a reviewer read tenant isolation on the listings and
+	// reasonably concluded the posture was in place, while a caller with the
+	// ordinary permissions could create a row inside another tenant, edit one
+	// and archive one. The asymmetry was what made it dangerous: they could not
+	// read back the row they had just archived.
 	DataAccess string `yaml:"dataAccess"`
 	// OwnerField is the persisted field that records the row's owner, for
 	// owner-only access — declare it with assignedFrom: identity-subject.
@@ -1093,6 +1124,44 @@ type Authz struct {
 	// TenantField is the persisted field the tenant claim is matched against,
 	// for tenant access — declare it with assignedFrom: identity-claim.
 	TenantField string `yaml:"tenantField"`
+	// Bypass names the permission that CROSSES the row scope — the platform
+	// operator supporting a customer, who must read and repair rows that are
+	// not theirs. Without it a `*:*` holder is filtered to their own tenant
+	// like anybody else, and there is no way to ask for the exception.
+	//
+	// It is a concrete `resource:action`, never a wildcard, because that is the
+	// only thing a caller can be asked about: the framework's HasPermission
+	// PANICS on a wildcard on the asking side (the claim wildcards; the
+	// question does not). So grant something like `platform:cross-tenant` and
+	// name it here.
+	//
+	// Refused unless dataAccess scopes the rows at all.
+	Bypass string `yaml:"bypass"`
+	// NoIdentity decides what an ABSENT identity means, which is a policy rather
+	// than an accident.
+	//
+	// stand-down is the DEFAULT: the scope applies to every authenticated
+	// caller and steps aside only where there is nobody to scope to. That is
+	// what every other identity-derived rule this generator writes already does
+	// — an ownerCheck tolerates an absent principal, and has to, since with
+	// auth.mode disabled no request carries one — so a row scope that alone
+	// failed closed would be the odd one out, and the surprise would land on the
+	// bench where the entity is first run, as a service that serves nothing and
+	// accepts nothing.
+	//
+	// It is safe because the generated guard asks whether an identity was
+	// PRESENT, never whether the scope came out empty. Those are two different
+	// facts arriving as one value, and only the first is confined to a bench:
+	// the middleware is bypassable solely with auth.mode disabled, which the
+	// framework's own boot guard allows under APP_PROFILE=dev alone, while a
+	// real token that simply carries no such claim is an ordinary production
+	// request — and is still refused.
+	//
+	// refuse is the opt-in for a service that wants the scope enforced even with
+	// authentication off: no rows, and no scoped write, on a bench included.
+	//
+	// Refused unless dataAccess scopes the rows at all.
+	NoIdentity string `yaml:"noIdentity"`
 }
 
 // ValueObjectsNamed is every value-object type a spec depends on: the ones it

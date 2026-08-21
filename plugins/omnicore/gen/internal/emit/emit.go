@@ -482,6 +482,21 @@ func entityValue(f ir.Field, expr string) string {
 	return fmt.Sprintf("%s(%s)", f.BaseEntityType, expr)
 }
 
+// identityValue is entityValue for a value the SERVER reads off the identity,
+// which always arrives as text.
+//
+// An `id` field is the case the plain one cannot serve: the claim is a string
+// and the column is the engine's own id type, so the assignment has to parse.
+// Without this, `assignedFrom: identity-claim` was refused on an id outright,
+// and the author had to choose between an honest UUID column that could carry a
+// foreign key and a declarative rule that could read it.
+func identityValue(f ir.Field, expr string) string {
+	if f.SpecType == "id" {
+		return fmt.Sprintf("domain.NewID(%s)", expr)
+	}
+	return entityValue(f, expr)
+}
+
 func fwImport(path string) string {
 	return "github.com/ClaudioSchirmer/omnicore/" + path
 }
