@@ -4,6 +4,8 @@ package spec
 // language resolves against one of these sets; a value outside the set is a
 // refusal with the whole set printed, never a silent pass-through.
 
+import "strings"
+
 var (
 	StorageKinds   = set("flat", "sharedbase-role")
 	LinkModels     = set("shared-pk", "separate-fk")
@@ -112,6 +114,17 @@ var (
 	)
 
 	DataAccess = set("anyone-with-permission", "owner-only", "tenant")
+
+	// NoIdentityPolicies is what an ABSENT identity means under a scoped
+	// dataAccess. It is a closed set because it is a policy with exactly two
+	// defensible answers, and it used to be a hardcoded branch: no identity
+	// scoped the read to the empty value, so a generated tenant entity answered
+	// every listing empty on the dev bench, which is the first place it is run.
+	//
+	// stand-down is the default — see Authz.NoIdentity for why, and for why it
+	// is safe: the guard asks about the PRESENCE of an identity, not about an
+	// empty scope, so a token that merely lacks the claim is still refused.
+	NoIdentityPolicies = set("refuse", "stand-down")
 
 	// AuthzOperations is the key set accepted under authz.permissions. It is
 	// cross-checked against the operations actually mounted, so a permission for
@@ -261,6 +274,13 @@ func Vocabularies() []Vocabulary {
 			"the operators this field is filterable by; an undeclared one is a typed 400."},
 		{"authz.dataAccess", DataAccess,
 			"whether every permission holder sees every row, or only their own / their tenant's."},
+		{"authz.noIdentity", NoIdentityPolicies,
+			"what an absent identity means under a scoped dataAccess. stand-down " +
+				"(the default) applies the scope to every authenticated caller and " +
+				"steps aside only where there is nobody to scope to — reachable on a " +
+				"dev bench alone, since auth.mode: disabled is refused outside " +
+				"APP_PROFILE=dev; refuse enforces it even then, serving no rows and " +
+				"accepting no scoped write."},
 		{"authz.permissions keys", AuthzOperations,
 			"the operations a permission can be required for."},
 		{"(discovered)", Dialects,
@@ -280,6 +300,27 @@ func Vocabularies() []Vocabulary {
 // lists a refused key like any other sends an author to write it, run, and get
 // blocked — and the test asserting the examples cover the language, which must
 // not demand that a refused key be demonstrated.
+// RefusalFor answers whether a key is refused, INCLUDING as a sub-key of a
+// refused block.
+//
+// Exact lookup is not enough: refusing `siblings[].fields[].unique` says nothing
+// about `siblings[].fields[].unique.scope`, which is part of the same block and
+// is just as refused. Listed unmarked, it reads as a key this build honours and
+// sends an author to write it, run, and get blocked — the exact round trip the
+// marking exists to save.
+func RefusalFor(path string) (string, bool) {
+	refused := RefusedKeys()
+	if why, ok := refused[path]; ok {
+		return why, true
+	}
+	for key, why := range refused {
+		if strings.HasPrefix(path, key+".") {
+			return why, true
+		}
+	}
+	return "", false
+}
+
 func RefusedKeys() map[string]string {
 	return map[string]string{
 		"read.indexes[].partial": "the framework takes a document filter there, and this " +
@@ -298,8 +339,6 @@ func RefusedKeys() map[string]string {
 			"endpoint would serve the parameter as optional",
 		"delete.children": "nothing reads a blanket delete semantic for the collections — " +
 			"removal is declared per child, with children[].softRemove",
-		"children[].fields[].unique": "uniqueness of a collection entry is not generated — " +
-			"declare it on a root field, or use businessIdentity for same-entry detection",
 		"siblings[].fields[].unique": "uniqueness of a facet's field is not generated — " +
 			"declare it on a root field",
 		"valueObjects[].rules.manual": "a GENERATED composite value object has no hook file " +

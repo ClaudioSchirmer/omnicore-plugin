@@ -335,6 +335,12 @@ func emitChildInput(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.Blank()
 	s.L("import (")
 	s.L("\t%s", quote("time"))
+	// An entry field of type: id is `domain.ID`, so this block needs the
+	// framework's domain package as much as the root's DTOs do. It was absent,
+	// and the emitted file did not compile — three steps after a green check.
+	// Declared unconditionally on purpose: gofile prunes what a spec does not
+	// use, which is the only version of this that cannot go stale again.
+	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
 	s.L(")")

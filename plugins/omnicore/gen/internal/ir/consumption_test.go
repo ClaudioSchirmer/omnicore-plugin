@@ -77,6 +77,9 @@ var unreadByEmitters = map[string]string{
 		"child field by its document key",
 	"Unique.Scope": "read by resolveConstraints, which turns it into the " +
 		"constraint's own Scope — that is what the DDL asks",
+	"Unique.Within": "read by resolveConstraints, which turns it into the " +
+		"constraint's leading COLUMNS — the DDL asks for those, and the " +
+		"constraint's own Within is what the report quotes back",
 }
 
 type modelField struct{ Qualified, Name string }

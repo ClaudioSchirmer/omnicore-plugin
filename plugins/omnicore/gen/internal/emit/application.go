@@ -87,12 +87,29 @@ func emitBodylessCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 			"answers 204: there is nothing to send back.", op.CommandType))
 	s.L("type %s struct{ %s }", op.CommandType, op.CommandBase)
 	s.Blank()
-	s.Doc("ApplyTo is the hook where identity-derived state would reach the entity. " +
-		"This verb needs none, so it is a no-op.")
-	s.L("func (c *%s) ApplyTo(_ *configuration.AppContext, _ *%s) error {", op.CommandType, entity)
-	s.L("\treturn nil")
-	s.L("}")
-	s.Blank()
+	// A bodyless verb still has a caller, and under a scoped dataAccess that is
+	// the whole question: archiving a row is a WRITE to it, and the row was
+	// loaded through the repository, which the read side's filter never touches.
+	// This hook being a flat no-op is what let a caller archive another tenant's
+	// row with the ordinary archive permission — and not be able to read back
+	// what they had just archived.
+	if len(m.Runtime) > 0 {
+		s.Doc("ApplyTo carries the caller's identity onto the entity, so BuildRules can " +
+			"refuse a write to a row outside the caller's scope. The verb has no body: " +
+			"this is the only thing it applies.")
+		s.L("func (c *%s) ApplyTo(ctx *configuration.AppContext, e *%s) error {", op.CommandType, entity)
+		emitIdentityFeed(s, m)
+		s.L("\treturn nil")
+		s.L("}")
+		s.Blank()
+	} else {
+		s.Doc("ApplyTo is the hook where identity-derived state would reach the entity. " +
+			"This verb needs none, so it is a no-op.")
+		s.L("func (c *%s) ApplyTo(_ *configuration.AppContext, _ *%s) error {", op.CommandType, entity)
+		s.L("\treturn nil")
+		s.L("}")
+		s.Blank()
+	}
 	s.Doc("FromEntity returns the framework's empty result: a bodyless verb has nothing to project.")
 	s.L("func (c *%s) FromEntity(_ *configuration.AppContext, _ *%s) (fwresults.None, error) {",
 		op.CommandType, entity)
@@ -252,11 +269,11 @@ func emitAssignedFields(s *src, m *ir.Model) {
 	s.L("\tif id := ctx.Identity(); id != nil {")
 	for _, f := range assigned {
 		if f.AssignedFrom == "identity-subject" {
-			s.L("\t\te.%s = %s", f.Name, entityValue(f, "id.Subject"))
+			s.L("\t\te.%s = %s", f.Name, identityValue(f, "id.Subject"))
 			continue
 		}
 		s.L("\t\tif raw, ok := id.Claims[%s].(string); ok {", quote(f.Claim))
-		s.L("\t\t\te.%s = %s", f.Name, entityValue(f, "raw"))
+		s.L("\t\t\te.%s = %s", f.Name, identityValue(f, "raw"))
 		s.L("\t\t}")
 	}
 	s.L("\t}")
@@ -272,11 +289,34 @@ func emitIdentityFeed(s *src, m *ir.Model) {
 	}
 	s.Blank()
 	s.L("\t// Identity-derived state the rules read. It is never persisted.")
-	s.L("\t//")
-	s.L("\t// The framework does not opine on which custom claims a token carries, so")
-	s.L("\t// the claim name comes from the spec rather than from a convention.")
+	if m.HasDeclaredRuntimeFields() {
+		s.L("\t//")
+		s.L("\t// The framework does not opine on which custom claims a token carries, so")
+		s.L("\t// the claim name comes from the spec rather than from a convention.")
+	}
 	s.L("\tif id := ctx.Identity(); id != nil {")
 	for _, f := range m.Runtime {
+		// The fields the ROW SCOPE synthesises do not come from a claim looked
+		// up by name: the tenant is whichever claim the framework is configured
+		// to read, the subject is the subject, and the bypass is a permission
+		// question. Reading them through Claims[...] would hardcode a claim name
+		// the deployment is free to change.
+		switch f.IdentitySource {
+		case "tenant":
+			s.L("\t\te.%s = id.TenantID()", f.Name)
+			continue
+		case "subject":
+			s.L("\t\te.%s = id.Subject", f.Name)
+			continue
+		case "permission":
+			s.L("\t\te.%s = id.HasPermission(%s)", f.Name, quote(f.Claim))
+			continue
+		case "present":
+			// Assigned inside the nil check, which is the whole point: reaching
+			// this line IS the fact being recorded.
+			s.L("\t\te.%s = true", f.Name)
+			continue
+		}
 		if f.BaseGoType == "bool" {
 			// A JSON token carries a yes/no as a real boolean, but plenty of
 			// issuers stringify it. Both are accepted and anything else leaves
@@ -542,43 +582,58 @@ func emitFieldRestrictions(s *src, m *ir.Model, target string) {
 // whether the caller may use the endpoint at all, this decides WHICH ROWS the
 // answer contains. Leaving it out means anyone who can read, reads everything.
 func emitRowScoping(s *src, m *ir.Model, target string) {
-	switch m.Authz.DataAccess {
-	case "owner-only":
-		if m.Authz.OwnerColumn == "" {
-			// Validation refuses a runtime owner field, so an empty column here
-			// is generator inconsistency, and returning quietly would ship a
-			// service that says owner-only and serves everything. Refuse loudly.
-			panic("owner-only with no owner column: validation should have refused this spec")
-		}
-		s.L("\t// Callers see only their own rows. Filter is a map keyed by the Go")
-		s.L("\t// field path, and the scope is FORCED: a value the caller sent for this")
-		s.L("\t// field is overwritten, never merged.")
-		s.L("\tif %s.Filter == nil {", target)
-		s.L("\t\t%s.Filter = map[string]any{}", target)
-		s.L("\t}")
-		s.L("\tif id := ctx.Identity(); id != nil {")
-		s.L("\t\t%s.Filter[%s] = id.Subject", target, quote(m.Authz.OwnerField.Name))
-		s.L("\t} else {")
-		s.L("\t\t// No identity: no rows. Failing open here would expose every row.")
-		s.L("\t\t%s.Filter[%s] = \"\"", target, quote(m.Authz.OwnerField.Name))
-		s.L("\t}")
-	case "tenant":
-		if m.Authz.TenantColumn == "" {
-			// Same contract as owner-only above: this shape is refused at
-			// validation, and shipping a tenant service with no tenant filter
-			// is the one thing this function exists to prevent.
-			panic("tenant with no tenant column: validation should have refused this spec")
-		}
-		s.L("\t// Callers see only their tenant's rows. The scope is FORCED: a value")
-		s.L("\t// the caller sent for this field is overwritten, never merged.")
-		s.L("\tif %s.Filter == nil {", target)
-		s.L("\t\t%s.Filter = map[string]any{}", target)
-		s.L("\t}")
-		s.L("\tif id := ctx.Identity(); id != nil {")
-		s.L("\t\t%s.Filter[%s] = id.TenantID()", target, quote(m.Authz.TenantField.Name))
-		s.L("\t} else {")
-		s.L("\t\t// No tenant claim: no rows, rather than every tenant's.")
-		s.L("\t\t%s.Filter[%s] = \"\"", target, quote(m.Authz.TenantField.Name))
-		s.L("\t}")
+	if !m.Authz.Scoped() {
+		return
 	}
+	field := m.Authz.ScopeSubject()
+	if field == nil {
+		// Validation refuses a runtime or missing scope field, so an empty one
+		// here is generator inconsistency — and returning quietly would ship a
+		// service that says owner-only and serves everything. Refuse loudly.
+		panic(m.Authz.DataAccess + " with no scope field: validation should have refused this spec")
+	}
+	whose, from := "their tenant's", "id.TenantID()"
+	if m.Authz.DataAccess == "owner-only" {
+		whose, from = "their own", "id.Subject"
+	}
+
+	s.L("\t// Callers see only %s rows. Filter is a map keyed by the Go field", whose)
+	s.L("\t// path, and the scope is FORCED: a value the caller sent for this field is")
+	s.L("\t// overwritten, never merged.")
+	s.L("\tif %s.Filter == nil {", target)
+	s.L("\t\t%s.Filter = map[string]any{}", target)
+	s.L("\t}")
+	s.L("\tif id := ctx.Identity(); id != nil {")
+	if m.Authz.Bypass != "" {
+		// Without this, a platform operator holding every permission there is
+		// was still filtered to their own tenant, so supporting a customer
+		// through the API was impossible — and they could not even ASK for the
+		// exception, because HasPermission panics on the wildcard a superadmin
+		// claim carries.
+		s.L("\t\t// %s crosses the scope: the operator supporting a customer", m.Authz.Bypass)
+		s.L("\t\t// reads across tenants. Asked as a CONCRETE permission — the framework")
+		s.L("\t\t// panics on a wildcard here, since the claim wildcards and the question")
+		s.L("\t\t// does not.")
+		s.L("\t\tif !id.HasPermission(%s) {", quote(m.Authz.Bypass))
+		s.L("\t\t\t%s.Filter[%s] = %s", target, quote(field.Name), from)
+		s.L("\t\t}")
+	} else {
+		s.L("\t\t%s.Filter[%s] = %s", target, quote(field.Name), from)
+	}
+	s.L("\t} else {")
+	if m.Authz.NoIdentity == "stand-down" {
+		// authz.noIdentity: stand-down. Only a dev bench reaches this branch —
+		// the middleware is bypassable solely with auth.mode disabled, which the
+		// framework refuses outside APP_PROFILE=dev — and the default is the
+		// other way round precisely because this one serves everything.
+		s.L("\t\t// No identity at all: the scope stands down, as authz.noIdentity says.")
+		s.L("\t\t// Reachable only on a dev bench — auth.mode disabled is refused outside")
+		s.L("\t\t// APP_PROFILE=dev — and it serves EVERY row, which is the point: a")
+		s.L("\t\t// tenant-scoped entity is otherwise unusable on the machine it is")
+		s.L("\t\t// first tried on, answering every listing empty.")
+	} else {
+		s.L("\t\t// No identity: no rows. Failing open here would expose every row.")
+		s.L("\t\t%s.Filter[%s] = \"\"", target, quote(field.Name))
+	}
+	s.L("\t}")
 }

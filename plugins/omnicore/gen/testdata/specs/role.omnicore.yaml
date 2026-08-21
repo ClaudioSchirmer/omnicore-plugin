@@ -1,0 +1,249 @@
+# A TENANT-SCOPED entity with a per-tenant natural key and one collection whose
+# entries are catalog ids.
+#
+# It is the gate's case for the row-scope pair and for the two uniquenesses that
+# used to be impossible to state, each of which cost a real project hand-written
+# code before it existed:
+#
+#   authz.dataAccess: tenant   the read filter AND the write guard. Only the read
+#                              half used to be generated, so a caller with the
+#                              ordinary permissions could create a row inside
+#                              another tenant, edit one and archive one — and
+#                              could not read back what they had just archived.
+#   authz.bypass               a concrete permission that crosses the scope.
+#   authz.noIdentity           what an absent identity means. Left at its default
+#                              (stand-down) so the bench lane proves the default.
+#   unique.within              the handle is unique PER TENANT, and the precheck
+#                              fact is held to exactly those columns.
+#   children[].fields[].unique the entry's index, per owner, with its 409 binding.
+#   filters: [Permissions.…]   a fact asked once per entry of the collection.
+specVersion: 1
+entity: Role
+plural: Roles
+language: eng
+
+storage:
+  kind: flat
+  table: roles
+  description: Roles a tenant grants to its members.
+  managed:
+    createdAt: created_at
+    updatedAt: updated_at
+    archivedAt: deleted_at
+    revision: revision
+
+fields:
+  # type: id, not string. The claim arrives as text either way, and the column
+  # stays the engine's own id type — which is what lets it carry a foreign key to
+  # the tenants table. Refusing an id here used to force the opposite trade,
+  # permanently: a VARCHAR cannot reference a UUID column on postgres, and a
+  # column's type is a migration over live data.
+  - name: TenantID
+    type: id
+    column: tenant_id
+    livesOn: root
+    example: 9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3
+    description: The tenant this role belongs to.
+    labelKey: RoleTenantIDField
+
+  - name: Key
+    type: string
+    column: role_key
+    length: 60
+    livesOn: root
+    example: administrator
+    description: The role's handle, unique within its tenant.
+    labelKey: RoleKeyField
+    unique:
+      enforce: service-precheck+constraint
+      notification: RoleKeyAlreadyExistsNotification
+      scope: active-only
+      # WITHIN WHAT. Two tenants may both call a role `administrator`, and both
+      # are right. The index becomes (tenant_id, role_key) and the precheck fact
+      # below must filter by exactly those — check refuses either half
+      # disagreeing with the other, in both directions.
+      within: [TenantID]
+
+  - name: Name
+    type: string
+    column: name
+    length: 120
+    livesOn: root
+    example: Administrator
+    description: The role's display name.
+    labelKey: RoleNameField
+
+modes: [display, insert, update, archive]
+
+update:
+  shape: both
+
+delete:
+  root: soft
+
+rules:
+  list:
+    - id: name-required
+      kind: required
+      scope: [insertOrUpdate]
+      fields: [Name]
+      notification: RequiredFieldNotification
+
+notifications:
+  - name: RoleKeyAlreadyExistsNotification
+    semantic: conflict
+    text:
+      ptbr: Ja existe um papel com este identificador neste tenant.
+      eng: A role with this handle already exists in this tenant.
+      esp: Ya existe un rol con este identificador en este tenant.
+      fra: Un role portant cet identifiant existe deja dans ce tenant.
+      deu: Eine Rolle mit diesem Bezeichner existiert in diesem Mandanten bereits.
+      ita: Esiste gia un ruolo con questo identificatore in questo tenant.
+      nld: Er bestaat al een rol met deze naam in deze tenant.
+
+  - name: PermissionAlreadyGrantedNotification
+    semantic: conflict
+    text:
+      ptbr: Este papel ja concede esta permissao.
+      eng: This role already grants this permission.
+      esp: Este rol ya concede este permiso.
+      fra: Ce role accorde deja cette permission.
+      deu: Diese Rolle gewaehrt diese Berechtigung bereits.
+      ita: Questo ruolo concede gia questo permesso.
+      nld: Deze rol verleent deze permissie al.
+
+  - name: PermissionGrantedTwiceNotification
+    semantic: conflict
+    text:
+      ptbr: A mesma permissao foi enviada duas vezes.
+      eng: The same permission was sent twice.
+      esp: El mismo permiso se envio dos veces.
+      fra: La meme permission a ete envoyee deux fois.
+      deu: Dieselbe Berechtigung wurde zweimal gesendet.
+      ita: Lo stesso permesso e stato inviato due volte.
+      nld: Dezelfde permissie is tweemaal verstuurd.
+
+children:
+  - name: RolePermission
+    plural: Permissions
+    table: role_permissions
+    parentColumn: role_id
+    description: The permissions this role grants.
+    ownedBy: root
+    editStrategy: per-child
+    businessIdentity: [PermissionID]
+    duplicateNotification: PermissionGrantedTwiceNotification
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - name: PermissionID
+        type: id
+        column: permission_id
+        example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31
+        description: The catalog permission this entry grants.
+        labelKey: RolePermissionPermissionIDField
+        # The backstop businessIdentity cannot be: that check sees ONE write, so
+        # two concurrent requests granting the same permission both pass it and
+        # both rows land. The index is per owner — the same permission under a
+        # different role is a different, legitimate row — and the repository
+        # binds its violation to the notification below, so a race answers 409
+        # rather than 500.
+        unique:
+          enforce: constraint-only
+          notification: PermissionAlreadyGrantedNotification
+          scope: active-only
+      # A field OUTSIDE the business identity, so the per-entry PUT means
+      # something. With every writable field inside it, the change verb could
+      # only replace one entry with another while keeping the first one's row id
+      # — check says so rather than leaving it to be discovered in the routes.
+      - name: Note
+        type: string
+        column: note
+        length: 200
+        nullable: true
+        example: granted for the migration window
+        description: Why this permission was granted.
+        labelKey: RolePermissionNoteField
+
+service:
+  required: true
+  facts:
+    - name: RoleKeyTaken
+      kind: exists
+      # Exactly the index's columns: unique.within, then the field.
+      filters: [TenantID, Key]
+      excludeSelf: true
+      activeOnly: true
+      description: >-
+        Whether another ACTIVE role in the SAME tenant already uses this handle.
+        Excludes the row being updated, so an update never collides with itself.
+
+    # Named for the PROBLEM, not for the healthy state. The generated suite stubs
+    # every probe with "nothing found", so TenantIsUnavailable reads false and the
+    # happy path passes; TenantIsActive would read false too and mean the tenant
+    # is gone, failing a correct spec's own test.
+    - name: TenantIsUnavailable
+      kind: manual
+      returns: bool
+      filters: [TenantID]
+      description: >-
+        Whether the tenant is missing or archived. NOT answerable from this
+        entity's own table: it is a question about the tenants table.
+
+    # PER ENTRY of the collection: the filter names the collection, so the method
+    # takes the entry's field and is asked once per entry. Manual, because a
+    # computed fact is a query over this entity's own table and permission_id
+    # lives on another one.
+    - name: PermissionIsUnavailable
+      kind: manual
+      returns: bool
+      filters: [Permissions.PermissionID]
+      description: >-
+        Whether the catalog id this entry grants names no permission, or names
+        an archived one. A question about the permissions table.
+
+read:
+  backing: relational
+  view:
+    name: roles
+    version: 1
+    maxLimit: 200
+  byId: true
+  byParams:
+    filters:
+      - field: Key
+        ops: [eq, in]
+      - field: Name
+        ops: [eq, contains]
+    sort: [ID, Key, Name]
+    controls:
+      pagination: true
+      orderBy: true
+      fields: true
+      onlyTotal: true
+      includeArchived: true
+
+surfaces:
+  rest: true
+
+authz:
+  resource: role
+  dataAccess: tenant
+  tenantField: TenantID
+  # A CONCRETE permission. A wildcard cannot be asked about: the framework's
+  # HasPermission panics on one, because the claim wildcards and the question
+  # does not. Without this key a `*:*` holder is filtered to their own tenant
+  # like anybody else, so supporting a customer through the API is impossible.
+  bypass: platform:cross-tenant
+  # authz.noIdentity is DELIBERATELY not declared: the default is stand-down,
+  # and the boot lane below proves what that buys — a tenant-scoped entity that
+  # is usable on a bench with auth.mode disabled instead of answering every
+  # listing empty. The safety of it is not visible from here: the guard asks
+  # whether an identity was PRESENT, so a real token carrying no tenant claim is
+  # still refused, which the JWT-backed proof beside this gate exercises.
+  permissions:
+    insert: role:insert
+    update: role:update
+    patch: role:update
+    archive: role:archive
+    read: role:read

@@ -66,7 +66,7 @@ func TestExamplesTogetherCoverTheLanguage(t *testing.T) {
 		if _, ok := notShownOnPurpose[k.Path]; ok {
 			continue
 		}
-		if _, refused := spec.RefusedKeys()[k.Path]; refused {
+		if _, refused := spec.RefusalFor(k.Path); refused {
 			continue // an example must not teach a key that `check` blocks
 		}
 		if !shown(k.Path) {
@@ -92,6 +92,11 @@ var notShownOnPurpose = map[string]string{
 		"anyone-with-permission; a third example for one key is not worth its " +
 		"maintenance — `explain keys` lists it and `explain vocabulary` says what " +
 		"the choice decides",
+	"authz.bypass": "modifies a SCOPED dataAccess, which neither example uses — same " +
+		"reason as authz.tenantField, and the same two places document it",
+	"authz.noIdentity": "modifies a SCOPED dataAccess, which neither example uses — same " +
+		"reason as authz.tenantField; `explain vocabulary` carries both answers and " +
+		"what each one decides",
 }
 
 // TestExamplesAreGoldenMatrixCases keeps the printed example and the gated one

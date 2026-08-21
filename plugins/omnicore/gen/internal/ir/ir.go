@@ -115,6 +115,14 @@ type Field struct {
 	// push it down.
 	Hidden bool
 	Claim  string
+	// IdentitySource says WHICH part of the identity fills a runtime field, for
+	// the ones this resolver synthesises rather than the author declaring:
+	// "tenant" (the framework's configured tenant claim, via Identity.TenantID),
+	// "subject", or "permission" (whether the caller holds Claim). Empty for an
+	// author-declared runtime field, which is read from Claims by name — the
+	// framework does not opine on custom claim names, so there is no convention
+	// to fall back on there.
+	IdentitySource string
 	// AssignedFrom names where the server reads this field's value when the
 	// client is not allowed to send it. Empty for an ordinary field.
 	AssignedFrom string
@@ -134,6 +142,10 @@ type Unique struct {
 	Enforce      string
 	Notification string
 	Scope        string
+	// Within names the fields the uniqueness is scoped BY — "unique per tenant".
+	// It sizes the index and is held to the pre-check fact's filters, so the
+	// domain and the database cannot disagree about what is unique.
+	Within []string
 }
 
 // Clause is one BuildRules block: a verb gate plus the checks inside it.
@@ -301,11 +313,39 @@ type Filter struct {
 }
 
 type Authz struct {
-	DataAccess   string
-	OwnerField   *Field
-	TenantField  *Field
-	OwnerColumn  string
-	TenantColumn string
+	DataAccess  string
+	OwnerField  *Field
+	TenantField *Field
+	// Bypass is the permission that crosses the row scope, empty when none is
+	// granted. NoIdentity is what an absent identity means — always resolved,
+	// never empty, so the emitters read a decision rather than a default.
+	Bypass     string
+	NoIdentity string
+	// ScopeField and BypassField are RUNTIME fields this resolver synthesises
+	// for a scoped dataAccess: the caller's own scope value, and whether they
+	// hold the bypass. They are what carries the identity into BuildRules, which
+	// is the only place a write can be refused for being outside its scope —
+	// the read filter lives in the query and never sees a write at all.
+	ScopeField  *Field
+	BypassField *Field
+	// PresenceField answers "was there an identity at all", which the scope
+	// value cannot: an empty scope is either no identity or a token without the
+	// claim, and only the first is confined to a dev bench. Synthesised only
+	// under stand-down, which is the one policy that acts on the difference.
+	PresenceField *Field
+}
+
+// Scoped reports whether the rows are narrowed by who is asking.
+func (a Authz) Scoped() bool {
+	return a.DataAccess == "owner-only" || a.DataAccess == "tenant"
+}
+
+// ScopeSubject is the persisted field a write is checked against.
+func (a Authz) ScopeSubject() *Field {
+	if a.DataAccess == "tenant" {
+		return a.TenantField
+	}
+	return a.OwnerField
 }
 
 // Constraint is a database constraint the migration creates AND the repository
@@ -320,6 +360,19 @@ type Constraint struct {
 	// holding the value: the difference between a document number that can never
 	// be reused and one that comes free when the row is archived.
 	Scope string
+	// Within names the fields the uniqueness is scoped BY, in the spec's own
+	// words. Columns already carries them — this is what the REPORT says, and a
+	// column list is not what an author declared.
+	Within []string
+	// Archived is the column an active-only constraint skips by. It is carried
+	// per constraint rather than read off the model because a COLLECTION
+	// archives by its own column: an entry freed for reuse is a soft-removed
+	// entry, which has nothing to do with whether the root is archived.
+	Archived string
+	// Collection names the collection this constraint belongs to, empty for the
+	// root's. It is what lets the notification be reported under the collection
+	// the caller sent, and the report say which table the index is on.
+	Collection string
 }
 
 // Resolve builds the model. The spec must already be valid and covered.
@@ -404,13 +457,109 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	m.Surfaces = resolveSurfaces(s)
 	if f := lookupField(m, s.Authz.OwnerField); f != nil {
 		m.Authz.OwnerField = f
-		m.Authz.OwnerColumn = f.Column
 	}
 	if f := lookupField(m, s.Authz.TenantField); f != nil {
 		m.Authz.TenantField = f
-		m.Authz.TenantColumn = f.Column
 	}
+	resolveRowScope(s, m)
 	return m, nil
+}
+
+// resolveRowScope completes a scoped dataAccess: the policy at its edges, and
+// the runtime fields that carry the caller into the WRITE path.
+//
+// The write path is the half that was missing. A read is narrowed inside the
+// query, where the identity is already in hand; a write is checked in
+// BuildRules, where the entity is all there is — so the caller's own scope has
+// to travel onto the entity as a runtime field, exactly as a hand-written
+// ownerCheck already did. Synthesising it is what makes the guard follow from
+// `dataAccess` instead of from remembering to declare three more things.
+// standsDown reports whether anything in this model tolerates a request that
+// carried no identity — which is exactly what needs to tell "no identity" apart
+// from "an identity without the claim".
+func standsDown(m *Model) bool {
+	if m.Authz.Scoped() && m.Authz.NoIdentity == "stand-down" {
+		return true
+	}
+	for _, c := range m.Clauses {
+		for _, r := range c.Rules {
+			if r.Kind == "ownerCheck" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resolveRowScope(s *spec.Spec, m *Model) {
+	m.Authz.Bypass = s.Authz.Bypass
+	m.Authz.NoIdentity = s.Authz.NoIdentity
+	if m.Authz.NoIdentity == "" {
+		// stand-down, because that is what every OTHER identity-derived rule
+		// this generator writes already does: an ownerCheck tolerates an absent
+		// principal, and it has to — with auth.mode disabled there is no
+		// identity on any request, so a rule that fired anyway would reject
+		// every call on the bench where the entity is first run. A row scope
+		// that alone failed closed would be the odd one out, and the surprise
+		// would land on the one profile nobody is watching for surprises.
+		//
+		// It is safe because the guard asks whether an identity was PRESENT,
+		// never whether the scope came out empty — see PresenceField. Absent
+		// identity is confined to auth.mode: disabled, which the framework
+		// refuses outside APP_PROFILE=dev; a token that merely lacks the claim
+		// is an ordinary production request and is still refused.
+		//
+		// `refuse` stays available for a service that wants the scope enforced
+		// even with authentication off.
+		m.Authz.NoIdentity = "stand-down"
+	}
+	// Whether there was an identity AT ALL — a fact no VALUE can carry.
+	//
+	// An empty scope means either "no identity" (only reachable with auth.mode
+	// disabled, which the framework refuses outside APP_PROFILE=dev) or "a real,
+	// signed token that carries no such claim", and the second is an ordinary
+	// production request. The read side tells them apart for free, because it
+	// branches on Identity() != nil and has an else; the domain sees only the
+	// entity, where both arrive as "". Every rule that stands down for an absent
+	// principal therefore has to ask THIS, or it stands down for the wrong one
+	// too — which is a token without the claim walking through the check.
+	//
+	// Synthesised only where something stands down, which is where the
+	// distinction is acted on: a row scope under stand-down, and every
+	// ownerCheck (which tolerates an absent principal by design, and must
+	// therefore tolerate the RIGHT one). A field nothing reads would sit on the
+	// aggregate as noise — import pruning cannot remove a struct field.
+	if standsDown(m) {
+		m.Authz.PresenceField = &Field{
+			Name: "RequestingIdentityPresent", GoType: "bool", BaseGoType: "bool",
+			SpecType: "bool", Runtime: true, IdentitySource: "present",
+			Description: "Whether the request carried an identity at all",
+		}
+		m.Runtime = append(m.Runtime, *m.Authz.PresenceField)
+	}
+	if !m.Authz.Scoped() || m.Authz.ScopeSubject() == nil {
+		return
+	}
+	source, what := "tenant", "tenant"
+	if m.Authz.DataAccess == "owner-only" {
+		source, what = "subject", "owner"
+	}
+	m.Authz.ScopeField = &Field{
+		Name: "Requesting" + naming.Pascal(source), GoType: "string", BaseGoType: "string",
+		SpecType: "string", Runtime: true, IdentitySource: source,
+		Description: "The caller's own " + what + ", from the request identity",
+	}
+	m.Runtime = append(m.Runtime, *m.Authz.ScopeField)
+	if m.Authz.Bypass == "" {
+		return
+	}
+	m.Authz.BypassField = &Field{
+		Name: "RequestingMayCrossScope", GoType: "bool", BaseGoType: "bool",
+		SpecType: "bool", Runtime: true, IdentitySource: "permission",
+		Claim:       m.Authz.Bypass,
+		Description: "Whether the caller holds " + m.Authz.Bypass + ", which crosses the row scope",
+	}
+	m.Runtime = append(m.Runtime, *m.Authz.BypassField)
 }
 
 func resolveNames(entity, plural string) Names {
@@ -485,7 +634,10 @@ func resolveField(entity string, f spec.Field) Field {
 		if scope == "" {
 			scope = "all"
 		}
-		out.Unique = &Unique{Enforce: f.Unique.Enforce, Notification: f.Unique.Notification, Scope: scope}
+		out.Unique = &Unique{
+			Enforce: f.Unique.Enforce, Notification: f.Unique.Notification,
+			Scope: scope, Within: f.Unique.Within,
+		}
 	}
 	return out
 }
@@ -869,11 +1021,77 @@ func resolveConstraints(s *spec.Spec, m *Model) []Constraint {
 			cols = compositeRunColumns(m.Fields, i)
 			field = naming.Camel(f.Composite.Owner)
 		}
+		// `within` scopes the uniqueness — "unique per tenant" — so its columns
+		// lead the index. They lead rather than trail because that is also the
+		// prefix every scoped lookup of this table uses, and an index the
+		// scope's own queries can ride is free.
+		//
+		// Validation holds these columns and the pre-check fact's filters to the
+		// same list, in both directions: the two used to be able to disagree,
+		// and what that shipped was a global index behind a per-tenant check.
+		scope := make([]string, 0, len(f.Unique.Within))
+		for _, name := range f.Unique.Within {
+			if within := lookupField(m, name); within != nil {
+				scope = append(scope, within.Column)
+			}
+		}
 		out = append(out, Constraint{
-			Kind: "unique", Table: m.Table, Columns: cols,
+			Kind: "unique", Table: m.Table, Columns: append(scope, cols...),
 			Notification: f.Unique.Notification + "{}", Field: field,
-			Scope: f.Unique.Scope,
+			Scope: f.Unique.Scope, Within: f.Unique.Within,
+			Archived: m.Managed.ArchivedAt,
 		})
+	}
+	return append(out, childConstraints(m)...)
+}
+
+// childConstraints is the uniqueness of a COLLECTION ENTRY.
+//
+// The index always leads with the parent column, and that is not a default the
+// author can change: an entry has no identity outside its owner. "This role
+// cannot grant the same permission twice" is a statement about one role, and the
+// same permission under a different role is a different, entirely legitimate
+// row. It is also what makes this the backstop for businessIdentity, which is
+// defined per owner too — and businessIdentity is an in-process check over one
+// write, so it cannot see the concurrent write that this index refuses.
+func childConstraints(m *Model) []Constraint {
+	var out []Constraint
+	for _, c := range m.Children {
+		if c.Mounted {
+			// The collection belongs to the spec that DECLARES it; this run only
+			// mounts a surface over it. Emitting its index here would create the
+			// same constraint twice, from two migrations.
+			continue
+		}
+		for _, f := range c.Fields {
+			if f.Unique == nil {
+				continue
+			}
+			cols := []string{c.ParentColumn}
+			for _, name := range f.Unique.Within {
+				for _, other := range c.Fields {
+					if other.Name == name {
+						cols = append(cols, other.Column)
+					}
+				}
+			}
+			out = append(out, Constraint{
+				Kind: "unique", Table: c.Table, Columns: append(cols, f.Column),
+				Notification: f.Unique.Notification + "{}",
+				// Reported under the COLLECTION, in its WIRE spelling: this
+				// value goes straight into the error envelope's field path, and
+				// the caller posted a list under that name. The root's binding
+				// carries JSONName for the same reason — the Go field name is
+				// what the DOMAIN's own AddNotification takes, one layer down.
+				Field:    c.Segment,
+				Scope:    f.Unique.Scope,
+				Within:   f.Unique.Within,
+				Archived: c.ArchivedAt,
+				// Not the root's archive column: an entry is freed for reuse by
+				// being soft-removed itself.
+				Collection: c.Plural,
+			})
+		}
 	}
 	return out
 }
@@ -891,6 +1109,34 @@ func compositeRunColumns(fields []Field, start int) []string {
 		out = append(out, f.Column)
 	}
 	return out
+}
+
+// lookupFactFilter resolves the name a fact narrows by, in the two forms the
+// language admits: a root field, and `<Collection>.<Field>` for a question about
+// ONE ENTRY of a collection.
+//
+// The second return is the collection, empty for the first form. It exists so
+// the port's documentation can say which entry the answer is about; nothing
+// downstream queries by it, because a per-entry filter is only ever on a manual
+// fact, whose body is the author's.
+func lookupFactFilter(s *spec.Spec, m *Model, name string) (*Field, string) {
+	if coll, _, dotted := spec.ChildFactField(s, name); dotted {
+		if coll == nil {
+			return nil, ""
+		}
+		for i := range m.Children {
+			if m.Children[i].Plural != coll.Plural {
+				continue
+			}
+			for j := range m.Children[i].Fields {
+				if m.Children[i].Fields[j].Name == strings.TrimPrefix(name, coll.Plural+".") {
+					return &m.Children[i].Fields[j], coll.Plural
+				}
+			}
+		}
+		return nil, ""
+	}
+	return lookupField(m, name), ""
 }
 
 func lookupField(m *Model, name string) *Field {
@@ -1227,6 +1473,11 @@ type FactParam struct {
 	GoType string
 	Field  string
 	Role   string // "" | exclude-self
+	// PerEntry names the COLLECTION this parameter's field belongs to, empty
+	// for the root's own fields. It is what lets the port's doc comment say
+	// which entry the question is about — the whole point of a per-entry fact
+	// is that it is asked once per entry, not once per write.
+	PerEntry string
 }
 
 func resolveService(s *spec.Spec, m *Model) *ServiceModel {
@@ -1264,11 +1515,20 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 			fact.ReturnsFound = false
 		}
 		for _, filter := range f.Filters {
-			if fld := lookupField(m, filter); fld != nil {
-				fact.Params = append(fact.Params, FactParam{
-					Name: naming.Camel(fld.Name), GoType: fld.BaseGoType, Field: fld.Name,
-				})
+			fld, collection := lookupFactFilter(s, m, filter)
+			if fld == nil {
+				// Validation resolves every filter and refuses the ones that
+				// resolve to nothing, so reaching here is generator
+				// inconsistency. It used to be a silent `continue`, and what
+				// that shipped was a port method with no parameter — a question
+				// the rule could not ask, discovered three steps downstream.
+				panic("service fact " + f.Name + ": the filter " + filter +
+					" resolves to no field — validation should have refused this spec")
 			}
+			fact.Params = append(fact.Params, FactParam{
+				Name: naming.Camel(fld.Name), GoType: fld.BaseGoType, Field: fld.Name,
+				PerEntry: collection,
+			})
 		}
 		if f.ExcludeSelf {
 			// The row being updated must not count against itself, or every
@@ -1677,6 +1937,19 @@ func resolveClausesFor(rs spec.Rules, scope []Field) []Clause {
 		}
 		return nil
 	})
+}
+
+// HasDeclaredRuntimeFields reports whether any runtime field came from the
+// SPEC, rather than being synthesised by the row scope. It answers one question
+// for the emitters: whether the identity feed reads a claim the author named,
+// which is the only case where "the claim name comes from the spec" is true.
+func (m *Model) HasDeclaredRuntimeFields() bool {
+	for _, f := range m.Runtime {
+		if f.IdentitySource == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // HasPerChild reports whether any collection is edited one entry at a time.

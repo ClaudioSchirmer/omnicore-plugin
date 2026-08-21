@@ -33,8 +33,12 @@ const (
 	CapExports         Capability = "CSV/XLSX exports"
 	CapFieldRestrict   Capability = "field-level read restriction"
 	CapIdentityView    Capability = "shared identity view"
-	CapOwnerAccess     Capability = "owner-only data access"
-	CapTenantAccess    Capability = "tenant data access"
+	CapOwnerAccess     Capability = "owner-only data access (read filter AND write guard)"
+	CapTenantAccess    Capability = "tenant data access (read filter AND write guard)"
+	CapScopeBypass     Capability = "a permission that crosses the row scope (operator support)"
+	CapPerEntryFact    Capability = "per-entry facts (a service question about ONE entry of a collection)"
+	CapScopedUnique    Capability = "uniqueness scoped by other fields (unique per tenant, per workspace)"
+	CapChildUnique     Capability = "uniqueness of a collection entry (index per owner + its 409 binding)"
 	CapGeneratedTests  Capability = "generated unit tests"
 	CapPerChild        Capability = "per-entry child operations"
 	CapAssignedField   Capability = "server-assigned fields (from the caller's identity)"
@@ -69,6 +73,10 @@ var implemented = map[Capability]bool{
 	CapFieldRestrict:   true,
 	CapOwnerAccess:     true,
 	CapTenantAccess:    true,
+	CapScopeBypass:     true,
+	CapPerEntryFact:    true,
+	CapScopedUnique:    true,
+	CapChildUnique:     true,
 	CapGeneratedTests:  true,
 	CapPerChild:        true,
 	CapAssignedField:   true,
@@ -95,7 +103,8 @@ func AllCapabilities() []Capability {
 		CapFlat, CapSharedBase, CapValueObjects, CapChildren, CapSiblings,
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
-		CapOwnerAccess, CapTenantAccess, CapGeneratedTests, CapPerChild,
+		CapOwnerAccess, CapTenantAccess, CapScopeBypass, CapScopedUnique,
+		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild,
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead,
@@ -213,6 +222,34 @@ func CheckCoverage(s *Spec) *Problems {
 		uses(CapOwnerAccess, "authz.dataAccess", "owner-only data access")
 	case "tenant":
 		uses(CapTenantAccess, "authz.dataAccess", "tenant data access")
+	}
+	if s.Authz.Bypass != "" {
+		uses(CapScopeBypass, "authz.bypass", "a permission that crosses the row scope")
+	}
+
+	for i, f := range s.Fields {
+		if f.Unique != nil && len(f.Unique.Within) > 0 {
+			uses(CapScopedUnique, fmt.Sprintf("fields[%d].unique.within", i),
+				"uniqueness scoped by another field")
+		}
+	}
+	for i, c := range s.Children {
+		for j, f := range c.Fields {
+			if f.Unique != nil {
+				uses(CapChildUnique, fmt.Sprintf("children[%d].fields[%d].unique", i, j),
+					"uniqueness of a collection entry")
+			}
+		}
+	}
+	if s.Service != nil {
+		for i, fa := range s.Service.Facts {
+			for _, fl := range fa.Filters {
+				if _, _, dotted := ChildFactField(s, fl); dotted {
+					uses(CapPerEntryFact, fmt.Sprintf("service.facts[%d].filters", i),
+						"a fact asked per entry of a collection")
+				}
+			}
+		}
 	}
 
 	ps.Sort()

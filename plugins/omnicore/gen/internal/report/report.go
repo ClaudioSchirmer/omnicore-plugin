@@ -47,13 +47,19 @@ type Input struct {
 	// for one question: whether a `kind: manual` value object is still owed or
 	// was written on an earlier run — the difference between "the package does
 	// not compile" and "check that it still matches the spec".
-	ExistingVOs     []string
-	MigrationsKept  []string
-	TargetTables    []emit.TargetTable
-	CompatLevel     string
-	CompatMessage   string
-	FrameworkPinned string
-	Warnings        []string
+	ExistingVOs []string
+	// UnimplementedFacts names the manual facts the EXISTING service hook does
+	// not answer — the shape a spec that gained a fact after its first
+	// generation lands in. The hook is written once, so nothing else in this
+	// run mentions the gap, and the package does not compile until it is
+	// closed.
+	UnimplementedFacts []string
+	MigrationsKept     []string
+	TargetTables       []emit.TargetTable
+	CompatLevel        string
+	CompatMessage      string
+	FrameworkPinned    string
+	Warnings           []string
 }
 
 // Render produces the markdown.
@@ -274,6 +280,10 @@ func renderTodo(b *strings.Builder, in Input) {
 			"arrives the moment the rule asks, as a 500 with the write rolled back. The " +
 			"outcome being avoided is the other one: a query against the wrong source " +
 			"would compile, return, and mean nothing.\n\n")
+		owed := map[string]bool{}
+		for _, name := range in.UnimplementedFacts {
+			owed[name] = true
+		}
 		for _, f := range manual {
 			fmt.Fprintf(b, "**`%s(%s) %s`**\n\n", f.Name, factSignature(f), f.ReturnType)
 			fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(f.Description, "\n", " "))
@@ -281,6 +291,26 @@ func renderTodo(b *strings.Builder, in Input) {
 		b.WriteString("The method returns a plain value and no error, so decide what an " +
 			"unavailable source means. Failing loudly is the safe default — returning a " +
 			"plausible answer skips the rule this exists to enforce.\n\n")
+		// A fact added AFTER the hook was first written is the one case where
+		// the section above is not enough: the file already exists, so this run
+		// wrote no stub for it, and the port now declares a method with nothing
+		// behind it. Nothing else in the run says so — the file is listed under
+		// "left untouched (yours, by design)", which is true and reads like
+		// reassurance. The package does not compile until these are added.
+		if len(in.UnimplementedFacts) > 0 {
+			b.WriteString("⚠ **The file already existed, so no stub was written for the " +
+				"fact(s) below.** They are declared on the port and implemented nowhere, " +
+				"which is a compile error, not a panic-when-asked:\n\n")
+			for _, f := range manual {
+				if !owed[f.Name] {
+					continue
+				}
+				fmt.Fprintf(b, "- `func (s *%s) %s(%s) %s`\n",
+					m.Service.Impl, f.Name, factSignature(f), f.ReturnType)
+			}
+			b.WriteString("\nAdd them to that file — it is yours, and the generator will " +
+				"not write into it again.\n\n")
+		}
 	}
 
 	if len(m.Read.Computed) > 0 {
@@ -748,9 +778,20 @@ func renderCheck(b *strings.Builder, in Input) {
 		if scope == "active-only" {
 			reuse = "an archived row frees it, so the value can be taken again"
 		}
-		fmt.Fprintf(b, "| Unique | `%s` — scope `%s` (%s) | %s; a duplicate is refused at "+
+		// WITHIN WHAT is the first question a reviewer has about a natural key,
+		// and the one the report used to answer by saying nothing — which reads
+		// as "across the whole table" whether or not that is what was built.
+		// It is stated from the constraint, so this line and the DDL cannot
+		// drift apart.
+		within := "across the whole table"
+		for _, c := range m.Constraints {
+			if c.Kind == "unique" && c.Field == f.JSONName && len(c.Within) > 0 {
+				within = "per " + strings.Join(c.Within, " + ")
+			}
+		}
+		fmt.Fprintf(b, "| Unique | `%s` — %s, scope `%s` (%s) | %s; a duplicate is refused at "+
 			"the database and reported as `%s`. |\n",
-			f.Name, scope, f.Unique.Enforce, reuse, f.Unique.Notification)
+			f.Name, within, scope, f.Unique.Enforce, reuse, f.Unique.Notification)
 	}
 
 	if m.Surfaces.GraphQL {

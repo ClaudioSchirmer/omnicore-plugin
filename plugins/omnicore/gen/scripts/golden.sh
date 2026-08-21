@@ -21,7 +21,7 @@ HOST="${HOST:-$GEN_DIR/testdata/host}"
 WORK="${WORK:-/tmp/omnicore-gen-golden}"
 # Relational fixtures: generated into the host that BOOTS, because the boot host
 # is infra-free by design.
-FIXTURES="${FIXTURES:-$GEN_DIR/testdata/specs/student.omnicore.yaml $GEN_DIR/testdata/specs/teacher.omnicore.yaml}"
+FIXTURES="${FIXTURES:-$GEN_DIR/testdata/specs/student.omnicore.yaml $GEN_DIR/testdata/specs/teacher.omnicore.yaml $GEN_DIR/testdata/specs/role.omnicore.yaml}"
 PRIMARY_FIXTURE="${PRIMARY_FIXTURE:-$GEN_DIR/testdata/specs/student.omnicore.yaml}"
 # Mongo fixture: generated into a SEPARATE tree that is built and vetted but not
 # booted. A Mongo-backed view aborts the boot without a mongo.uri, so mixing it
@@ -370,9 +370,54 @@ PYID
       bad "could not write a student to compare the two reads"
     fi
 
+    # The TENANT-SCOPED entity, at runtime. Two things are proved here that no
+    # compile lane can see.
+    #
+    # First, that a scoped entity is usable on a bench at all: with auth.mode
+    # disabled there is no identity, so under the default policy the write guard
+    # refuses every write and the listing answers empty. `noIdentity: stand-down`
+    # is what makes the bench work, and this is where that is checked rather
+    # than assumed.
+    #
+    # Second, that the per-tenant unique index and its binding agree: the SECOND
+    # write of the same handle in the same tenant must come back 409, not 500 and
+    # not 201. That is exactly the pair that used to disagree — a per-tenant
+    # pre-check behind a global index — and the disagreement was invisible until
+    # a second tenant hit it.
+    ROLE_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/roles" \
+      -H 'Content-Type: application/json' \
+      -d '{"tenantID":"9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3","key":"administrator","name":"Administrator","permissions":[{"permissionID":"3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31","note":"initial grant"}]}' \
+      2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
+    if [[ -n "$ROLE_ID" ]]; then
+      ok "a tenant-scoped entity accepts a write on a bench with no identity (noIdentity: stand-down)"
+      DUP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:18099/roles" \
+        -H 'Content-Type: application/json' \
+        -d '{"tenantID":"9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3","key":"administrator","name":"Duplicate","permissions":[]}')
+      if [[ "$DUP" == "409" ]]; then
+        ok "the per-tenant unique key answers 409 on a duplicate handle"
+      else
+        bad "a duplicate handle in the same tenant answered $DUP, not 409 — the index and the precheck disagree"
+      fi
+      # The SAME handle in ANOTHER tenant is a different row and must be
+      # accepted. This is the half the old global index got wrong: it refused
+      # tenant B the handle only tenant A held, under a notification saying the
+      # handle was taken — for a tenant where it was free.
+      OTHER=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:18099/roles" \
+        -H 'Content-Type: application/json' \
+        -d '{"tenantID":"11111111-2222-4333-8444-555555555555","key":"administrator","name":"Administrator","permissions":[]}')
+      if [[ "$OTHER" == "201" || "$OTHER" == "200" ]]; then
+        ok "the same handle in ANOTHER tenant is accepted (unique.within scopes the index)"
+      else
+        bad "another tenant was refused the handle it does not share — answered $OTHER"
+      fi
+    else
+      bad "the tenant-scoped entity refused a write on the bench, or did not answer with an id"
+      sed -n '1,25p' /tmp/gg-boot.log
+    fi
+
     OPENAPI=$(curl -fsS "http://127.0.0.1:18099/openapi.json")
-    if grep -q "teachers" <<<"$OPENAPI" && grep -q "students" <<<"$OPENAPI"; then
-      ok "both entities appear in the OpenAPI document"
+    if grep -q "teachers" <<<"$OPENAPI" && grep -q "students" <<<"$OPENAPI" && grep -q "roles" <<<"$OPENAPI"; then
+      ok "every entity appears in the OpenAPI document"
     else
       bad "an entity is missing from the OpenAPI document"
     fi

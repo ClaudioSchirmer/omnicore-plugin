@@ -7,6 +7,7 @@ import (
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 func emitDomain(m *ir.Model) ([]fsplan.File, error) {
@@ -36,6 +37,12 @@ func emitAggregate(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("import (")
 	s.L("\t%s", quote("time"))
+	// The row-scope guard answers with the framework's own TenantMismatch, which
+	// lives beside the other application notifications — it is offered there
+	// precisely so a service does not declare its own per aggregate, and its
+	// Forbidden semantic is already translated in all seven catalogs. Pruned
+	// when the spec scopes nothing.
+	s.L("\t%s", quote(fwImport("application/notifications")))
 	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
@@ -176,7 +183,12 @@ func emitBuildRules(s *src, m *ir.Model) {
 	s.L("func (e *%s) BuildRules(actionName string, service domain.Service, r *domain.Rules) {",
 		m.Entity.Pascal)
 
-	if len(m.Clauses) == 0 && !m.HasHookFile && m.ArchiveWhen == nil {
+	// The row-scope guard goes FIRST, and deliberately: it decides whether this
+	// caller may touch this row at all, so every invariant below it is being
+	// checked on a write that is already established as the caller's to make.
+	scoped := emitRowScopeGuard(s, m)
+
+	if len(m.Clauses) == 0 && !m.HasHookFile && m.ArchiveWhen == nil && !scoped {
 		s.L("\t// The spec declares no rule for this aggregate. The method still exists")
 		s.L("\t// because the framework's entity contract requires it.")
 		s.L("}")
@@ -216,6 +228,174 @@ func emitBuildRules(s *src, m *ir.Model) {
 	}
 	s.L("}")
 	s.Blank()
+
+	emitRowScopeCheck(s, m)
+}
+
+// emitRowScopeGuard is the WRITE half of owner-only / tenant data access.
+//
+// The read half lives in the query, which forces the caller's scope into the
+// filter. For a long time that was the only half generated, and the output
+// looked complete: a reviewer read tenant isolation on the listings and
+// reasonably concluded the posture was in place. It was not. A caller holding
+// nothing but the ordinary permissions could
+//
+//   - CREATE a row inside another tenant — the insert mapper copies the tenant
+//     straight from the request body, and no rule objected;
+//   - EDIT one — the write path loads through the repository, not through the
+//     filtered query, so the read-side filter is not on that path at all;
+//   - ARCHIVE one — same load, and the bodyless verb's ApplyTo was a no-op.
+//
+// The asymmetry is what made it dangerous: the caller could not read back the
+// row they had just archived, so the damage was invisible from their own side.
+//
+// So the check is here, in BuildRules, which is the one place every write verb
+// passes through — and it reads the caller off the entity, because the domain
+// performs no IO and has no other way to know who is asking.
+//
+// Returns whether anything was emitted, so the "this aggregate declares no
+// rule" shortcut above does not fire over a guard that is right there.
+func emitRowScopeGuard(s *src, m *ir.Model) bool {
+	subject, caller := m.Authz.ScopeSubject(), m.Authz.ScopeField
+	if !m.Authz.Scoped() || subject == nil || caller == nil {
+		return false
+	}
+	what := "tenant"
+	if m.Authz.DataAccess == "owner-only" {
+		what = "owner"
+	}
+
+	s.L("\t// Row scoping, WRITE side. The read filter decides what this caller may")
+	s.L("\t// SEE; this decides what they may create, edit and archive. Without it a")
+	s.L("\t// caller writes into a %s that is not theirs and cannot read back what", what)
+	s.L("\t// they wrote — damage that is invisible from the side that caused it.")
+	s.L("\t//")
+	s.L("\t// Every WRITE gate, one by one, and no display gate: a read is narrowed")
+	s.L("\t// by the query's filter, and refusing it here would answer 403 where the")
+	s.L("\t// contract is an empty page.")
+	for _, gate := range scopeGates(m) {
+		s.L("\tr.%s(func() { e.refuseForeign%s(r) })", gate, naming.Pascal(what))
+	}
+	s.Blank()
+	return true
+}
+
+// scopeGates lists the write clauses the guard is registered under.
+//
+// Each verb is named EXPLICITLY rather than covered by one catch-all, because
+// the framework dispatches a clause by mode and there is no "any write" gate:
+// IfInsertOrUpdate covers POST/PUT/PATCH, and archive, unarchive and delete are
+// each their own EntityMode with their own entry point. Archive in particular
+// does NOT dispatch under IfUpdate — which is exactly the verb the report found
+// a caller could use on another tenant's row.
+func scopeGates(m *ir.Model) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(g string) {
+		if !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	for _, op := range m.Ops {
+		switch op.Verb {
+		case "insert", "update", "patch":
+			add("IfInsertOrUpdate")
+		case "archive":
+			add("IfArchive")
+		case "unarchive":
+			add("IfUnarchive")
+		case "delete":
+			add("IfDelete")
+		}
+	}
+	return out
+}
+
+// emitRowScopeCheck writes the guard's body, once, as a method the gates call.
+//
+// One body rather than one per gate: the question is identical in every verb —
+// "is this row the caller's?" — and four copies of it are four places for the
+// bypass or the policy to be edited into disagreement.
+func emitRowScopeCheck(s *src, m *ir.Model) {
+	subject, caller := m.Authz.ScopeSubject(), m.Authz.ScopeField
+	if !m.Authz.Scoped() || subject == nil || caller == nil {
+		return
+	}
+	what := "tenant"
+	if m.Authz.DataAccess == "owner-only" {
+		what = "owner"
+	}
+
+	var conds []string
+	if m.Authz.NoIdentity == "stand-down" && m.Authz.PresenceField != nil {
+		// A request with NO identity at all is provably a development bench:
+		// the middleware is only bypassable with auth.mode disabled, and the
+		// framework refuses that mode outside APP_PROFILE=dev. Under `refuse`
+		// this clause is absent, so an empty caller matches no row and every
+		// scoped write is refused — which is the default, for a reason.
+		//
+		// The question is PRESENCE, never the scope's emptiness. Those are two
+		// different facts that arrive as one value: a token carrying no such
+		// claim also lands here with an empty scope, and it is an ordinary
+		// production request. Standing down for it would hand the whole write
+		// guard to anyone holding a token without the claim.
+		conds = append(conds, "e."+m.Authz.PresenceField.Name)
+	}
+	if m.Authz.BypassField != nil {
+		conds = append(conds, "!e."+m.Authz.BypassField.Name)
+	}
+	conds = append(conds, fmt.Sprintf("%s != e.%s", scopeText(*subject, "e"), caller.Name))
+
+	doc := []string{
+		fmt.Sprintf("refuseForeign%s refuses a write to a row that is not the caller's.",
+			naming.Pascal(what)),
+		"",
+		fmt.Sprintf("%s is filled from the request identity by every write command's "+
+			"mapper, including the bodyless ones — an archive is a write to the row like "+
+			"any other, and it loads through the repository, which the read side's filter "+
+			"never touches.", caller.Name),
+	}
+	switch {
+	case m.Authz.NoIdentity == "stand-down":
+		doc = append(doc, "",
+			"With NO IDENTITY AT ALL the check stands down: that is provably a "+
+				"development bench, since the middleware is only bypassable with "+
+				"auth.mode disabled and the framework refuses that mode outside "+
+				"APP_PROFILE=dev. It asks whether an identity was PRESENT, never "+
+				"whether the scope came out empty — a token that simply carries no "+
+				"such claim is an ordinary production request and is still refused.")
+	default:
+		doc = append(doc, "",
+			"With no identity at all the caller's scope is empty, so every write to a "+
+				"row that HAS one is refused. That is the safe default and it is also "+
+				"why a dev bench with auth disabled writes nothing here — declare "+
+				"authz.noIdentity: stand-down if that bench is wanted.")
+	}
+	if m.Authz.BypassField != nil {
+		doc = append(doc, "",
+			fmt.Sprintf("A caller holding %s crosses the scope: the operator supporting "+
+				"a customer, who has to be able to repair a row that is not theirs.",
+				m.Authz.Bypass))
+	}
+	s.Doc(doc...)
+	s.L("func (e *%s) refuseForeign%s(r *domain.Rules) {", m.Entity.Pascal, naming.Pascal(what))
+	s.L("\tif %s {", strings.Join(conds, " && "))
+	s.L("\t\tr.AddNotification(%s, notifications.TenantMismatchNotification{})",
+		quote(subject.Name))
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
+}
+
+// scopeText renders the row's own scope value as TEXT, which is what the
+// caller's claim is. An id is unwrapped with Value(), a value object with the
+// same call, and a plain string is already there.
+func scopeText(f ir.Field, recv string) string {
+	if f.SpecType == "id" {
+		return recv + "." + f.Name + ".Value()"
+	}
+	return wireValue(f, recv)
 }
 
 func emitRule(s *src, m *ir.Model, gate string, rule ir.Rule) {
@@ -455,9 +635,15 @@ func emitOwnerCheck(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	}
 	owner := rule.OwnerField
 	s.Doc("")
-	s.L("\t\t// Tolerates an empty principal: with authentication disabled in")
-	s.L("\t\t// development, and inside tests that bypass the middleware, no identity")
-	s.L("\t\t// is attached and the check would otherwise reject every call.")
+	s.L("\t\t// Stands down when the request carried NO IDENTITY: with authentication")
+	s.L("\t\t// disabled in development, and inside tests that bypass the middleware,")
+	s.L("\t\t// none is attached and the check would otherwise reject every call.")
+	s.L("\t\t//")
+	s.L("\t\t// It asks about PRESENCE, never about the principal being empty. Those")
+	s.L("\t\t// are two different facts that arrive as one value: a real, signed token")
+	s.L("\t\t// that simply carries no such claim also leaves the field empty, and it")
+	s.L("\t\t// is an ordinary production request. Standing down for it would let")
+	s.L("\t\t// anyone holding a claimless token edit a row that is not theirs.")
 	if len(rule.Fields) == 0 {
 		return
 	}
@@ -467,8 +653,20 @@ func emitOwnerCheck(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	// one until it is unwrapped. Comparing them directly does not compile, which
 	// is the good case; what it looked like was an example that validated and
 	// produced a tree that did not build.
-	cond := fmt.Sprintf("%s.%s != \"\" && %s != %s.%s",
-		recv, owner.Name, wireValue(target, recv), recv, owner.Name)
+	// scopeText, not wireValue: the row's owner may be an `id`, and an id is
+	// compared to a claim by its text. wireValue leaves a domain.ID whole, which
+	// does not compile against a string — the good failure, but only reached
+	// after the spec had already said yes.
+	// The resolver synthesises the presence field for every spec carrying an
+	// ownerCheck, and the kind is refused on a collection (where there is no
+	// model), so this is always the presence form in practice. The fallback is
+	// kept only so the function stays total.
+	present := fmt.Sprintf("%s.%s != \"\"", recv, owner.Name)
+	if m != nil && m.Authz.PresenceField != nil {
+		present = fmt.Sprintf("%s.%s", recv, m.Authz.PresenceField.Name)
+	}
+	cond := fmt.Sprintf("%s && %s != %s.%s",
+		present, scopeText(target, recv), recv, owner.Name)
 	if rule.AdminField != nil {
 		// The bypass is a separate question from the permission: the permission
 		// says who may attempt the verb, this says who may attempt it on a row

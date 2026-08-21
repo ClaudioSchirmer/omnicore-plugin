@@ -364,6 +364,22 @@ Three things to get right, because they are the ones that cost a migration later
   The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
   `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
   refused — the build used to accept the string and silently emit only the constraint.
+  - **Unique WITHIN what? Say it, or the two halves disagree.** A natural key is almost
+    never unique across the whole table: a role handle is unique per tenant, a code per
+    workspace, a registration number per campus. `unique.within: [TenantID]` sizes the
+    index AND is held to the fact's filters — which must be exactly `within` + the field,
+    in both directions. Getting this wrong used to be silent and one-sided: the precheck
+    came from the fact (per tenant) and the index from the field alone (global), so the
+    domain accepted a handle the database then refused, reported as "already taken" for a
+    tenant where it was free. Every multi-tenant entity landed there, on exactly the
+    handles two customers both pick — `administrator`, `owner`, `viewer`.
+- **Uniqueness on a COLLECTION ENTRY is generated, and it is per owner.**
+  `children[].fields[].unique` emits the index on the entry's table — always led by the
+  parent column, because an entry has no identity outside its collection — plus the
+  binding that makes a duplicate a clean 409. `enforce` is `constraint-only`: a pre-check
+  would be a query over the collection's own table and this build writes none. It is the
+  backstop `businessIdentity` cannot be: that check sees ONE write, so two concurrent
+  requests adding the same entry both pass it and both rows land.
 - **An aggregating fact answers in the shape the KIND decides, not the column.** `sum`,
   `avg`, `min` and `max` compute in the database over a numeric field (`int`, `int64`,
   `float64` — anything else is refused, because the framework carries an aggregate as an
@@ -404,6 +420,22 @@ Three things to get right, because they are the ones that cost a migration later
     part is a value object), so a part of an **optional** composite is refused there — the
     value object may be absent and there is nothing to pass; call that fact from
     `rules.manual`, where the absent case is a branch you write.
+
+  - a fact may ask about **ONE ENTRY of a collection**: `filters: [<collection>.<field>]`,
+    where the collection is a `children[].plural`. It emits a method taking that entry
+    field's type, asked once per entry — the shape of every "these referenced ids must
+    exist and be active" rule and of every per-entry authorization check. Only on
+    `kind: manual`: a computed fact is a query over this entity's own table, and the
+    entry's column is on another one. Naming the entry's field BARE, or naming the entry's
+    Go type instead of the collection, is refused with the spelling that works — for a
+    while it was accepted in silence and the method arrived with no parameter at all,
+    uncallable, discovered while hand-writing the rule that needed it.
+  - **name a fact for the PROBLEM, not for the healthy state.** The generated test suite
+    stubs the service so every probe answers "nothing found", which is what lets the valid
+    fixture through. `TenantIsUnavailable`, `WorkspaceTaken`, `PermissionKeyTaken` read
+    false under that stub and the happy path passes; the same question spelled
+    `TenantIsActive` reads false too — and now means the tenant is gone, so a perfectly
+    correct spec ships with a red generated test.
 
   So: *"no more than 5 active enrolments per course"* is a fact with `groupBy` — it is about
   rows that exist. *"no more than 30 photos in this listing"* is a `groupCap` — it is about
@@ -633,7 +665,28 @@ Do not re-read every file. Read against the plan the dev approved and against th
    developer read off the catalogue, not something only this file carries.
 4. **Authz** — the permission per operation, and whether `dataAccess` narrows rows the
    way the domain needs (`owner-only`/`tenant` are a different question from the
-   permission).
+   permission). A scoped `dataAccess` generates BOTH halves: the read filter in the
+   query, and a guard in `BuildRules` under every write gate — insert, update/patch,
+   archive, unarchive, delete — answering `TenantMismatchNotification` (403). Read both;
+   for a while only the read half existed, and the output LOOKED complete, so a reviewer
+   read tenant isolation on the listings and reasonably concluded the posture was in
+   place while a caller with the ordinary permissions could create a row inside another
+   tenant, edit one and archive one. Two knobs at its edges, both optional and both
+   policy: `authz.bypass` names a concrete permission that crosses the scope (the
+   operator supporting a customer — concrete, never a wildcard, because the framework's
+   `HasPermission` panics on one), and `authz.noIdentity` says what an absent identity
+   means — `stand-down` (the default: the scope applies to every authenticated caller and
+   steps aside only where there is nobody to scope to) or `refuse` (enforced even with
+   authentication off, so the entity serves nothing on a dev bench).
+
+   **The generated guards ask whether an identity was PRESENT, never whether the scope
+   came out empty**, and that distinction is the whole reason the default is safe. They
+   are two different facts arriving as one value: no identity at all is confined to
+   `auth.mode: disabled`, which the framework refuses outside `APP_PROFILE=dev`; a real,
+   signed token that simply carries no such claim is an ordinary production request, and
+   is still refused. The same applies to a `rules.list` `ownerCheck`, which has tolerated
+   an absent principal since long before the row scope existed — for a while it tolerated
+   an empty VALUE, so a token without the claim walked through it in production.
 5. **The read side** — the view name and `Version`, the declared filters and controls,
    the indexes. A `?search=` needs a declared text index. If the spec declares
    `read.computed`, the derivation hook is the one place where a green build still means

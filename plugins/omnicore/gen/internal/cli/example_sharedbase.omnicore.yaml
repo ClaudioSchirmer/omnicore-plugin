@@ -97,6 +97,12 @@ fields:
     vo: {kind: raw, ref: PersonEmail}
     example: helen@school.edu
     description: The person's e-mail address.
+  - name: CampusID
+    type: id
+    column: campus_id
+    livesOn: role
+    example: 9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3
+    description: The campus this contract belongs to.
   - name: RegistrationNumber
     type: string
     column: registration_number
@@ -107,8 +113,16 @@ fields:
       notification: RegistrationNumberAlreadyExistsNotification
       # active-only: an archived teacher frees the number for reuse.
       scope: active-only
+      # within: WHAT the uniqueness is per. The number is unique inside ONE
+      # campus, not across the institution — two campuses may both issue
+      # DOC-2026-001. It sizes the index (campus_id, registration_number) AND is
+      # held to the precheck fact's filters, in both directions: those two used
+      # to be able to disagree, and a per-campus check behind a global index
+      # means the domain accepts a number the database then refuses — reported
+      # as "already taken" for a campus where it is free.
+      within: [CampusID]
     example: DOC-2026-001
-    description: The teacher's staff registration number.
+    description: The teacher's staff registration number, unique within its campus.
   - name: Status
     type: string
     column: status
@@ -412,9 +426,15 @@ service:
     # the precheck would otherwise silently not be generated.
     - name: RegistrationNumberTaken
       kind: exists
-      description: Whether an active teacher already holds this registration number.
+      description: >-
+        Whether an active teacher on the SAME campus already holds this
+        registration number.
       field: RegistrationNumber
-      filters: [RegistrationNumber]
+      # Exactly the index's columns: unique.within first, then the field itself.
+      # Any other list is refused — a filter the index does not cover, or an
+      # index column the filter drops, is the two halves answering different
+      # questions and reporting one of them under the other's notification.
+      filters: [CampusID, RegistrationNumber]
       excludeSelf: true
       activeOnly: true
     - name: ActiveClassesOfRegistration

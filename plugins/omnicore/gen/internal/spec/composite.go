@@ -225,10 +225,83 @@ func factField(s *Spec, name string) *Field {
 	return findLogicalField(s.Fields, s, name)
 }
 
+// ChildFactField resolves the PER-ENTRY form of a fact filter, `<Collection>.<Field>`.
+//
+// A fact whose question is about one ENTRY of a collection — "does this catalog
+// id name a permission that is still active?", "may the caller grant this one?"
+// — is the shape of every "these referenced ids must exist and be active" rule
+// and of every per-entry authorization check. The root's field set cannot
+// express it: the field is on the child's table, under the child's name. So the
+// filter names the collection first.
+//
+// The collection is addressed by its COLLECTION NAME — `plural` — and not by
+// the entry's Go type, because plural is the single name the framework already
+// uses for this collection everywhere else: the document segment the projection
+// nests it under, the Go field the read DTO declares, the notification's wire
+// path. One spelling, and it is the one already on screen.
+//
+// The three returns are what the caller needs to say something useful: the
+// collection (nil when nothing is addressed), the field (nil when the
+// collection is real and the field is not), and whether the name had the dotted
+// SHAPE at all — which is what tells "you meant a collection and missed" apart
+// from "this is an ordinary root name".
+func ChildFactField(s *Spec, name string) (*Child, *Field, bool) {
+	coll, field, dotted := strings.Cut(name, ".")
+	if !dotted {
+		return nil, nil, false
+	}
+	for i := range s.Children {
+		if s.Children[i].Plural != coll {
+			continue
+		}
+		return &s.Children[i], findField(s.Children[i].Fields, field), true
+	}
+	return nil, nil, true
+}
+
+// childOwningField reports the collection a BARE field name belongs to — the
+// author who wrote `filters: [PermissionID]` meaning the entry's field. It is
+// the whole reason the old silence was expensive: the name resolved against
+// nothing, was dropped, and the method arrived with no parameter at all.
+func childOwningField(s *Spec, name string) *Child {
+	for i := range s.Children {
+		if findField(s.Children[i].Fields, name) != nil {
+			return &s.Children[i]
+		}
+	}
+	return nil
+}
+
+// childNamedByType reports the collection whose ENTRY TYPE is spelled `name` —
+// the other near-miss, `RolePermission.PermissionID` for a collection called
+// Permissions.
+func childNamedByType(s *Spec, name string) *Child {
+	for i := range s.Children {
+		if s.Children[i].Name == name {
+			return &s.Children[i]
+		}
+	}
+	return nil
+}
+
 // reportUnknownFactField refuses a name no field answers to, and says WHY when
 // the name is the composite itself rather than one of its parts — the mistake
 // that is easy to make precisely because the composite IS a field of the entity.
 func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
+	if coll, field, dotted := ChildFactField(s, name); dotted {
+		reportUnknownPerEntryFilter(s, name, coll, field, where, ps)
+		return
+	}
+	// A bare name that IS a collection's field: the author meant the per-entry
+	// form and wrote the root's. Naming the spelling costs one line here and
+	// saved three steps of debugging there.
+	if c := childOwningField(s, name); c != nil {
+		ps.BlockerFix(where,
+			fmt.Sprintf("%q is a field of the collection %q, and a bare name resolves "+
+				"against the ROOT's fields", name, c.Plural),
+			fmt.Sprintf("name a root field, or ask it per entry: %s.%s", c.Plural, name))
+		return
+	}
 	if owner := compositeOwnerNamed(s, name); owner != nil {
 		ps.BlockerFix(where,
 			fmt.Sprintf("%q is a composite value object, so it has no single column for a "+
@@ -238,6 +311,44 @@ func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
 		return
 	}
 	ps.Blockerf(where, "%q does not name a field of this entity", name)
+}
+
+// reportUnknownPerEntryFilter explains a dotted filter that resolved to nothing.
+// The three shapes it tells apart are the three ways the report's author spelled
+// the same intent before giving up and declaring the method by hand.
+func reportUnknownPerEntryFilter(s *Spec, name string, coll *Child, field *Field, where string, ps *Problems) {
+	head, tail, _ := strings.Cut(name, ".")
+	if coll == nil {
+		if c := childNamedByType(s, head); c != nil {
+			ps.BlockerFix(where,
+				fmt.Sprintf("%q is the entry's Go type, and a per-entry filter names the "+
+					"COLLECTION", head),
+				fmt.Sprintf("spell it %s.%s — plural is the name the projection, the read "+
+					"DTO and the notification path already use", c.Plural, tail))
+			return
+		}
+		ps.BlockerFix(where,
+			fmt.Sprintf("%q does not name a collection of this entity", head),
+			"a per-entry filter is <collection>.<field>, where the collection is a "+
+				"children[].plural")
+		return
+	}
+	ps.BlockerFix(where,
+		fmt.Sprintf("%q does not name a field of the collection %q", tail, coll.Plural),
+		fmt.Sprintf("one of: %s", childFieldNames(*coll)))
+}
+
+// childFieldNames lists a collection's field names for a refusal that offers the
+// alternatives instead of only saying no.
+func childFieldNames(c Child) string {
+	names := make([]string, 0, len(c.Fields))
+	for _, f := range c.Fields {
+		names = append(names, f.Name)
+	}
+	if len(names) == 0 {
+		return "it declares none"
+	}
+	return strings.Join(names, ", ")
 }
 
 // compositeOwnerNamed reports the composite field a name addresses AS A WHOLE —

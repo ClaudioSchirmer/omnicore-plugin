@@ -7,6 +7,221 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-08-21
+
+Everything in this section came out of ONE report: an agent generating a single
+entity — a tenant-scoped `Role` with a per-tenant handle and one collection of
+catalog ids — and writing down every place the generator made it work by hand.
+Four of the nine findings produced hand-written code or a wrong artifact; after
+this release that entity has no adopted file and no hand-written SQL, and its
+only hand-written code is the rules the spec genuinely cannot express.
+
+### Security
+
+- **A scoped `authz.dataAccess` guards the WRITE side, not only the read side.**
+  `owner-only` and `tenant` emitted the read filter and no write guard, and the
+  output looked complete: a reviewer read tenant isolation on the listings and
+  reasonably concluded the posture was in place. It was not. A caller holding
+  nothing but the ordinary permissions could **create a row inside another
+  tenant** (the insert mapper copies the tenant straight from the request body,
+  and no rule objected), **edit one** (the write path loads through the
+  repository, not through the filtered query, so the read filter is not on that
+  path at all) and **archive one** (same load, and the bodyless verb's `ApplyTo`
+  was a flat no-op). The asymmetry is what made it dangerous: the caller could
+  not read back the row they had just archived, so the damage was invisible from
+  the side that caused it.
+
+  The guard is now emitted in `BuildRules`, registered under **every write gate
+  the entity mounts** — `IfInsertOrUpdate`, `IfArchive`, `IfUnarchive`,
+  `IfDelete`, each named explicitly because there is no "any write" gate and
+  archive does not dispatch under `IfUpdate` — and answers the framework's own
+  `TenantMismatchNotification` (403, already translated in all seven catalogs).
+  The caller's own scope reaches the entity through a runtime-only field the
+  resolver synthesises, fed by every write command's mapper **including the
+  bodyless ones**, which is what turns that no-op into the one thing an archive
+  applies.
+
+  Two things this also fixed, neither of them in the report. A `rules.list`
+  `ownerCheck` scoped to `[archive]` was **inert**: the archive command's mapper
+  fed no runtime field, so the check compared against `""` and its own
+  empty-principal tolerance let every call through — a documented rule that ran
+  on no verb. And the by-id read had no generated scope test while the listing
+  did, so the read where a leak is most direct (the caller already holds the id)
+  was asserted nowhere.
+
+  **Regenerating an existing owner-only or tenant entity changes its runtime
+  behaviour**, which is the point — writes that previously succeeded across the
+  scope now answer 403.
+
+- **Every rule that stands down for an absent principal now asks whether an
+  identity was PRESENT, not whether its value came out empty.** The two are
+  different facts that arrive at the domain as one, because the domain sees only
+  the entity: `""` means either "no identity at all" — confined to
+  `auth.mode: disabled`, which the framework refuses outside `APP_PROFILE=dev` —
+  or "a real, signed, valid token that simply carries no such claim", which is an
+  ordinary production request.
+
+  A `rules.list` `ownerCheck` had been standing down on the VALUE since long
+  before the row scope existed (`e.RequesterEmail != "" && …`), so **a caller
+  holding a token without the claim passed the check and could edit or archive a
+  row that was not theirs, in production**. The row scope's own `stand-down`
+  inherited the same shape and the same hole. Both now read a runtime flag the
+  mapper sets INSIDE the nil check, so reaching the assignment is the fact being
+  recorded, and a claimless token is refused like any other caller who is not the
+  owner.
+
+### Added
+
+- **`fields[].unique.within`** — what a uniqueness is scoped BY. A natural key is
+  almost never unique across a whole table: a role handle is unique per tenant, a
+  code per workspace, a registration number per campus. The clause sizes the
+  index *and* is held to the pre-check fact's `filters`, which must now be
+  exactly `within` + the field, refused in both directions. See *Fixed* for what
+  the two halves used to do instead.
+- **`children[].fields[].unique`** — uniqueness on a COLLECTION ENTRY, previously
+  refused outright. The index is emitted on the entry's table, always led by the
+  parent column (an entry has no identity outside its collection, and the same
+  value under a different owner is a different, legitimate row), together with
+  the constraint binding that makes a duplicate a clean 409. `enforce` is
+  `constraint-only`: a pre-check would be a query over the collection's own table
+  and this build writes none.
+
+  The refusal pointed at `businessIdentity`, which cannot do this job —
+  it is an in-process check over what ONE write carries, so two concurrent
+  requests adding the same entry both pass it and both rows land. The author's
+  only recourse was an index written by hand, into a migration the generator
+  would then describe incorrectly, with **no way to register a binding for it**,
+  so the violation surfaced as a raw 500 where the root's equivalent is a 409.
+- **Per-entry facts** — `service.facts[].filters` accepts
+  `[<collection>.<field>]`, where the collection is a `children[].plural`, and
+  emits a port method taking that entry field's type, asked once per entry. It is
+  the shape of every "these referenced ids must exist and be active" rule and of
+  every per-entry authorization check. `kind: manual` only: a computed fact is a
+  query over this entity's own table, and the entry's column is on another one.
+- **`authz.bypass`** — a concrete permission that crosses the row scope, on both
+  the read and the write side: the platform operator supporting a customer. It
+  had to be a key because the caller could not even ask before — the framework's
+  `HasPermission` panics on the wildcard a superadmin claim carries, so an entity
+  wanting the exception had to parse the raw claim itself. A wildcard here is
+  refused, with that reason.
+- **`authz.noIdentity`** — `stand-down` (the default: the scope applies to every
+  authenticated caller and steps aside only where there is nobody to scope to) or
+  `refuse` (enforced even with authentication off). It replaces a hardcoded
+  `else` branch that scoped an absent identity to `""`, which meant a freshly
+  generated tenant-scoped entity answered **every listing empty on the dev
+  bench**, the first place anybody runs it.
+
+  The default matches what every other identity-derived rule this generator
+  writes already does — an `ownerCheck` tolerates an absent principal, and has
+  to, since with `auth.mode: disabled` no request carries one. A row scope that
+  alone failed closed would be the odd one out, and the surprise would land on
+  the one profile nobody watches for surprises. It is safe because the guard asks
+  about PRESENCE (see *Security*), so the only thing it steps aside for is a
+  request with no caller at all. `check` warns on `refuse` instead, since that is
+  the setting under which a bench serves nothing — which reads as a broken
+  service rather than as a policy.
+- **`type: id` is accepted where an identity is compared or assigned** — on a
+  `rules.list[].ownerCheck` subject and on an `assignedFrom: identity-subject` /
+  `identity-claim` field. Both were refused with the same true and unhelpful
+  reason ("an identity is text"), and together they forced a permanent trade at
+  the moment the author was least equipped to make it: keep the id and the column
+  can carry a foreign key while the declarative rules are unavailable, or take
+  the rules and the column becomes a `VARCHAR` that cannot reference a `UUID`
+  column on postgres — permanently, since a column's type is a migration over
+  live data. The comparison now unwraps with `Value()` and the mapper parses the
+  claim into the id.
+- **Generated tests for all of it**: a write into a foreign scope refused on
+  every write verb (the acceptance criterion the security finding asked for by
+  name), an authenticated caller whose token carries no such claim refused while
+  an anonymous one stands down, the bypass crossing the scope, and the by-id
+  read's scope. The `valid<Entity>()` fixture now states that a request made it,
+  by a caller entitled to make it — including the ownerCheck's own principal,
+  which it used to leave empty, so those cases passed by standing the rule down
+  rather than by running it.
+
+  The gate carries a new fixture — the reported entity itself — that generates,
+  builds, boots and is exercised over HTTP (**70 passed · 0 failed · 0
+  skipped**). Beside it, a service booted with `auth.mode: jwt` and real RS256
+  tokens covers what a gate with authentication disabled structurally cannot:
+  **18 passed · 0 failed**, and reverting just the two guard conditions to their
+  previous form turns four of them red — a claimless token answering `201` on a
+  write into a tenant, and `204` archiving a row it does not own.
+
+### Fixed
+
+- **`unique` emitted a pre-check and an index that contradicted each other.**
+  With `enforce: service-precheck+constraint`, the pre-check came from the
+  fact's `filters` (`[TenantID, Key]` → per tenant) and the index came from the
+  FIELD ALONE (`role_key` → global). Nothing reported it. Tenant B creating a
+  role named `administrator` was accepted by the domain, refused by the database,
+  and told the handle was already taken — for a tenant where it was free. Every
+  multi-tenant entity with a per-tenant natural key landed there, on exactly the
+  handles two customers both pick: `administrator`, `owner`, `viewer`. The two
+  halves are now held to one list (see `unique.within`), and disagreeing either
+  way is a blocker naming the exact clause to paste.
+
+  **This blocks regeneration of an existing spec** whose pre-check fact filters
+  by more than the unique field — deliberately, since that spec has the wrong
+  index on disk. Declaring `within` changes the index's column list and therefore
+  its NAME, and migrations are hooks: the `DROP INDEX` / `CREATE UNIQUE INDEX`
+  pair is hand-written, as the report's migration section says.
+- **A `service.facts[].filters` entry that named a collection's field was
+  silently dropped**, emitting a port method with **no parameter at all** —
+  uncallable, for a question it is named after. `check` was green, `generate`
+  succeeded, and the tree compiled (a method with no parameter is valid Go), so
+  it was discovered three steps and two "the spec is correct" verdicts later,
+  while hand-writing the rule that needed it. A manual fact's filters were
+  validated nowhere; they are now validated like a computed fact's, every
+  parameter is proved distinct, and each of the four spellings the report's
+  author tried is refused with the one that works.
+- **A `children[].fields[]` of `type: id` emitted a DTO and a test that did not
+  compile.** `internal/application/dtos/<child>_input.go` and the collection's
+  input test declared `domain.ID` with no import behind it — the CHILD path only;
+  the root's DTOs, the aggregate value object and the web-layer child types were
+  all correct. It broke the build's own stated invariant, "a green spec compiles
+  AND boots".
+- **The `_manual` service hook was emitted with no import block** while its
+  signatures used `domain.ID`. The file is the author's, but what is handed over
+  still has to compile — on a first run it reads as a broken generation rather
+  than as a TODO.
+- **The generation report now names a manual fact the existing hook does not
+  implement.** A hook is written once, so a fact ADDED to a spec that has already
+  generated arrives on the port and nowhere else: the package stops compiling on
+  a run whose summary calls it successful, and the file is listed under "left
+  untouched (yours, by design)", which is true and reads like reassurance.
+- **The per-child change verb's response mapper had no generated test** while its
+  two siblings did, so the coverage report read 0% for that one function — about
+  code the other two paths prove is reachable. A number that says "untested"
+  about tested code is worse than a low number.
+- **MySQL's active-only unique index no longer rebuilds the table.** The
+  condition is materialised as a generated column, and `STORED` cannot be added
+  in place: the `ALTER` copies the whole table, which MySQL refuses outright
+  (ERROR 1215) on a table that is the CHILD of a foreign key — so a collection's
+  active-only uniqueness could not be created at all — and is an expensive copy
+  everywhere else. `VIRTUAL` enforces exactly the same thing at no storage cost.
+
+### Changed
+
+- `check` warns when a per-entry collection has **no field outside its business
+  identity**: the generated `PUT` can then only replace one entry with another
+  while keeping the first one's row id, which is a revoke plus a grant wearing an
+  edit's clothes. Said rather than refused — keeping the row through the swap is
+  a defensible thing to want, and it is the author's API; what is not defensible
+  is finding out by reading the generated routes.
+- The generation report states **what a uniqueness is scoped by** ("per
+  TenantID"), read off the constraint so the line and the DDL cannot drift. It
+  said nothing before, which reads as "across the whole table" whether or not
+  that is what was built.
+- `explain rules` writes down the fact-naming convention the generated suite
+  silently depends on: **name a fact for the problem, not for the healthy
+  state**. The suite stubs every probe with "nothing found", so
+  `TenantIsUnavailable` passes the happy path and `TenantIsActive` — the same
+  question — fails it, against a spec that is perfectly correct.
+- `explain keys` marks a **sub-key of a refused block** as refused. Exact-match
+  lookup meant `siblings[].fields[].unique.scope` was listed like an available
+  key while its parent was refused, sending an author to write it, run, and get
+  blocked.
+
 ## [0.26.0] — 2026-08-20
 
 ### Fixed

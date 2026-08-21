@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/compat"
@@ -172,11 +173,17 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 		// Discovery ran BEFORE anything was written, which is what makes this
 		// answer meaningful: the generator writes no file for a `kind: manual`
 		// value object, so a name in here is one the author already wrote.
-		ExistingVOs:     proj.ExistingVOs,
-		CompatLevel:     string(verdict.Level),
-		CompatMessage:   verdict.Message,
-		FrameworkPinned: verdict.Pinned,
-		Warnings:        warnings,
+		ExistingVOs: proj.ExistingVOs,
+		// A hook file is written once and never again, so a fact ADDED to a spec
+		// that already generated declares a method on the port with nothing
+		// behind it — and the package stops compiling on a run the summary calls
+		// successful. The report is the hand-off, so it is where that has to be
+		// said, by name.
+		UnimplementedFacts: unimplementedFacts(proj.Root, model, decisions),
+		CompatLevel:        string(verdict.Level),
+		CompatMessage:      verdict.Message,
+		FrameworkPinned:    verdict.Pinned,
+		Warnings:           warnings,
 	})
 	reportPath := filepath.Join(filepath.Dir(opt.SpecPath),
 		model.Entity.Snake+".gen-report.md")
@@ -348,6 +355,44 @@ func sortedEntityNames(lock *fsplan.Lock) []string {
 // commentary, while one written earlier may have run somewhere since, and the
 // reader has to be told that the shape below is what the code now expects —
 // not what their database necessarily holds.
+// unimplementedFacts names the manual facts the service hook does not answer.
+//
+// The hook is written ONCE — that is what makes it the author's file — so a
+// fact added to a spec that has already generated arrives on the port and
+// nowhere else. The tree stops compiling, and everything the run printed said
+// it went fine: the file appears under "left untouched (yours, by design)",
+// which is true and is not the point.
+//
+// The check is deliberately a text search for the method name rather than a
+// parse: the file is the author's, it may be mid-edit or not compile at all,
+// and a report that refuses to render because a hook is unfinished would be
+// withholding the very list that says how to finish it.
+func unimplementedFacts(root string, m *ir.Model, decisions []fsplan.Decision) []string {
+	if m.Service == nil {
+		return nil
+	}
+	var hook string
+	for _, d := range decisions {
+		if d.Action == fsplan.KeptHook && strings.HasSuffix(d.File.Path, "_service_manual.go") {
+			hook = d.File.Path
+		}
+	}
+	if hook == "" {
+		return nil // freshly written, so it carries every stub this run planned
+	}
+	body, err := os.ReadFile(filepath.Join(root, hook))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, f := range m.Service.Facts {
+		if f.Manual && !strings.Contains(string(body), ") "+f.Name+"(") {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
 func keptMigrations(decisions []fsplan.Decision) []string {
 	var out []string
 	for _, d := range decisions {
