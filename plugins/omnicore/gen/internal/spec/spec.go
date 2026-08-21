@@ -973,6 +973,12 @@ type ByParams struct {
 	// own is not required, and one that is not filtered becomes a leaf that is
 	// orderable and carries no value on the wire. A computed field is refused:
 	// ordering happens in the store and there is no column to order by.
+	//
+	// `ID` is orderable on every entity and is declared nowhere: the aggregate
+	// id is on the root's row whatever the spec says, the projector writes it as
+	// the document's _id, and it is the one path that is indexed before anything
+	// asks for it. It is also the tie-break the cursor already appends to every
+	// key, so ordering by it is the cheapest total order a listing can offer.
 	Sort []string `yaml:"sort"`
 	// Controls turns on the framework's reserved query controls (pagination,
 	// orderBy, fields, search, onlyTotal, includeArchived).
@@ -980,7 +986,9 @@ type ByParams struct {
 }
 
 type Filter struct {
-	// Field is the entity field the filter applies to.
+	// Field is the entity field the filter applies to. `ID` is always one of
+	// them, without being declared anywhere: the aggregate id lives on the
+	// root's row and the framework resolves the name itself.
 	Field string `yaml:"field"`
 	// Ops are the operators the field is filterable by, from the framework's
 	// closed set; an undeclared one is a typed 400.

@@ -7,6 +7,45 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-08-20
+
+### Fixed
+
+- **`ID` filters and orders a listing.** The aggregate id was nameable NOWHERE on the read
+  side: `fields[].name: ID` is a reserved name (the framework's managed carrier owns the id,
+  and mapping it is a boot panic) and `read.managed` admits only the three timestamps — so
+  every read key resolved the name through the declared set, found nothing, and refused it
+  with `"ID" does not name a readable field`. True, useless, and about the one column every
+  entity has. It was not a framework limit: `TableSchema.ID` maps the logical name, the
+  projector writes it as the document's `_id`, and a hand-written service has always been
+  able to declare `` ID *string `query:"id" filter:"eq" sort:"asc,desc"` ``. The generator
+  simply had no way to say it, so `?orderBy=id` — a listing's cheapest total order, and the
+  tie-break the keyset cursor already appends to every key — was inexpressible, and the
+  author's next move was to invent a surrogate column for it.
+
+  `read.byParams.filters` and `read.byParams.sort` now resolve `ID` on every entity, ahead of
+  the declared set and without anything declaring it. The operators are an opaque value's,
+  checked like any other `type: id` field — `eq/ne/in/nin`, and a range refused. The lowering
+  resolves it in the same order, so the leaf reaches the request struct instead of being
+  dropped after a green `check`, which is the failure the two halves disagreeing used to
+  produce.
+
+  The id stays refused under `read.indexes`, `read.fieldRestrict`, `read.computed.from` and
+  `controls.search`, and now says why: those name a column in the PROJECTION, and the id is
+  not one — every response carries it because the framework puts it there, so an index would
+  be declared over a field the document does not have, and a restriction would be asked to
+  scrub the handle the response is required to carry. Any spelling of the name lands on that
+  explanation instead of on the old refusal, which said nothing about the id at all.
+
+  The gate proves it at RUNTIME, not only at compile time: the boot lane writes a record and
+  asserts `?id=`, `?id.in=` and `?orderBy=id` against the live service — the last one
+  checking the rows actually come back in id order, because a leaf that binds nothing is
+  indistinguishable from the outside up to that point. Both emitted shapes are covered: one
+  fixture filters AND orders by the id (the ordering tag rides on the filter leaf), the other
+  only orders by it (a vocabulary leaf carrying no value on the wire, which is the branch
+  that emits a Go field nothing ever binds). A `sharedbase` case in the matrix covers the id
+  as the shared key on the base table.
+
 ## [0.25.0] — 2026-08-20
 
 ### Added

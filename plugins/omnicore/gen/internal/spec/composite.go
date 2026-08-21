@@ -278,6 +278,34 @@ func exposedNamesOf(f Field) string {
 // what the author has to learn is that a composite has no single value to read —
 // its parts do, under the names it exposes them by.
 func reportUnreadable(s *Spec, name, where string, ps *Problems) {
+	// The aggregate id, in the exact spelling and in every other one. Two
+	// different mistakes, and the same wrong answer before: "does not name a
+	// readable field", which said nothing about the id at all.
+	if strings.EqualFold(name, IdentityName) {
+		// A near-spelling is a typo, not a refusal — the name it meant works
+		// where the author was writing it.
+		if name != IdentityName {
+			ps.BlockerFix(where,
+				fmt.Sprintf("%q resolves nothing: the aggregate id answers to %q, in that "+
+					"exact case", name, IdentityName),
+				fmt.Sprintf("spell it %q — it narrows and orders a listing "+
+					"(read.byParams.filters, read.byParams.sort) and is refused only where a "+
+					"key names a projected column", IdentityName))
+			return
+		}
+		// The exact name, so this is one of the keys that address a PROJECTED
+		// column. That the same name is accepted under filters and sort is not a
+		// contradiction: those two are resolved in the STORE, by a name the
+		// framework maps itself.
+		ps.BlockerFix(where,
+			"the aggregate id is not a projected field: the framework carries it "+
+				"itself and the projector writes it as the document's _id, so there is "+
+				"no column here to index, restrict, search or derive from",
+			fmt.Sprintf("every response renders it already; to narrow or order a "+
+				"listing by it, name %q under read.byParams.filters or read.byParams.sort",
+				IdentityName))
+		return
+	}
 	if owner := compositeOwnerNamed(s, name); owner != nil {
 		ps.BlockerFix(where,
 			fmt.Sprintf("%q is a composite value object, so it has no single value to "+

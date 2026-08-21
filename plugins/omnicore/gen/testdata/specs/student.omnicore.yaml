@@ -528,10 +528,20 @@ read:
         ops: [eq, gte, lte]
       - field: LeaveFrom
         ops: [gte, lte]
+      # A identidade nao e declarada em campo nenhum e mesmo assim filtra e
+      # ordena: ela mora na linha da raiz, o framework resolve o nome ID pelo
+      # TableSchema e o projetor a escreve como _id do documento. Os operadores
+      # sao os de um valor opaco — eq/ne/in/nin; ordenar por > um id nao
+      # significa nada e e recusado aqui.
+      - field: ID
+        ops: [eq, in]
     # O vocabulario de ordenacao. Viaja com controls.orderBy: o controle e o
     # INTERRUPTOR, isto e QUAIS caminhos ?orderBy= aceita. Nenhuma metade sozinha
     # e legal — o framework derruba o boot nas duas.
-    sort: [Name, EnrollmentNumber, EnrolledAt, TuitionAmount]
+    #
+    # ID esta sempre disponivel: e a unica coluna indexada antes de alguem pedir,
+    # e e o mesmo desempate que o cursor ja acrescenta a toda chave.
+    sort: [ID, Name, EnrollmentNumber, EnrolledAt, TuitionAmount]
     controls:
       pagination: true
       orderBy: true

@@ -121,7 +121,10 @@ read:
         ops: [eq, contains, icontains]
       - field: RegistrationCode
         ops: [eq, in]
-    sort: [FullName, RegistrationCode]
+    # ID ordena SEM filtrar: nenhuma entrada em filters o nomeia, entao a leaf
+    # que sai carrega so o vocabulario de ordenacao e nenhum parametro de busca.
+    # E o outro lado do id no student, que filtra e ordena pela mesma leaf.
+    sort: [ID, FullName, RegistrationCode]
     controls:
       pagination: true
       orderBy: true

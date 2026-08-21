@@ -77,8 +77,12 @@ read:
   view: {name: professores, version: 1}
   byId: true
   byParams:
-    filters: [{field: NomeCompleto, ops: [eq, contains]}]
-    controls: {pagination: true, includeArchived: true}
+    # ID sob sharedbase: a identidade e a chave COMPARTILHADA, na tabela base, e
+    # o papel a le pela mesma coluna. Filtrar e ordenar por ela nao depende de
+    # qual metade da identidade guarda o campo.
+    filters: [{field: NomeCompleto, ops: [eq, contains]}, {field: ID, ops: [eq, in]}]
+    sort: [ID, NomeCompleto]
+    controls: {pagination: true, orderBy: true, includeArchived: true}
 surfaces: {rest: true}
 authz:
   resource: professor

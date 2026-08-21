@@ -307,6 +307,65 @@ PYSHAPE
       else
         bad "by-id and the listing disagree — $SHAPES"
       fi
+
+      # The aggregate id as a QUERY path. It is declared by no fields[] entry and
+      # by no read.managed name — the framework's managed carrier owns it — so
+      # the generator resolves it on its own and the only thing that proves the
+      # resolution was right is the framework answering. A leaf that compiles and
+      # binds nothing looks identical from the outside up to here: the endpoint
+      # is there, the tag is there, and every request quietly comes back
+      # unfiltered.
+      #
+      # Both shapes are probed because they are emitted by different branches:
+      # student filters AND orders by the id (the tag rides on the filter leaf),
+      # teacher only orders by it (a vocabulary leaf carrying no value on the
+      # wire, which is the branch that emits a Go field nothing ever binds).
+      IDQ=$(python3 - "$NEW_ID" <<'PYID'
+import json, sys, urllib.error, urllib.request
+
+entry_id = sys.argv[1]
+bad = []
+
+
+def rows(url):
+    try:
+        with urllib.request.urlopen(url) as fh:
+            return json.load(fh)["data"]
+    except urllib.error.HTTPError as e:
+        bad.append("%s answered %s" % (url, e.code))
+        return None
+
+
+ordered = rows("http://127.0.0.1:18099/students?orderBy=id")
+if ordered is not None:
+    ids = [r["id"] for r in ordered]
+    if entry_id not in ids:
+        bad.append("?orderBy=id dropped the record")
+    elif ids != sorted(ids):
+        bad.append("?orderBy=id did not order by the id: " + ", ".join(ids))
+
+eq = rows("http://127.0.0.1:18099/students?id=" + entry_id)
+if eq is not None and [r["id"] for r in eq] != [entry_id]:
+    bad.append("?id= did not narrow to the one row: %d row(s)" % len(eq))
+
+inlist = rows("http://127.0.0.1:18099/students?id.in=" + entry_id)
+if inlist is not None and [r["id"] for r in inlist] != [entry_id]:
+    bad.append("?id.in= did not narrow to the one row: %d row(s)" % len(inlist))
+
+# The vocabulary-only leaf. An empty listing is a fine answer — what is being
+# proved is that the framework ACCEPTS the token, and an undeclared one is a
+# typed 400, so a 200 here is the whole assertion.
+if rows("http://127.0.0.1:18099/teachers?orderBy=id") is None:
+    bad.append("the sort-only id leaf refused ?orderBy=id")
+
+print("; ".join(bad))
+PYID
+)
+      if [[ -z "$IDQ" ]]; then
+        ok "the aggregate id filters and orders the listing (?id=, ?id.in=, ?orderBy=id)"
+      else
+        bad "the id is declared as a query path and does not answer as one — $IDQ"
+      fi
     else
       bad "could not write a student to compare the two reads"
     fi
