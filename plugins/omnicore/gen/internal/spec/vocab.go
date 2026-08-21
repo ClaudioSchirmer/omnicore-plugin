@@ -67,6 +67,17 @@ var (
 	ChildOwners    = set("root", "base", "role")
 	EditStrategies = set("atomic-replace", "per-child")
 
+	// ChildOperations is which per-entry verbs a per-child collection mounts.
+	// Absent means all three — the trio is the default because it is what
+	// per-child meant before the key existed.
+	//
+	// It is a closed set of THREE and not of two, even though only one of them
+	// is ever dropped in practice: naming the verbs is what lets a collection
+	// say "add and remove, no change" without the author having to reach for
+	// atomic-replace, which is a different contract (an omitted entry is
+	// revoked) rather than a smaller one.
+	ChildOperations = set("add", "change", "remove")
+
 	Modes        = set("display", "insert", "update", "delete", "archive", "unarchive")
 	UpdateShapes = set("patch", "put", "both")
 	DeleteRoot   = set("soft", "hard", "both")
@@ -240,6 +251,10 @@ func Vocabularies() []Vocabulary {
 			"base = the collection belongs to the shared identity and outlives this role."},
 		{"children[].editStrategy", EditStrategies,
 			"atomic-replace = the root's update swaps the whole collection; per-child = its own endpoints."},
+		{"children[].operations", ChildOperations,
+			"WHICH per-entry verbs a per-child collection mounts; absent = all three. " +
+				"Drop `change` where every field is the business identity — replacing " +
+				"such an entry is a removal plus an addition wearing an edit's clothes."},
 		{"delete.children", DeleteChild,
 			"soft = the entry is archived and can come back; hard = the row is gone."},
 		{"modes", Modes,

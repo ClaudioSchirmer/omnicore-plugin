@@ -416,97 +416,28 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L(")")
 	s.Blank()
 
-	// ── add
-	s.Doc(
-		fmt.Sprintf("Add%sCommand adds ONE entry to %s's %s.", op, entity, c.Segment),
-		"",
-		"The path carries the OWNER's id; the body is the entry. The aggregate is "+
-			"loaded, the entry appended, and the whole thing saved in one transaction — "+
-			"so the collection's invariants are checked against what will actually be "+
-			"stored.")
-	s.L("type Add%sCommand struct {", op)
-	s.L("\tpipeline.CommandWithBodyIDBase")
-	emitChildFieldsFlat(s, c)
-	s.L("}")
-	s.Blank()
-	s.L("func (cmd *Add%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
-	s.L("\te.%s(%s)", c.AddMethod, childInputFold(c, "cmd", "\t"))
-	s.L("\treturn nil")
-	s.L("}")
-	s.Blank()
-	emitPerChildResult(s, m, c, "Add")
-	s.L("func (cmd *Add%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Add%sResult, error) {", op, entity, op)
-	s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot())", c.Name)
-	s.L("\tout := Add%sResult{%sID: *e.GetID()}", op, entity)
-	s.L("\t// The entry as STORED, which is the last one the aggregate holds — the")
-	s.L("\t// domain may have normalised a value the caller sent.")
-	s.L("\tif len(items) > 0 {")
-	s.L("\t\tout.%s = projectOne%s(items[len(items)-1])", c.Name, c.Name)
-	s.L("\t}")
-	s.L("\treturn out, nil")
-	s.L("}")
-	s.Blank()
-
-	// ── change
-	s.Doc(
-		fmt.Sprintf("Change%sCommand replaces ONE entry, keeping its id.", op),
-		"",
-		"Full replacement of that entry: every writable field must arrive, because "+
-			"an absent one here cannot be told from an explicit null. An id the "+
-			"collection does not hold answers not-found rather than doing nothing.")
-	s.L("type Change%sCommand struct {", op)
-	s.L("\tpipeline.CommandWithBodyIDBase")
-	s.L("\t%sID string", c.Name)
-	emitChildFieldsFlat(s, c)
-	s.L("}")
-	s.Blank()
-	s.L("func (cmd *Change%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
-	s.L("\te.%s(cmd.%sID, %s)", c.ChangeMethod, c.Name, childInputFold(c, "cmd", "\t"))
-	s.L("\treturn nil")
-	s.L("}")
-	s.Blank()
-	emitPerChildResult(s, m, c, "Change")
-	s.L("func (cmd *Change%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Change%sResult, error) {", op, entity, op)
-	s.L("\tout := Change%sResult{%sID: *e.GetID()}", op, entity)
-	s.L("\tfor _, item := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
-	s.L("\t\tif item.GetID().Value() == cmd.%sID {", c.Name)
-	s.L("\t\t\tout.%s = projectOne%s(item)", c.Name, c.Name)
-	s.L("\t\t\tbreak")
-	s.L("\t\t}")
-	s.L("\t}")
-	s.L("\treturn out, nil")
-	s.L("}")
-	s.Blank()
-
-	// ── remove
-	s.Doc(
-		fmt.Sprintf("Remove%sCommand takes ONE entry out of the collection.", op),
-		"",
-		"There is no body: the entry is named by the path. Whether the row is "+
-			"archived or deleted follows the child's own declaration, not this verb.")
-	s.L("type Remove%sCommand struct {", op)
-	s.L("\tpipeline.CommandWithBodyIDBase")
-	s.L("\t%sID string", c.Name)
-	s.L("}")
-	s.Blank()
-	s.L("func (cmd *Remove%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
-	s.L("\te.%s(cmd.%sID)", c.RemoveMethod, c.Name)
-	s.L("\treturn nil")
-	s.L("}")
-	s.Blank()
-	s.L("// Remove%sResult carries only the owner: the entry it names is gone.", op)
-	s.L("type Remove%sResult struct {", op)
-	s.L("\t%sID domain.ID", entity)
-	s.L("}")
-	s.Blank()
-	s.L("func (cmd *Remove%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Remove%sResult, error) {", op, entity, op)
-	s.L("\treturn Remove%sResult{%sID: *e.GetID()}, nil", op, entity)
-	s.L("}")
-	s.Blank()
+	if c.MountsAdd {
+		emitAddChildCommand(s, m, c, entity, op)
+	}
+	if c.MountsChange {
+		emitChangeChildCommand(s, m, c, entity, op)
+	}
+	if c.MountsRemove {
+		emitRemoveChildCommand(s, c, entity, op)
+	}
 
 	if c.Mounted {
 		// The projector belongs to the spec that declares the entry type, and it
 		// is the same function for every role over the identity.
+		return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",
+			fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
+	}
+
+	// Only the verbs that ANSWER with the entry call it. A collection that
+	// mounts removal alone projects nothing back — the entry it named is gone —
+	// so the function would sit there unused, and the reader would have to work
+	// out that nothing was missing.
+	if !c.MountsAdd && !c.MountsChange {
 		return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",
 			fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
 	}
@@ -541,6 +472,105 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
 }
 
+// emitAddChildCommand writes the verb that appends ONE entry.
+func emitAddChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
+	s.Doc(
+		fmt.Sprintf("Add%sCommand adds ONE entry to %s's %s.", op, entity, c.Segment),
+		"",
+		"The path carries the OWNER's id; the body is the entry. The aggregate is "+
+			"loaded, the entry appended, and the whole thing saved in one transaction — "+
+			"so the collection's invariants are checked against what will actually be "+
+			"stored.")
+	s.L("type Add%sCommand struct {", op)
+	s.L("\tpipeline.CommandWithBodyIDBase")
+	emitChildFieldsFlat(s, c)
+	s.L("}")
+	s.Blank()
+	s.L("func (cmd *Add%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
+	s.L("\te.%s(%s)", c.AddMethod, childInputFold(c, "cmd", "\t"))
+	s.L("\treturn nil")
+	s.L("}")
+	s.Blank()
+	emitPerChildResult(s, m, c, "Add")
+	s.L("func (cmd *Add%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Add%sResult, error) {", op, entity, op)
+	s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot())", c.Name)
+	s.L("\tout := Add%sResult{%sID: *e.GetID()}", op, entity)
+	s.L("\t// The entry as STORED, which is the last one the aggregate holds — the")
+	s.L("\t// domain may have normalised a value the caller sent.")
+	s.L("\tif len(items) > 0 {")
+	s.L("\t\tout.%s = projectOne%s(items[len(items)-1])", c.Name, c.Name)
+	s.L("\t}")
+	s.L("\treturn out, nil")
+	s.L("}")
+	s.Blank()
+}
+
+// emitChangeChildCommand writes the verb that replaces ONE entry in place.
+//
+// It is the verb children[].operations most often leaves out: a collection
+// whose every field is its business identity has nothing a change could change
+// and still be the same entry.
+func emitChangeChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
+	s.Doc(
+		fmt.Sprintf("Change%sCommand replaces ONE entry, keeping its id.", op),
+		"",
+		"Full replacement of that entry: every writable field must arrive, because "+
+			"an absent one here cannot be told from an explicit null. An id the "+
+			"collection does not hold answers not-found rather than doing nothing.")
+	s.L("type Change%sCommand struct {", op)
+	s.L("\tpipeline.CommandWithBodyIDBase")
+	s.L("\t%sID string", c.Name)
+	emitChildFieldsFlat(s, c)
+	s.L("}")
+	s.Blank()
+	s.L("func (cmd *Change%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
+	s.L("\te.%s(cmd.%sID, %s)", c.ChangeMethod, c.Name, childInputFold(c, "cmd", "\t"))
+	s.L("\treturn nil")
+	s.L("}")
+	s.Blank()
+	emitPerChildResult(s, m, c, "Change")
+	s.L("func (cmd *Change%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Change%sResult, error) {", op, entity, op)
+	s.L("\tout := Change%sResult{%sID: *e.GetID()}", op, entity)
+	s.L("\tfor _, item := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+	s.L("\t\tif item.GetID().Value() == cmd.%sID {", c.Name)
+	s.L("\t\t\tout.%s = projectOne%s(item)", c.Name, c.Name)
+	s.L("\t\t\tbreak")
+	s.L("\t\t}")
+	s.L("\t}")
+	s.L("\treturn out, nil")
+	s.L("}")
+	s.Blank()
+}
+
+// emitRemoveChildCommand writes the verb that takes ONE entry out. It needs no
+// model: the entry is named by the path and nothing about it is projected back.
+func emitRemoveChildCommand(s *src, c ir.Child, entity, op string) {
+	s.Doc(
+		fmt.Sprintf("Remove%sCommand takes ONE entry out of the collection.", op),
+		"",
+		"There is no body: the entry is named by the path. Whether the row is "+
+			"archived or deleted follows the child's own declaration, not this verb.")
+	s.L("type Remove%sCommand struct {", op)
+	s.L("\tpipeline.CommandWithBodyIDBase")
+	s.L("\t%sID string", c.Name)
+	s.L("}")
+	s.Blank()
+	s.L("func (cmd *Remove%sCommand) ApplyTo(_ *configuration.AppContext, e *appdomain.%s) error {", op, entity)
+	s.L("\te.%s(cmd.%sID)", c.RemoveMethod, c.Name)
+	s.L("\treturn nil")
+	s.L("}")
+	s.Blank()
+	s.L("// Remove%sResult carries only the owner: the entry it names is gone.", op)
+	s.L("type Remove%sResult struct {", op)
+	s.L("\t%sID domain.ID", entity)
+	s.L("}")
+	s.Blank()
+	s.L("func (cmd *Remove%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Remove%sResult, error) {", op, entity, op)
+	s.L("\treturn Remove%sResult{%sID: *e.GetID()}, nil", op, entity)
+	s.L("}")
+	s.Blank()
+}
+
 func emitPerChildResult(s *src, m *ir.Model, c ir.Child, verb string) {
 	s.Doc(fmt.Sprintf("%s%sResult is the owner plus the entry as stored.", verb, c.OpBase))
 	s.L("type %s%sResult struct {", verb, c.OpBase)
@@ -573,7 +603,22 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L(")")
 	s.Blank()
 
-	// ── add
+	if c.MountsAdd {
+		emitAddChildRequest(s, m, c, entity, op)
+	}
+	if c.MountsChange {
+		emitChangeChildRequest(s, m, c, op, idParam)
+	}
+	if c.MountsRemove {
+		emitRemoveChildRequest(s, m, c, entity, op, idParam)
+	}
+
+	return goFile("internal/web/requests/"+naming.Snake(op)+"_requests.go",
+		fsplan.Owned, fmt.Sprintf("the per-entry wire types for %s", c.Table), s)
+}
+
+// emitAddChildRequest writes the wire pair of the verb that appends one entry.
+func emitAddChildRequest(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	s.Doc(
 		fmt.Sprintf("Add%sRequest adds one entry to an existing %s.", op, entity),
 		"",
@@ -587,8 +632,11 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	emitAutoToCommand(s, "Add"+op+"Request", "Add"+op+"Command")
 	s.Blank()
 	emitPerChildResponse(s, m, c, "Add")
+}
 
-	// ── change
+// emitChangeChildRequest writes the wire pair of the verb that replaces one
+// entry in place.
+func emitChangeChildRequest(s *src, m *ir.Model, c ir.Child, op, idParam string) {
 	s.Doc(
 		fmt.Sprintf("Change%sRequest replaces one entry, keeping its id.", op),
 		"",
@@ -604,8 +652,11 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	emitAutoToCommand(s, "Change"+op+"Request", "Change"+op+"Command")
 	s.Blank()
 	emitPerChildResponse(s, m, c, "Change")
+}
 
-	// ── remove
+// emitRemoveChildRequest writes the wire pair of the verb that takes one entry
+// out. The response carries the owner alone: the entry it named is gone.
+func emitRemoveChildRequest(s *src, m *ir.Model, c ir.Child, entity, op, idParam string) {
 	s.Doc(
 		fmt.Sprintf("Remove%sRequest names the entry to take out.", op),
 		"",
@@ -626,9 +677,6 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("}")
 	s.Blank()
 	emitAutoFromResult(s, "Remove"+op+"Response", "commands.Remove"+op+"Result")
-
-	return goFile("internal/web/requests/"+naming.Snake(op)+"_requests.go",
-		fsplan.Owned, fmt.Sprintf("the per-entry wire types for %s", c.Table), s)
 }
 
 func emitPerChildResponse(s *src, m *ir.Model, c ir.Child, verb string) {

@@ -316,11 +316,18 @@ type Authz struct {
 	DataAccess  string
 	OwnerField  *Field
 	TenantField *Field
-	// Bypass is the permission that crosses the row scope, empty when none is
-	// granted. NoIdentity is what an absent identity means — always resolved,
-	// never empty, so the emitters read a decision rather than a default.
-	Bypass     string
-	NoIdentity string
+	// Bypass is what crosses the row scope, empty when nothing does: a concrete
+	// permission, or the framework's super-admin wildcard. NoIdentity is what an
+	// absent identity means — always resolved, never empty, so the emitters read
+	// a decision rather than a default.
+	Bypass string
+	// BypassWildcard says the bypass is the SUPER-ADMIN WILDCARD rather than a
+	// permission anybody can be granted. It changes how the question is asked
+	// and nothing else: HasPermission panics on a wildcard, so the guard tests
+	// for the wildcard indirectly, and the two emitters that write that guard
+	// have to know which of the two they are writing.
+	BypassWildcard bool
+	NoIdentity     string
 	// ScopeField and BypassField are RUNTIME fields this resolver synthesises
 	// for a scoped dataAccess: the caller's own scope value, and whether they
 	// hold the bypass. They are what carries the identity into BuildRules, which
@@ -333,6 +340,31 @@ type Authz struct {
 	// claim, and only the first is confined to a dev bench. Synthesised only
 	// under stand-down, which is the one policy that acts on the difference.
 	PresenceField *Field
+}
+
+// SuperAdminProbes are the two concrete permissions a generated guard asks when
+// what crosses the row scope is the SUPER-ADMIN WILDCARD rather than a
+// permission somebody was granted.
+//
+// The framework's HasPermission panics on a wildcard — the claim wildcards, the
+// question does not — so "does this caller hold `*:*`?" cannot be asked
+// straight. It can be asked indirectly, because a `*:*` claim answers true to
+// EVERY concrete question: these two permissions live under reserved resources
+// no catalog contains, so the only claim set that says yes to both is one
+// carrying the wildcard — or one that deliberately granted both of these, which
+// is not something anybody does by accident.
+//
+// Two probes and not one, and the second is the load-bearing half: a single
+// probe is also satisfied by a `<its resource>:*` grant, because HasPermission
+// matches a resource wildcard too. Two probes under two different resources
+// cannot both be covered by one resource wildcard.
+//
+// They live here rather than in the emitter because the REPORT names them: a
+// reviewer who meets these strings in the generated code has to be able to find
+// out what they are, and the answer must not be two answers.
+var SuperAdminProbes = [2]string{
+	"superadmin.probe.a:cross-scope",
+	"superadmin.probe.b:cross-scope",
 }
 
 // Scoped reports whether the rows are narrowed by who is asking.
@@ -493,6 +525,7 @@ func standsDown(m *Model) bool {
 
 func resolveRowScope(s *spec.Spec, m *Model) {
 	m.Authz.Bypass = s.Authz.Bypass
+	m.Authz.BypassWildcard = s.Authz.Bypass == spec.SuperAdminClaim
 	m.Authz.NoIdentity = s.Authz.NoIdentity
 	if m.Authz.NoIdentity == "" {
 		// stand-down, because that is what every OTHER identity-derived rule
@@ -553,11 +586,17 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 	if m.Authz.Bypass == "" {
 		return
 	}
+	// A wildcard bypass is fed by a DIFFERENT question, so it is a different
+	// source: the feed cannot hand `*:*` to HasPermission, which panics on it.
+	asked, held := "permission", "holds "+m.Authz.Bypass
+	if m.Authz.BypassWildcard {
+		asked, held = "wildcard-permission", "is a super-admin ("+spec.SuperAdminClaim+")"
+	}
 	m.Authz.BypassField = &Field{
 		Name: "RequestingMayCrossScope", GoType: "bool", BaseGoType: "bool",
-		SpecType: "bool", Runtime: true, IdentitySource: "permission",
+		SpecType: "bool", Runtime: true, IdentitySource: asked,
 		Claim:       m.Authz.Bypass,
-		Description: "Whether the caller holds " + m.Authz.Bypass + ", which crosses the row scope",
+		Description: "Whether the caller " + held + ", which crosses the row scope",
 	}
 	m.Runtime = append(m.Runtime, *m.Authz.BypassField)
 }
@@ -1702,7 +1741,17 @@ type Child struct {
 	// endpoints, its own commands, and a 404 when the entry is not there. The
 	// alternative — atomic-replace — has no entry to address, because the root's
 	// update swaps the whole collection.
-	PerChild     bool
+	PerChild bool
+	// MountsAdd, MountsChange and MountsRemove are WHICH of the per-entry verbs
+	// this collection mounts — children[].operations, defaulted to all three.
+	//
+	// They are three fields rather than a list because every consumer asks about
+	// one verb at a time: the routes, the commands, the wire types, the domain
+	// methods and the generated tests each emit per verb, and a verb nobody
+	// mounts must leave no trace in any of them.
+	MountsAdd    bool
+	MountsChange bool
+	MountsRemove bool
 	ChangeMethod string
 	RemoveMethod string
 	// DuplicateNotification is what an ADD raises when the entry is already
@@ -1773,6 +1822,9 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			Mounted:               c.OwnedBy == "base" && s.Storage.Base != nil && s.Storage.Base.Reuse,
 			OpBase:                c.Name,
 			PerChild:              c.EditStrategy == "per-child",
+			MountsAdd:             spec.MountsPerChildOp(c, "add"),
+			MountsChange:          spec.MountsPerChildOp(c, "change"),
+			MountsRemove:          spec.MountsPerChildOp(c, "remove"),
 			ChangeMethod:          "Change" + c.Name + "ByID",
 			RemoveMethod:          "Remove" + c.Name + "ByID",
 			DuplicateNotification: c.DuplicateNotification,

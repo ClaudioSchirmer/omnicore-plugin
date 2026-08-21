@@ -1043,31 +1043,43 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 				"it is what an ADD compares against to answer duplicate, and what makes "+
 					"two entries the same one; declare the field(s) that identify an entry")
 		}
-		// A per-entry collection mounts three verbs, and one of them can be
-		// meaningless: if every writable field is part of the business identity,
-		// the PUT's only possible effect is to turn entry A into entry B while
-		// keeping A's row id — a revoke plus a grant wearing an edit's clothes.
-		// There is nothing about such an entry that can change and still leave
-		// it the same entry.
+		validateChildOperations(c, where, ps)
+		// A per-entry collection mounts up to three verbs, and one of them can
+		// be meaningless: if every writable field is part of the business
+		// identity, the PUT's only possible effect is to turn entry A into entry
+		// B while keeping A's row id — a revoke plus a grant wearing an edit's
+		// clothes. There is nothing about such an entry that can change and
+		// still leave it the same entry.
 		//
 		// Said, not refused: keeping A's row (and its created_at) through the
 		// swap is a defensible thing to want, and it is the author's API. What
 		// is not defensible is finding out by reading the generated routes.
-		if c.EditStrategy == "per-child" && len(c.Fields) > 0 &&
+		//
+		// It is not said at all once the author has answered it, which is what
+		// operations is for: a collection that mounts add and remove and no
+		// change has no such verb to be surprised by.
+		if MountsPerChildOp(c, "change") && len(c.Fields) > 0 &&
 			len(c.BusinessIdentity) == len(c.Fields) {
 			ps.WarnFix(where+".businessIdentity",
 				"the collection has no field outside its business identity, so the "+
 					"generated change verb can only replace one entry with another — "+
 					"keeping the first one's row id",
-				"if that is not a verb you want, use editStrategy: atomic-replace, or "+
-					"add the field that is allowed to change (a note, a validity date) "+
-					"and leave it out of businessIdentity")
+				"if that is not a verb you want, drop it with operations: [add, remove] "+
+					"— or add the field that is allowed to change (a note, a validity "+
+					"date) and leave it out of businessIdentity. editStrategy: "+
+					"atomic-replace is the third answer, and a different contract: the "+
+					"root's update carries the whole collection, so an entry a partial "+
+					"client omits is removed")
 		}
-		if c.EditStrategy == "per-child" && c.SoftRemove && c.DuplicateNotification == "" {
+		if MountsPerChildOp(c, "add") && c.SoftRemove && c.DuplicateNotification == "" {
+			fix := "the update path can edit one entry into another's identity; naming a " +
+				"notification makes the rejection specific"
+			if !MountsPerChildOp(c, "change") {
+				fix = "an add can name an entry the collection already holds; naming a " +
+					"notification makes the rejection specific"
+			}
 			ps.WarnFix(where+".duplicateNotification",
-				"no duplicate notification for a per-child collection",
-				"the update path can edit one entry into another's identity; naming a "+
-					"notification makes the rejection specific")
+				"no duplicate notification for a per-child collection", fix)
 		}
 		validateNotificationRef(s, c.DuplicateNotification, where+".duplicateNotification", ps)
 		// A per-entry verb addresses ONE entry, so its command carries the
@@ -1075,7 +1087,11 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 		// from the route segment. A field of the same name would land twice in
 		// one struct, which the compiler refuses in generated code the author
 		// did not write and cannot fix. Refuse it here, where the name is.
-		if c.EditStrategy == "per-child" {
+		//
+		// Only the verbs that NAME an entry declare that field, so a collection
+		// mounting add alone never collides — and refusing it there would be a
+		// refusal about code this spec does not generate.
+		if MountsPerChildOp(c, "change") || MountsPerChildOp(c, "remove") {
 			clash := c.Name + "ID"
 			for _, f := range c.Fields {
 				if f.Name != clash {
@@ -1088,6 +1104,48 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 						"rename this field (or drop it, if it IS that id)")
 			}
 		}
+	}
+}
+
+// validateChildOperations checks the key that says WHICH per-entry verbs a
+// collection mounts.
+//
+// The key is a subtraction, so every mistake it can carry is one that silently
+// removes a route: a misspelled verb, a verb selected on a collection that
+// mounts none, an empty list that reads as "all of them" in YAML and as "none"
+// to a reader. Each is refused with the whole set printed, because a missing
+// endpoint is not something the author finds out about from the code — they
+// find out from a client that gets a 404.
+func validateChildOperations(c Child, where string, ps *Problems) {
+	if c.Operations == nil {
+		return
+	}
+	if c.EditStrategy != "per-child" {
+		ps.BlockerFix(where+".operations",
+			"operations picks among the PER-ENTRY verbs, and this collection mounts "+
+				"none of them: an atomic replace edits the collection through the "+
+				"root's own update",
+			"drop it, or set editStrategy: per-child")
+		return
+	}
+	if len(c.Operations) == 0 {
+		ps.BlockerFix(where+".operations",
+			"the list is empty, which is not the same as absent: absent mounts all "+
+				"three verbs, and no collection mounts zero",
+			"name the verbs you want — "+ChildOperations.String()+" — or drop the key")
+		return
+	}
+	seen := map[string]bool{}
+	for _, op := range c.Operations {
+		switch {
+		case !ChildOperations.Has(op):
+			ps.BlockerFix(where+".operations",
+				fmt.Sprintf("%q is not a per-entry verb", op),
+				"one of: "+ChildOperations.String())
+		case seen[op]:
+			ps.Blockerf(where+".operations", "%q is named twice", op)
+		}
+		seen[op] = true
 	}
 }
 
@@ -2839,14 +2897,22 @@ func validateRowScopePolicy(a Authz, ps *Problems) {
 				"drop it, or scope the rows with dataAccess: owner-only or tenant")
 		}
 		switch {
+		case a.Bypass == SuperAdminClaim:
+			// The superadmin wildcard, and the reason this is a `case` with no
+			// body: it is the one wildcard a caller CAN be tested for, so the
+			// refusal below must not swallow it. How the test is written without
+			// panicking is Authz.Bypass's own documentation.
 		case strings.Contains(a.Bypass, "*"):
 			// The mistake this exists to catch, because it is the natural way to
 			// write the intent and it does not fail until a request arrives.
 			ps.BlockerFix("authz.bypass",
-				"a wildcard cannot be asked about — the framework's HasPermission panics "+
-					"on one, since the CLAIM wildcards and the question does not",
-				"grant a concrete permission for crossing the scope and name it here, "+
-					"e.g. platform:cross-tenant")
+				fmt.Sprintf("%q cannot be asked about — the framework's HasPermission "+
+					"panics on a wildcard, since the CLAIM wildcards and the question "+
+					"does not", a.Bypass),
+				`"*:*" is the one exception, because a superadmin answers true to every `+
+					`concrete question and the generated guard can test for exactly that. `+
+					`Anything narrower has to be a concrete permission: grant something `+
+					`like platform:cross-tenant and name it here`)
 		case !strings.Contains(a.Bypass, ":"):
 			ps.BlockerFix("authz.bypass",
 				fmt.Sprintf("%q is not a permission", a.Bypass),

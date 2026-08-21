@@ -373,10 +373,13 @@ func emitRowScopeCheck(s *src, m *ir.Model) {
 				"authz.noIdentity: stand-down if that bench is wanted.")
 	}
 	if m.Authz.BypassField != nil {
+		who := "A caller holding " + m.Authz.Bypass
+		if m.Authz.BypassWildcard {
+			who = "A super-admin (" + m.Authz.Bypass + ")"
+		}
 		doc = append(doc, "",
-			fmt.Sprintf("A caller holding %s crosses the scope: the operator supporting "+
-				"a customer, who has to be able to repair a row that is not theirs.",
-				m.Authz.Bypass))
+			fmt.Sprintf("%s crosses the scope: the operator supporting a customer, who "+
+				"has to be able to repair a row that is not theirs.", who))
 	}
 	s.Doc(doc...)
 	s.L("func (e *%s) refuseForeign%s(r *domain.Rules) {", m.Entity.Pascal, naming.Pascal(what))
@@ -1020,43 +1023,60 @@ func emitChildMethods(s *src, m *ir.Model) {
 			continue
 		}
 
-		s.Doc(
-			fmt.Sprintf("%s replaces ONE entry, keeping its id.", c.ChangeMethod),
-			"",
-			"Keeping the id is the whole point: the row is updated rather than "+
-				"removed and re-added, so whatever references it still does, and the "+
-				"audit trail reads as a change instead of as a deletion plus a creation.",
-			"",
-			"An id that is not in the collection is NOT silently ignored — it answers "+
-				"not-found, because the caller addressed a specific entry.")
-		s.L("func (e *%s) %s(id string, replacement aggregatevos.%s) {", m.Entity.Pascal, c.ChangeMethod, c.Name)
-		s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
-		s.L("\t\tif current.GetID().Value() == id {")
-		s.L("\t\t\treplacement.SetID(domain.NewID(id))")
-		s.L("\t\t\tdomain.ChangeAggregateChild(e, current, replacement)")
-		s.L("\t\t\treturn")
-		s.L("\t\t}")
-		s.L("\t}")
-		s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
-		s.L("}")
-		s.Blank()
-
-		s.Doc(
-			fmt.Sprintf("%s takes ONE entry out of the collection.", c.RemoveMethod),
-			"",
-			"Same not-found posture as the change: the caller named an entry, so a "+
-				"missing one is an answer rather than a no-op.")
-		s.L("func (e *%s) %s(id string) {", m.Entity.Pascal, c.RemoveMethod)
-		s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
-		s.L("\t\tif current.GetID().Value() == id {")
-		s.L("\t\t\tdomain.RemoveAggregateChild(e, current)")
-		s.L("\t\t\treturn")
-		s.L("\t\t}")
-		s.L("\t}")
-		s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
-		s.L("}")
-		s.Blank()
+		// A verb the collection does not mount gets no domain method either.
+		// Writing one anyway would leave `ChangeXByID` on the aggregate with
+		// nothing calling it — an invitation to a hand-written route that
+		// reintroduces exactly the verb the spec decided against.
+		if c.MountsChange {
+			emitChangeChildMethod(s, m, c)
+		}
+		if c.MountsRemove {
+			emitRemoveChildMethod(s, m, c)
+		}
 	}
+}
+
+// emitChangeChildMethod is the aggregate's "replace ONE entry, keep its id".
+func emitChangeChildMethod(s *src, m *ir.Model, c ir.Child) {
+	s.Doc(
+		fmt.Sprintf("%s replaces ONE entry, keeping its id.", c.ChangeMethod),
+		"",
+		"Keeping the id is the whole point: the row is updated rather than "+
+			"removed and re-added, so whatever references it still does, and the "+
+			"audit trail reads as a change instead of as a deletion plus a creation.",
+		"",
+		"An id that is not in the collection is NOT silently ignored — it answers "+
+			"not-found, because the caller addressed a specific entry.")
+	s.L("func (e *%s) %s(id string, replacement aggregatevos.%s) {", m.Entity.Pascal, c.ChangeMethod, c.Name)
+	s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+	s.L("\t\tif current.GetID().Value() == id {")
+	s.L("\t\t\treplacement.SetID(domain.NewID(id))")
+	s.L("\t\t\tdomain.ChangeAggregateChild(e, current, replacement)")
+	s.L("\t\t\treturn")
+	s.L("\t\t}")
+	s.L("\t}")
+	s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
+	s.L("}")
+	s.Blank()
+}
+
+// emitRemoveChildMethod is the aggregate's "take ONE entry out".
+func emitRemoveChildMethod(s *src, m *ir.Model, c ir.Child) {
+	s.Doc(
+		fmt.Sprintf("%s takes ONE entry out of the collection.", c.RemoveMethod),
+		"",
+		"Same not-found posture as the change: the caller named an entry, so a "+
+			"missing one is an answer rather than a no-op.")
+	s.L("func (e *%s) %s(id string) {", m.Entity.Pascal, c.RemoveMethod)
+	s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+	s.L("\t\tif current.GetID().Value() == id {")
+	s.L("\t\t\tdomain.RemoveAggregateChild(e, current)")
+	s.L("\t\t\treturn")
+	s.L("\t\t}")
+	s.L("\t}")
+	s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
+	s.L("}")
+	s.Blank()
 }
 
 // notifLiteralFor builds the notification value, filling the interpolation

@@ -210,3 +210,52 @@ func TestBypassCrossesTheScopeOnBothSides(t *testing.T) {
 		t.Errorf("nothing asks whether the caller holds the bypass:\n%s", cmd)
 	}
 }
+
+// authz.bypass: "*:*" — the policy a concrete permission cannot state.
+//
+// "A super-admin crosses the tenant" written as `platform:cross-tenant` mints a
+// string that can be granted to somebody who is NOT a super-admin, which is a
+// wider policy than the one that was approved. The wildcard says the policy —
+// and it cannot be handed to HasPermission, which panics on one, so what has to
+// be proven here is that the emitters ask an equivalent question instead of the
+// literal one.
+func TestWildcardBypassIsAskedWithoutPanicking(t *testing.T) {
+	m := rowScopeModel(t, "  bypass: \"*:*\"\n")
+	a, b := ir.SuperAdminProbes[0], ir.SuperAdminProbes[1]
+
+	for _, side := range []struct{ what, path string }{
+		{"the listing", "internal/application/queries/find_papeis_by_params_query.go"},
+		{"the by-id read", "internal/application/queries/find_papel_by_id_query.go"},
+		{"the insert mapper", "internal/application/commands/insert_papel_command.go"},
+		{"the archive mapper", "internal/application/commands/archive_papel_command.go"},
+	} {
+		got := fileNamed(t, m, side.path)
+		if strings.Contains(got, `HasPermission("*:*")`) {
+			t.Errorf("%s hands the wildcard to HasPermission, which panics on the first "+
+				"request that reaches it:\n%s", side.what, got)
+		}
+		// ANDed, and both: one probe alone is satisfied by a `<resource>:*`
+		// grant, which is a narrower claim than the one meant to cross.
+		want := `id.HasPermission("` + a + `") && id.HasPermission("` + b + `")`
+		if !strings.Contains(got, want) {
+			t.Errorf("%s does not ask the pair of probes, so nothing tells a super-admin "+
+				"from anybody else:\n%s", side.what, got)
+		}
+	}
+
+	dom := fileNamed(t, m, "internal/domain/papel.go")
+	if !strings.Contains(dom, "!e.RequestingMayCrossScope") {
+		t.Errorf("the write guard ignores the bypass:\n%s", dom)
+	}
+
+	// The generated proof. The domain's own bypass test sets the flag by hand,
+	// so it cannot see whether anything ever raises it — and for the wildcard
+	// that is the whole question.
+	qt := fileNamed(t, m, "internal/application/queries/papel_queries_test.go")
+	if !strings.Contains(qt, "func TestPapelBypassCrossesTheReadScope(t *testing.T) {") {
+		t.Errorf("nothing proves the probes answer for a real wildcard claim:\n%s", qt)
+	}
+	if !strings.Contains(qt, `"permissions": []any{"*:*"}`) {
+		t.Errorf("the generated proof does not use a wildcard claim set:\n%s", qt)
+	}
+}

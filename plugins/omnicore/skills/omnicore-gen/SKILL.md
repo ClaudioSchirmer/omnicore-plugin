@@ -360,6 +360,18 @@ Three things to get right, because they are the ones that cost a migration later
   `/<entity>/:id/<collection>[/:entryId]`, a duplicate answer on ADD (declare
   `duplicateNotification`) and a 404 for an entry that is not there. Per-child needs
   `businessIdentity`: it is what "the same entry" means.
+  - **`children[].operations` picks WHICH of the three to mount** — absent means all
+    three, and any non-empty subset of `[add, change, remove]` is legal. Reach for it when
+    every field of the entry IS its business identity (a grant holding one catalog id and
+    nothing else): there is nothing such an entry can change and still be the same entry,
+    so the change verb turns entry A into entry B while keeping A's row id, which an audit
+    trail reads as one grant BECOMING another instead of as two events. `operations: [add,
+    remove]` is the honest surface there. Do NOT reach for `atomic-replace` instead: it is
+    a different contract, not a smaller one — the root's update carries the whole
+    collection, so every partial client silently revokes what it omits. `check` warns
+    about the swap verb when the key is absent, and stops warning once you have answered
+    it. A verb you leave out leaves no trace: no route, no command, no wire type, no
+    domain method, no generated test.
 - **`unique.enforce: service-precheck+constraint` is a pair, and the fact is your half.**
   The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
   `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
@@ -672,12 +684,24 @@ Do not re-read every file. Read against the plan the dev approved and against th
    read tenant isolation on the listings and reasonably concluded the posture was in
    place while a caller with the ordinary permissions could create a row inside another
    tenant, edit one and archive one. Two knobs at its edges, both optional and both
-   policy: `authz.bypass` names a concrete permission that crosses the scope (the
-   operator supporting a customer — concrete, never a wildcard, because the framework's
-   `HasPermission` panics on one), and `authz.noIdentity` says what an absent identity
+   policy: `authz.bypass` says WHO crosses the scope (the operator supporting a customer),
+   and `authz.noIdentity` says what an absent identity
    means — `stand-down` (the default: the scope applies to every authenticated caller and
    steps aside only where there is nobody to scope to) or `refuse` (enforced even with
    authentication off, so the entity serves nothing on a dev bench).
+
+   **`authz.bypass` has two spellings and they are two different policies.** A concrete
+   permission (`platform:cross-tenant`) is grantable on its own — and note that HOLDING it
+   is wider than being granted it, since `HasPermission` answers yes for `platform:*` and
+   for `*:*` too. `bypass: "*:*"` is the other one: the super-admin wildcard itself, and
+   nothing new becomes grantable, which is the right spelling when the approved policy was
+   "a super-admin crosses the tenant" and minting a permission would widen it. The
+   generated guard cannot ASK about a wildcard — `HasPermission` panics on one, because
+   the claim wildcards and the question does not — so for `*:*` it asks two reserved
+   concrete permissions no catalog contains, which only a wildcard claim set answers both
+   of; the gen-report names them, and a generated test proves it against the framework's
+   own `HasPermission` rather than against a comment. Every OTHER wildcard is still
+   refused: `role:*` cannot be a bypass.
 
    **The generated guards ask whether an identity was PRESENT, never whether the scope
    came out empty**, and that distinction is the whole reason the default is safe. They
@@ -709,14 +733,17 @@ this order — each step is cheap and most problems die at the first:
    concern.** The key usually exists and is named something you did not guess:
    uniqueness scoped to the active rows is `unique.scope`, "required only when that other
    field is filled" is `requiredIf`, "valid IF present" is `skipWhen`, per-entry endpoints
-   are `editStrategy: per-child`, "the server fills this from the caller" is
+   are `editStrategy: per-child` and which of those verbs to mount is
+   `children[].operations`, "a super-admin crosses the tenant" is `authz.bypass: "*:*"`,
+   "the server fills this from the caller" is
    `assignedFrom`, and a collection of the shared identity on a second role is
    `ownedBy: base` under `base.reuse: true`.
 
-   The four listed here were each found AFTER someone hand-wrote the thing they express —
-   a hand-edited SQL constraint, a hand-written insert mapper, four hand-written files for
-   a collection. Reading this list costs seconds; the alternative cost hours and left
-   files that no longer track the spec.
+   Most of these were found AFTER someone hand-wrote the thing they express — a
+   hand-edited SQL constraint, a hand-written insert mapper, four hand-written files for
+   a collection. The two newest ones came the cheap way instead: an author hit the wall,
+   stopped, and reported it, and the language grew a key. Reading this list costs
+   seconds; the alternative cost hours and left files that no longer track the spec.
 2. **Change the spec and regenerate.** Regeneration is seconds and idempotent; there is
    no cost to trying.
 3. **If the invariant genuinely cannot be declared, use `rules.manual`** — a named item,

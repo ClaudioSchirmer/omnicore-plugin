@@ -10,7 +10,7 @@
 #   the whole storage.base block   — link, naturalKey, schemaFunc, linkColumn,
 #                                    rowUniqueness, orphanPolicy, reuse
 #   fields[].livesOn: base|role    — which table a field is stored in
-#   children[].editStrategy: per-child + duplicateNotification
+#   children[].editStrategy: per-child + duplicateNotification + operations
 #   children[].ownedBy: base       — a collection of the IDENTITY, not of the role
 #   siblings[].attachTo: role      — a 1:1 facet of the role
 #   rules: requiredIf · skipWhen · transition · comparison · groupCap ·
@@ -212,6 +212,14 @@ children:
     description: The classes the teacher runs.
     ownedBy: role
     editStrategy: per-child
+    # operations — WHICH of the per-entry verbs to mount. Absent means all three,
+    # which is exactly what this line spells out; it is written here so the key
+    # is not something you have to guess exists. Leave `change` out where every
+    # field IS the business identity: replacing such an entry cannot change it
+    # and still leave it the same entry, so the verb turns one entry into
+    # another while keeping the first one's row id — which an audit trail reads
+    # as one thing becoming another rather than as a removal and an addition.
+    operations: [add, change, remove]
     duplicateNotification: ClassAlreadyAssignedNotification
     businessIdentity: [Code]
     softRemove: true

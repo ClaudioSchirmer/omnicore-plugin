@@ -645,9 +645,9 @@ func renderCheck(b *strings.Builder, in Input) {
 	// block", which reads like a generator bug rather than a redundancy.
 	if m.HasPerChild() {
 		b.WriteString("### Per-entry command tests are generated now\n\n")
-		b.WriteString("The three verbs that address ONE entry — add, change, remove — have " +
+		b.WriteString("The verbs that address ONE entry — " + perChildVerbs(m) + " — have " +
 			"generated tests in `" + fmt.Sprintf("internal/application/commands/%s_commands_test.go",
-			m.Entity.Snake) + "`: the entry is applied and projected back, the change keeps its " +
+			m.Entity.Snake) + "`: the entry is applied and projected back, a change keeps its " +
 			"id, an unknown id projects nothing.\n\n")
 		b.WriteString("**If you wrote your own tests for those mappers before this run**, the " +
 			"package will not compile until you delete them — Go reports it as `redeclared in " +
@@ -806,6 +806,13 @@ func renderCheck(b *strings.Builder, in Input) {
 	fmt.Fprintf(b, "| Data access | %s | %s |\n", m.Authz.DataAccess,
 		dataAccessNote(m.Authz.DataAccess))
 
+	// A scope with an exception is two decisions, and the second one is the one
+	// a reviewer has to be told about: it is the line that lets somebody read
+	// and repair rows that are not theirs.
+	if m.Authz.Bypass != "" {
+		fmt.Fprintf(b, "| Crossing the scope | `%s` | %s |\n", m.Authz.Bypass, bypassNote(m))
+	}
+
 	if m.Read.Enabled {
 		fmt.Fprintf(b, "| Read backing | %s | %s |\n", m.Read.Backing,
 			backingNote(m.Read.Backing))
@@ -823,6 +830,34 @@ func dataAccessNote(kind string) string {
 		return "Callers are restricted to their tenant's rows."
 	}
 	return ""
+}
+
+// bypassNote explains the exception to the row scope, and each of the two forms
+// has one thing the reader is likely to get wrong.
+//
+// For a concrete permission it is that HOLDING it is not the same as being
+// granted it: a resource wildcard covers it too, so `platform:*` crosses the
+// scope as surely as the permission itself. For the wildcard form it is that
+// the generated code asks about two permissions nobody has ever heard of —
+// which reads as a bug until you know why they are there.
+func bypassNote(m *ir.Model) string {
+	if m.Authz.BypassWildcard {
+		return "Only a super-admin crosses the scope, and nothing new became grantable — " +
+			"what crosses is the claim they already carry. The wildcard cannot be handed " +
+			"to the framework's HasPermission (it panics on one), so the generated guard " +
+			"asks two reserved concrete permissions instead — `" + ir.SuperAdminProbes[0] +
+			"` and `" + ir.SuperAdminProbes[1] + "` — which only a `*:*` claim set answers " +
+			"both of. Never add either to a permission catalog: granting both IS the bypass."
+	}
+	res := m.Authz.Bypass
+	if i := strings.Index(res, ":"); i > 0 {
+		res = res[:i]
+	}
+	return "A caller holding it reads and writes outside the scope — the operator " +
+		"supporting a customer. HOLDING it is wider than being granted it: the framework " +
+		"answers yes for `" + res + ":*` and for `*:*` too, so anyone with the resource " +
+		"wildcard crosses the scope as well. If the intent was \"only a super-admin\", " +
+		"declare `bypass: \"*:*\"` instead of minting a permission."
 }
 
 func backingNote(backing string) string {
@@ -990,6 +1025,35 @@ func factSignature(f ir.Fact) string {
 		parts = append(parts, p.Name+" "+p.GoType)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// perChildVerbs is the union of the per-entry verbs the collections mount, in
+// the order they are mounted.
+//
+// It is a union rather than a per-collection list because the sentence it feeds
+// is about one FILE: every collection's per-entry tests land in the same
+// generated test file. Saying "add, change, remove" there when a collection
+// dropped one sends the reader looking for a test that was never written.
+func perChildVerbs(m *ir.Model) string {
+	var add, change, remove bool
+	for _, c := range m.Children {
+		if !c.PerChild {
+			continue
+		}
+		add = add || c.MountsAdd
+		change = change || c.MountsChange
+		remove = remove || c.MountsRemove
+	}
+	var out []string
+	for _, v := range []struct {
+		on   bool
+		name string
+	}{{add, "add"}, {change, "change"}, {remove, "remove"}} {
+		if v.on {
+			out = append(out, v.name)
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 // pairingNote names how entries are matched to their former selves, because it

@@ -1,0 +1,89 @@
+# Eixos: children[].operations SEM o verbo `change`, e authz.bypass pelo
+# CURINGA de super-admin. Os dois vieram do mesmo relato, sobre a mesma
+# entidade: um papel de tenant cuja coleção guarda ids do catálogo.
+#
+#   operations: [add, remove]  A entrada tem UM campo e ele É a identidade de
+#                              negócio. Não há o que um PUT altere: trocar a
+#                              permissão concedida é revogar uma e conceder
+#                              outra, e fazer isso mantendo o id da linha é o
+#                              que uma trilha de auditoria lê como "uma
+#                              concessão virou outra" em vez de dois eventos.
+#                              A saída antiga era editStrategy: atomic-replace,
+#                              que é outro contrato — nele um cliente parcial
+#                              revoga por omissão.
+#   bypass: "*:*"              A política aprovada era "quem tem o curinga
+#                              atravessa o tenant". Escrevê-la com uma
+#                              permissão concreta cunha uma string concedível a
+#                              quem não é super-admin, que é um superconjunto
+#                              da política. O curinga não pode ser PERGUNTADO
+#                              ao framework (HasPermission entra em panic), e é
+#                              por isso que o gerador pergunta por duas
+#                              permissões concretas reservadas que só um
+#                              conjunto de claims com `*:*` responde.
+specVersion: 1
+entity: PerfilPC
+plural: PerfisPC
+language: pt-BR
+storage:
+  kind: flat
+  table: perfis_pc
+  description: Perfis que cada tenant define para os seus membros.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Chave, type: string, column: chave, length: 64, livesOn: root, example: administrador, description: Chave do perfil dentro do tenant.}
+  - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Administrador, description: Nome exibido do perfil.}
+  - {name: TenantID, type: string, column: tenant_id, length: 60, livesOn: root, example: escola-alfa, description: Tenant dono da linha.}
+children:
+  - name: PerfilPermissao
+    plural: Permissoes
+    table: perfil_pc_permissoes
+    parentColumn: perfil_pc_id
+    description: As permissões que o perfil concede.
+    ownedBy: root
+    editStrategy: per-child
+    # Sem `change`: conceder e revogar são chamadas explícitas e auditáveis, e
+    # não existe um terceiro verbo que troque uma pela outra na mesma linha.
+    operations: [add, remove]
+    duplicateNotification: PermissaoConcedidaDuasVezesNotification
+    businessIdentity: [PermissaoID]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - name: PermissaoID
+        type: id
+        column: permissao_id
+        example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31
+        description: Permissão do catálogo que esta entrada concede.
+modes: [display, insert, update, archive]
+update: {shape: patch}
+delete: {root: soft}
+rules:
+  list:
+    - {id: chave-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Chave], notification: RequiredFieldNotification}
+    - {id: nome-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Nome], notification: RequiredFieldNotification}
+notifications:
+  - name: PermissaoConcedidaDuasVezesNotification
+    semantic: conflict
+    description: A mesma permissão já consta no perfil.
+    text:
+      ptbr: Este perfil ja concede esta permissao.
+      eng: This profile already grants this permission.
+      esp: Este perfil ya concede este permiso.
+      fra: Ce profil accorde deja cette permission.
+      deu: Dieses Profil gewaehrt diese Berechtigung bereits.
+      ita: Questo profilo concede gia questo permesso.
+      nld: Dit profiel verleent deze permissie al.
+read:
+  backing: relational
+  view: {name: perfis_pc, version: 1}
+  byId: true
+  byParams:
+    filters: [{field: Chave, ops: [eq, contains]}]
+    controls: {pagination: true, includeArchived: true}
+surfaces: {rest: true}
+authz:
+  resource: perfilpc
+  dataAccess: tenant
+  tenantField: TenantID
+  bypass: "*:*"
+  permissions: {insert: "perfilpc:escrever", patch: "perfilpc:escrever", archive: "perfilpc:arquivar", read: "perfilpc:ler"}

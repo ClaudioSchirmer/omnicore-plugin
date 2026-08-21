@@ -505,6 +505,26 @@ type Child struct {
 	// update swaps the whole collection; per-child = each entry gets its own
 	// add/update/remove endpoints.
 	EditStrategy string `yaml:"editStrategy"`
+	// Operations selects WHICH per-entry verbs the collection mounts — any
+	// non-empty subset of add, change, remove. Absent means all three, which is
+	// what per-child meant before this key existed. Per-child only: an
+	// atomic-replace collection mounts no per-entry verb to select from.
+	//
+	// It exists because the trio is sometimes a PAIR. A collection whose every
+	// field is its business identity — a grant holding one catalog id and
+	// nothing else — has no meaningful change: replacing that entry's only value
+	// revokes one thing and grants another while KEEPING the first entry's row
+	// id, so an audit trail reads one grant becoming another instead of two
+	// events. Dropping `change` there is the honest API, and the two ways out
+	// before this key existed were both worse: atomic-replace, which makes every
+	// partial client a silent mass-revoker, or inventing a mutable field the
+	// model does not have so that the change verb has something to change.
+	//
+	// What a dropped verb costs is nothing else: its route, its command, its
+	// wire types and its generated tests are simply not written. The collection
+	// is still stored, still projected and still validated the same way, and the
+	// root's own verbs still carry the whole of it.
+	Operations []string `yaml:"operations"`
 	// BusinessIdentity names the fields that make two entries THE SAME entry —
 	// the duplicate detector, and the match key per-child operations use.
 	BusinessIdentity []string `yaml:"businessIdentity"`
@@ -522,6 +542,34 @@ type Child struct {
 	// DuplicateNotification names the conflict answer a per-child ADD raises
 	// when the entry is already there.
 	DuplicateNotification string `yaml:"duplicateNotification"`
+}
+
+// PerChildOperations is the effective set of per-entry verbs a collection
+// mounts: what `operations` declares, or the whole trio when it declares
+// nothing.
+//
+// The default is all three because that is what per-child meant before the key
+// existed — a spec written against the older language has to keep generating
+// what it generated then, and silently mounting fewer verbs on a regeneration
+// would take routes away from a running service.
+func PerChildOperations(c Child) []string {
+	if c.EditStrategy != "per-child" {
+		return nil
+	}
+	if len(c.Operations) == 0 {
+		return ChildOperations.List()
+	}
+	return append([]string(nil), c.Operations...)
+}
+
+// MountsPerChildOp answers the same question for one verb.
+func MountsPerChildOp(c Child, op string) bool {
+	for _, have := range PerChildOperations(c) {
+		if have == op {
+			return true
+		}
+	}
+	return false
 }
 
 type Sibling struct {
@@ -1087,6 +1135,16 @@ type XLSXExport struct {
 
 // ---------------------------------------------------------------- authz
 
+// SuperAdminClaim is the framework's super-admin wildcard, as it appears in a
+// permissions claim: the one claim that answers true to every concrete
+// permission question.
+//
+// It is a constant rather than a literal because two halves of the build have
+// to agree on it — the validator, which accepts it as an authz.bypass and
+// refuses every other wildcard, and the emitters, which must never pass it to
+// HasPermission (that panics) and ask an equivalent question instead.
+const SuperAdminClaim = "*:*"
+
 type Authz struct {
 	// Resource is the permission resource name, usually the entity in lower
 	// case: student, professor.
@@ -1124,16 +1182,33 @@ type Authz struct {
 	// TenantField is the persisted field the tenant claim is matched against,
 	// for tenant access — declare it with assignedFrom: identity-claim.
 	TenantField string `yaml:"tenantField"`
-	// Bypass names the permission that CROSSES the row scope — the platform
-	// operator supporting a customer, who must read and repair rows that are
-	// not theirs. Without it a `*:*` holder is filtered to their own tenant
-	// like anybody else, and there is no way to ask for the exception.
+	// Bypass says WHO crosses the row scope — the platform operator supporting
+	// a customer, who must read and repair rows that are not theirs. Without it
+	// even a `*:*` holder is filtered to their own tenant like anybody else.
 	//
-	// It is a concrete `resource:action`, never a wildcard, because that is the
-	// only thing a caller can be asked about: the framework's HasPermission
-	// PANICS on a wildcard on the asking side (the claim wildcards; the
-	// question does not). So grant something like `platform:cross-tenant` and
-	// name it here.
+	// Two spellings, answering two different policies:
+	//
+	//   bypass: platform:cross-tenant   a CONCRETE permission, grantable like
+	//                                   any other. Everyone holding it crosses —
+	//                                   which includes a `*:*` superadmin AND a
+	//                                   holder of `platform:*`, because that is
+	//                                   what holding a permission means.
+	//   bypass: "*:*"                   the superadmin wildcard itself, and
+	//                                   nothing narrower. Nothing new becomes
+	//                                   grantable: what crosses is the claim a
+	//                                   superadmin already carries.
+	//
+	// Take the wildcard when the policy is "a superadmin crosses" and minting a
+	// permission would widen it — a concrete string can be handed to somebody
+	// who is not a superadmin, which is not the policy that was approved. Take
+	// the concrete permission when crossing is meant to be delegable on its own.
+	//
+	// A wildcard cannot simply be ASKED about: the framework's HasPermission
+	// panics on one (the claim wildcards; the question does not), which is why
+	// `bypass: role:*` is still refused. `*:*` is the one the generator can
+	// answer honestly, because whoever holds it answers true to EVERY concrete
+	// question — so the emitted guard asks two reserved concrete permissions no
+	// catalog grants, and only a claim set carrying `*:*` says yes to both.
 	//
 	// Refused unless dataAccess scopes the rows at all.
 	Bypass string `yaml:"bypass"`
