@@ -220,6 +220,16 @@ children:
     # another while keeping the first one's row id — which an audit trail reads
     # as one thing becoming another rather than as a removal and an addition.
     operations: [add, change, remove]
+    # permissions — gate the per-entry verbs SEPARATELY from the root's update.
+    # Absent (and absent per verb: this map names two of the three) the entry
+    # verbs require whatever the root's update requires, which is the default
+    # and stays the default. Declare it where the collection edge is a different
+    # job from editing the record: assigning a class to a teacher is scheduling,
+    # renaming the teacher is not, and one permission for both is how the holder
+    # of the smaller privilege helps themselves to the larger. `change` is left
+    # out here on purpose — correcting a class's subject is editing the record,
+    # so it keeps inheriting teacher:update.
+    permissions: {add: "teacher:assign", remove: "teacher:assign"}
     duplicateNotification: ClassAlreadyAssignedNotification
     businessIdentity: [Code]
     softRemove: true

@@ -244,7 +244,7 @@ func emitFacetClearMutations(s *src, m *ir.Model, entity string) {
 			entity, sib.Name, sib.Name)
 		s.L("\t\t\tRepo: repo,%s", serviceField(m))
 		s.L("\t\t},")
-		s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(updatePermission(m)))
+		s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(m.UpdatePermission()))
 		s.Blank()
 	}
 }

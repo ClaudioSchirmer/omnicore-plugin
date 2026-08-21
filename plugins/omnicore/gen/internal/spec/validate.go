@@ -1044,6 +1044,7 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 					"two entries the same one; declare the field(s) that identify an entry")
 		}
 		validateChildOperations(c, where, ps)
+		validateChildPermissions(s, c, where, ps)
 		// A per-entry collection mounts up to three verbs, and one of them can
 		// be meaningless: if every writable field is part of the business
 		// identity, the PUT's only possible effect is to turn entry A into entry
@@ -1146,6 +1147,103 @@ func validateChildOperations(c Child, where string, ps *Problems) {
 			ps.Blockerf(where+".operations", "%q is named twice", op)
 		}
 		seen[op] = true
+	}
+}
+
+// validateChildPermissions checks the key that gates the per-entry verbs on
+// their own, and the one case where the inheritance it replaces has nothing to
+// inherit.
+//
+// Everything this key can get wrong is silent in the generated code, and silent
+// in opposite directions. A permission on a verb the collection does not mount
+// is dead configuration that reads, in the spec, as a route being guarded. A
+// misspelled verb is the same thing wearing a plausible name. And a verb left
+// to inherit from a root that serves no update, patch or insert inherits the
+// empty string — a route with a permission requirement no claim can satisfy,
+// which fails closed at runtime and says nothing at generation time.
+func validateChildPermissions(s *Spec, c Child, where string, ps *Problems) {
+	if c.EditStrategy != "per-child" {
+		if c.Permissions != nil {
+			ps.BlockerFix(where+".permissions",
+				"permissions gates the PER-ENTRY verbs, and this collection mounts none "+
+					"of them: an atomic replace is edited through the root's own update, "+
+					"under the root's own permission",
+				"drop it, or set editStrategy: per-child")
+		}
+		return
+	}
+	if c.Permissions != nil && len(c.Permissions) == 0 {
+		ps.BlockerFix(where+".permissions",
+			"the map is empty, which is not the same as absent: absent means every "+
+				"entry verb keeps requiring what the root's update requires",
+			"name the verb(s) you want gated separately — "+ChildOperations.String()+
+				" — or drop the key")
+		return
+	}
+
+	// Unknown keys first, sorted, so two runs over the same spec print the same
+	// report: a map has no order, and a diagnostic that moves between runs is
+	// one a reviewer cannot diff.
+	var unknown []string
+	for key := range c.Permissions {
+		if !ChildOperations.Has(key) {
+			unknown = append(unknown, key)
+		}
+	}
+	sort.Strings(unknown)
+	for _, key := range unknown {
+		ps.BlockerFix(where+".permissions",
+			fmt.Sprintf("%q is not a per-entry verb", key),
+			"one of: "+ChildOperations.String())
+	}
+
+	for _, key := range ChildOperations.List() {
+		value, declared := c.Permissions[key]
+		if !declared {
+			continue
+		}
+		if !MountsPerChildOp(c, key) {
+			ps.BlockerFix(where+".permissions",
+				fmt.Sprintf("a permission is declared for %q but that verb is not mounted", key),
+				"add it to operations, or remove the permission")
+			continue
+		}
+		if strings.TrimSpace(value) == "" {
+			ps.BlockerFix(where+".permissions."+key,
+				"the permission is empty",
+				"an empty string registers a route that no permission can satisfy")
+			continue
+		}
+		// The same warning the root's permissions get, for the same reason: the
+		// framework does not require the prefix, so a short claim is legitimate,
+		// but a permission outside the resource's namespace is also what a typo
+		// or a claim borrowed from another entity looks like.
+		if s.Authz.Resource != "" && !strings.HasPrefix(value, s.Authz.Resource+":") {
+			ps.WarnFix(where+".permissions."+key,
+				fmt.Sprintf("%q is not namespaced by the declared resource %q",
+					value, s.Authz.Resource),
+				fmt.Sprintf("if that is unintended, spell it %s:<action> — a borrowed "+
+					"claim grants the wrong thing quietly", s.Authz.Resource))
+		}
+	}
+
+	// What the undeclared verbs fall back to. It is checked HERE, next to the
+	// key that overrides it, because the key is also the fix: a collection on an
+	// entity that serves no write of its own can still be gated, it just cannot
+	// be gated by inheritance.
+	if InheritedChildPermission(s) != "" {
+		return
+	}
+	for _, op := range PerChildOperations(c) {
+		if strings.TrimSpace(c.Permissions[op]) != "" {
+			continue
+		}
+		ps.BlockerFix(where+".permissions",
+			fmt.Sprintf("the %s verb is mounted and has no permission: it inherits the "+
+				"root's update, and this entity serves no update, patch or insert to "+
+				"inherit from", op),
+			fmt.Sprintf("declare it — permissions: {%s: %s} — or drop the verb with "+
+				"operations", op, CanonicalPermission(s.Authz.Resource, "update")))
 	}
 }
 

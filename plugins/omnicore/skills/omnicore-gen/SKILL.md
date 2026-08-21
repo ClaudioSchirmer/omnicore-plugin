@@ -372,6 +372,23 @@ Three things to get right, because they are the ones that cost a migration later
     about the swap verb when the key is absent, and stops warning once you have answered
     it. A verb you leave out leaves no trace: no route, no command, no wire type, no
     domain method, no generated test.
+  - **`children[].permissions` gates those verbs APART from the root's update.** By
+    default a per-entry route requires whatever the root's update requires — editing one
+    entry is editing the aggregate — and that default does not change: a collection that
+    declares nothing keeps generating exactly what it generated before this key existed.
+    Reach for it when the collection edge is a **different job** from editing the record:
+    on an RBAC entity, "may rename the group" and "may change what the group confers" are
+    one permission only by accident, and the second is the one that lets an administrator
+    hand themselves power they were not granted (Entra ID guards a role-assignable group
+    behind Privileged Role Administrator, not Groups Administrator; IAM spells
+    `AttachGroupPolicy` as its own action rather than part of `UpdateGroup`). The map is
+    keyed by the same verbs `operations` uses and may be **partial** — `permissions: {add:
+    group:grant}` gates the add and leaves change and remove inheriting. It is per
+    COLLECTION, so an entity with two of them can gate one and not the other. `check`
+    refuses a verb the collection does not mount, a name outside `add | change | remove`,
+    and any of it under `atomic-replace`. **Ask before declaring it**, the same way you
+    ask about `dataAccess`: a permission the deployment has not granted turns a route that
+    used to answer into a 403, and nothing on the wire says which claim is missing.
 - **`unique.enforce: service-precheck+constraint` is a pair, and the fact is your half.**
   The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
   `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
@@ -773,7 +790,9 @@ this order — each step is cheap and most problems die at the first:
    uniqueness scoped to the active rows is `unique.scope`, "required only when that other
    field is filled" is `requiredIf`, "valid IF present" is `skipWhen`, per-entry endpoints
    are `editStrategy: per-child` and which of those verbs to mount is
-   `children[].operations`, "a super-admin crosses the tenant" is `authz.bypass: "*:*"`,
+   `children[].operations`, "adding to this collection needs a permission of its own,
+   not the one that edits the record" is `children[].permissions`,
+   "a super-admin crosses the tenant" is `authz.bypass: "*:*"`,
    "the server fills this from the caller" is
    `assignedFrom`, and a collection of the shared identity on a second role is
    `ownedBy: base` under `base.reuse: true`.
