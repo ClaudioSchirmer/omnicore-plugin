@@ -249,7 +249,7 @@ type ReadModel struct {
 	MaxLimit        int
 	ByID            bool
 	ByParams        bool
-	Filters []Filter
+	Filters         []Filter
 	// Sortable is the ordering VOCABULARY, in declaration order: the leaves that
 	// carry a `sort:` tag on the Request DTO. A leaf that is also filtered gets
 	// the tag beside its `filter:`; one that is not becomes a leaf of its own,
