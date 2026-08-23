@@ -284,7 +284,7 @@ else
     # below would come back 404 on its own record.
     CAMPUS_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/campi" \
       -H 'Content-Type: application/json' \
-      -d '{"campusLabel":"Campus Norte","budgetCode":"ORC-2026-11","ownerID":"1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4"}' \
+      -d '{"campusLabel":"Campus Norte","code":"NOR","budgetCode":"ORC-2026-11","ownerID":"1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4"}' \
       2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
     NEW_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/students" \
       -H 'Content-Type: application/json' \

@@ -1600,6 +1600,15 @@ var frameworkNotifications = map[string]bool{
 	"ArchiveNotAllowedNotification":  true,
 }
 
+// IsFrameworkNotification reports whether a name is one the FRAMEWORK supplies.
+//
+// It exists so the resolver can qualify a reference correctly: a notification
+// the service declares is generated into the package that names it, while a
+// framework one lives in the framework's own domain package and needs its
+// qualifier. Keeping the set here, with the validator that already owns it,
+// is what stops a second copy from disagreeing with this one.
+func IsFrameworkNotification(name string) bool { return frameworkNotifications[name] }
+
 func validateRules(s *Spec, ps *Problems) {
 	validateRuleSet(s, s.Rules, ruleScopeOfRoot(s), "rules", ps)
 	for i, c := range s.Children {

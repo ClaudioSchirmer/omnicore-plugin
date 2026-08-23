@@ -61,8 +61,12 @@ v0.56 or below has to upgrade first.
 
 - **The pointer follows from what can be ABSENT, not from the kind alone.** A left join
   with no counterpart is one source of NULL; a column the TARGET declares nullable is the
-  other, and it makes a field nullable even under an `inner` join. A field that cannot
-  hold NULL fails on the first row that has one, so both are applied.
+  other, and it makes a field nullable even under an `inner` join — an inner join proves
+  the joined ROW exists, never that every column of it is filled. A field that cannot hold
+  NULL fails on the first row that has one, so both are applied. The framework guards the
+  same pair; the generator derives it from the target's own spec, so the two agree by
+  construction rather than by a boot that says no. A nullable identity and a nullable
+  plain column are both crossed under an inner join in the fixtures.
 
 - **`joins[].fields[].hidden` — on the entity, off the wire.** Needing a value and
   publishing it are different decisions, so the language asks them separately. A hidden
@@ -85,6 +89,28 @@ v0.56 or below has to upgrade first.
   zero value, and a joined field filters and orders the listing — and the prune lane
   compiles a join whose target is HAND-WRITTEN, which is the escape hatch's only honest
   proof.
+
+### Fixed
+
+- **A value object naming a FRAMEWORK notification no longer generates a tree that does
+  not compile.** The reference was emitted bare inside package `vos`, where nothing
+  declares it — while the framework's notifications live in the framework's own domain
+  package, which every generated value-object file already imports (the
+  `RequiredFieldNotification` path writes it qualified two lines above).
+
+  The generator invited the mistake: when a value object names a notification the spec
+  does not declare, the refusal offers the framework's own BY NAME — "or name one of the
+  framework's: …, `SchemaViolationNotification`". Following that advice produced a spec
+  that passed `check` and a tree that failed `go build`, against the invariant the
+  generator states about itself: a green spec compiles and boots.
+
+  The reference is now qualified where every other default is materialised — in the
+  resolver, not at the emission site — so the two cases differ only by where the type
+  lives: a notification the service declares is generated INTO the `vos` package and is
+  referenced bare; a framework one carries its qualifier. A golden fixture now declares
+  one, so the lane that builds the tree is the guard.
+
+  Present since the value-object emitters landed, and unrelated to read joins.
 
 ### Changed
 

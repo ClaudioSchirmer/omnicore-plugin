@@ -19,6 +19,19 @@ storage:
     revision: revision
 
 valueObjects:
+  # Um VO que nomeia uma notificacao DO FRAMEWORK — que e o que a propria
+  # recusa do gerador oferece quando a notificacao nao esta declarada. Ela mora
+  # no pacote domain do framework, nao no vos gerado, entao a referencia sai
+  # qualificada; emiti-la nua produzia um arquivo que citava um identificador
+  # que nenhum pacote dele declara.
+  - name: CampusCode
+    kind: raw
+    backing: string
+    description: Codigo do campus — tres letras maiusculas.
+    regex: '^[A-Z]{3}$'
+    maxLength: 3
+    notification: SchemaViolationNotification
+
   - name: Coordinates
     kind: composite
     description: Um ponto geografico — latitude e longitude juntas.
@@ -84,6 +97,30 @@ fields:
     parts:
       - {part: Latitude,  column: latitude,  as: Latitude,  example: "-30.0346"}
       - {part: Longitude, column: longitude, as: Longitude, example: "-51.2177"}
+
+  - name: Code
+    type: string
+    column: code
+    length: 3
+    livesOn: root
+    vo: {kind: raw, ref: CampusCode}
+    example: NOR
+    description: Codigo do campus.
+    labelKey: CampusCodeField
+
+  # Uma coluna comum ANULAVEL. Ela existe para ser atravessada por um join
+  # INNER: a linha do alvo existe, mas esta coluna dela pode estar vazia — sao
+  # duas perguntas diferentes, e o campo que a recebe precisa saber dizer
+  # "ausente" ou a leitura quebra na primeira linha com NULL.
+  - name: Nickname
+    type: string
+    column: nickname
+    length: 40
+    nullable: true
+    livesOn: root
+    example: Norte
+    description: Apelido do campus, quando houver.
+    labelKey: CampusNicknameField
 
 modes: [display, insert]
 

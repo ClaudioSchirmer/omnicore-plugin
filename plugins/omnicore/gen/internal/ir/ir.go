@@ -1480,8 +1480,18 @@ func resolveValueObjects(s *spec.Spec) []ValueObject {
 			Name: vo.Name, Kind: vo.Kind, Backing: vo.Backing, GoBacking: backing,
 			Description: vo.Description, Regex: vo.Regex,
 			MinLength: vo.MinLength, MaxLength: vo.MaxLength,
-			Min: vo.Min, Max: vo.Max, Notification: vo.Notification,
-			UnknownNotification: vo.UnknownNotification,
+			Min: vo.Min, Max: vo.Max,
+			// QUALIFIED here, not at the emission site. A notification the
+			// service declares is generated INTO the vos package, so it is
+			// referenced bare; a FRAMEWORK one lives in the framework's own
+			// domain package, which the generated file already imports. Emitting
+			// the bare name for a framework notification produced a file that
+			// referenced an identifier nothing in its package declares — and the
+			// generator's own refusal message offers exactly those names as a
+			// legitimate choice, so following the advice produced a tree that
+			// did not compile.
+			Notification:        qualifyVONotification(vo.Notification),
+			UnknownNotification: qualifyVONotification(vo.UnknownNotification),
 			Written:             vo.Written,
 		}
 		if vo.Kind == "composite" {
@@ -2623,4 +2633,22 @@ func resolveArchiveWhen(s *spec.Spec, m *Model) *ArchiveWhen {
 	return &ArchiveWhen{
 		Field: *f, Equals: aw.Equals, Becomes: aw.Becomes, Description: aw.Description,
 	}
+}
+
+// qualifyVONotification renders a value object's notification as the reference
+// the generated vos package must write.
+//
+// The two live in different packages and only one of them needs saying: the
+// service's own notifications are generated into internal/domain/vos beside the
+// value objects that raise them, while the framework's live in its domain
+// package — already imported by every generated value-object file, because the
+// RequiredFieldNotification path writes it unconditionally.
+func qualifyVONotification(name string) string {
+	if name == "" {
+		return ""
+	}
+	if spec.IsFrameworkNotification(name) {
+		return "domain." + name
+	}
+	return name
 }

@@ -454,6 +454,13 @@ joins:
         example: "-30.0346"
         description: Latitude do campus.
         labelKey: StudentCampusLatitudeField
+      # Coluna comum ANULAVEL sob um join INNER: o ponteiro nao vem do kind,
+      # vem da coluna. O framework recusa um campo nao-ponteiro aqui.
+      - name: CampusNickname
+        column: nickname
+        example: Norte
+        description: Apelido do campus, quando houver.
+        labelKey: StudentCampusNicknameField
 
   # Join a partir de uma COLECAO desta entidade. O verbo nomeia a colecao, `on`
   # nomeia a chave estrangeira NA TABELA DELA, e o campo pousa na entrada.
