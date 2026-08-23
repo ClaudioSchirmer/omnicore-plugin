@@ -52,16 +52,39 @@ func resolveJoins(s *spec.Spec, p *discover.Project, m *Model) {
 }
 
 func resolveJoinField(entity string, j spec.Join, f spec.JoinField, target *discover.SpecClaim) Field {
-	_ = target
 	specType := f.Type
+	targetNullable := false
 	if target != nil {
 		if tf := claimFieldByColumn(target.Fields, f.Column); tf != nil {
-			specType = tf.Type
+			specType, targetNullable = tf.Type, tf.Nullable
 		}
 	}
+
+	// A join field carries NO DOMAIN TYPE — not an identity, not a value object
+	// of any kind. The framework refuses one at construction, and the reason is
+	// not stylistic: the value belongs to ANOTHER aggregate and arrives
+	// read-only, so it is never written through this entity and never validated
+	// by this domain. A domain type here would be an instance no rule ever
+	// approved.
+	//
+	// An IDENTITY column therefore lands as its canonical TEXT rather than as
+	// domain.ID. That is also the only shape that is correct on every engine:
+	// three of the four store an id as BINARY(16)/RAW(16), and the framework
+	// decodes it on the way out.
 	base := goTypeOf(specType)
+	if specType == "id" {
+		base = "string"
+	}
+
+	// The pointer is decided by what can be ABSENT, and there are two
+	// independent sources of absence: a left join with no counterpart, and a
+	// column the TARGET declares nullable. Either one makes NULL reachable, and
+	// a non-pointer field cannot hold it — the scan fails on the first row that
+	// has one. The framework enforces exactly this pair for an identity column
+	// and leaves the rest to the declaration, so the generator applies it to
+	// every type rather than waiting to be told per column.
+	nullable := j.Kind == "left" || targetNullable
 	goType := base
-	nullable := j.Kind == "left"
 	if nullable {
 		goType = "*" + base
 	}

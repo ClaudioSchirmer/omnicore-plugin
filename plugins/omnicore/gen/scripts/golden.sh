@@ -284,7 +284,7 @@ else
     # below would come back 404 on its own record.
     CAMPUS_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/campi" \
       -H 'Content-Type: application/json' \
-      -d '{"campusLabel":"Campus Norte","budgetCode":"ORC-2026-11"}' \
+      -d '{"campusLabel":"Campus Norte","budgetCode":"ORC-2026-11","ownerID":"1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4"}' \
       2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
     NEW_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/students" \
       -H 'Content-Type: application/json' \
@@ -338,6 +338,17 @@ with urllib.request.urlopen("http://127.0.0.1:18099/students/" + entry_id) as fh
 
 if one.get("campusName") != "Campus Norte":
     bad.append("the inner join did not serve campusName: %r" % one.get("campusName"))
+
+# An IDENTITY column crossing a join. A join field carries no domain type, so it
+# lands as the canonical TEXT — which is also the only shape correct on every
+# engine, since three of the four store an id as raw bytes. A mandatory column
+# arrives as a value; a nullable one the campus left unset arrives as an absence.
+if one.get("campusOwnerID") != "1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4":
+    bad.append("a joined identity column did not arrive as its text: %r"
+               % one.get("campusOwnerID"))
+if one.get("campusAuditorID") is not None:
+    bad.append("a nullable identity the target left unset must be an absence, got %r"
+               % one.get("campusAuditorID"))
 if "campusBudgetCode" in one:
     bad.append("a hidden join field reached the wire")
 for g in one.get("guardians") or []:

@@ -113,6 +113,9 @@ var (
 	FactReturns = set("bool", "int64", "float64", "string")
 
 	ReadBackings  = set("relational", "mongo")
+	// JoinFieldTypes is FieldTypes minus `id`: a join field carries no domain
+	// type, so an identity crosses as its canonical text instead of as domain.ID.
+	JoinFieldTypes = set("string", "int", "int64", "float64", "bool", "time")
 	// JoinKinds is what a joining row with no counterpart means. The choice is
 	// not free: inner is legal only over a NON-NULLABLE foreign key.
 	JoinKinds = set("inner", "left")
@@ -286,6 +289,11 @@ func Vocabularies() []Vocabulary {
 			"how the fact is answered; manual means you write it in the hook file."},
 		{"service.facts[].returns", FactReturns,
 			"the Go type the fact answers with."},
+		{"joins[].fields[].type", JoinFieldTypes,
+			"the type a joined value lands in. Derived from the TARGET's own declaration " +
+				"when omitted, which is the spelling to prefer; stated only for a target " +
+				"this project has no spec for. `id` is absent on purpose — a join field " +
+				"carries no domain type, so an identity column arrives as text."},
 		{"joins[].kind", JoinKinds,
 			"what a row with NO counterpart means: left keeps it and reads the joined " +
 				"fields as NULL (legal over any foreign key, and the fields land in " +

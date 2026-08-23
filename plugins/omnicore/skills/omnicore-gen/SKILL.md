@@ -212,6 +212,14 @@ Four things to get right, because they are the ones that cost a migration later:
   - **`inChild`** hangs the traversal off one of this entity's own collections. Its fields
     are LOAD-ONLY — served inside the entry, never filterable or sortable — and an `inner`
     there drops the ENTRY, not the root, which is a silent hole in the array.
+  - **no field carries a DOMAIN TYPE** — `type: id` is refused, and so is any value
+    object. The value belongs to another aggregate and arrives read-only, so a domain
+    type would be an instance no rule ever approved; an identity crosses as TEXT
+    instead. You rarely state a type at all: it is derived from the target's spec,
+    identity included.
+  - **the pointer follows from what can be ABSENT**, not from the kind alone: a left
+    join with no counterpart, OR a column the target declares nullable — which makes a
+    field nullable even under an `inner` join.
   - **the target** is normally another spec of this project, and then the column and its
     type are checked and DERIVED from that spec. A hand-written aggregate is accepted on
     your word: `check` warns, each field must state its own `type`, and the generated

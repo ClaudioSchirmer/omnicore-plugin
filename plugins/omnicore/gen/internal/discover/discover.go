@@ -414,7 +414,35 @@ func discoverSpecs(root string) []SpecClaim {
 				Type     string `yaml:"type"`
 				Nullable bool   `yaml:"nullable"`
 				LivesOn  string `yaml:"livesOn"`
+				VO       *struct {
+					Kind string `yaml:"kind"`
+					Ref  string `yaml:"ref"`
+				} `yaml:"vo"`
+				// A COMPOSITE field declares no column of its own: its value
+				// spans several, one per part. Those columns are ordinary
+				// columns of the table — they enter the schema's bijection
+				// under the same rules a plain field's does — so a read join
+				// may traverse onto one, and this is where they become visible.
+				Parts []struct {
+					Part     string `yaml:"part"`
+					Column   string `yaml:"column"`
+					As       string `yaml:"as"`
+					Type     string `yaml:"type"`
+					Nullable bool   `yaml:"nullable"`
+				} `yaml:"parts"`
 			} `yaml:"fields"`
+			// The value objects THIS spec declares. A composite part states its
+			// type only when the value object is reused from elsewhere; when it
+			// is declared here, the type lives in the declaration and this is
+			// the only place to read it from.
+			ValueObjects []struct {
+				Name  string `yaml:"name"`
+				Parts []struct {
+					Name     string `yaml:"name"`
+					Type     string `yaml:"type"`
+					Nullable bool   `yaml:"nullable"`
+				} `yaml:"parts"`
+			} `yaml:"valueObjects"`
 			Children []struct {
 				Name    string `yaml:"name"`
 				Table   string `yaml:"table"`
@@ -440,6 +468,46 @@ func discoverSpecs(root string) []SpecClaim {
 			Table: doc.Storage.Table,
 		}
 		for _, f := range doc.Fields {
+			// A composite contributes its PARTS instead of itself: it owns no
+			// column, and each part owns one.
+			if len(f.Parts) > 0 {
+				for _, part := range f.Parts {
+					pType, pNull := part.Type, part.Nullable
+					if pType == "" && f.VO != nil {
+						// Declared in this file: the type is in the value
+						// object, not restated on the field.
+						for _, vo := range doc.ValueObjects {
+							if vo.Name != f.VO.Ref {
+								continue
+							}
+							for _, vp := range vo.Parts {
+								if vp.Name == part.Part {
+									pType = vp.Type
+									pNull = pNull || vp.Nullable
+								}
+							}
+						}
+					}
+					name := part.As
+					if name == "" {
+						name = part.Part
+					}
+					claim.Fields = append(claim.Fields, FieldClaim{
+						Name: name, Column: part.Column, Type: pType,
+						// An OPTIONAL composite stores every part column
+						// NULL-able whatever the parts say: "every part NULL"
+						// is how the absence of the whole value is written.
+						Nullable: pNull || f.Nullable,
+						LivesOn:  f.LivesOn,
+					})
+				}
+				continue
+			}
+			// A field with no column is runtime-only or malformed; either way
+			// there is nothing for a join to traverse onto.
+			if f.Column == "" {
+				continue
+			}
 			claim.Fields = append(claim.Fields, FieldClaim{
 				Name: f.Name, Column: f.Column, Type: f.Type,
 				Nullable: f.Nullable, LivesOn: f.LivesOn,

@@ -1472,6 +1472,18 @@ type JoinField struct {
 	// Type is the Go type the value lands in. Derived from the target's own
 	// declaration of that column when omitted, which is the spelling to prefer —
 	// stating it again is a second place for the two to disagree.
+	//
+	// A join field carries NO DOMAIN TYPE: not an identity, not a value object of
+	// any kind. The value belongs to ANOTHER aggregate and arrives read-only — it
+	// is never written through this entity and never validated by this domain, so
+	// a domain type here would be an instance no rule ever approved. `id` is
+	// therefore refused: an identity column crosses as its canonical TEXT, which
+	// is also the only shape correct on all four engines (three store an id as
+	// raw bytes and the framework decodes it on the way out).
+	//
+	// The pointer is not declared here either — it follows from what can be
+	// ABSENT: a left join with no counterpart, or a column the TARGET declares
+	// nullable. Either one makes NULL reachable, on either kind of join.
 	Type string `yaml:"type"`
 	// LabelKey is the translation-catalog key for the field's label, exactly as
 	// on a persisted field. Derived when omitted.

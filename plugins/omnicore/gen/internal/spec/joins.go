@@ -201,6 +201,21 @@ func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
 			"name the column on the target this field is filled from")
 		return
 	}
+	// A join field carries NO domain type, and `id` is the one spec type that
+	// would ask for one. The value belongs to another aggregate and arrives
+	// read-only — never written through this entity, never validated by this
+	// domain — so an identity lands as its canonical TEXT instead, which is also
+	// the only shape correct on all four engines. Nothing is lost: the column is
+	// still the target's identity, and the generator derives the text form from
+	// the target's own declaration when the type is left out.
+	if f.Type == "id" {
+		ps.BlockerFix(where+".type",
+			"a join field carries no domain type, and that includes an identity",
+			"drop the key — an identity column arrives as text, and the generator "+
+				"reads which columns are identities from "+j.To+"'s own spec. For a "+
+				"hand-written target, declare type: string")
+		return
+	}
 
 	// The Go name is this entity's namespace, so it must not shadow anything
 	// the entity already answers to. The framework checks the same thing at
@@ -239,9 +254,10 @@ func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
 					f.Name, j.To),
 				"state the type here — it is what the Go field on this entity is declared "+
 					"as, and it must match the column on "+j.To)
-		case !FieldTypes.Has(f.Type):
+		case !JoinFieldTypes.Has(f.Type):
 			ps.BlockerFix(where+".type",
-				fmt.Sprintf("%q is not a type", f.Type), "one of: "+FieldTypes.String())
+				fmt.Sprintf("%q is not a type a join field can carry", f.Type),
+				"one of: "+JoinFieldTypes.String())
 		}
 		return
 	}
@@ -356,20 +372,28 @@ func joinReachOf(s *Spec, opt Options) joinReach {
 	for _, j := range s.Joins {
 		target := neighbourNamed(opt.Neighbours, j.To)
 		for _, f := range j.Fields {
-			specType := f.Type
+			specType, targetNullable := f.Type, false
 			if target != nil {
 				if tf := neighbourFieldByColumn(target.Fields, f.Column); tf != nil {
-					specType = tf.Type
+					specType, targetNullable = tf.Type, tf.Nullable
 				}
 			}
 			if specType == "" {
 				continue
 			}
+			// An identity crosses as TEXT (a join field carries no domain type),
+			// so the operators a filter may declare on it are a string's. The
+			// framework still binds the predicate in the target's native id form —
+			// it takes that typing from the TARGET's schema rather than from this
+			// side, precisely because nothing about the field says "identity".
+			if specType == "id" {
+				specType = "string"
+			}
 			rf := Field{
 				Name: f.Name, Type: specType, Column: f.Column,
-				// A left join answers NULL where there is no counterpart,
-				// whatever the target's own column declares.
-				Nullable: j.Kind == "left",
+				// Two independent sources of absence: no counterpart (left), or a
+				// column the target itself declares nullable.
+				Nullable: j.Kind == "left" || targetNullable,
 				LivesOn:  "root",
 			}
 			if j.InChild == "" {

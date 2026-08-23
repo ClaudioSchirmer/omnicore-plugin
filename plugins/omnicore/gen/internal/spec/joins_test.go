@@ -98,6 +98,8 @@ func TestJoinRefusesWhatTheFrameworkWouldPanicOn(t *testing.T) {
 			func(s *Spec) { s.Joins[0].Fields[0].Type = "int" }, "string"},
 		{"a traversal onto itself",
 			func(s *Spec) { s.Joins[0].To = "Student" }, "itself"},
+		{"a domain type on a join field",
+			func(s *Spec) { s.Joins[0].Fields[0].Type = "id" }, "no domain type"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := joiningSpec()
@@ -163,6 +165,44 @@ func TestAnUnseenTargetDemandsAnExplicitType(t *testing.T) {
 	ps := Validate(joiningSpec(), Options{}) // the field states no type
 	if !ps.HasBlockers() {
 		t.Fatal("with nothing to derive a type from, the type must be demanded")
+	}
+}
+
+// TestAJoinedIdentityCrossesAsText pins the shape the framework demands: a join
+// field carries no domain type, so an identity column lands as plain text — and
+// the pointer follows from what can be ABSENT, which is why a NULLABLE identity
+// is nullable text even under an INNER join.
+func TestAJoinedIdentityCrossesAsText(t *testing.T) {
+	target := campusNeighbour()
+	target.Fields = append(target.Fields,
+		NeighbourField{Name: "OwnerID", Column: "owner_id", Type: "id", LivesOn: "root"},
+		NeighbourField{Name: "AuditorID", Column: "auditor_id", Type: "id", LivesOn: "root", Nullable: true})
+
+	s := joiningSpec()
+	s.Joins[0].Fields = append(s.Joins[0].Fields,
+		JoinField{Name: "CampusOwnerID", Column: "owner_id"},
+		JoinField{Name: "CampusAuditorID", Column: "auditor_id"})
+
+	opts := Options{Neighbours: []Neighbour{target}}
+	if ps := Validate(s, opts); ps.HasBlockers() {
+		t.Fatalf("joining onto an identity column is legal, got:\n%v", ps.Error())
+	}
+
+	jr := joinReachOf(s, opts)
+	for _, tc := range []struct {
+		field    string
+		nullable bool
+	}{{"CampusOwnerID", false}, {"CampusAuditorID", true}} {
+		f := fieldNamedIn(jr.root, tc.field)
+		if f == nil {
+			t.Fatalf("%s did not resolve on the read side", tc.field)
+		}
+		if f.Type != "string" {
+			t.Errorf("%s must cross as text, got %q", tc.field, f.Type)
+		}
+		if f.Nullable != tc.nullable {
+			t.Errorf("%s nullable = %v, want %v", tc.field, f.Nullable, tc.nullable)
+		}
 	}
 }
 

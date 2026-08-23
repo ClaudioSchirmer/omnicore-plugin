@@ -18,6 +18,20 @@ storage:
     updatedAt: updated_at
     revision: revision
 
+valueObjects:
+  - name: Coordinates
+    kind: composite
+    description: Um ponto geografico — latitude e longitude juntas.
+    parts:
+      - name: Latitude
+        type: float64
+        description: A latitude, em graus decimais.
+        labelKey: CoordinatesLatitudeField
+      - name: Longitude
+        type: float64
+        description: A longitude, em graus decimais.
+        labelKey: CoordinatesLongitudeField
+
 fields:
   - name: CampusLabel
     type: string
@@ -36,6 +50,40 @@ fields:
     example: ORC-2026-11
     description: Código orçamentário do campus.
     labelKey: CampusBudgetCodeField
+
+  # Duas colunas de IDENTIDADE, uma obrigatoria e uma opcional. Elas existem
+  # para serem ATRAVESSADAS: um campo de join nao carrega tipo de dominio, entao
+  # do outro lado elas chegam como texto — string quando a coluna e obrigatoria,
+  # *string quando ela admite NULL.
+  - name: OwnerID
+    type: id
+    column: owner_id
+    livesOn: root
+    example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4
+    description: Responsavel pelo campus.
+    labelKey: CampusOwnerIDField
+
+  - name: AuditorID
+    type: id
+    column: auditor_id
+    nullable: true
+    livesOn: root
+    example: 8c1d0f77-5b41-4a35-8f11-6d6e4c9b0a3e
+    description: Auditor do campus, quando houver.
+    labelKey: CampusAuditorIDField
+
+  # Um VALUE OBJECT COMPOSTO: nao tem coluna propria, o valor mora em duas.
+  # Essas colunas sao colunas comuns da tabela — entram na bijecao do schema
+  # sob as mesmas regras de um campo simples — entao um read join pode
+  # atravessar ate uma delas.
+  - name: Location
+    livesOn: root
+    vo: {kind: composite, ref: Coordinates}
+    description: Localizacao geografica do campus.
+    labelKey: CampusLocationField
+    parts:
+      - {part: Latitude,  column: latitude,  as: Latitude,  example: "-30.0346"}
+      - {part: Longitude, column: longitude, as: Longitude, example: "-51.2177"}
 
 modes: [display, insert]
 

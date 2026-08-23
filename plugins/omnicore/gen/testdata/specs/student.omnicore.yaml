@@ -429,6 +429,31 @@ joins:
         hidden: true
         description: Codigo orcamentario do campus — lido pelas regras, nunca servido.
         labelKey: StudentCampusBudgetCodeField
+      # Uma coluna de IDENTIDADE do alvo. Um campo de join nao carrega tipo de
+      # dominio — nem domain.ID, nem value object nenhum — porque o valor e de
+      # OUTRA agregada e chega so-leitura: nunca e escrito por esta entidade e
+      # nunca e validado por este dominio. Entao ela pousa como texto, e o tipo
+      # nao se declara aqui: sai do proprio spec do Campus.
+      - name: CampusOwnerID
+        column: owner_id
+        example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4
+        description: Responsavel pelo campus.
+        labelKey: StudentCampusOwnerIDField
+      # A mesma coisa sobre uma coluna que admite NULL: o ponteiro vem da
+      # nulidade DO ALVO, mesmo num join inner.
+      - name: CampusAuditorID
+        column: auditor_id
+        example: 8c1d0f77-5b41-4a35-8f11-6d6e4c9b0a3e
+        description: Auditor do campus, quando houver.
+        labelKey: StudentCampusAuditorIDField
+      # Uma PARTE de um value object composto do alvo. Do outro lado ela e uma
+      # coluna como outra qualquer, e chega como escalar: um composto vale como
+      # um conceito so na agregada que o declara, e atravessa parte a parte.
+      - name: CampusLatitude
+        column: latitude
+        example: "-30.0346"
+        description: Latitude do campus.
+        labelKey: StudentCampusLatitudeField
 
   # Join a partir de uma COLECAO desta entidade. O verbo nomeia a colecao, `on`
   # nomeia a chave estrangeira NA TABELA DELA, e o campo pousa na entrada.

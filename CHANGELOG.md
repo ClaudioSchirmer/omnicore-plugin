@@ -36,6 +36,34 @@ v0.56 or below has to upgrade first.
   entity's own collections, and each `fields[]` entry maps one column of the target onto
   a Go name of your choosing.
 
+- **A joined field carries no domain type, and an identity crosses as TEXT.** `type: id`
+  is refused on a join field, and so is any value object: the value belongs to another
+  aggregate and arrives read-only, so a domain type there would be an instance no rule
+  ever approved. The type is normally not stated at all — it is derived from the target's
+  own spec, identity included. The generator emits `string` (or `*string`) for an identity
+  column, which is also the only shape correct on all four engines, since three of them
+  store an id as raw bytes.
+
+- **A join may traverse onto a column of the target's COMPOSITE value object.** A
+  composite owns no column of its own — its value spans several, one per part — and those
+  part columns are ordinary columns of the table, entered in the schema's bijection under
+  the same rules a plain field's column is. The generator read only `fields[].column` when
+  resolving a target, so they were invisible and a legal traversal was refused with the
+  wrong reason ("not a column of X" — it is one). It now resolves each part's column,
+  its exposed name (`as`, else the part's own) and its type — from the value object's own
+  declaration, which is the only place the type lives when the composite is declared in
+  that same spec. A part of an OPTIONAL composite is nullable whatever the parts say,
+  because "every part column NULL" is how the absence of the whole value is written.
+
+  What still does not cross is the composite as a CONCEPT: it stays whole only in the
+  aggregate that declares it, and the invariant tying its parts together is that
+  aggregate's to keep.
+
+- **The pointer follows from what can be ABSENT, not from the kind alone.** A left join
+  with no counterpart is one source of NULL; a column the TARGET declares nullable is the
+  other, and it makes a field nullable even under an `inner` join. A field that cannot
+  hold NULL fails on the first row that has one, so both are applied.
+
 - **`joins[].fields[].hidden` — on the entity, off the wire.** Needing a value and
   publishing it are different decisions, so the language asks them separately. A hidden
   joined field is filled on every load and read by the rules and the domain service, and

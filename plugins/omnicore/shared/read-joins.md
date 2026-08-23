@@ -8,7 +8,9 @@ exact API is the PIN's (`read-joins`, plus the parity table in `relational-view`
 
 **Availability: the pin must be ≥ v0.57.0.** Below that the capability does not exist and
 every "no, copy the column / project it into Mongo" answer this file overturns is still the
-correct one. Check the project's `go.mod` before offering it.
+correct one. Check the project's `go.mod` before offering it — and note that the
+no-domain-type rule below was settled INSIDE that line, so confirm it against the pin's
+`read-joins` rather than assuming an early v0.57 build enforces it.
 
 ## What it is
 
@@ -52,6 +54,46 @@ supplier's country, and it is not on this entity"*:
 3. Needs to match on something other than the target's id (a code, a natural key)? → **not
    expressible.** The predicate is always `fk = target.id`. Model it as a real foreign key,
    or read it with the raw querier.
+
+## A joined field carries NO domain type
+
+Not an identity, not a value object of any kind — scalar, enum or composite. The
+framework refuses one at construction, and the reason is not stylistic: **the value
+belongs to another aggregate and arrives read-only.** It is never written through this
+entity and never validated by this domain, so a domain type here would be an instance no
+rule ever approved — a `domain.ID` nobody checked, an enum nobody constrained, a value
+object whose invariants this side does not own.
+
+So an **identity column crosses as its canonical TEXT**, and that is also the only shape
+correct on every engine: three of the four store an id as raw bytes, and the framework
+decodes it on the way out. A predicate on that field still binds in the target's native id
+form — the framework takes that typing from the TARGET's schema, precisely because nothing
+about the field on this side says "identity".
+
+The practical consequences, in order of how often they bite:
+
+- **A joined identity is a string here.** Comparing it to this entity's own `domain.ID`
+  needs the id's text form, not the other way round.
+- **A composite value object has no form at all** — it spans several columns and a join
+  maps exactly one. That is not a refusal to reach it, though: the target's part columns
+  are ordinary columns of its table, so **traverse onto the parts you actually need, one
+  scalar field each**. What does not cross is the composite AS A CONCEPT — it stays whole
+  only in the aggregate that declares it, and the invariant tying its parts together is
+  that aggregate's to keep.
+- **A scalar or enum value object is refused too**; bring the underlying scalar across and
+  let the owning aggregate keep the invariant.
+
+## What can be ABSENT decides the pointer
+
+Two independent sources, and either one alone is enough:
+
+1. **a left join with no counterpart**, and
+2. **a column the TARGET declares nullable** — which makes NULL reachable even under an
+   `inner` join, because the row exists and the column in it is empty.
+
+A field that cannot hold NULL fails on the first row that has one. So a nullable column
+crossing an inner join is still nullable on this side; the kind of the join is only half
+the question.
 
 ## On the entity vs on the wire — two questions, asked separately
 
