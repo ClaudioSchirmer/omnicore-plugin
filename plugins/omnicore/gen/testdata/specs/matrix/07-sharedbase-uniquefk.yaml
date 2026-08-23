@@ -29,7 +29,7 @@ rules:
     - {id: doc-obrigatorio, kind: required, scope: [insert], fields: [Documento], notification: RequiredFieldNotification}
 read:
   backing: relational
-  view: {name: bibliotecarios, version: 1}
+  view: {name: bibliotecarios}
   byId: true
 surfaces: {rest: true}
 authz:

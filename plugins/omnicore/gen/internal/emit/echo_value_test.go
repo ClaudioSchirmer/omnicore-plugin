@@ -131,7 +131,7 @@ notifications:
       nld: Het gerecht staat al op het menu.
 read:
   backing: relational
-  view: {name: cardapios, version: 1}
+  view: {name: cardapios}
   byId: true
 surfaces: {rest: true}
 authz:

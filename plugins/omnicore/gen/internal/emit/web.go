@@ -194,6 +194,9 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	for _, f := range m.Read.Managed {
 		s.L("\t%s %s `%s`", f.Name, f.GoType, readFieldTag(f, false))
 	}
+	for _, f := range m.ResponseJoinFields() {
+		s.L("\t%s %s `%s`", f.Name, f.GoType, readFieldTag(f, false))
+	}
 	emitComputedResponseFields(s, m, false)
 	for _, c := range m.Children {
 		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
@@ -283,6 +286,17 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 		s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
 	}
 	for _, f := range m.Read.Managed {
+		typ := f.GoType
+		if pointered {
+			typ = "*" + f.BaseGoType
+		}
+		s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
+	}
+	// A LEFT join's field is already a pointer, and it stays one even where the
+	// shape is not sparse: nil there means "no counterpart", which is a
+	// different answer from the zero value and the one the framework insists on
+	// preserving all the way to the wire.
+	for _, f := range m.ResponseJoinFields() {
 		typ := f.GoType
 		if pointered {
 			typ = "*" + f.BaseGoType
@@ -396,7 +410,7 @@ func emitRoutes(m *ir.Model) (fsplan.File, error) {
 	if m.Service != nil {
 		s.L("\tsvc domain.Service,")
 	}
-	s.L("\tview *query.ViewDefinition,")
+	s.L("\tview %s,", viewType(m))
 	s.L("\td bootstrap.Deps,")
 	s.L(") {")
 	if !m.Surfaces.REST {
@@ -593,6 +607,13 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 				}
 				// exportLabelKey rides the nested row too: a hierarchical export
 				// gives every level its own columns, and each needs a header.
+				s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
+			}
+			for _, f := range m.ResponseChildJoinFields(c) {
+				typ := f.GoType
+				if pointered {
+					typ = "*" + f.BaseGoType
+				}
 				s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
 			}
 			s.L("}")

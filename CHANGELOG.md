@@ -7,6 +7,106 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-08-23
+
+The framework's v0.57.0 landed two things at once: it turned a relational read model into
+its own TYPE, which broke every tree this generator emits, and it added READ JOINS, which
+change how a rule reaches a value that belongs to another aggregate. This release is both
+halves — the repair, and the capability.
+
+**This release targets framework v0.57.0 and does not support anything older.** The
+generator's supported line moved, and the emitted shape moved with it; a project pinned to
+v0.56 or below has to upgrade first.
+
+### Added
+
+- **`joins:` — read joins in the spec language.** A read-only traversal across a foreign
+  key into ANOTHER aggregate, declared on the REPOSITORY: the mapped columns become
+  ordinary Go fields of the entity, filled on every load, and no `INSERT` or `UPDATE` can
+  ever carry them because the `TableSchema` is untouched.
+
+  The reason this matters more than "one more key" is what it makes unnecessary. A rule
+  that needs a value belonging to another aggregate used to mean a denormalized column
+  plus a write path keeping it in step — a rule that is quietly wrong the moment the
+  source changes. Now the value is simply there, on the entity, at every load, with
+  nothing duplicated and nothing to synchronize.
+
+  `kind: inner | left` decides what a joining row with no counterpart means. `on:` names
+  the foreign key on the joining table, `inChild:` hangs the traversal off one of the
+  entity's own collections, and each `fields[]` entry maps one column of the target onto
+  a Go name of your choosing.
+
+- **`joins[].fields[].hidden` — on the entity, off the wire.** Needing a value and
+  publishing it are different decisions, so the language asks them separately. A hidden
+  joined field is filled on every load and read by the rules and the domain service, and
+  it is in no response body and in no export. It is the shape for a traversal declared for
+  a RULE, and without it "the rule needs it" quietly becomes "the caller receives it",
+  which is an API promise nobody planned to make.
+
+- **`shared/read-joins.md` — the plugin-side owner of the whole subject.** What a join is,
+  where it is declared, the two kinds and what a missing counterpart means, the load-only
+  boundary inside a collection, what it costs, and the line to hold when someone asks a
+  join to do more than it can. Every skill that writes a rule, a repository or a read
+  model now routes there. The three previously-correct answers it overturns — copy the
+  column, load the other aggregate inside the rule, or materialize a Mongo view for it —
+  are named as the thing not to do.
+
+- **Two golden-gate lanes** (`73 passed`, was 71): the running service is asked to prove a
+  join end to end — an inner join serves the counterpart's value, a hidden field never
+  reaches the wire, a left join with no counterpart answers an ABSENCE rather than the
+  zero value, and a joined field filters and orders the listing — and the prune lane
+  compiles a join whose target is HAND-WRITTEN, which is the escape hatch's only honest
+  proof.
+
+### Changed
+
+- **breaking: the generator targets framework v0.57.0.** A relational read model is now
+  emitted as its own declaration type over the aggregate's existing loader, contributed
+  through the framework's relational feature seam rather than the Mongo one. The emitted
+  view function returns a different type and takes the loader as its only structural
+  input — the loader carries the schema, so nothing about the shape is restated and the
+  old `BoundTable()` boot guard is gone with the thing it guarded.
+
+  *Migration*: regenerate. Every generated view, feature and mount signature moves
+  together, and no spec key changes except the one below.
+
+- **breaking: `read.view.version` is REFUSED on a relational backing.** A read model that
+  materializes nothing has no stored shape to grow stale against, nothing to rebuild and
+  no boot to refuse, so a version there is a number nobody ever compares. It joins
+  `read.indexes`, `read.view.deleteOnArchive` and `read.view.ttlSeconds` in the set the
+  build refuses rather than silently discards — and the generator's own drift guard
+  (shape-changed-without-a-bump) now stands down for that backing, because there is
+  nothing it could be guarding.
+
+  *Migration*: delete the key. A relational shape change is free — no bump, no rebuild, no
+  operational step.
+
+- **A read-model name may not end in `__0` or `__1`.** They are the blue-green slot
+  suffixes the framework addresses a projected view's two physical collections by, and
+  every consequence of the collision is silent. `check` refuses it here, in the same words
+  the framework refuses it at boot.
+
+- **The backing flip is a CONVERSION, not a flag** — and `evolve-view` now plans both
+  halves of it. Relational→Mongo re-declares the view on the other seam and rebuilds;
+  Mongo→relational leaves a collection AND an `omnicore_mongo_views` row behind that
+  nothing drops for you, so the DB-per-service guard aborts the next boot outside `dev`.
+  The registry row is the half that gets forgotten, and forgetting it aborts the boot for
+  a different reason than the one you just fixed. Both statements are now in the plan,
+  which is read BEFORE the boot fails.
+
+- **`UnsupportedCapabilityNotification` replaces the relational-specific name** across the
+  skills, and `doctor` now tells the two 400s apart: a capability the backing cannot serve
+  versus a `?fields=` path or cursor the read model does not have — the second is a
+  client-side problem and must not be answered with a backing conversion.
+
+- **The read-side knowledge was wrong in one load-bearing place and is fixed.**
+  "The relational side cannot reach another aggregate" was true until v0.57 and is now
+  false. `shared/read-side.md` says so plainly, and says the gap NARROWED rather than
+  closed: a join is 1:1 and horizontal, one column at a time, while Mongo still does
+  strictly more. `scaffold-view` gained a gate ahead of its composition catalog for the
+  request that a join already answers, so a ComposedView is no longer proposed for a
+  problem that needs no view at all.
+
 ## [0.31.0] — 2026-08-21
 
 One key, reported from a consumer that had written its spec, got `✓ this spec can be

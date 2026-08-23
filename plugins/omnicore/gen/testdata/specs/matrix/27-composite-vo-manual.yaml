@@ -85,7 +85,7 @@ modes: [display, insert, update, archive]
 update: {shape: patch}
 read:
   backing: relational
-  view: {name: permissoes, version: 1}
+  view: {name: permissoes}
   # Colunas carimbadas pelo framework, expostas na leitura porque foram
   # DECLARADAS. Entram na view, no by-id, em cada linha da listagem e no export,
   # e podem ser filtradas como qualquer campo — "criadas entre estas datas" é a

@@ -1910,15 +1910,21 @@ func emitViewTests(m *ir.Model) (fsplan.File, error) {
 	s.L("import %s", quote("testing"))
 	s.Blank()
 
-	s.Doc(
+	doc := []string{
 		"The view builds and answers the name the spec declared.",
 		"",
-		"A view is validated as it is declared: an index on a path it cannot resolve, "+
-			"a projection of a field that is not there. Every one of those aborts the "+
+		"A view is validated as it is declared: an index on a path it cannot resolve, " +
+			"a projection of a field that is not there. Every one of those aborts the " +
 			"boot, and building the definition here turns that into a test failure.",
-		"",
-		"The source is nil on purpose — nothing is read here; the declaration itself "+
-			"is what is under test.")
+	}
+	if m.Read.Backing == "relational" {
+		doc = append(doc, "",
+			"The loader is nil on purpose — nothing is read here; the declaration "+
+				"itself is what is under test. The framework's own boot validation "+
+				"rejects a nil loader, which is a service-wide check over every "+
+				"declared read model rather than a property of this one.")
+	}
+	s.Doc(doc...)
 	s.L("func Test%sViewBuilds(t *testing.T) {", m.Entity.Pascal)
 	if m.Read.Backing == "relational" {
 		s.L("\tv := %sView(nil)", m.Entity.Pascal)

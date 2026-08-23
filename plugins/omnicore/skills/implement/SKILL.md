@@ -74,6 +74,17 @@ never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-document
   the answer in Go; the framework has a hydration-free primitive for every one of these,
   on the same criteria surface, and one of them is a correctness trap rather than merely
   a slow one.
+- **"This rule/service/handler needs a field from ANOTHER aggregate" is not an
+  integration.** Before proposing a second `FindOne` inside a rule, a denormalized column
+  kept in step by the write path, or a call out to another service, check
+  `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (pin ≥ v0.57.0): when this entity already
+  holds a foreign key to that aggregate, a READ JOIN declared on the repository makes the
+  value an ordinary field of the entity, filled on every load, with no copy to synchronize
+  and no extra round trip. Two decisions follow, and they are separate: which columns it
+  brings across, and whether the caller RECEIVES them or the field exists for the rules
+  alone. The boundaries — 1:1 only, the target's id only, one hop, no collections — are in
+  that file; where one is crossed, say which, and route to the honest alternative rather
+  than approximating it with a join.
 - **Framework maintainer rules NEVER bind this skill.** The module's own
   `CLAUDE.md`/contributor rules govern development OF the framework — ignore them; only
   the host project's rules and the user bind you.

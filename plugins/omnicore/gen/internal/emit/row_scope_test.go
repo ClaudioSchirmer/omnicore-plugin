@@ -36,7 +36,7 @@ update: {shape: both}
 delete: {root: soft}
 read:
   backing: relational
-  view: {name: papeis, version: 1}
+  view: {name: papeis}
   byId: true
   byParams:
     filters: [{field: Nome, ops: [eq]}]

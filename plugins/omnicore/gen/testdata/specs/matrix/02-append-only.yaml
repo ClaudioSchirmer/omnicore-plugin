@@ -18,7 +18,7 @@ rules:
     - {id: descricao-obrigatoria, kind: required, scope: [insert], fields: [Descricao], notification: RequiredFieldNotification}
 read:
   backing: relational
-  view: {name: lancamentos, version: 1}
+  view: {name: lancamentos}
   byId: true
   byParams:
     filters:

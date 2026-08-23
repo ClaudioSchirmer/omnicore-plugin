@@ -113,6 +113,9 @@ var (
 	FactReturns = set("bool", "int64", "float64", "string")
 
 	ReadBackings  = set("relational", "mongo")
+	// JoinKinds is what a joining row with no counterpart means. The choice is
+	// not free: inner is legal only over a NON-NULLABLE foreign key.
+	JoinKinds = set("inner", "left")
 	IdentityViews = set("create", "add-role", "skip")
 	IndexOrders   = set("asc", "desc")
 
@@ -283,8 +286,16 @@ func Vocabularies() []Vocabulary {
 			"how the fact is answered; manual means you write it in the hook file."},
 		{"service.facts[].returns", FactReturns,
 			"the Go type the fact answers with."},
+		{"joins[].kind", JoinKinds,
+			"what a row with NO counterpart means: left keeps it and reads the joined " +
+				"fields as NULL (legal over any foreign key, and the fields land in " +
+				"nullable Go types); inner drops it, and is legal ONLY over a " +
+				"non-nullable foreign key — the declaration reaches FindByID too, so " +
+				"over a nullable one it would turn a legitimate write into a 404."},
 		{"read.backing", ReadBackings,
-			"relational = read straight from the tables; mongo = from a projection updated shortly after."},
+			"relational = read straight from the tables (its own read-model KIND: no version, " +
+				"no collection, no rebuild — and it inherits whatever the repository's read " +
+				"joins reach); mongo = from a projection updated shortly after the write."},
 		{"read.identityView", IdentityViews,
 			"whether this role creates the shared identity's own view, joins it, or skips it."},
 		{"read.indexes[].order", IndexOrders,

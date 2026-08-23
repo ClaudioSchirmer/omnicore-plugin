@@ -542,6 +542,14 @@ func ViewShape(m *ir.Model) string {
 	if !m.Read.Enabled {
 		return ""
 	}
+	// A relational read model has no materialisation, so it has no stored shape
+	// to grow stale against: nothing is versioned, nothing is rebuilt, and the
+	// framework has no projection to refuse to boot against. An empty
+	// fingerprint is what turns the version guard off for it — the honest answer
+	// rather than a hash nobody compares.
+	if m.Read.Backing == "relational" {
+		return ""
+	}
 	var b strings.Builder
 	b.WriteString(m.Read.ViewName + "\n")
 	for _, f := range m.AllOwnerFields() {

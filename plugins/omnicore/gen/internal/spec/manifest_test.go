@@ -138,7 +138,7 @@ func minimalSpec() *Spec {
 			LivesOn: "root", Example: "Ana", Description: "Nome do aluno.",
 		}},
 		Modes:    []string{"display", "insert"},
-		Read:     Read{Backing: "relational", View: View{Name: "students", Version: 1}, ByID: true},
+		Read:     Read{Backing: "relational", View: View{Name: "students"}, ByID: true},
 		Surfaces: Surfaces{REST: true},
 		Authz: Authz{
 			Resource:    "student",

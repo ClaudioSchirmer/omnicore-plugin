@@ -67,7 +67,7 @@ notifications:
     text: {ptbr: Nível de contrato desconhecido., eng: Unknown contract level., esp: Nivel de contrato desconocido., fra: Niveau de contrat inconnu., deu: Unbekannte Vertragsstufe., ita: Livello di contratto sconosciuto., nld: Onbekend contractniveau.}
 read:
   backing: relational
-  view: {name: contratos, version: 1}
+  view: {name: contratos}
   byId: true
   byParams:
     filters:

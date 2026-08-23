@@ -120,6 +120,17 @@ fields:
     claim: email
     description: E-mail do solicitante, vindo do token — nunca persistido.
 
+  # A chave estrangeira para outra agregada e uma coluna comum desta entidade.
+  # Nada nela e especial aqui — o que a torna alcancavel numa CONSULTA e o bloco
+  # joins: la embaixo, que e uma declaracao separada de proposito.
+  - name: CampusID
+    type: id
+    column: campus_id
+    livesOn: root
+    example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4
+    description: Campus ao qual a matricula pertence.
+    labelKey: StudentCampusIDField
+
 valueObjects:
   - name: Email
     kind: raw
@@ -380,6 +391,63 @@ notifications:
       ita: L'iscrizione è fuori dalla finestra accademica corrente.
       nld: De inschrijving valt buiten het huidige academische venster.
 
+# READ JOINS — o alcance a OUTRA agregada, atraves de uma chave estrangeira.
+#
+# Declarados aqui, eles pousam no REPOSITORIO: nunca no TableSchema e nunca na
+# view. Uma coluna de join nao entra em INSERT nem em UPDATE, e uma projecao
+# Mongo desta entidade nao muda em nada — o que o join acrescenta e permissao
+# para ATRAVESSAR uma coluna que ja existe, o que e acesso, nao armazenamento.
+#
+# E como ele pende do LOADER, UMA declaracao alcanca tudo de uma vez: FindByID
+# (por onde os handlers de escrita carregam), um service chamando o loader, e o
+# modelo de leitura relacional declarado sobre o mesmo loader, que herda o
+# alcance sem declarar nada.
+joins:
+  # Join de RAIZ: sempre no FROM, as colunas viajam no SELECT da raiz. Os campos
+  # ficam preenchidos em TODA leitura — um campo que so aparecesse quando algum
+  # filtro o mencionasse estaria em branco na chamada seguinte.
+  #
+  # kind: inner so e legal sobre chave NAO nula. A declaracao alcanca FindByID,
+  # entao sobre uma chave nula ela derrubaria agregadas em silencio e uma escrita
+  # legitima viraria 404.
+  - to: Campus
+    kind: inner
+    on: campus_id
+    fields:
+      # O nome Go e SEU: a grafia do outro lado nunca sobe da infraestrutura.
+      - name: CampusName
+        column: label
+        example: Campus Norte
+        description: Nome do campus do aluno.
+        labelKey: StudentCampusNameField
+      # hidden: NA ENTIDADE, FORA DA API. O valor e preenchido em todo load e as
+      # regras leem como qualquer outro campo — ele so nao esta em resposta
+      # nenhuma nem em export nenhum. E a forma de um join declarado PARA UMA
+      # REGRA: precisar do valor e publicar o valor sao perguntas diferentes.
+      - name: CampusBudgetCode
+        column: budget_code
+        hidden: true
+        description: Codigo orcamentario do campus — lido pelas regras, nunca servido.
+        labelKey: StudentCampusBudgetCodeField
+
+  # Join a partir de uma COLECAO desta entidade. O verbo nomeia a colecao, `on`
+  # nomeia a chave estrangeira NA TABELA DELA, e o campo pousa na entrada.
+  #
+  # Join em filho e SO-CARGA: preenchido em toda entrada carregada e servido
+  # dentro dela (?fields=guardians.guardianCampusName), mas nem filtra nem
+  # ordena — estreitar a raiz por um campo de colecao 1:N e um pushdown que um
+  # unico SELECT de raiz nao expressa.
+  - to: Campus
+    kind: left
+    on: campus_id
+    inChild: Guardian
+    fields:
+      - name: GuardianCampusName
+        column: label
+        example: Campus Norte
+        description: Campus de referencia do responsavel, quando houver.
+        labelKey: GuardianCampusNameField
+
 children:
   - name: Guardian
     plural: Guardians
@@ -414,6 +482,13 @@ children:
         example: "+55 51 99999-0000"
         description: Telefone de contato.
         labelKey: GuardianPhoneField
+      - name: CampusID
+        type: id
+        column: campus_id
+        nullable: true
+        example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4
+        description: Campus de referencia do responsavel, quando houver.
+        labelKey: GuardianCampusIDField
     rules:
       list:
         - id: guardian-name-required
@@ -487,7 +562,6 @@ read:
   backing: relational
   view:
     name: students
-    version: 1
     maxLimit: 200
   fieldRestrict:
     - field: Grade
@@ -540,13 +614,17 @@ read:
       # significa nada e e recusado aqui.
       - field: ID
         ops: [eq, in]
+      # Um campo de join de RAIZ filtra e ordena como uma coluna qualquer: ele
+      # viaja no SELECT da raiz, entao a loja compara e ordena por ele.
+      - field: CampusName
+        ops: [eq, contains]
     # O vocabulario de ordenacao. Viaja com controls.orderBy: o controle e o
     # INTERRUPTOR, isto e QUAIS caminhos ?orderBy= aceita. Nenhuma metade sozinha
     # e legal — o framework derruba o boot nas duas.
     #
     # ID esta sempre disponivel: e a unica coluna indexada antes de alguem pedir,
     # e e o mesmo desempate que o cursor ja acrescenta a toda chave.
-    sort: [ID, Name, EnrollmentNumber, EnrolledAt, TuitionAmount]
+    sort: [ID, Name, EnrollmentNumber, EnrolledAt, TuitionAmount, CampusName]
     controls:
       pagination: true
       orderBy: true

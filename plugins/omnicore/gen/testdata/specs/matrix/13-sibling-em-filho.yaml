@@ -61,7 +61,7 @@ notifications:
     text: {ptbr: "A capacidade deve ficar entre {min} e {max}.", eng: "Capacity must be between {min} and {max}.", esp: "La capacidad debe estar entre {min} y {max}.", fra: "La capacité doit être comprise entre {min} et {max}.", deu: "Die Kapazität muss zwischen {min} und {max} liegen.", ita: "La capacità deve essere compresa tra {min} e {max}.", nld: "De capaciteit moet tussen {min} en {max} liggen."}
 read:
   backing: relational
-  view: {name: turmas, version: 1}
+  view: {name: turmas}
   byId: true
   byParams:
     filters:

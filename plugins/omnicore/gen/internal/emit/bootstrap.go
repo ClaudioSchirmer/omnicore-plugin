@@ -38,7 +38,7 @@ func emitBootstrap(m *ir.Model) ([]fsplan.File, error) {
 		s.L("\tsvc  *appinfra.%s", m.Service.Impl)
 	}
 	if m.Read.Enabled {
-		s.L("\tview *query.ViewDefinition")
+		s.L("\tview %s", viewType(m))
 	}
 	s.L("}")
 	s.Blank()
@@ -51,7 +51,8 @@ func emitBootstrap(m *ir.Model) ([]fsplan.File, error) {
 	if m.Read.Enabled {
 		if m.Read.Backing == "relational" {
 			s.L("\t// The view reads through the SAME loader as the repository. Building a")
-			s.L("\t// second loader for the same aggregate works and is pure waste.")
+			s.L("\t// second loader for the same aggregate works and is pure waste — and the")
+			s.L("\t// loader is what carries the schema, so there is no shape to restate.")
 			s.L("\treturn &%s{repo: repo,%s view: appviews.%sView(repo.Loader)}", feature, svcField(m), m.Entity.Pascal)
 		} else {
 			s.L("\treturn &%s{repo: repo,%s view: appviews.%sView()}", feature, svcField(m), m.Entity.Pascal)
@@ -63,9 +64,20 @@ func emitBootstrap(m *ir.Model) ([]fsplan.File, error) {
 	s.Blank()
 
 	if m.Read.Enabled {
-		s.Doc("Views contributes this aggregate's projection to the framework's sync engine.")
-		s.L("func (f *%s) Views() []*query.ViewDefinition {", feature)
-		s.L("\treturn []*query.ViewDefinition{f.view}")
+		if m.Read.Backing == "relational" {
+			s.Doc("RelationalViews contributes this aggregate's read model through "+
+				"bootstrap.RelationalReadableFeature — the sibling seam of Views().",
+				"",
+				"It is a different seam because it is a different KIND of read model: "+
+					"nothing here is materialised, so the sync engine, the drift detector "+
+					"and the rebuild have nothing to receive.")
+			s.L("func (f *%s) RelationalViews() []*query.RelationalViewDefinition {", feature)
+			s.L("\treturn []*query.RelationalViewDefinition{f.view}")
+		} else {
+			s.Doc("Views contributes this aggregate's projection to the framework's sync engine.")
+			s.L("func (f *%s) Views() []*query.ViewDefinition {", feature)
+			s.L("\treturn []*query.ViewDefinition{f.view}")
+		}
 		s.L("}")
 		s.Blank()
 	}
@@ -117,4 +129,16 @@ func mountSvcArg(m *ir.Model) string {
 		return ""
 	}
 	return " f.svc,"
+}
+
+// viewType is the Go type of the read model this backing declares.
+//
+// The two are unrelated types on purpose: a relational read model carries no
+// version, no collection and no Mongo spec, so the projection machinery — which
+// takes *query.ViewDefinition concretely — cannot be handed one by accident.
+func viewType(m *ir.Model) string {
+	if m.Read.Backing == "relational" {
+		return "*query.RelationalViewDefinition"
+	}
+	return "*query.ViewDefinition"
 }

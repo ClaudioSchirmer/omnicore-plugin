@@ -65,3 +65,29 @@ func lowerASCII(s string) string {
 	}
 	return string(out)
 }
+
+// ReservedViewSuffix reports why a read-model name is refused, or "".
+//
+// `__0` and `__1` are the blue-green SLOT suffixes the framework addresses a
+// view's two physical collections by. A view named `users__0` would own a bare
+// collection byte-identical to view `users`'s FIRST SLOT — and every
+// consequence of that collision is silent: the DB-per-service guard whitelists
+// all three physical names per view and reads the overlap as legitimate on both
+// sides, a rebuild of `users` provisions into `users__0` and drops what is
+// already there, and the orphan-collection diagnostic names the wrong registry
+// row.
+//
+// The framework refuses it at boot in EVERY read-model family — plain views,
+// shared-base views, composed views and relational views alike, because all four
+// share one namespace. This is the generator's copy of that rule, answered while
+// the author is still in the file (query.ReservedNameSuffixProblem is the
+// framework's own, exported for exactly this).
+func ReservedViewSuffix(name string) string {
+	for _, slot := range []string{"__0", "__1"} {
+		if len(name) > len(slot) && name[len(name)-len(slot):] == slot {
+			return "ends in " + slot + ", which is a blue-green slot suffix the " +
+				"framework reserves for a view's physical collections"
+		}
+	}
+	return ""
+}

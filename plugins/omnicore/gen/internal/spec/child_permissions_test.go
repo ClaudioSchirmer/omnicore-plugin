@@ -141,7 +141,7 @@ children:
       - {name: DiaSemana, type: string, column: dia_semana, length: 15, example: segunda, description: O dia.}
 read:
   backing: relational
-  view: {name: turmas, version: 1}
+  view: {name: turmas}
   byId: true
 surfaces: {rest: true}
 authz:

@@ -157,10 +157,17 @@ generator emits it).
 - Field-level read authz: any field only SOME callers may see? (`ReadCriteria.Restrict`
   — passive omission vs active 403, prunes `?fields=`/GraphQL selection/exports alike;
   `authz-seams.html`.) Ask — invisible at modeling time, loved when offered.
-- View backing: relational (SoR, read-your-writes) | Mongo (canonical) — default =
-  project posture; on SQLite the plain per-entity view is FORCED relational (no CDC
-  source ⇒ a Mongo projection never materializes; `shared/read-side.md`). Shapes
-  RelationalSource cannot serve (SharedBaseView) follow the §1 identity-view rule.
+- View backing: relational (SoR, read-your-writes — its own declaration type: no version,
+  no collection, no rebuild) | Mongo (canonical) — default = project posture; on SQLite the
+  plain per-entity view is FORCED relational (no CDC source ⇒ a Mongo projection never
+  materializes; `shared/read-side.md`). Shapes a relational read model cannot serve
+  (SharedBaseView) follow the §1 identity-view rule.
+- Read joins: does a RULE, a service fact or the listing need a field belonging to ANOTHER
+  aggregate this entity already holds a foreign key to? (pin ≥ v0.57.0 — declared on the
+  repository, `shared/read-joins.md`.) Two answers per traversal, and they are separate
+  questions: WHICH columns it brings across, and whether the caller RECEIVES them or the
+  field exists for the rules alone. Ask — a dev who does not know it exists will otherwise
+  ask for the column to be copied into this table.
 - Filter/sort/search operators per field (low-risk — filled, shown):
 
 ## 10. Authorization                          [required — BOTH slots, a blank is invalid]

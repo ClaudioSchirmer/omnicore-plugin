@@ -186,6 +186,7 @@ func emitRepository(m *ir.Model) (fsplan.File, error) {
 	emitConstraints(s, m)
 
 	s.L("\tr.WithSchema(schemas.%sSchema())", m.Entity.Pascal)
+	emitWithJoins(s, m)
 	s.L("\treturn r")
 	s.L("}")
 	s.Blank()
@@ -286,28 +287,60 @@ func emitView(m *ir.Model) (fsplan.File, error) {
 	s.L(")")
 	s.Blank()
 
-	relational := m.Read.Backing == "relational"
+	if m.Read.Backing == "relational" {
+		return emitRelationalView(s, m)
+	}
+	return emitMongoView(s, m)
+}
+
+// emitRelationalView writes the read model served straight from the SoR.
+//
+// It is a DIFFERENT TYPE from a projected view, not a flag on one, and almost
+// everything a projected view carries is absent by construction: no version, no
+// schema argument, no collection, no indexes, no archive-drop, no TTL. The
+// loader is the only structural input — it carries the schema, so the two
+// cannot disagree and there is no boot guard to satisfy.
+func emitRelationalView(s *src, m *ir.Model) (fsplan.File, error) {
 	doc := []string{
-		fmt.Sprintf("%sView is the read side of the aggregate.", m.Entity.Pascal),
+		fmt.Sprintf("%sView is the read side of the aggregate, served straight from the "+
+			"relational tables.", m.Entity.Pascal),
 		"",
-		"The schema alone materialises the document — the fields it maps are what the " +
-			"view serves, with no field list repeated here.",
+		"There is no projection between the write and this read: a write is visible " +
+			"to the very next read, with no CDC hop to wait for.",
+		"",
+		"The loader carries the schema, so nothing about the shape is restated here — " +
+			"and there is no Version, because a read model with no materialisation has " +
+			"no stored shape to grow stale against.",
 	}
-	if relational {
-		doc = append(doc, "",
-			"This view reads straight from the relational tables, so it has no separate "+
-				"collection and a write is visible to the very next read.")
-	}
-	doc = append(doc, "",
-		"Version identifies the shape. Bump it whenever the projected shape changes, "+
-			"or the framework aborts the boot rather than serving a stale projection.")
 	s.Doc(doc...)
 
-	if relational {
-		s.L("func %sView(source query.RelationalReader) *query.ViewDefinition {", m.Entity.Pascal)
-	} else {
-		s.L("func %sView() *query.ViewDefinition {", m.Entity.Pascal)
+	s.L("func %sView(loader query.AggregateReader) *query.RelationalViewDefinition {", m.Entity.Pascal)
+	s.L("\t// The aggregate's OWN loader, shared with the repository — never a second one.")
+	s.L("\tv := query.RelationalView(%s, loader)", quote(m.Read.ViewName))
+	if m.Read.MaxLimit > 0 {
+		s.L("\t// A ceiling on how much one request may pull back.")
+		s.L("\tv = v.MaxLimit(%d)", m.Read.MaxLimit)
 	}
+	s.L("\treturn v")
+	s.L("}")
+
+	return goFile("internal/infra/views/"+m.Entity.Snake+"_view.go", fsplan.Owned,
+		fmt.Sprintf("the %s view (relational-backed)", m.Read.ViewName), s)
+}
+
+// emitMongoView writes the projected read model: a collection, a version and
+// the Mongo-only options.
+func emitMongoView(s *src, m *ir.Model) (fsplan.File, error) {
+	s.Doc(
+		fmt.Sprintf("%sView is the read side of the aggregate.", m.Entity.Pascal),
+		"",
+		"The schema alone materialises the document — the fields it maps are what the "+
+			"view serves, with no field list repeated here.",
+		"",
+		"Version identifies the shape. Bump it whenever the projected shape changes, "+
+			"or the framework aborts the boot rather than serving a stale projection.")
+
+	s.L("func %sView() *query.ViewDefinition {", m.Entity.Pascal)
 	s.L("\tv := query.View(%s).", quote(m.Read.ViewName))
 	s.L("\t\tVersion(%d).", m.Read.Version)
 	s.L("\t\tSchema(schemas.%sSchema())", m.Entity.Pascal)
@@ -333,15 +366,11 @@ func emitView(m *ir.Model) (fsplan.File, error) {
 		s.L("\tv = v.Indexes(query.Index(%s).TTL(%d * time.Second))",
 			quote(m.Managed.ArchivedAt), m.Read.TTLSeconds)
 	}
-	if relational {
-		s.L("\t// The aggregate's OWN loader, shared with the repository — never a second one.")
-		s.L("\tv = v.RelationalSource(source)")
-	}
 	s.L("\treturn v")
 	s.L("}")
 
 	return goFile("internal/infra/views/"+m.Entity.Snake+"_view.go", fsplan.Owned,
-		fmt.Sprintf("the %s view (%s-backed)", m.Read.ViewName, m.Read.Backing), s)
+		fmt.Sprintf("the %s view (mongo-backed)", m.Read.ViewName), s)
 }
 
 // qualifyNotification renders a notification reference from inside the infra
@@ -518,4 +547,103 @@ func quoteList(items []string) string {
 		out = append(out, quote(i))
 	}
 	return strings.Join(out, ", ")
+}
+
+// emitWithJoins declares the aggregate's READ JOINS on the repository.
+//
+// The repository is where they belong, and the placement is the design rather
+// than a convention. A TableSchema declares the form of ONE entity; a foreign
+// key to another aggregate is already an ordinary column of that form, and what
+// a join adds is permission to TRAVERSE it — access, not storage. Keeping it off
+// the schema is also what keeps it invisible to the projection side, which
+// shares that schema with the Mongo composer.
+//
+// Declared here it hangs off the LOADER, so ONE declaration reaches FindOne,
+// FindAll, Exists, Aggregate, the request-scoped ScopedReader, FindByID (which
+// the write-side auto handlers load through) — and any relational read model
+// declared over this loader, which inherits the reach and declares nothing.
+//
+// It stays read-only STRUCTURALLY: WriteFields walks the TableSchema, so a
+// joined column can never enter an INSERT or UPDATE.
+func emitWithJoins(s *src, m *ir.Model) {
+	if len(m.Joins) == 0 {
+		return
+	}
+	s.Blank()
+	s.L("\t// Read joins: read-only traversals across a foreign key into another")
+	s.L("\t// aggregate. They fill ordinary fields of the entity on every load and are")
+	s.L("\t// absent from the TableSchema, so no write can carry them.")
+	s.L("\tr.WithJoins(")
+	for _, j := range m.Joins {
+		emitOneJoin(s, j)
+	}
+	s.L("\t)")
+}
+
+func emitOneJoin(s *src, j ir.Join) {
+	head := fmt.Sprintf("read.%s(schemas.%s())", j.Verb(), j.TargetSchemaFunc)
+	if j.Child != "" {
+		// Two positional schema arguments would be swappable without a compile
+		// error, so the framework puts the CHILD behind the verb and the target
+		// behind .To(...).
+		head = fmt.Sprintf("read.%sInChild(schemas.%s()).To(schemas.%s())",
+			j.Verb(), j.ChildSchemaFunc, j.TargetSchemaFunc)
+	}
+	for _, line := range wrapComment(joinCallNote(j), 70) {
+		s.L("\t\t// %s", line)
+	}
+	s.L("\t\t%s.", head)
+	s.L("\t\t\tOn(%s).", quote(j.FKColumn))
+	for i, f := range j.Fields {
+		sep := "."
+		if i == len(j.Fields)-1 {
+			sep = ","
+		}
+		// Same two arguments, same order, as TableSchema.Field: the Go field on
+		// this side, then the column on the joined one.
+		s.L("\t\t\tField(%s, %s)%s", quote(f.Name), quote(f.Column), sep)
+	}
+}
+
+// joinCallNote states what the traversal costs and what a missing counterpart
+// does, which is the pair a reader of the constructor needs.
+func joinCallNote(j ir.Join) string {
+	switch {
+	case j.Child != "" && j.Kind == "inner":
+		return fmt.Sprintf("%s → %s, on every loaded entry. No counterpart drops the ENTRY, "+
+			"not the root — a hole in the collection.", j.Child, j.Target)
+	case j.Child != "":
+		return fmt.Sprintf("%s → %s, on every loaded entry; nil where there is none.",
+			j.Child, j.Target)
+	case j.Kind == "inner":
+		return fmt.Sprintf("→ %s, always in the FROM. No counterpart drops the aggregate "+
+			"from EVERY read, FindByID included — which is why the framework allows it "+
+			"only over a non-nullable key.", j.Target)
+	default:
+		return fmt.Sprintf("→ %s, always in the FROM. No counterpart leaves the fields nil "+
+			"— an absence, never the zero value.", j.Target)
+	}
+}
+
+// wrapComment breaks a note into lines a reader can take in. gofmt does not
+// reflow comments, so an emitter that writes one long line writes one long line
+// into somebody's editor forever.
+func wrapComment(text string, width int) []string {
+	var out []string
+	line := ""
+	for _, w := range strings.Fields(text) {
+		switch {
+		case line == "":
+			line = w
+		case len(line)+1+len(w) <= width:
+			line += " " + w
+		default:
+			out = append(out, line)
+			line = w
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
 }

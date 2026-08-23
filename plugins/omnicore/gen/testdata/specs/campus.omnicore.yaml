@@ -1,0 +1,55 @@
+# O ALVO de um read join — uma agregada flat que outra alcança por uma chave
+# estrangeira.
+#
+# Ela existe para ser atravessada: o spec do aluno declara joins até aqui, e é
+# deste arquivo que o gerador tira as colunas e os tipos. Alvo invisível não
+# tem coluna que se possa conferir.
+specVersion: 1
+entity: Campus
+plural: Campi
+language: pt-BR
+
+storage:
+  kind: flat
+  table: campi
+  description: Campi da instituição.
+  managed:
+    createdAt: created_at
+    updatedAt: updated_at
+    revision: revision
+
+fields:
+  - name: CampusLabel
+    type: string
+    column: label
+    length: 120
+    livesOn: root
+    example: Campus Norte
+    description: Nome do campus.
+    labelKey: CampusLabelField
+
+  - name: BudgetCode
+    type: string
+    column: budget_code
+    length: 20
+    livesOn: root
+    example: ORC-2026-11
+    description: Código orçamentário do campus.
+    labelKey: CampusBudgetCodeField
+
+modes: [display, insert]
+
+read:
+  backing: relational
+  view: {name: campi}
+  byId: true
+  byParams:
+    filters:
+      - {field: CampusLabel, ops: [eq, contains]}
+
+surfaces: {rest: true}
+
+authz:
+  resource: campus
+  dataAccess: anyone-with-permission
+  permissions: {insert: "campus:escrever", read: "campus:ler"}

@@ -92,6 +92,7 @@ func emitAVO(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("type %s struct {", c.Name)
 	s.L("\tdomain.Managed")
 	emitStructFields(s, c.Fields)
+	emitJoinStructFields(s, childJoins(m, c), "this entry")
 	s.L("}")
 	s.Blank()
 
@@ -732,4 +733,22 @@ func childInputFold(c ir.Child, recv, indent string) string {
 	}
 	fmt.Fprintf(&b, "%s}.To%s()", indent, c.Name)
 	return b.String()
+}
+
+// childJoins are the read joins that hang off THIS collection.
+//
+// A child join rides the collection's own batched SELECT, so its fields are
+// filled on every loaded entry — and an InnerJoinInChild eliminates the ENTRY,
+// not the root: the aggregate still comes back, with that element missing from
+// its collection. That is a silent hole in the array rather than a missing
+// aggregate, which is why the left form is the one to reach for whenever the
+// relationship is genuinely optional.
+func childJoins(m *ir.Model, c ir.Child) []ir.Join {
+	var out []ir.Join
+	for _, j := range m.Joins {
+		if j.Child == c.Name {
+			out = append(out, j)
+		}
+	}
+	return out
 }

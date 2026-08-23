@@ -21,7 +21,11 @@ HOST="${HOST:-$GEN_DIR/testdata/host}"
 WORK="${WORK:-/tmp/omnicore-gen-golden}"
 # Relational fixtures: generated into the host that BOOTS, because the boot host
 # is infra-free by design.
-FIXTURES="${FIXTURES:-$GEN_DIR/testdata/specs/student.omnicore.yaml $GEN_DIR/testdata/specs/teacher.omnicore.yaml $GEN_DIR/testdata/specs/role.omnicore.yaml}"
+# campus comes FIRST: it is the TARGET of the student's read joins, and the
+# generator resolves a join's columns and their types from the target's own
+# spec. Generating the joining side before the target exists would be a lane
+# that proves the refusal rather than the feature.
+FIXTURES="${FIXTURES:-$GEN_DIR/testdata/specs/campus.omnicore.yaml $GEN_DIR/testdata/specs/student.omnicore.yaml $GEN_DIR/testdata/specs/teacher.omnicore.yaml $GEN_DIR/testdata/specs/role.omnicore.yaml}"
 PRIMARY_FIXTURE="${PRIMARY_FIXTURE:-$GEN_DIR/testdata/specs/student.omnicore.yaml}"
 # Mongo fixture: generated into a SEPARATE tree that is built and vetted but not
 # booted. A Mongo-backed view aborts the boot without a mongo.uri, so mixing it
@@ -274,9 +278,17 @@ else
     # dropped the collections and the facet's fields from by-id alone: opening a
     # record showed LESS of it than the list it was opened from, and no second
     # request would have filled the gap, because the document was already there.
+    # The student declares an INNER read join onto a campus, so the row it
+    # points at has to exist before the student does — an inner join drops the
+    # aggregate from EVERY read otherwise, FindByID included, and the write
+    # below would come back 404 on its own record.
+    CAMPUS_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/campi" \
+      -H 'Content-Type: application/json' \
+      -d '{"campusLabel":"Campus Norte","budgetCode":"ORC-2026-11"}' \
+      2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
     NEW_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/students" \
       -H 'Content-Type: application/json' \
-      -d '{"name":"Ana Paula","enrollmentNumber":"2026-09999","email":"ana@escola.br","status":"active","grade":8.5,"enrolledAt":"2026-02-01T09:00:00Z","tuitionAmount":185000,"tuitionCurrency":"BRL","leaveFrom":"2026-06-01T00:00:00Z","leaveTo":"2026-08-01T00:00:00Z","scholarshipSponsor":"Fundacao Alfa","scholarshipPercentage":50,"guardians":[{"fullName":"Marcos","document":"123.456.789-00","phone":"11999999999"}]}' \
+      -d '{"name":"Ana Paula","enrollmentNumber":"2026-09999","email":"ana@escola.br","status":"active","grade":8.5,"enrolledAt":"2026-02-01T09:00:00Z","tuitionAmount":185000,"tuitionCurrency":"BRL","leaveFrom":"2026-06-01T00:00:00Z","leaveTo":"2026-08-01T00:00:00Z","scholarshipSponsor":"Fundacao Alfa","scholarshipPercentage":50,"campusId":"'"$CAMPUS_ID"'","guardians":[{"fullName":"Marcos","document":"123.456.789-00","phone":"11999999999"}]}' \
       2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
     if [[ -n "$NEW_ID" ]]; then
       SHAPES=$(python3 - "$NEW_ID" <<'PYSHAPE'
@@ -306,6 +318,47 @@ PYSHAPE
         ok "the by-id read returns the same record as the listing"
       else
         bad "by-id and the listing disagree — $SHAPES"
+      fi
+
+      # READ JOINS, end to end. The declaration lives on the repository and
+      # NOTHING else was told about it — not the TableSchema, not the view — so
+      # the only proof that the reach actually reaches is the served document.
+      #
+      # Three assertions, and each one is a different half of the contract: the
+      # value crossed the foreign key at all; a field marked hidden is on the
+      # entity and OFF the wire; and a LEFT join with no counterpart answers an
+      # ABSENCE rather than the zero value.
+      JOINS=$(python3 - "$NEW_ID" <<'PYJOIN'
+import json, sys, urllib.request
+
+entry_id = sys.argv[1]
+bad = []
+with urllib.request.urlopen("http://127.0.0.1:18099/students/" + entry_id) as fh:
+    one = json.load(fh)["data"]
+
+if one.get("campusName") != "Campus Norte":
+    bad.append("the inner join did not serve campusName: %r" % one.get("campusName"))
+if "campusBudgetCode" in one:
+    bad.append("a hidden join field reached the wire")
+for g in one.get("guardians") or []:
+    if g.get("guardianCampusName") is not None:
+        bad.append("a left join with no counterpart served %r, not an absence"
+                   % g.get("guardianCampusName"))
+
+# A ROOT join's field is addressable in a criteria — it rides the root SELECT.
+with urllib.request.urlopen(
+        "http://127.0.0.1:18099/students?campusName=Campus%20Norte&orderBy=campusName") as fh:
+    rows = json.load(fh)["data"]
+if not any(r["id"] == entry_id for r in rows):
+    bad.append("filtering and ordering by the joined field did not find the row")
+
+print("; ".join(bad))
+PYJOIN
+)
+      if [[ -z "$JOINS" ]]; then
+        ok "the read joins serve, hide and filter as declared"
+      else
+        bad "the read joins did not behave as declared — $JOINS"
       fi
 
       # The aggregate id as a QUERY path. It is declared by no fields[] entry and
@@ -628,6 +681,56 @@ func (v TaxID) IsValid(fieldName string, ctx *domain.NotificationContext) bool {
 // but Value(), and this is the other half of what written: manual buys.
 func (v TaxID) String() string { return strings.ToUpper(v.Country) + ":" + v.Number }
 VOEOF
+
+# The hand-written half of a READ JOIN's TARGET.
+#
+# The example reaches into a Campus this project does not generate — which is
+# the shape a service that adopted the generator midway has by definition, and
+# the one the language accepts on the author's word: each mapped field states
+# its own type, and the generated repository calls schemas.CampusSchema()
+# because that is the project's own convention. This lane is what proves the
+# bargain compiles rather than merely validates. Name the schema differently and
+# the build says so at once, which is the honest failure the design promises.
+mkdir -p "$PRUNE_WORK/internal/domain" "$PRUNE_WORK/internal/infra/schemas"
+cat > "$PRUNE_WORK/internal/domain/campus.go" <<'CAMPUSEOF'
+package domain
+
+import "github.com/ClaudioSchirmer/omnicore/domain"
+
+// Campus is hand-written on purpose: it is what a read join TARGETS when the
+// target is not one of this project's specs.
+type Campus struct {
+	domain.BaseEntity
+	Name       string `labelKey:"CampusNameField"`
+	BudgetCode string `labelKey:"CampusBudgetCodeField"`
+}
+
+func (e *Campus) Modes() []domain.EntityMode {
+	return []domain.EntityMode{domain.ModeDisplay}
+}
+
+func (e *Campus) BuildRules() {}
+CAMPUSEOF
+cat > "$PRUNE_WORK/internal/infra/schemas/campus_schema.go" <<'CAMPUSSCHEMAEOF'
+package schemas
+
+import (
+	"github.com/ClaudioSchirmer/omnicore/infra/db/core"
+	appdomain "github.com/omnicore/gen-golden-host/internal/domain"
+)
+
+// CampusSchema is the target a declared read join traverses INTO. The join
+// needs exactly two things from it: the id the predicate compares against, and
+// the columns it maps.
+func CampusSchema() *core.TableSchema {
+	return core.NewTableSchema[*appdomain.Campus]("campi").
+		ID("id").
+		Revision("revision").
+		Field("Name", "name").
+		Field("BudgetCode", "budget_code")
+}
+CAMPUSSCHEMAEOF
+
 prune_ok=1
 # ORDER MATTERS: the neighbour REUSES a value object the first spec declares, so
 # generating it first is refused — the type is not in the project yet.
@@ -639,13 +742,16 @@ done
 if [[ $prune_ok -eq 1 ]]; then
   # Drop the Email field AND its value object from the declaring spec; the
   # neighbour still reuses the VO. Also drop the Guardian collection, so the
-  # ordinary orphan path is exercised in the same run.
+  # ordinary orphan path is exercised in the same run — and with it the read
+  # join that hangs off that collection, which the generator would otherwise
+  # (correctly) refuse as a join from a collection this spec no longer has.
   python3 - "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" <<'PYEOF'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
 s = re.sub(r'  - name: Email\n(?:    .*\n)+?\n', '', s, count=1)
 s = re.sub(r'  - name: Email\n    kind: raw\n(?:    .*\n)+?\n', '', s, count=1)
 s = re.sub(r'\nchildren:\n(?:.*\n)*?\nsiblings:', '\nsiblings:', s)
+s = re.sub(r'\n  # A join FROM ONE OF THIS ENTITY.S OWN COLLECTIONS\..*\n(?:.*\n)*?\nservice:', '\nservice:', s)
 s = s.replace("    version: 1", "    version: 2")
 open(p, 'w').write(s)
 PYEOF

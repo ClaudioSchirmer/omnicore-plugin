@@ -49,6 +49,7 @@ const (
 	CapManualVO        Capability = "hand-written value objects (declared here, written by you): a scalar with kind: manual, a composite with written: manual"
 	CapArchiveOnUpdate Capability = "an update that finishes as an archive (CompleteAsArchive)"
 	CapComputedRead    Capability = "computed read fields (derived per document, no column)"
+	CapReadJoin        Capability = "read joins (reaching another aggregate across a foreign key: on the entity for the rules, and on a relational read model for filter/sort/projection)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -86,6 +87,7 @@ var implemented = map[Capability]bool{
 	CapManualVO:        true,
 	CapArchiveOnUpdate: true,
 	CapComputedRead:    true,
+	CapReadJoin:        true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -107,7 +109,7 @@ func AllCapabilities() []Capability {
 		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild,
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
-		CapComputedRead,
+		CapComputedRead, CapReadJoin,
 	}
 }
 
@@ -126,6 +128,9 @@ func CheckCoverage(s *Spec) *Problems {
 				phaseOf[c]))
 	}
 
+	if len(s.Joins) > 0 {
+		uses(CapReadJoin, "joins", "read joins")
+	}
 	if s.Storage.Kind == "sharedbase-role" {
 		uses(CapSharedBase, "storage.kind", "a shared-base role")
 	}

@@ -74,7 +74,7 @@ notifications:
       nld: Dit profiel verleent deze permissie al.
 read:
   backing: relational
-  view: {name: perfis_pc, version: 1}
+  view: {name: perfis_pc}
   byId: true
   byParams:
     filters: [{field: Chave, ops: [eq, contains]}]

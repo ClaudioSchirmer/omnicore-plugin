@@ -194,7 +194,7 @@ notifications:
 
 read:
   backing: relational
-  view: {name: turmas_g, version: 1}
+  view: {name: turmas_g}
   byId: true
   byParams:
     filters:

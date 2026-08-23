@@ -41,7 +41,7 @@ rules:
       scope: [insert]
 read:
   backing: relational
-  view: {name: anotacoes, version: 1}
+  view: {name: anotacoes}
   byId: true
   byParams:
     filters: [{field: Texto, ops: [contains, icontains]}]

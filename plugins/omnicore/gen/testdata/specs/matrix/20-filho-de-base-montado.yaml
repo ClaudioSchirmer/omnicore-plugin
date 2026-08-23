@@ -64,7 +64,7 @@ notifications:
     text: {ptbr: "Esse título já consta.", eng: "That degree is already there.", esp: "Ese título ya consta.", fra: "Ce titre figure déjà.", deu: "Dieser Titel ist bereits vorhanden.", ita: "Questo titolo è già presente.", nld: "Die titel staat er al."}
 read:
   backing: relational
-  view: {name: estagiarios_bib, version: 1}
+  view: {name: estagiarios_bib}
   byId: true
 surfaces: {rest: true}
 authz:

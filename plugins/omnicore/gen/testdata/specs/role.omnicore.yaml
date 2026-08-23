@@ -206,7 +206,6 @@ read:
   backing: relational
   view:
     name: roles
-    version: 1
     maxLimit: 200
   byId: true
   byParams:

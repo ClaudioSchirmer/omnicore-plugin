@@ -48,7 +48,7 @@ rules:
     - {id: codigo-derivado, description: Calcular Codigo a partir de Texto no insert., scope: [insert]}
 read:
   backing: relational
-  view: {name: anotacoes, version: 1}
+  view: {name: anotacoes}
   byId: true
 surfaces: {rest: true}
 authz:

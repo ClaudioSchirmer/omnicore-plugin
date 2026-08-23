@@ -143,7 +143,7 @@ notifications:
     text: {ptbr: "A data final nao pode ser anterior a inicial.", eng: "The end date cannot precede the start date.", esp: "La fecha final no puede ser anterior a la inicial.", fra: "La date de fin ne peut pas preceder la date de debut.", deu: "Das Enddatum darf nicht vor dem Startdatum liegen.", ita: "La data di fine non puo precedere quella di inizio.", nld: "De einddatum mag niet voor de begindatum liggen."}
 read:
   backing: relational
-  view: {name: contratos, version: 1}
+  view: {name: contratos}
   byId: true
   byParams:
     filters:

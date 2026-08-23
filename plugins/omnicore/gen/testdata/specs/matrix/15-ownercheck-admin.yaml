@@ -41,7 +41,7 @@ rules:
 
 read:
   backing: relational
-  view: {name: salas, version: 1}
+  view: {name: salas}
   byId: true
 surfaces: {rest: true}
 authz:

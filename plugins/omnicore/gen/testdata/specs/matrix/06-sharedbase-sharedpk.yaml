@@ -74,7 +74,7 @@ notifications:
     text: {ptbr: O documento não pode ser alterado., eng: The document cannot be changed., esp: El documento no se puede modificar., fra: Le document ne peut pas être modifié., deu: Das Dokument kann nicht geändert werden., ita: Il documento non può essere modificato., nld: Het document kan niet worden gewijzigd.}
 read:
   backing: relational
-  view: {name: professores, version: 1}
+  view: {name: professores}
   byId: true
   byParams:
     # ID sob sharedbase: a identidade e a chave COMPARTILHADA, na tabela base, e

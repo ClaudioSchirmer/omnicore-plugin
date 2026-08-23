@@ -49,7 +49,7 @@ children:
       - {name: PermissaoID, type: id, column: permissao_id, example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31, description: A permissão.}
 read:
   backing: relational
-  view: {name: papeis, version: 1}
+  view: {name: papeis}
   byId: true
 surfaces: {rest: true}
 authz:

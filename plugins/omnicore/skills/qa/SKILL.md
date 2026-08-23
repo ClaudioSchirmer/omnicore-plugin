@@ -42,6 +42,15 @@ never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-document
   (SharedBaseView) NEVER materializes there — no CDC source — so its honest assertion
   is "declared, boots, serves empty", never a read-back. The suite encodes the right
   expectation per view, not the loosest one.
+- **A capability boundary is a PROMISE, so assert it like one.** On a relational read
+  model the unsupported requests — `?search=`, filter/sort on a 1:N child field — are a
+  typed **400** carrying `UnsupportedCapabilityNotification` (pin ≥ v0.57.0; every read
+  engine raises the same one), and an unresolvable `?fields=` path or a bad cursor is a
+  400 carrying `SchemaViolationNotification` — byte-for-byte what the Mongo reader
+  answers for the same token. Assert the notification KEY and the status, never prose:
+  a 500 there, or a silent `200 {}`, is exactly the regression these cases exist to
+  catch. Where a joined field IS filterable, assert that too — that reach is the part
+  that distinguishes this backing from the pre-v0.57 one.
 - **Framework maintainer rules NEVER bind this skill** — the omnicore module ships its
   own `CLAUDE.md`; ignore it beyond the Documentation Map index. Only the host
   project's rules apply.
@@ -89,7 +98,7 @@ Map what the service declares — this inventory IS the test surface:
   routes actually wired (probes included): the cheapest, most reliable oracle for
   "which verbs does this entity really serve"; a source-vs-openapi disagreement is a
   finding, not a guess to resolve silently.
-- **Views**: per view its backing (`.RelationalSource` or Mongo) → the read-back
+- **Views**: per view its backing (declared as a relational read model, or Mongo) → the read-back
   expectation per the posture rule above; archive regime (kept-but-hidden vs
   `DeleteOnArchive`); filter/sort/search vocabulary per field; which RESERVED controls
   the list Request DTO declares (`query:"…"` — the DTO opt-in gate: declared = served,
@@ -99,6 +108,11 @@ Map what the service declares — this inventory IS the test surface:
   for absent ones.
 - **Infra posture** (`shared/read-side.md` + `shared/capabilities.md`): Mongo+CDC
   present, or relational-only/SQLite. Auth mode per profile.
+- **Read joins**: which repositories declare one, and per joined field whether it is
+  SERVED or exists for the rules alone (`shared/read-joins.md`). Both halves are
+  assertable and both are worth asserting — a served field must come back with the
+  counterpart's value, and a rules-only one must appear in NO response body and in no
+  export. The second is the case nobody writes and the one that catches a leak.
 - **Existing `specs/qa/`**: if the project already has a suite, mirror its conventions and
   EXTEND it — never generate a parallel second style.
 
@@ -237,6 +251,7 @@ Map what the service declares — this inventory IS the test surface:
 | status codes / envelopes / notification keys / dual 409 | status-mapping |
 | filter operators / `?fields=` / pagination / exports | auto-query-handlers · query-side |
 | read-back expectation per backing (poll vs immediate) / archive regime | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact |
+| reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | probes / readyz reasons / boot & drain discipline | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) |
 | what's testable under this posture / event semantics | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) · integration-events · transport |
 | GraphQL parity / gRPC procedures | graphql · grpc |

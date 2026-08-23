@@ -181,6 +181,16 @@ fields:
     example: registrar@school.edu
     description: Who registered the enrollment, read from the authenticated identity.
 
+  # A FOREIGN KEY to another aggregate is an ordinary column of this entity.
+  # Nothing about it is special here — what makes it reachable in a QUERY is the
+  # joins: block further down, which is a separate statement on purpose.
+  - name: CampusID
+    type: id
+    column: campus_id
+    livesOn: root
+    example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4
+    description: The campus this enrollment belongs to.
+
   # runtime: the opposite — NEVER persisted. It exists only for the rules to
   # read, and it comes from a named claim, because the framework holds no
   # opinion about custom claims.
@@ -540,6 +550,13 @@ children:
         example: "+1 555 0134 8890"
         description: A contact phone number.
         labelKey: GuardianPhoneField
+      - name: CityID
+        type: id
+        column: city_id
+        nullable: true
+        example: 8c1d0f77-5b41-4a35-8f11-6d6e4c9b0a3e
+        description: The city the guardian lives in, when it is on record.
+        labelKey: GuardianCityIDField
     rules:
       list:
         - id: guardian-name-required
@@ -575,6 +592,89 @@ siblings:
         description: The scholarship's discount percentage.
         labelKey: StudentScholarshipPercentageField
 
+# READ JOINS — reaching ANOTHER aggregate from this one's queries.
+#
+# Declared here, they land on the REPOSITORY, never on the TableSchema and never
+# on a view. That placement is the whole design:
+#
+#   * not storage — the TableSchema is untouched, so no INSERT or UPDATE can
+#     ever carry a joined column, and a Mongo projection of this entity is
+#     unaffected;
+#   * not the read model either — it hangs off the LOADER, so ONE declaration
+#     reaches FindByID (which the write-side handlers load through), a service
+#     calling the loader directly, and the relational read model declared over
+#     the same loader, which inherits the reach and declares nothing itself.
+#
+# The consequence worth knowing BEFORE writing a rule: a rule that needs a value
+# belonging to another aggregate no longer has to copy that column into this
+# table. Declare the traversal and the field is an ordinary field of the entity,
+# filled on every load.
+#
+# It is 1:1 and horizontal — one column onto one field at a time. There is no
+# many-valued form: a 1:N traversal would multiply the root's rows and break the
+# paged read, so "bring the order's items" is a child collection, never a join.
+joins:
+  # A ROOT join. It is ALWAYS in the FROM and its columns ride the root SELECT,
+  # so the values cost no second round trip and the field is populated on EVERY
+  # read — one that appeared only when a filter happened to mention it would be
+  # blank on the next call.
+  #
+  # kind: inner is legal ONLY over a non-nullable foreign key. The declaration
+  # reaches FindByID too, so over a nullable one it would silently drop
+  # aggregates and turn a legitimate write into a 404 — the framework refuses
+  # that combination and names left as the fix.
+  - to: Campus
+    kind: inner
+    on: campus_id
+    fields:
+      # The Go field is YOURS: the joined side's spelling never surfaces above
+      # infrastructure, so renaming is free. `type` is stated here only because
+      # Campus is hand-written — when the target is another spec of this
+      # project the type is DERIVED from its own declaration, which is the one
+      # place the two cannot disagree.
+      - name: CampusName
+        type: string
+        column: name
+        example: North Campus
+        description: The campus's name, as the campus itself declares it.
+        labelKey: StudentCampusNameField
+        text: {eng: Campus, ptbr: Campus}
+      # hidden: ON THE ENTITY, OFF THE WIRE. The value is filled on every load
+      # and the rules and the domain service read it like any other field — it
+      # is simply in no response body and in no export. That is the shape for a
+      # traversal declared FOR A RULE: needing the value and publishing it are
+      # different questions, so the language asks them separately.
+      - name: CampusBudgetCode
+        type: string
+        column: budget_code
+        hidden: true
+        description: The campus's budget code — read by the rules, never served.
+        labelKey: StudentCampusBudgetCodeField
+
+  # A join FROM ONE OF THIS ENTITY'S OWN COLLECTIONS. The verb names the
+  # collection, `on` names the foreign key on ITS table, and the mapped field
+  # lands on the entry.
+  #
+  # A child join is LOAD-ONLY: its fields are filled on every loaded entry and
+  # served inside it (?fields= names them guardians.CityName), but they are
+  # neither filterable nor sortable — narrowing the root by a field of a 1:N
+  # collection is a pushdown one root SELECT cannot express, which is the same
+  # boundary every child field already has.
+  - to: City
+    kind: left
+    on: city_id
+    inChild: Guardian
+    fields:
+      # A LEFT join's field is nullable by construction: with no counterpart the
+      # column reads NULL, and nil there means "there is no counterpart" — not
+      # the zero value, which is a different answer.
+      - name: CityName
+        type: string
+        column: name
+        example: Porto Alegre
+        description: The guardian's city, when one is on record.
+        labelKey: GuardianCityNameField
+
 service:
   required: true
   facts:
@@ -600,10 +700,15 @@ service:
         with itself.
 
 read:
+  # relational: the read is served straight from the tables, which makes it its
+  # own KIND of read model rather than a flag on the projected one. Nothing is
+  # materialised, so there is no collection, no version, no rebuild and no
+  # drift — and view.version, indexes, deleteOnArchive and ttlSeconds are
+  # REFUSED here rather than silently discarded. See example sharedbase for the
+  # mongo half.
   backing: relational
   view:
     name: students
-    version: 1
     maxLimit: 200
   fieldRestrict:
     - field: Grade
@@ -628,9 +733,10 @@ read:
   # it into the view, returns it from the by-id read and every listing row, keeps
   # it in the CSV/XLSX export, and makes it filterable like any other field.
   #
-  # It is DECLARED rather than automatic because it changes the view's SHAPE:
-  # adding one to a view that already exists needs read.view.version bumped in
-  # the same edit, or the framework refuses to boot against the older projection.
+  # It is DECLARED rather than automatic because it changes the view's SHAPE. On
+  # a MONGO backing that costs a read.view.version bump in the same edit, or the
+  # framework refuses to boot against the older projection; on this relational
+  # one there is no projection to be older than, so the change is free.
   managed: [CreatedAt, UpdatedAt]
   computed:
     - name: EnrollmentLabel

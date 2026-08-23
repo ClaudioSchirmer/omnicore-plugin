@@ -46,5 +46,6 @@ audience it was written for.
 ## Read side
 
 Full distributed CQRS is available: entity views project to MongoDB through the CDC
-pipeline. (A view may still opt into the relational read-your-writes posture via
-`.RelationalSource(...)` — that is a per-view choice, not a Postgres constraint.)
+pipeline. (A view may still be declared as a RELATIONAL read model instead — the
+read-your-writes posture, its own declaration type — which is a per-view choice, not a
+Postgres constraint. `shared/read-side.md` owns it.)

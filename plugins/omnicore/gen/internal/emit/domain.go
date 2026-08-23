@@ -87,6 +87,7 @@ func emitAggregate(m *ir.Model) (fsplan.File, error) {
 		s.L("\t// in its own collection. A slice here would stay empty on every read and")
 		s.L("\t// be ignored on every write.")
 	}
+	emitJoinStructFields(s, m.RootJoins(), "this entity")
 	if len(m.Runtime) > 0 {
 		s.Blank()
 		s.L("\t// Fed from the caller's identity by the command mapper and read by the")
@@ -1780,4 +1781,45 @@ func entityLiteral(f ir.Field, value string) string {
 		return fmt.Sprintf("%s(%s)", f.BaseEntityType, quote(value))
 	}
 	return quote(value)
+}
+
+// emitJoinStructFields writes the fields a declared READ JOIN lands on the
+// struct.
+//
+// They are ordinary exported fields — that is the whole design. They are simply
+// absent from the TableSchema, which is what makes them read-only STRUCTURALLY:
+// WriteFields walks the schema, so no INSERT or UPDATE can carry one, and the
+// write repository holds a schema with no loader in sight. Nothing here has to
+// be defended; the field cannot reach a write.
+//
+// They carry no labelKey tag for the same reason a runtime field does not: the
+// tag is what the schema resolves a column through, and there is no column of
+// this table behind a joined value.
+func emitJoinStructFields(s *src, joins []ir.Join, owner string) {
+	if len(joins) == 0 {
+		return
+	}
+	s.Blank()
+	s.L("\t// Filled by the READ JOINS the repository declares — see WithJoins in")
+	s.L("\t// internal/infra. They are ordinary fields of %s, populated on EVERY", owner)
+	s.L("\t// load, and readable by the rules like any other; they are absent from the")
+	s.L("\t// TableSchema, so no write can carry them and no migration creates them.")
+	for _, j := range joins {
+		for _, f := range j.Fields {
+			s.L("\t%s %s // %s", f.Name, f.GoType, joinFieldNote(j, f))
+		}
+	}
+}
+
+// joinFieldNote says where the value comes from and, for a left join, what a
+// nil means — which is the distinction the pointer exists to preserve.
+func joinFieldNote(j ir.Join, f ir.Field) string {
+	note := fmt.Sprintf("%s.%s, via the %s on %s", j.Target, f.Column, j.Verb(), j.FKColumn)
+	if j.Kind == "left" {
+		note += "; nil = no counterpart, never the zero value"
+	}
+	if f.Description != "" {
+		note = strings.TrimSuffix(f.Description, ".") + " — " + note
+	}
+	return note
 }

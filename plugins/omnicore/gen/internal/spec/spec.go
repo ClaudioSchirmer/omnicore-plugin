@@ -67,6 +67,23 @@ type Spec struct {
 	// Service declares the domain service and the facts it answers — the
 	// questions the rules ask that the row being written cannot answer alone.
 	Service *Service `yaml:"service"`
+	// Joins are the entity's READ JOINS: read-only traversals across a foreign
+	// key into ANOTHER aggregate, declared on the repository.
+	//
+	// They sit here rather than under read: or storage: because that is where
+	// the framework puts them, and the placement is the point. A join is not
+	// storage — the TableSchema is untouched, so no INSERT or UPDATE can ever
+	// carry a joined column, and a Mongo projection over this entity is
+	// unaffected. And it is not the read model either — it hangs off the LOADER,
+	// so every read through it inherits the reach at once: FindByID (which the
+	// write-side handlers load through), a hand-written service call, and a
+	// relational read model declared over the same loader.
+	//
+	// That last consequence is the one worth knowing before writing a rule: a
+	// business rule that needs a value belonging to another aggregate no longer
+	// has to copy that column into this table. Declare the traversal here, and
+	// the field is an ordinary field of the entity, filled on every load.
+	Joins []Join `yaml:"joins"`
 	// Read configures the read side: the backing store, the view, and which read
 	// operations (by id, by params) are served.
 	Read Read `yaml:"read"`
@@ -987,8 +1004,20 @@ type Fact struct {
 // ---------------------------------------------------------------- read side
 
 type Read struct {
-	// Backing is where reads are served from: relational = straight from the
-	// tables; mongo = from a projection updated shortly after the write.
+	// Backing is where reads are served from, and it picks between two different
+	// KINDS of read model rather than flipping a switch on one.
+	//
+	// relational = straight from the tables (the source of record): strongly
+	// consistent with the write that just happened, no CDC hop, and composed at
+	// read time instead of fetched as one document. Nothing is materialised, so
+	// there is no collection, no view.version, no rebuild and no drift — and the
+	// keys that only make sense over a collection (view.version, indexes,
+	// view.deleteOnArchive, view.ttlSeconds, controls.search) are refused rather
+	// than silently discarded. It also inherits whatever the repository's READ
+	// JOINS reach: a joined field is filterable, sortable and served here.
+	//
+	// mongo = from a projection updated shortly after the write: an O(1)
+	// document read and the full read-side vocabulary, at the cost of CDC lag.
 	Backing string `yaml:"backing"`
 	// View names, versions and bounds the read view — on a mongo backing, the
 	// projection's collection.
@@ -1070,13 +1099,25 @@ type Computed struct {
 type View struct {
 	// Name is the view's name — on a mongo backing, the projection's collection
 	// name — unique across the project's entities.
+	//
+	// It may not end in __0 or __1: those are the blue-green SLOT suffixes the
+	// framework addresses a view's two physical collections by, so a view named
+	// users__0 would own a collection byte-identical to view users's first slot,
+	// and every consequence of that collision is silent. The framework refuses
+	// the name at boot in every read-model family — plain, shared-base, composed
+	// and relational alike, since all four share one namespace.
 	Name string `yaml:"name"`
 	// Version is YOURS, and it is the opposite of specVersion: bump it whenever
 	// the projected SHAPE changes — a field added or removed, a collection
 	// renamed, a facet folded in. The framework compares it against what is
 	// stored and refuses to boot rather than serve a projection built to an
-	// older shape, so forgetting is a failed start; and on a Mongo backing,
-	// bumping it is what triggers the rebuild.
+	// older shape, so forgetting is a failed start; and bumping it is what
+	// triggers the rebuild.
+	//
+	// MONGO BACKING ONLY, and refused on a relational one: a read model with no
+	// materialisation has no stored shape to grow stale against, nothing to
+	// rebuild and no boot to refuse. A version there would be a number nobody
+	// ever compares.
 	Version int `yaml:"version"`
 	// MaxLimit is the page-size ceiling a listing request may ask for.
 	MaxLimit int `yaml:"maxLimit"`
@@ -1367,4 +1408,92 @@ func ValueObjectsNamed(s *Spec) []string {
 		}
 	}
 	return out
+}
+
+// ------------------------------------------------------------------- joins
+
+// Join is one read-only traversal into another aggregate, across a foreign key
+// this entity (or one of its collections) already stores.
+//
+// It is 1:1 and horizontal: one column of the target mapped onto one Go field
+// at a time. There is no many-valued form — a 1:N traversal would multiply the
+// root's rows and break the paged read — so "bring the order's items" is a
+// child collection, never a join.
+type Join struct {
+	// Kind decides what a joining row with NO counterpart means:
+	//
+	//   left  — the row is still returned and the traversed fields read as NULL.
+	//           Legal over any foreign key, and the right default: a load exists
+	//           to return THIS aggregate, and a missing relation is not a reason
+	//           to stop returning it. Its fields land in NULLABLE Go fields.
+	//   inner — the row is NOT returned. Legal ONLY over a non-nullable foreign
+	//           key: the declaration lives on the repository, so it applies to
+	//           FindByID too, and over a nullable key it would silently turn a
+	//           legitimate write into a 404.
+	Kind string `yaml:"kind"`
+	// To is the target aggregate — the entity name, as another spec of this
+	// project declares it. The generator resolves its schema and its columns
+	// from that spec, which is what lets it refuse a column the target does not
+	// have while the author is still in the file.
+	To string `yaml:"to"`
+	// On is the FOREIGN KEY column on the JOINING table: this entity's root
+	// table normally, the collection's table when inChild is set. The other side
+	// of the predicate is always the target's declared id column — a foreign key
+	// points at a primary key, and both schemas already name it — so a traversal
+	// onto a non-id column of the target is deliberately not expressible.
+	On string `yaml:"on"`
+	// InChild hangs the traversal off one of THIS entity's own collections
+	// instead of its root: the foreign key is the collection's, and the mapped
+	// Go fields land on the collection's entry.
+	//
+	// A child join is LOAD-ONLY. Its fields are filled on every loaded entry and
+	// served inside the entry, but they are not filterable or sortable: narrowing
+	// the root by a field of a 1:N collection is a pushdown a single root SELECT
+	// cannot express — the same boundary every child field already has.
+	InChild string `yaml:"inChild"`
+	// Fields is what the traversal brings back. At least one is mandatory: a
+	// join that maps no column reaches nothing.
+	Fields []JoinField `yaml:"fields"`
+}
+
+// JoinField maps ONE column of the joined table onto a Go field of the entity
+// that declares the join. The joined side's spelling never surfaces above
+// infrastructure, so renaming is free.
+type JoinField struct {
+	// Name is the Go field this entity gains, PascalCase — the name the rules,
+	// the criteria, the DTOs and `?fields=` all speak. It must not collide with
+	// anything the entity already answers: its own fields, a sibling's, the
+	// shared base's, or another join's.
+	Name string `yaml:"name"`
+	// Column is the column on the TARGET's own table. A column of the target's
+	// shared base or of one of its siblings is not reachable: the traversal is
+	// one predicate onto one table.
+	Column string `yaml:"column"`
+	// Type is the Go type the value lands in. Derived from the target's own
+	// declaration of that column when omitted, which is the spelling to prefer —
+	// stating it again is a second place for the two to disagree.
+	Type string `yaml:"type"`
+	// LabelKey is the translation-catalog key for the field's label, exactly as
+	// on a persisted field. Derived when omitted.
+	LabelKey string `yaml:"labelKey"`
+	// Text is the field's LABEL per language catalog — a couple of words, the
+	// same contract a persisted field's text has.
+	Text Texts `yaml:"text"`
+	// Example feeds the OpenAPI example, exactly as on a persisted field.
+	Example string `yaml:"example"`
+	// Hidden keeps the joined value OFF THE WIRE: out of the by-id response,
+	// out of every listing row, out of the CSV/XLSX exports. Everything else is
+	// unchanged — the field is still on the entity, still filled on every load,
+	// still readable by the rules and by a domain service, and still nameable
+	// under read.byParams.filters and sort.
+	//
+	// This is the shape to reach for when the traversal exists FOR A RULE. A
+	// service that has to decide against a value belonging to another aggregate
+	// needs that value on the entity, and needs nothing at all on the wire —
+	// and the two are separate questions, so the language asks them separately.
+	// The same key means the same thing on a persisted field.
+	Hidden bool `yaml:"hidden"`
+	// Description is one line on what the value means, for the reader of the
+	// generated entity.
+	Description string `yaml:"description"`
 }

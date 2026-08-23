@@ -45,6 +45,13 @@ type Model struct {
 	ValueObjects  []ValueObject
 	Service       *ServiceModel
 
+	// Joins are the READ JOINS this repository declares: read-only traversals
+	// across a foreign key into another aggregate. They are deliberately NOT in
+	// Fields — nothing about them is persisted, so no write shape, no migration
+	// and no TableSchema may ever see them — and every consumer that DOES serve
+	// them names them explicitly.
+	Joins []Join
+
 	Ops  []Operation
 	Read ReadModel
 
@@ -250,6 +257,35 @@ type Operation struct {
 	Description string
 }
 
+// Join is one resolved read-join declaration.
+type Join struct {
+	// Kind is "inner" or "left"; it decides the framework verb AND whether the
+	// mapped Go fields are nullable.
+	Kind string
+	// Target is the joined entity, and TargetSchemaFunc the schema function the
+	// generated repository hands to the framework.
+	Target           string
+	TargetSchemaFunc string
+	// FKColumn is the foreign key on the JOINING table.
+	FKColumn string
+	// Child is the collection this join hangs off, empty for a root join;
+	// ChildSchemaFunc is that collection's schema function.
+	Child           string
+	ChildSchemaFunc string
+	// Fields are what the traversal brings back. Their Column is the column on
+	// the TARGET — the join's own side — not a column of this entity, which has
+	// none for them.
+	Fields []Field
+}
+
+// Verb is the framework call this declaration renders as.
+func (j Join) Verb() string {
+	if j.Kind == "inner" {
+		return "InnerJoin"
+	}
+	return "LeftJoin"
+}
+
 type ReadModel struct {
 	Enabled         bool
 	DeleteOnArchive bool
@@ -287,6 +323,16 @@ type ReadModel struct {
 	// Computed are the derived read fields: no column, filled by the hook the
 	// generator writes once and the author owns from then on.
 	Computed []ComputedField
+	// JoinFields are the ROOT joins' fields, as the read model serves them.
+	//
+	// Populated on a RELATIONAL backing only, and that is not a policy choice: a
+	// join leaves the TableSchema untouched, so a Mongo projection over the same
+	// entity never carries these columns. Putting them in the projected Result
+	// would serve a zero value on every document.
+	//
+	// A CHILD join's fields are not here — they live on the collection's own
+	// entry (Child.JoinFields), which is where the document carries them.
+	JoinFields []Field
 }
 
 // ComputedField is a read field with no column behind it.
@@ -474,6 +520,9 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 			}
 		}
 	}
+	// Before the read: a relational read model serves the ROOT joins' fields, so
+	// the read side has to be resolved with them already in hand.
+	resolveJoins(s, p, m)
 	m.Read = resolveRead(s, m)
 	m.Ops = resolveOps(s, m)
 	// After the ops, not with the children: what an undeclared per-entry verb
@@ -872,6 +921,13 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 	for _, n := range s.Read.Managed {
 		r.Managed = append(r.Managed, managedReadField(s, m, n))
 	}
+	// A ROOT join's fields are served by a relational read model — it reads
+	// through the very loader that declares them. A Mongo one is composed from
+	// the TableSchema, which a join deliberately never touches, so the same
+	// fields would be a zero value on every document.
+	if r.Backing == "relational" {
+		r.JoinFields = m.RootJoinFields()
+	}
 	if s.Read.ByParams != nil {
 		r.Controls = s.Read.ByParams.Controls
 		for _, f := range s.Read.ByParams.Filters {
@@ -886,6 +942,10 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 			// lookupField: m.Read is still the previous (empty) value at this
 			// point, so a filter on CreatedAt resolved to nothing and the query
 			// parameter was silently never emitted.
+			if fld := joinNamed(r.JoinFields, f.Field); fld != nil {
+				r.Filters = append(r.Filters, Filter{Field: *fld, Ops: f.Ops})
+				continue
+			}
 			if fld := managedNamed(r.Managed, f.Field); fld != nil {
 				r.Filters = append(r.Filters, Filter{Field: *fld, Ops: f.Ops})
 				continue
@@ -896,6 +956,10 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 		}
 		for _, name := range s.Read.ByParams.Sort {
 			if fld := identityReadField(m, name); fld != nil {
+				r.Sortable = append(r.Sortable, *fld)
+				continue
+			}
+			if fld := joinNamed(r.JoinFields, name); fld != nil {
 				r.Sortable = append(r.Sortable, *fld)
 				continue
 			}
@@ -1735,6 +1799,11 @@ type Child struct {
 	Description string
 	OwnedBy     string
 	Fields      []Field
+	// JoinFields are what a read join declared IN this collection brings back:
+	// ordinary fields of the entry, filled on every load, served inside the
+	// entry — and never filterable or sortable, because narrowing the root by a
+	// field of a 1:N collection is a pushdown one root SELECT cannot express.
+	JoinFields  []Field
 	Identity    []Field // the business-identity subset
 	ArchivedAt  string
 	InputType   string

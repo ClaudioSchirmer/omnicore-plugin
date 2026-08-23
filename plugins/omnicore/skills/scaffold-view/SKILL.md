@@ -109,6 +109,18 @@ convention; validate framework usage against the docs.
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` slots answered, never defaulted;
 sections structural (`N/A — <why>`, never deleted):
 
+0. **Is a whole view the right answer at all?** [gate — ask BEFORE the catalog] If the
+   request is "this entity's listing should also show / filter by a few fields of ANOTHER
+   aggregate it already holds a foreign key to", and the entity is served by a RELATIONAL
+   read model, that is a **read join** on the repository — no new view, no `Version`, no
+   rebuild, no collection (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`, pin ≥ v0.57.0).
+   Say so and hand it back to `/omnicore:evolve-entity`; building a ComposedView for it is
+   over-engineering a solved problem. It is NOT the answer when: the entity is
+   Mongo-projected (a join never enters the `TableSchema`, so the projection cannot carry
+   it — Embed/Link/Composed is right); the reach is 1:N or many-valued; the source is
+   another SERVICE; or the match is on anything but the target's id. When any of those
+   holds, continue to item 1 — and say WHICH one held, so the dev sees the boundary rather
+   than a verdict.
 1. **Composition type** [high-risk — THE decision, taught before asked]: read the FULL
    view catalog + composition contracts in `views` at the pin (the type set is the PIN's, not
    this skill's — e.g. a local cross-entity join like ComposedView vs the external
@@ -122,7 +134,10 @@ sections structural (`N/A — <why>`, never deleted):
    SELECTS rows and a 1:1 segment field is a first-class `orderBy` key; on a ComposedView a
    leg filter only shapes the segment and a segment `?orderBy=` is a 400 — the docs name
    "consumers need to filter/sort BY the joined data" as the trigger to materialize
-   (`views`). Then recommend ONE with the why, name the runner-up, and CONFIRM.
+   (`views`) — a trigger that no longer implies a view kind by itself: on a relational
+   read model a declared ROOT read join makes the joined field filterable and sortable
+   with no materialization at all (item 0). Then recommend ONE with the why, name the
+   runner-up, and CONFIRM.
    Never self-answer; never ask without the explanation.
    **Relational backing is NOT on this menu.** Every type this skill creates is a view
    KIND, relational-INELIGIBLE by construction — the rule, the plain-view exception and
@@ -212,6 +227,7 @@ index for concepts this table doesn't list.
 |---|---|
 | composition type (the catalog + contracts) | views |
 | relational backing — eligibility / limits | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view |
+| reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | cross-service data: subscription vs call vs event — the choice matrix | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) · service-to-service |
 | view declaration / options / indexes / aggregations | views · auto-query-handlers |
 | custom projection / response shaping | custom-query-handler |

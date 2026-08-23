@@ -172,9 +172,12 @@ dev.
 **Changing an entity instead: the spec exists — EDIT it, and do not run `init`.** That file
 is the entity's source of truth; `init` refuses to overwrite it without `-force`, and that
 refusal is a feature. Change only what the approved impact map says, `check` after each
-block, and bump `read.view.version` when the projected shape moves — `generate` compares
-this run's shape against the one it last wrote and refuses an unbumped version, naming the
-number. The one thing an edit cannot do is move a table: migrations are hooks (step 5), so
+block, and — **on a MONGO backing** — bump `read.view.version` when the projected shape
+moves: `generate` compares this run's shape against the one it last wrote and refuses an
+unbumped version, naming the number. **On a relational backing there is no version to
+bump and the key is refused outright**: a read model that materializes nothing has no
+stored shape to grow stale against, so a shape change there costs nothing and needs no
+operational step. The one thing an edit cannot do is move a table: migrations are hooks (step 5), so
 the ALTER pair is hand-written by the caller.
 
 **Check as you go, not at the end.** Write the storage block and the fields, run `check`,
@@ -183,11 +186,40 @@ checked once returns a wall of blockers where each one might be a symptom of the
 above it. Checked in four passes, each blocker is about the thing you just wrote — and
 `check` is instant and free.
 
-Three things to get right, because they are the ones that cost a migration later:
+Four things to get right, because they are the ones that cost a migration later:
 
 - **`storage.kind`** — `flat` (its own table) vs `sharedbase-role` (a ROLE over an
   identity other roles may share). Starting flat and extracting an identity afterwards is
   real data movement.
+- **`joins:` — before copying ANY column that belongs to another aggregate.** This is the
+  block that most often goes unwritten because nobody knows it is there, and the cost of
+  not knowing is a denormalized column plus a write path that has to keep it in step
+  forever. If a rule, a service fact or the listing needs a value from an aggregate this
+  entity already holds a foreign key to, declare the traversal: the value becomes an
+  ordinary field of the entity, filled on every load, and NOTHING is duplicated. The
+  decisions the spec asks you to make are all consequential and none of them has a safe
+  default:
+  - **`kind`** — `left` keeps the row and answers an ABSENCE where there is no
+    counterpart; `inner` drops the row, and is legal only over a NON-NULLABLE foreign key.
+    `inner` reaches `FindByID` too, so over a nullable key it would turn a legitimate
+    write into a 404 — `check` refuses that combination and names `left` as the fix.
+    Default to `left` unless the key is genuinely mandatory.
+  - **`hidden` per field — ON THE ENTITY vs ON THE WIRE.** A traversal declared for a
+    RULE belongs on the entity and nowhere near the API: `hidden: true` keeps it out of
+    every response body and every export while the rules still read it. Needing a value
+    and publishing it are different decisions; do not let the first quietly become the
+    second, because once it is on the wire it is a promise.
+  - **`inChild`** hangs the traversal off one of this entity's own collections. Its fields
+    are LOAD-ONLY — served inside the entry, never filterable or sortable — and an `inner`
+    there drops the ENTRY, not the root, which is a silent hole in the array.
+  - **the target** is normally another spec of this project, and then the column and its
+    type are checked and DERIVED from that spec. A hand-written aggregate is accepted on
+    your word: `check` warns, each field must state its own `type`, and the generated
+    repository assumes the project's own schema-function naming. That last assumption
+    fails at BUILD time if it is wrong, which is the honest failure — do not paper over it.
+  What it is NOT: a 1:N reach, a match on anything but the target's id, a second hop, or a
+  way to bring a collection. `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` owns the
+  boundary and the alternatives; `explain keys joins` prints the language half.
 - **Value objects — and ask the closed-set question about EVERY one.** Before writing
   `kind: raw`, ask: is the set of valid values FINITE and known? If it is, it is an
   `enum`, not a shape. `raw` with `regex: '^[A-Z]{2}$'` accepts `XX`, `ZZ` and `QQ` — a
@@ -335,8 +367,10 @@ Three things to get right, because they are the ones that cost a migration later
   from the by-id read and every listing row, keeps them in the CSV/XLSX export, and makes
   them filterable like any other field — `{field: CreatedAt, ops: [gte, lte]}` is the
   "created between these dates" every listing eventually needs. It is declared rather than
-  automatic because it changes the view's SHAPE: bump `read.view.version` in the same edit,
-  or the framework refuses to boot against a projection built to the older one.
+  automatic because it changes the view's SHAPE — which on a MONGO backing means bumping
+  `read.view.version` in the same edit, or the framework refuses to boot against a
+  projection built to the older one. On a relational backing there is no projection to be
+  older than, so the change is free.
 - **"They query by it and never receive it" is `fields[].hidden`, not `read.fieldRestrict`.**
   The two look alike and answer different questions. `fieldRestrict` is about WHO is asking:
   a caller with the permission receives the field, one without it gets a 403 for naming it
@@ -677,7 +711,10 @@ the good kind.
   filled with a loud placeholder.
 - **What to check** — the decisions the spec made that a reviewer should confirm against
   the domain (uniqueness scope, delete semantics, permissions per operation, the archive
-  column, the view version).
+  column, the view version) — **including one row per declared read join**, which is the
+  one decision on that page a reviewer cannot see by reading the entity, since a joined
+  field looks exactly like the entity's own. Each row states what a missing counterpart
+  does and whether the value is on the wire.
 - **What was generated** and **what was NOT** — the refused capabilities, so the gap is
   visible rather than assumed.
 

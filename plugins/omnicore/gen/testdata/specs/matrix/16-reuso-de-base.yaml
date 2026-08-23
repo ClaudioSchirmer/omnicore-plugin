@@ -39,7 +39,7 @@ notifications:
     text: {ptbr: O documento não pode ser alterado., eng: The document cannot be changed., esp: El documento no se puede modificar., fra: Le document ne peut pas être modifié., deu: Das Dokument kann nicht geändert werden., ita: Il documento non può essere modificato., nld: Het document kan niet worden gewijzigd.}
 read:
   backing: relational
-  view: {name: alunos, version: 1}
+  view: {name: alunos}
   byId: true
   byParams:
     filters: [{field: NomeCompleto, ops: [eq, contains]}]

@@ -75,6 +75,12 @@ type SpecClaim struct {
 	Entity   string
 	ViewName string
 	Route    string
+	// Table and Fields are the ROOT of that spec: what a READ JOIN declared by
+	// another entity traverses INTO. A join names a column of the target, and
+	// the only way to say whether that column exists — and what Go type the
+	// field it lands on must have — is to read the target's own declaration.
+	Table  string
+	Fields []FieldClaim
 	// Children is what this spec declares its collections to be. A role that
 	// MOUNTS one of them restates its shape, and the two statements have to
 	// agree: a column named on one side and not the other compiles on both and
@@ -96,6 +102,12 @@ type FieldClaim struct {
 	Name   string
 	Column string
 	Type   string
+	// Nullable and LivesOn matter to a read join: an InnerJoin is legal only
+	// over a NON-NULLABLE foreign key, and a join reaches the target's own
+	// table — so a column that lives on a shared base or a sibling is not
+	// something the traversal's single predicate can reach.
+	Nullable bool
+	LivesOn  string
 }
 
 // Find walks up from dir looking for the go.mod that roots the service.
@@ -391,8 +403,18 @@ func discoverSpecs(root string) []SpecClaim {
 			continue
 		}
 		var doc struct {
-			Entity   string `yaml:"entity"`
-			Plural   string `yaml:"plural"`
+			Entity  string `yaml:"entity"`
+			Plural  string `yaml:"plural"`
+			Storage struct {
+				Table string `yaml:"table"`
+			} `yaml:"storage"`
+			Fields []struct {
+				Name     string `yaml:"name"`
+				Column   string `yaml:"column"`
+				Type     string `yaml:"type"`
+				Nullable bool   `yaml:"nullable"`
+				LivesOn  string `yaml:"livesOn"`
+			} `yaml:"fields"`
 			Children []struct {
 				Name    string `yaml:"name"`
 				Table   string `yaml:"table"`
@@ -415,6 +437,13 @@ func discoverSpecs(root string) []SpecClaim {
 		claim := SpecClaim{
 			Path: filepath.Join(layout.Dir, e.Name()), Entity: doc.Entity,
 			ViewName: doc.Read.View.Name, Route: doc.Plural,
+			Table: doc.Storage.Table,
+		}
+		for _, f := range doc.Fields {
+			claim.Fields = append(claim.Fields, FieldClaim{
+				Name: f.Name, Column: f.Column, Type: f.Type,
+				Nullable: f.Nullable, LivesOn: f.LivesOn,
+			})
 		}
 		for _, c := range doc.Children {
 			cc := ChildClaim{Name: c.Name, Table: c.Table, OwnedBy: c.OwnedBy}

@@ -97,7 +97,7 @@ notifications:
     text: {ptbr: "Moeda desconhecida.", eng: "Unknown currency.", esp: "Moneda desconocida.", fra: "Devise inconnue.", deu: "Unbekannte Waehrung.", ita: "Valuta sconosciuta.", nld: "Onbekende valuta."}
 read:
   backing: relational
-  view: {name: colaboradores, version: 1}
+  view: {name: colaboradores}
   byId: true
   byParams:
     filters:

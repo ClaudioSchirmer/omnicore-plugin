@@ -110,8 +110,22 @@ Bench-proven cause patterns to CHECK, not to assume:
   presentation is PROFILE-SPLIT: under `dev` it is a `slog.Warn` naming each foreign
   collection and boot CONTINUES (foreign docs can then leak into reads — grep the boot
   log for the warning when reads return strangers); under every other profile it is a
-  boot abort. Either way → the service shares a view DB it shouldn't; prescribe
-  isolating it in its own database, per the bootstrap section.
+  boot abort. **Read the abort's own text before prescribing** — it names the database,
+  lists each unclaimed collection and leads with the CAUSE, and there are three quite
+  different ones:
+  - the read model's declaration is no longer in the build — its view was **deleted,
+    renamed, or CONVERTED to a relational read model**, which materializes nothing and
+    therefore claims no collection. The conversion is the one that surprises people: it
+    leaves both the collection AND its `omnicore_mongo_views` row behind, nothing drops
+    them for you, and **deleting only the collection aborts the next boot for a different
+    reason**. Prescribe BOTH statements the abort hands over — the collection drop and the
+    registry-row delete, keyed by the VIEW name, not by the physical slot.
+  - a collection materialized by an upstream SUBSCRIPTION (pin ≥ v0.57.0 claims those
+    under their bare name; an older pin reported them as foreign, which made a service
+    with a subscription unbootable outside `dev` — if the pin is older, that IS the
+    diagnosis and the answer is `/omnicore:upgrade`).
+  - genuinely shared database → prescribe isolating this service in its own, per the
+    bootstrap section.
 - **Writes 2xx forever, views never arrive** → read the BOOT LOG first: the INFO
   anchor `projection consumer not started: no transport configured` is direct
   evidence — with no `transport:` block the sync consumer is skipped BY DESIGN
@@ -127,6 +141,28 @@ Bench-proven cause patterns to CHECK, not to assume:
   expected (the outbox doesn't exist yet) — not a failure. In an infra-free / SQLite
   project none of the three exists and views are served relational
   (read-your-writes) — same INFO anchor, same `/omnicore:configure` answer.
+- **A read returns 400 on a relational read model** → not a bug, a capability boundary,
+  and the notification tells you WHICH: `UnsupportedCapabilityNotification` (pin ≥
+  v0.57.0 — every read engine raises this same one; an older pin had a
+  relational-specific name) means the request asked for something that backing cannot
+  serve — `?search=`, or filter/sort on a 1:N child field. `SchemaViolationNotification`
+  means something else entirely: the `?fields=` path or the cursor is not a thing this
+  read model has, which is the SAME answer the Mongo reader gives the same token. Do not
+  prescribe a backing conversion for the second one — it is a client-side typo or a stale
+  consumer. For the first, the honest options are the Mongo projection or, when the field
+  belongs to another aggregate reached by a foreign key, a read join
+  (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`) — the capability rule and the split are
+  owned by `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`.
+- **A read join field is blank / the aggregate vanished from every read** → the two
+  failure modes of a declared traversal, and they look nothing alike. Blank on a LEFT
+  join = there is genuinely no counterpart (nil is an ABSENCE, and the framework refuses
+  a non-pointer field precisely so it cannot be confused with the zero value). An
+  aggregate missing from `FindByID` as well as from the listing = an INNER join whose
+  foreign key points at nothing — the declaration lives on the repository, so it drops the
+  row from every read, and a legitimate write then 404s on its own record. The framework
+  refuses `inner` over a NULLABLE key at construction; over a non-nullable one with broken
+  referential integrity, the data is the bug. Never diagnose either from the view — the
+  join is on the repository (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`).
 - **Relay/broker/sync all GREEN, one view or one document missing/stale** → the parked
   layer, not timing: `SELECT … FROM omnicore_projection_failures` (Phase 1 stage 7).
   A parked event with `parkedRetry` disabled in the yaml is the classic "everything
@@ -187,6 +223,7 @@ for concepts this table doesn't list.
 | migrations state / numbering / dirty | migrations |
 | outbox / relay / broker contract | transport |
 | infra-free / relational-view posture (views by design, no relay) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
+| reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | a write that got slower as the table grew · a hand-written Service/finder that lists rows to answer a scalar · `Old()` empty on a write loaded by hand (a list load does not snapshot) | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner) · custom-command-handler · old-state |
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
 | parked events / failed ripples / `omnicore_projection_failures` / `ProjectionHealth` / `parkedRetry`·`reconcile` knobs | views · auto-query-handlers · yaml-reference |

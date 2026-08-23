@@ -256,6 +256,8 @@ var specTypes = map[string]reflect.Type{
 	"Texts":         reflect.TypeOf(Texts{}),
 	"Service":       reflect.TypeOf(Service{}),
 	"Fact":          reflect.TypeOf(Fact{}),
+	"Join":          reflect.TypeOf(Join{}),
+	"JoinField":     reflect.TypeOf(JoinField{}),
 	"Read":          reflect.TypeOf(Read{}),
 	"View":          reflect.TypeOf(View{}),
 	"Index":         reflect.TypeOf(Index{}),

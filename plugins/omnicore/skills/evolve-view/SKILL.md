@@ -72,8 +72,12 @@ read. Never bump inline.
 Map it before proposing: kind (own | ComposedView | SharedBaseView | Upstream | Embed |
 EmbedMany | EmbedInChild | Link | LinkMany | LinkInChild — the full set is the PIN's
 `views` catalog, never this list) · legs/roles and join keys · projected shape + current `Version` · indexes
-and options · collection name · **whether it currently carries `.RelationalSource()`**
-(SoR-served) · **is Mongo present in this project** (infra-free ⇒ a flip TO Mongo needs
+and options · collection name · **whether it is declared as a RELATIONAL read model**
+(SoR-served — its own declaration TYPE, contributed through the relational feature seam,
+carrying no `Version`, no indexes and no collection) · **whether its loader declares READ
+JOINS** (a relational view inherits them and declares none itself, so a filterable field
+may come from a traversal rather than from the schema — `shared/read-joins.md`) · **is
+Mongo present in this project** (infra-free ⇒ a flip TO Mongo needs
 it enabled first) · surfaces exposing it (REST, GraphQL) · known consumers in-repo · the
 project's local flavor. For any change touching a segment's projected
 fields or lifecycle, check whether it FLIPS the segment's ARCHIVE regime
@@ -86,6 +90,12 @@ it out explicitly in the impact map, per the pin's `views` archived rule.
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` answered, never defaulted; sections
 structural (`N/A — <why>`):
 
+0. **Is this a view change at all?** If what the dev wants is "the listing should also
+   show / filter by a field of ANOTHER aggregate", stop and check `shared/read-joins.md`
+   first. On a relational read model that is a READ JOIN on the repository — no view
+   edit, no `Version`, no rebuild — and proposing an Embed or a ComposedView for it is
+   over-engineering a solved problem. On a Mongo-projected view it genuinely is a view
+   change (Embed/Link/Composed) and this skill owns it.
 1. **The change, in one paragraph** — restated.
 2. **Impact map** — every artifact touched (view declaration, `Version`, indexes,
    surfaces, tests). The contract: Phase 2 edits nothing outside it.
@@ -125,23 +135,38 @@ structural (`N/A — <why>`):
    (where the truth lives · how it refreshes · coupling/failure mode · cost) in the
    user's language BEFORE recommending — same teach-then-confirm doctrine as
    `scaffold-view`; a type change is a new consistency contract, never a detail.
-4b. **Flipping the backing (relational ⇄ Mongo)** [high-risk] — adding or removing
-   `.RelationalSource()` is a SHAPE change (it's in the rebuild hash), so it REQUIRES a
-   `Version(N)` bump like any other. Teach the two transitions from `relational-view`
-   at the pin: Mongo→relational = `DriftRelationalSync` (registry synced, NO rebuild;
-   reads move to the SoR, and **the old Mongo collection is DROPPED** — a relational
-   view holds none; leaving it would strand alien data. There is no frozen copy to
-   fall back on: flipping BACK is a fresh `DriftRebuildRequired` backfill — the FULL
-   online blue-green rebuild, costed like any other on a large collection, not a
-   "resume");
-   relational→Mongo = `DriftRebuildRequired` (full online blue-green rebuild from the
-   CURRENT SoR — zero-downtime, captures every write made during the relational phase).
+4b. **Flipping the backing (relational ⇄ Mongo)** [high-risk] — **it is a CONVERSION
+   between two different declaration TYPES, not a flag on one** (pin ≥ v0.57.0). The
+   view is re-declared on the other seam; there is no marker to add or remove and no
+   drift decision to ride on. Confirm the shape at `relational-view` before proposing,
+   and put BOTH halves of each transition in the impact map:
+   - **Mongo → relational**: declare the relational read model over the aggregate's
+     existing loader and contribute it through the relational seam. Then **drop the
+     collection and DELETE its `omnicore_mongo_views` row BY HAND, as part of this
+     change.** Nothing does it for you any more — a relational read model never reaches
+     the sync engine — and the leftovers are then reported as foreign by the
+     DB-per-service guard: a warning under `dev`, **a boot abort in every other
+     profile**. The registry row is the half that gets forgotten and it aborts the next
+     boot for a different reason. Both statements are printed by the guard's own abort
+     message; the plan states them anyway, because the plan is read BEFORE the boot
+     fails. There is no frozen copy to fall back on: flipping BACK is a full online
+     blue-green rebuild, costed like any other on a large collection, not a "resume".
+   - **relational → Mongo**: declare the projected view with `Version(1)` and contribute
+     it through the Mongo seam; the rebuild provisions the collection from the CURRENT
+     SoR — zero-downtime, capturing every write made during the relational phase.
    Only a PLAIN single-aggregate view can flip — a Composed/Shared/Embed view is
    relational-ineligible (different type or boot fail), so this item is `N/A` for them.
+   **Read joins survive the flip untouched in either direction** — they live on the
+   repository — but their READ-side reach does not: going to Mongo, a joined field stops
+   being filterable/sortable/served (a projection is composed from the `TableSchema`,
+   which a join never enters), so if the listing filters by one, that filter is a
+   consumer-visible LOSS and belongs under item 5. Going to relational, the reverse:
+   the reach arrives for free.
    State the read-side consequence so the dev flips with open eyes (per
    `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` + `relational-view`): relational =
-   read-your-writes but 1:1-reach filters only, `?search=` and 1:N child filter/sort
-   become typed 400s, and pagination switches from stable keyset to a camouflaged
+   read-your-writes but 1:1-reach filters only (root, sibling, shared base — plus any
+   field a declared ROOT read join brought across), `?search=` and 1:N child filter/sort
+   become typed 400s (`UnsupportedCapabilityNotification`), and pagination switches from stable keyset to a camouflaged
    OFFSET that can skip/repeat rows under concurrent writes — wire-compatible, so no
    grep will surface it; Mongo = full vocabulary, eventual. If the target is Mongo but
    the project is infra-free (no `mongo.uri`), flipping would abort the boot — don't
@@ -174,6 +199,7 @@ index for concepts this table doesn't list.
 | projected shape / `Version` / rebuild (the FULL rebuild-hash list — incl. embedded-view coupling — is in `views`) | views · mongo-schema-evolution · auto-query-handlers |
 | flipping backing: relational ⇄ Mongo (drift, rebuild) | relational-view · mongo-schema-evolution |
 | read-side posture / what each backing serves & asks | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) |
+| reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | composition contracts / legs / roles | views |
 | custom projection / response shaping | custom-query-handler |
 | indexes / options (index-only = no bump; hash-moving options = bump; collation immutable) | auto-query-handlers · mongo-schema-evolution |

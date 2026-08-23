@@ -124,7 +124,7 @@ notifications:
       nld: Maximaal {max} leesrechten.
 read:
   backing: relational
-  view: {name: perfis, version: 1}
+  view: {name: perfis}
   byId: true
 surfaces:
   rest: true

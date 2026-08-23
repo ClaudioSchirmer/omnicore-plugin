@@ -33,6 +33,7 @@ the one that grows; the primitive costs nothing extra to pick correctly at write
 | "give me the rows, I am going to walk them" | `FindAll` — this is what it is for | — |
 | a user-facing LISTING | the read side: the query handler → `ViewReader.ReadPage` | `FindAll` on the request path |
 | a user-facing "how many match" | the request DTO's `onlyTotal` opt-in (`auto-query-handlers.html`) — no documents materialized | `ReadPage` + `len(Items)` |
+| "the rule needs a field that belongs to ANOTHER aggregate" | a **read join** declared on the repository — the value becomes an ordinary field of the entity, filled on every load (`read-joins.md`) | a second `FindOne` inside the rule · copying the column into this table and keeping it in step |
 
 **`FindAll(…)[0]` is a correctness bug, not only a slow one.** `FindOne` is the
 framework's BIRTH point for a write-side entity: it stamps the old-state snapshot, so
@@ -48,6 +49,12 @@ default; `IncludeArchived`/`OnlyArchived` on the Query) — and the criteria may
 sibling and shared-base fields, because the same joins apply. Picking the cheap primitive
 never costs expressiveness, which is why there is no trade-off to weigh and no reason to
 "start with FindAll and optimize later".
+
+**Nor does the REACH.** Every primitive above runs through the same loader, so a field a
+declared read join brought across another aggregate's foreign key is addressable in all of
+them alike — filtered by the existence probe, compared by a clause, grouped by the
+aggregate DSL. One declaration on the repository, not one per call site (`read-joins.md`,
+pin ≥ v0.57.0).
 
 ## Four things that bite in the hand-written impl
 

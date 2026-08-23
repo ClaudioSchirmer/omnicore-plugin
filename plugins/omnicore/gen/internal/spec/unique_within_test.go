@@ -54,7 +54,7 @@ service:
       description: Se outro papel ativo ja usa esta chave.
 read:
   backing: relational
-  view: {name: papeis, version: 1}
+  view: {name: papeis}
   byId: true
 surfaces: {rest: true}
 authz:
