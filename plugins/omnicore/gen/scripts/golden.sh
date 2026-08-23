@@ -203,6 +203,36 @@ else
   bad "the refusal was not reported"
 fi
 
+# ── Lane 4a: doctor SEES the drift, and adopt is the way out ─────────────────
+#
+# The refusal above is what a regeneration does; doctor is what a developer runs
+# to find out BEFORE regenerating, and adopt is the declared way to keep an edit
+# instead of losing it. Neither had a lane, so the pair that decides whether a
+# hand edit is recoverable was proven by nobody. The tree here is join-bearing,
+# which is the point: both commands walk the lock and the file checksums, and a
+# read join adds files and fields to both.
+DOC=$(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen doctor -project "$WORK" 2>&1)
+if grep -q "was edited by hand" <<<"$DOC"; then
+  ok "doctor reports the hand edit"
+else
+  bad "doctor did not see a hand-edited file — $(tr '\n' ' ' <<<"$DOC" | head -c 200)"
+fi
+(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen adopt "$OWNED" -project "$WORK" >/tmp/gg-adopt.log 2>&1)
+DOC2=$(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen doctor -project "$WORK" 2>&1)
+if grep -q "carries a hand edit adopted" <<<"$DOC2"; then
+  ok "adopt turns the refusal into a recorded exception"
+else
+  bad "doctor does not report the file as adopted — $(tr '\n' ' ' <<<"$DOC2" | head -c 200)"
+fi
+# The whole promise of adopt: the NEXT regeneration preserves the edit instead of
+# refusing the run. Reporting it and honoring it are two different things.
+(cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$SPEC" -project "$WORK" >/tmp/gg-postadopt.log 2>&1)
+if grep -q "hand written" "$OWNED"; then
+  ok "a regeneration after adopt preserves the edit"
+else
+  bad "adopt was recorded and the next generation clobbered the file anyway"
+fi
+
 # ── Lane 4b: the generated service BOOTS and serves ──────────────────────────
 # Compiling proves the code is well formed; only booting proves the framework
 # accepts it. Most of what this generator can get wrong — a schema that does not
@@ -370,6 +400,27 @@ PYJOIN
         ok "the read joins serve, hide and filter as declared"
       else
         bad "the read joins did not behave as declared — $JOINS"
+      fi
+
+      # The TABULAR EXPORT is a third rendering of the same read, written by its
+      # own emitter, and a joined field reaches it through the labelKey like any
+      # other column. It is the surface where a missing header shows up as an
+      # internal name rather than as an error, so it is asserted rather than
+      # assumed — headers AND values, plus the hidden field's absence, which is
+      # the half a "does it contain the value" check would miss.
+      CSV=$(curl -fsS "http://127.0.0.1:18099/students.csv" 2>/dev/null)
+      CSVHEAD=$(head -1 <<<"$CSV")
+      CSVROW=$(sed -n '2p' <<<"$CSV")
+      csvbad=""
+      for col in "Campus Name" "Campus Owner ID" "Campus Latitude" "Campus Nickname"; do
+        grep -q "$col" <<<"$CSVHEAD" || csvbad="$csvbad; no header for $col"
+      done
+      grep -q "Campus Norte" <<<"$CSVROW" || csvbad="$csvbad; the joined value is not in the row"
+      grep -q "Campus Budget Code" <<<"$CSVHEAD" && csvbad="$csvbad; a hidden join field reached the export"
+      if [[ -z "$csvbad" ]]; then
+        ok "the CSV export carries the joined columns, headed and without the hidden one"
+      else
+        bad "the CSV export disagrees with the read${csvbad}"
       fi
 
       # The aggregate id as a QUERY path. It is declared by no fields[] entry and

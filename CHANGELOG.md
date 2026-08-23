@@ -83,12 +83,22 @@ v0.56 or below has to upgrade first.
   column, load the other aggregate inside the rule, or materialize a Mongo view for it —
   are named as the thing not to do.
 
-- **Two golden-gate lanes** (`73 passed`, was 71): the running service is asked to prove a
-  join end to end — an inner join serves the counterpart's value, a hidden field never
+- **Seven golden-gate lanes** (`78 passed`, was 71). The running service is asked to prove
+  a join end to end — an inner join serves the counterpart's value, a hidden field never
   reaches the wire, a left join with no counterpart answers an ABSENCE rather than the
-  zero value, and a joined field filters and orders the listing — and the prune lane
-  compiles a join whose target is HAND-WRITTEN, which is the escape hatch's only honest
-  proof.
+  zero value, a joined identity arrives as text, and a joined field filters and orders the
+  listing. The **CSV export** is asserted separately, because it is a third rendering
+  written by its own emitter and a missing header there surfaces as an internal name
+  rather than as an error. The prune lane compiles a join whose target is HAND-WRITTEN,
+  and a new **coverage-matrix row** (`29-read-joins`) carries both join shapes over a
+  hand-written target through build, vet and the generated tests.
+
+- **`doctor` and `adopt` have a lane at all.** Neither had one: the pair that decides
+  whether a hand edit is recoverable was proven by nobody. The gate now checks the whole
+  cycle on a join-bearing tree — doctor reports the edit, adopt records the exception,
+  doctor reports it as adopted, and the next regeneration PRESERVES it instead of
+  refusing the run. Reporting an exception and honoring it are two different things, and
+  only the last step proves the second.
 
 ### Fixed
 
