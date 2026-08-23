@@ -15,10 +15,11 @@ import (
 // exists there or it does not, and it has exactly one type — a second statement
 // of it is a second thing to keep in step.
 //
-// Nullability is derived from the KIND, not from the target's column: a left
-// join with no counterpart produces NULL whatever the target declares, and the
-// framework refuses a non-pointer Go field for one. An inner join's field takes
-// the target's own shape, since a matching row is guaranteed to exist.
+// Nullability has TWO independent sources and either one alone decides it: a
+// left join with no counterpart produces NULL whatever the target declares, and
+// a column the TARGET declares nullable is reachable as NULL even under an inner
+// join — which proves the joined ROW exists, never that every column of it is
+// filled. The framework refuses a non-pointer Go field in both cases.
 func resolveJoins(s *spec.Spec, p *discover.Project, m *Model) {
 	for _, j := range s.Joins {
 		// A hand-written target is invisible to the generator: validation has
@@ -26,11 +27,12 @@ func resolveJoins(s *spec.Spec, p *discover.Project, m *Model) {
 		// the resolution below falls back to it rather than skipping the join.
 		target := claimNamed(p.SiblingSpecs, j.To)
 		rj := Join{
-			Kind:             j.Kind,
-			Target:           j.To,
-			TargetSchemaFunc: j.To + "Schema",
-			FKColumn:         j.On,
-			Child:            j.InChild,
+			Kind:              j.Kind,
+			Target:            j.To,
+			TargetSchemaFunc:  j.To + "Schema",
+			FKColumn:          j.On,
+			Child:             j.InChild,
+			TargetHandWritten: target == nil,
 		}
 		if j.InChild != "" {
 			rj.ChildSchemaFunc = j.InChild + "Schema"
@@ -52,8 +54,10 @@ func resolveJoins(s *spec.Spec, p *discover.Project, m *Model) {
 }
 
 func resolveJoinField(entity string, j spec.Join, f spec.JoinField, target *discover.SpecClaim) Field {
-	specType := f.Type
-	targetNullable := false
+	// The target's own declaration wins whenever there is one; the field's own
+	// keys stand in ONLY for a hand-written aggregate this project has no spec
+	// for, which is the single case validation demands them in.
+	specType, targetNullable := f.Type, f.Nullable
 	if target != nil {
 		if tf := claimFieldByColumn(target.Fields, f.Column); tf != nil {
 			specType, targetNullable = tf.Type, tf.Nullable

@@ -217,22 +217,25 @@ func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
 		return
 	}
 
-	// The Go name is this entity's namespace, so it must not shadow anything
-	// the entity already answers to. The framework checks the same thing at
-	// construction and panics; the joined side's spelling is free precisely
-	// because it never surfaces above infrastructure.
-	if findAnyField(s, f.Name) != nil {
+	// The Go name must not shadow anything the JOINING TABLE already answers to,
+	// and that namespace is the owner's — not the aggregate's. The framework
+	// checks `owner.Resolve`, which reaches the owner's own columns and the
+	// facets attached to it (plus, on the root, the shared base) and stops
+	// there: a collection's schema does not resolve the root's fields.
+	//
+	// So an entry may carry a joined name the root also uses. Refusing that
+	// would be this generator inventing a rule and presenting it as the
+	// framework's, and the two structs are genuinely separate namespaces in the
+	// emitted Go.
+	owner := s.Entity
+	if j.InChild != "" {
+		owner = "the collection " + j.InChild
+	}
+	if what := shadowedOnOwner(s, j.InChild, ownerFields, f.Name); what != "" {
 		ps.BlockerFix(where+".name",
-			fmt.Sprintf("%s already resolves on %s — its own field, a sibling's or the shared base's",
-				f.Name, s.Entity),
+			fmt.Sprintf("%s already resolves on %s — %s", f.Name, owner, what),
 			"the joined side's spelling never surfaces above infra, so rename this "+
 				"field freely: the column it reads is unchanged")
-		return
-	}
-	if findField(ownerFields, f.Name) != nil {
-		ps.BlockerFix(where+".name",
-			fmt.Sprintf("%s is already a field of %s", f.Name, ownerLabel),
-			"a join field must not shadow one the joining table already declares")
 		return
 	}
 	if prev, dup := joinNames[ownerLabel+"/"+f.Name]; dup {
@@ -245,7 +248,11 @@ func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
 
 	// A target this generator cannot see has nothing to check the column
 	// against, so the field's own type is what stands in for the derivation —
-	// demanded rather than guessed.
+	// demanded rather than guessed. The same goes for its NULLABILITY, which is
+	// not derivable from the join kind: an inner join proves the joined ROW
+	// exists, never that every column of it is filled, so `nullable: true` is
+	// the only way to say "this column can be NULL on the other side" about an
+	// aggregate the generator cannot read.
 	if target == nil {
 		switch {
 		case f.Type == "":
@@ -280,12 +287,59 @@ func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
 				"never enters")
 		return
 	}
+	// Both restatements are refused the same way and for the same reason: the
+	// target's own declaration is the single place the two sides cannot
+	// disagree, and a second copy here is a copy that goes stale the first time
+	// the target's spec changes and this one is not reopened.
+	if f.Nullable && !tf.Nullable {
+		ps.BlockerFix(where+".nullable",
+			fmt.Sprintf("%s declares %q as NOT NULL", j.To, f.Column),
+			"leave nullable out — it is derived from the target's own declaration. "+
+				"The key exists only for a target this project has no spec for, where "+
+				"there is nothing to derive it from")
+	}
 	if f.Type != "" && f.Type != tf.Type {
 		ps.BlockerFix(where+".type",
 			fmt.Sprintf("%s declares %q as %s, not %s", j.To, f.Column, tf.Type, f.Type),
 			"leave type out — it is derived from the target's own declaration, which "+
 				"is the one place the two cannot disagree")
 	}
+}
+
+// shadowedOnOwner names what a joined Go field would shadow ON THE JOINING
+// TABLE, or "" when the name is free there.
+//
+// It reproduces the reach of the framework's `owner.Resolve`, which is what
+// read.WithJoins consults: the owner's own columns, plus the 1:1 facets attached
+// to that same node — the root's for a root join, the collection's for a child
+// one. A root's fields include the shared base's (they are declared here with
+// livesOn: base), which is the third thing Resolve reaches.
+//
+// What it deliberately does NOT reach is the other direction: a collection does
+// not resolve the root's fields, and a facet of one collection is nothing to
+// another. Checking wider would refuse declarations the framework accepts.
+func shadowedOnOwner(s *Spec, inChild string, ownerFields []Field, name string) string {
+	if findField(ownerFields, name) != nil {
+		return "a field it already declares"
+	}
+	attachTo := "child:" + inChild
+	for i := range s.Siblings {
+		sib := s.Siblings[i]
+		isChildFacet := strings.HasPrefix(sib.AttachTo, "child:")
+		if inChild == "" {
+			// The root's own facets: root, and role under sharedbase. A facet of
+			// a collection hangs off that collection, not off the root.
+			if isChildFacet {
+				continue
+			}
+		} else if sib.AttachTo != attachTo {
+			continue
+		}
+		if findField(sib.Fields, name) != nil {
+			return "a field of the facet " + sib.Name
+		}
+	}
+	return ""
 }
 
 func neighbourNamed(ns []Neighbour, entity string) *Neighbour {
@@ -422,9 +476,12 @@ func warnUnseenTarget(j Join, where string, opt Options, ps *Problems) {
 		fmt.Sprintf("no spec of this project declares %q, so its columns cannot be checked here", j.To),
 		fmt.Sprintf("the generated repository calls schemas.%sSchema() — a hand-written "+
 			"aggregate that names its schema differently fails the build at once, which "+
-			"is the honest failure. Each mapped field has to state its own type, and the "+
-			"framework validates the column and the Go field itself at repository "+
-			"construction%s", j.To, knownEntities(opt.Neighbours)))
+			"is the honest failure. Each mapped field has to state its own type, and "+
+			"`nullable: true` on any column that is nullable OVER THERE — an inner join "+
+			"proves the joined row exists, not that every column of it is filled, and a "+
+			"non-pointer field receiving a NULL is refused at repository construction. "+
+			"The framework validates the column and the Go field itself at that same "+
+			"point%s", j.To, knownEntities(opt.Neighbours)))
 }
 
 func anyVisibleJoinField(s *Spec) bool {

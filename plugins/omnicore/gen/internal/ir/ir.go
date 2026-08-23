@@ -276,6 +276,12 @@ type Join struct {
 	// the TARGET — the join's own side — not a column of this entity, which has
 	// none for them.
 	Fields []Field
+	// TargetHandWritten says no spec of this project declares the target, so
+	// every field's type and nullability came from the AUTHOR rather than from a
+	// declaration the generator could read. Nothing downstream changes; it is
+	// carried so the gen-report can tell a reviewer which rows were taken on
+	// somebody's word and are checked by the framework at boot instead.
+	TargetHandWritten bool
 }
 
 // Verb is the framework call this declaration renders as.
@@ -1813,11 +1819,11 @@ type Child struct {
 	// ordinary fields of the entry, filled on every load, served inside the
 	// entry — and never filterable or sortable, because narrowing the root by a
 	// field of a 1:N collection is a pushdown one root SELECT cannot express.
-	JoinFields  []Field
-	Identity    []Field // the business-identity subset
-	ArchivedAt  string
-	InputType   string
-	AddMethod   string
+	JoinFields []Field
+	Identity   []Field // the business-identity subset
+	ArchivedAt string
+	InputType  string
+	AddMethod  string
 	// PerChild says the collection is edited one entry at a time: its own
 	// endpoints, its own commands, and a 404 when the entry is not there. The
 	// alternative — atomic-replace — has no entry to address, because the root's

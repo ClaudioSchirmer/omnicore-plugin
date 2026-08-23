@@ -873,6 +873,21 @@ func joinNote(m *ir.Model, j ir.Join) string {
 	b.WriteString("Nothing here is a write path: the fields are absent from the TableSchema, " +
 		"so no INSERT or UPDATE can carry them and no migration creates them. ")
 
+	// The one row on this page the generator did NOT verify. With a target it can
+	// read, the column, its type and its nullability are checked against that
+	// spec; with a hand-written one there is nothing to check them against and
+	// the declaration was taken on the author's word. The framework checks the
+	// same things at repository construction — so the cost of a wrong word here
+	// is a boot that refuses, and a reviewer is the last chance to catch it
+	// before that.
+	if j.TargetHandWritten {
+		fmt.Fprintf(&b, "%s is HAND-WRITTEN — no spec of this project declares it — so the "+
+			"column names, their types and their nullability came from the spec's author, "+
+			"unchecked here. Confirm each against %s's own schema: the framework validates "+
+			"them at repository construction, and a nullable column landing in a "+
+			"non-pointer field aborts the boot rather than the build. ", j.Target, j.Target)
+	}
+
 	var served, hidden []string
 	for _, f := range j.Fields {
 		if f.Hidden {

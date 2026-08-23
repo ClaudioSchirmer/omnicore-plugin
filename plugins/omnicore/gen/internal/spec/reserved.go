@@ -1,5 +1,7 @@
 package spec
 
+import "strings"
+
 // Identifiers are emitted UNQUOTED in the Go schema and quoted in the DDL, so a
 // name that is reserved on one engine produces a migration that applies on some
 // dialects and is rejected on others. That is the worst shape of failure: it
@@ -82,9 +84,14 @@ func lowerASCII(s string) string {
 // share one namespace. This is the generator's copy of that rule, answered while
 // the author is still in the file (query.ReservedNameSuffixProblem is the
 // framework's own, exported for exactly this).
+//
+// The test is HasSuffix, exactly as the framework's is. A length guard here
+// would let the degenerate name `__0` through the generator and into a boot the
+// framework aborts — and a copy of a rule that answers differently at the edge
+// is worse than no copy at all, because the author trusts it.
 func ReservedViewSuffix(name string) string {
 	for _, slot := range []string{"__0", "__1"} {
-		if len(name) > len(slot) && name[len(name)-len(slot):] == slot {
+		if strings.HasSuffix(name, slot) {
 			return "ends in " + slot + ", which is a blue-green slot suffix the " +
 				"framework reserves for a view's physical collections"
 		}

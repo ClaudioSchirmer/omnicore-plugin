@@ -36,6 +36,11 @@ v0.56 or below has to upgrade first.
   entity's own collections, and each `fields[]` entry maps one column of the target onto
   a Go name of your choosing.
 
+  The Go name must not shadow what the JOINING TABLE already answers to, which is the
+  framework's own rule and not a wider one: an entry's join may carry a name the root also
+  uses, because a collection's schema does not resolve the root's fields and the two are
+  separate structs in the emitted Go.
+
 - **A joined field carries no domain type, and an identity crosses as TEXT.** `type: id`
   is refused on a join field, and so is any value object: the value belongs to another
   aggregate and arrives read-only, so a domain type there would be an instance no rule
@@ -43,6 +48,13 @@ v0.56 or below has to upgrade first.
   own spec, identity included. The generator emits `string` (or `*string`) for an identity
   column, which is also the only shape correct on all four engines, since three of them
   store an id as raw bytes.
+
+  `explain keys` says so too. It matches a key path to its closed set by SUFFIX — which is
+  what lets a nested `unique.scope` show the same values as the top-level one — and under
+  first-match-wins `joins[].fields[].type` inherited `fields[].type`'s set and advertised
+  `id`, the one value it blocks by name. The exact path now wins, and among suffixes the
+  longest; a reference that recommends what the validator refuses is the failure it exists
+  to prevent.
 
 - **A join may traverse onto a column of the target's COMPOSITE value object.** A
   composite owns no column of its own — its value spans several, one per part — and those
@@ -68,6 +80,14 @@ v0.56 or below has to upgrade first.
   construction rather than by a boot that says no. A nullable identity and a nullable
   plain column are both crossed under an inner join in the fixtures.
 
+  Where there is nothing to derive from — a HAND-WRITTEN target, which the generator
+  cannot read — `joins[].fields[].nullable` is how the author says it, alongside the
+  `type` that case already demands. Without it the emitted field was a non-pointer the
+  framework refuses at repository construction, and the author had no key to prevent it
+  with: a boot to find what the file could have said. Stating it for a target that IS a
+  spec of this project is refused, for the same reason a restated `type` is — the target's
+  own declaration is the one place the two cannot disagree.
+
 - **`joins[].fields[].hidden` — on the entity, off the wire.** Needing a value and
   publishing it are different decisions, so the language asks them separately. A hidden
   joined field is filled on every load and read by the rules and the domain service, and
@@ -81,7 +101,9 @@ v0.56 or below has to upgrade first.
   join to do more than it can. Every skill that writes a rule, a repository or a read
   model now routes there. The three previously-correct answers it overturns — copy the
   column, load the other aggregate inside the rule, or materialize a Mongo view for it —
-  are named as the thing not to do.
+  are named as the thing not to do. The language half is `explain keys`, which takes no
+  argument — `omnicore-gen` answers `explain keys joins` with "unknown topic", so the
+  skill sent an agent at a command that prints nothing it asked for.
 
 - **Seven golden-gate lanes** (`78 passed`, was 71). The running service is asked to prove
   a join end to end — an inner join serves the counterpart's value, a hidden field never
@@ -148,7 +170,8 @@ v0.56 or below has to upgrade first.
 - **A read-model name may not end in `__0` or `__1`.** They are the blue-green slot
   suffixes the framework addresses a projected view's two physical collections by, and
   every consequence of the collision is silent. `check` refuses it here, in the same words
-  the framework refuses it at boot.
+  the framework refuses it at boot — and by the same test, `HasSuffix`, so the degenerate
+  name `__0` is refused on both sides rather than passing `check` and aborting the boot.
 
 - **The backing flip is a CONVERSION, not a flag** — and `evolve-view` now plans both
   halves of it. Relational→Mongo re-declares the view on the other seam and rebuilds;

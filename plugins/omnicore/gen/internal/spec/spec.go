@@ -1485,6 +1485,20 @@ type JoinField struct {
 	// ABSENT: a left join with no counterpart, or a column the TARGET declares
 	// nullable. Either one makes NULL reachable, on either kind of join.
 	Type string `yaml:"type"`
+	// Nullable says the column is nullable ON THE TARGET, and it exists for the
+	// one case the generator cannot see: a hand-written aggregate this project
+	// declares no spec for.
+	//
+	// It matters because the pointer does not follow from the join kind alone.
+	// An INNER join proves the joined ROW exists, never that every column of it
+	// is filled — so a nullable column crossing an inner join still lands in a
+	// pointer on this side, and a non-pointer field there fails the framework's
+	// own check at repository construction, which is a boot to find. When the
+	// target IS a spec of this project the answer is read off its declaration
+	// and stating it here is refused as a second place for the two to disagree;
+	// a LEFT join is nullable whatever this says, because a missing counterpart
+	// produces NULL on its own.
+	Nullable bool `yaml:"nullable"`
 	// LabelKey is the translation-catalog key for the field's label, exactly as
 	// on a persisted field. Derived when omitted.
 	LabelKey string `yaml:"labelKey"`

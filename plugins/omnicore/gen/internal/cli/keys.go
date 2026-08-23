@@ -24,14 +24,28 @@ func explainKeys() string {
 	// `unique.scope` is as real under children[].fields[] as at the top level,
 	// and showing its values in one place and not the other is how an author
 	// concludes the nested one is a different, dumber key.
+	//
+	// But the EXACT path wins, and among suffixes the LONGEST one does. A nested
+	// key whose set genuinely differs from its outer namesake is otherwise
+	// answered by the outer entry, and this reference then advertises a value the
+	// validator refuses by name: `joins[].fields[].type` is `fields[].type` minus
+	// `id`, and matching on first-suffix-wins offered `id` as a legitimate choice
+	// for it. A generator that recommends what it blocks is the one failure this
+	// reference exists to prevent.
 	vocab := spec.Vocabularies()
 	setFor := func(path string) (spec.Vocabulary, bool) {
+		best, found := spec.Vocabulary{}, false
 		for _, v := range vocab {
-			if v.Path == path || strings.HasSuffix(path, "."+v.Path) {
+			switch {
+			case v.Path == path:
 				return v, true
+			case !strings.HasSuffix(path, "."+v.Path):
+				continue
+			case !found || len(v.Path) > len(best.Path):
+				best, found = v, true
 			}
 		}
-		return spec.Vocabulary{}, false
+		return best, found
 	}
 
 	var b strings.Builder

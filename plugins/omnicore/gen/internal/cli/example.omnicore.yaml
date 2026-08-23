@@ -644,8 +644,15 @@ joins:
       # is simply in no response body and in no export. That is the shape for a
       # traversal declared FOR A RULE: needing the value and publishing it are
       # different questions, so the language asks them separately.
+      # nullable: the column can be NULL ON THE TARGET, so the field lands in a
+      # pointer even though this is an INNER join — the join proves the campus
+      # ROW exists, never that every column of it is filled. Like `type`, it is
+      # stated only because Campus is hand-written: when the target is another
+      # spec of this project both are read off its own declaration, and
+      # restating either one here is refused.
       - name: CampusBudgetCode
         type: string
+        nullable: true
         column: budget_code
         hidden: true
         description: The campus's budget code — read by the rules, never served.

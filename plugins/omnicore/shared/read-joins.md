@@ -95,6 +95,14 @@ A field that cannot hold NULL fails on the first row that has one. So a nullable
 crossing an inner join is still nullable on this side; the kind of the join is only half
 the question.
 
+**Where the second half comes from decides who has to say it.** When the target is a spec
+of the same project, the generator reads its nullability off that declaration and stating
+it again is refused — one source, and it cannot go stale. When the target is HAND-WRITTEN
+there is nothing to read, and the author is the only one who knows: say so per field
+(`nullable: true` in the generator's spec; a pointer in a hand-written entity). Skipping it
+is not a warning, it is a boot — the framework checks the field against the target's schema
+at repository construction and refuses a non-pointer that can receive NULL.
+
 ## On the entity vs on the wire — two questions, asked separately
 
 **Needing a value and publishing it are different decisions, and the language keeps them

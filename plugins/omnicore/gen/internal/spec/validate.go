@@ -3249,20 +3249,6 @@ func findSibling(ss []Sibling, name string) *Sibling {
 	return nil
 }
 
-// findAnyField looks through the root and its siblings — everything that lands
-// on the aggregate's own struct.
-func findAnyField(s *Spec, name string) *Field {
-	if f := findField(s.Fields, name); f != nil {
-		return f
-	}
-	for i := range s.Siblings {
-		if f := findField(s.Siblings[i].Fields, name); f != nil {
-			return f
-		}
-	}
-	return nil
-}
-
 // readableField also accepts a child field addressed as Child.Field, which is
 // how the read side names it inside the projected document.
 // checkTableName applies the same reserved-word and format rules the root

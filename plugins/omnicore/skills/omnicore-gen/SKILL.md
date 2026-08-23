@@ -220,14 +220,20 @@ Four things to get right, because they are the ones that cost a migration later:
   - **the pointer follows from what can be ABSENT**, not from the kind alone: a left
     join with no counterpart, OR a column the target declares nullable — which makes a
     field nullable even under an `inner` join.
-  - **the target** is normally another spec of this project, and then the column and its
-    type are checked and DERIVED from that spec. A hand-written aggregate is accepted on
-    your word: `check` warns, each field must state its own `type`, and the generated
-    repository assumes the project's own schema-function naming. That last assumption
+  - **the target** is normally another spec of this project, and then the column, its
+    type and its nullability are checked and DERIVED from that spec — restating any of
+    them here is refused, because a second copy goes stale the first time the target
+    changes. A hand-written aggregate is accepted on your word, and then the derivation
+    has nothing to read: `check` warns, each field must state its own `type` AND
+    `nullable: true` on any column that is nullable over there, and the generated
+    repository assumes the project's own schema-function naming. Do not skip the
+    nullability: an `inner` join proves the joined ROW exists, not that every column of
+    it is filled, so a non-pointer field receiving a NULL is refused at repository
+    construction — a boot to find what the file could have said. The naming assumption
     fails at BUILD time if it is wrong, which is the honest failure — do not paper over it.
   What it is NOT: a 1:N reach, a match on anything but the target's id, a second hop, or a
   way to bring a collection. `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` owns the
-  boundary and the alternatives; `explain keys joins` prints the language half.
+  boundary and the alternatives; `explain keys` prints the language half.
 - **Value objects — and ask the closed-set question about EVERY one.** Before writing
   `kind: raw`, ask: is the set of valid values FINITE and known? If it is, it is an
   `enum`, not a shape. `raw` with `regex: '^[A-Z]{2}$'` accepts `XX`, `ZZ` and `QQ` — a

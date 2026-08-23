@@ -112,13 +112,13 @@ var (
 	// returns pure values and never an error, so the set stays narrow on purpose.
 	FactReturns = set("bool", "int64", "float64", "string")
 
-	ReadBackings  = set("relational", "mongo")
+	ReadBackings = set("relational", "mongo")
 	// JoinFieldTypes is FieldTypes minus `id`: a join field carries no domain
 	// type, so an identity crosses as its canonical text instead of as domain.ID.
 	JoinFieldTypes = set("string", "int", "int64", "float64", "bool", "time")
 	// JoinKinds is what a joining row with no counterpart means. The choice is
 	// not free: inner is legal only over a NON-NULLABLE foreign key.
-	JoinKinds = set("inner", "left")
+	JoinKinds     = set("inner", "left")
 	IdentityViews = set("create", "add-role", "skip")
 	IndexOrders   = set("asc", "desc")
 

@@ -255,3 +255,107 @@ func TestAMongoBackedJoinIsWarnedAboutOnlyWhenItLooksLikeAReadRequest(t *testing
 		t.Errorf("a rules-only traversal needs no warning about the view: %v", w)
 	}
 }
+
+// TestAnUnseenTargetsNullableColumnIsDeclarable is the gap `nullable` closes.
+//
+// The pointer does not follow from the join kind: an INNER join proves the
+// joined ROW exists, never that every column of it is filled. When the target is
+// a spec of this project that is read off its declaration — but a hand-written
+// aggregate is invisible here, and without a key to say it the generator emitted
+// a non-pointer field that the framework refuses at repository construction. A
+// boot to find what the file could have said.
+func TestAnUnseenTargetsNullableColumnIsDeclarable(t *testing.T) {
+	s := joiningSpec()
+	s.Joins[0].Fields[0].Type = "string"
+	s.Joins[0].Fields[0].Nullable = true
+	// No neighbours: Campus is hand-written as far as this run can tell.
+	if ps := Validate(s, Options{}); ps.HasBlockers() {
+		t.Fatalf("nullable must be declarable for an unseen target, got:\n%v", ps.Error())
+	}
+}
+
+// TestNullableIsRefusedWhenTheTargetAlreadyAnswersIt keeps ONE source of truth.
+//
+// The target's own spec says whether the column is nullable. A second copy on
+// this side is a copy that goes stale the first time the target changes and this
+// file is not reopened — the same reason `type` is refused when it can be
+// derived.
+func TestNullableIsRefusedWhenTheTargetAlreadyAnswersIt(t *testing.T) {
+	s := joiningSpec()
+	s.Joins[0].Fields[0].Nullable = true // but Campus declares `label` NOT NULL
+	ps := Validate(s, joinOpts())
+	if !ps.HasBlockers() {
+		t.Fatal("restating nullability a visible target already declares must be refused")
+	}
+	if !strings.Contains(ps.Error().Error(), "leave nullable out") {
+		t.Errorf("the refusal must name the fix; got:\n%v", ps.Error())
+	}
+}
+
+// TestAChildJoinMayReuseARootFieldName holds the generator to the framework's
+// OWN namespace rule rather than a stricter invented one.
+//
+// read.WithJoins checks `owner.Resolve`, and the owner of a child join is the
+// COLLECTION's schema — which reaches the collection's columns and its facets
+// and stops there. A collection does not resolve the root's fields, and the two
+// entries are separate structs in the emitted Go, so a name used on both is
+// legal. Refusing it would be this generator presenting its own rule as the
+// framework's.
+func TestAChildJoinMayReuseARootFieldName(t *testing.T) {
+	s := joiningSpec()
+	s.Fields = append(s.Fields, Field{
+		Name: "CityName", Type: "string", Column: "city_name", LivesOn: "root",
+		Length: 80, Example: "Porto Alegre", Description: "A cidade do aluno.",
+	})
+	s.Children = []Child{{
+		Name: "Guardiao", Plural: "Guardioes", Table: "guardioes", OwnedBy: "root",
+		Description:      "Os responsáveis pelo aluno.",
+		ParentColumn:     "matricula_id",
+		EditStrategy:     "atomic-replace",
+		BusinessIdentity: []string{"CampusID"},
+		Fields: []Field{{
+			Name: "CampusID", Type: "id", Column: "campus_id",
+			Example: "1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4", Description: "O campus.",
+		}},
+	}}
+	// The entry reaches Campus and lands the value on a field the ROOT also
+	// declares — a different struct, a different namespace.
+	s.Joins = append(s.Joins, Join{
+		Kind: "left", To: "Campus", On: "campus_id", InChild: "Guardiao",
+		Fields: []JoinField{{Name: "CityName", Column: "label", Description: "A cidade."}},
+	})
+	if ps := Validate(s, joinOpts()); ps.HasBlockers() {
+		t.Fatalf("a child join may carry a name the root also uses, got:\n%v", ps.Error())
+	}
+}
+
+// TestAJoinFieldStillCannotShadowItsOwnTable is the other half of the rule
+// above: relaxing the ROOT's namespace must not relax the OWNER's.
+func TestAJoinFieldStillCannotShadowItsOwnTable(t *testing.T) {
+	s := joiningSpec()
+	s.Joins[0].Fields[0].Name = "CampusID" // already a field of the root, which owns this join
+	ps := Validate(s, joinOpts())
+	if !ps.HasBlockers() {
+		t.Fatal("a join field must not shadow one the joining table declares")
+	}
+}
+
+// TestReservedViewSuffixMatchesTheFrameworksRule keeps the generator's copy
+// exact at the edge.
+//
+// The framework's query.ReservedNameSuffixProblem is a HasSuffix test. A length
+// guard here would let the degenerate name `__0` through the generator and into
+// a boot the framework aborts — and a copy that answers differently at the edge
+// is worse than no copy, because the author trusts it.
+func TestReservedViewSuffixMatchesTheFrameworksRule(t *testing.T) {
+	for _, name := range []string{"users__0", "users__1", "__0", "__1"} {
+		if ReservedViewSuffix(name) == "" {
+			t.Errorf("%q ends in a blue-green slot suffix and must be refused", name)
+		}
+	}
+	for _, name := range []string{"users", "users__2", "u__0s", ""} {
+		if why := ReservedViewSuffix(name); why != "" {
+			t.Errorf("%q is a legal read-model name, got refused: %s", name, why)
+		}
+	}
+}
