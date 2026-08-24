@@ -7,6 +7,33 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-08-24
+
+The hand-off page said a two-column constraint was a one-column one — and the reviewer
+who trusts a summary is exactly who the page is written for.
+
+### Fixed
+
+- **The gen-report's `Unique` row named half of a composite constraint.** Uniqueness
+  declared on a composite value object is uniqueness over the TUPLE, and it lands on the
+  value object's FIRST PART so the constraint is built once over the whole run. The report
+  printed that part's name and stopped there: a permission keyed by `recurso:acao` read as
+  `Unique | ChaveRecurso — across the whole table`, while the migration created a partial
+  index over `(chave_recurso, chave_acao) WHERE deleted_at IS NULL`. Nothing was wrong with
+  the generated code — the DDL and even its own comment ("over the TUPLE: this constraint
+  belongs to a composite value object") said it correctly. Only the summary a reviewer
+  reads FIRST contradicted them, and it contradicted them in the direction that looks
+  plausible: a single-column unique is what most entities have. The row now names the value
+  object with its parts and says the constraint covers them together.
+
+  The scope half of the same line was wrong for the same reason. `within` was read off the
+  constraint by matching the field's JSON name, but a composite's constraint is FILED under
+  the value object's name — so the lookup never matched a composite at all and every one of
+  them fell back to "across the whole table". A composite unique per tenant reported as
+  global while the index was scoped, which is the report saying the opposite of what was
+  built. The lookup now keys on the value object for a composite and on the field for a
+  plain one, which is how `resolveConstraints` files them.
+
 ## [0.34.0] — 2026-08-24
 
 A key the spec language documented, validated and threw away — and the guard that makes
