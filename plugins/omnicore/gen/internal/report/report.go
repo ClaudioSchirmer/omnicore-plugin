@@ -817,15 +817,42 @@ func renderCheck(b *strings.Builder, in Input) {
 		// as "across the whole table" whether or not that is what was built.
 		// It is stated from the constraint, so this line and the DDL cannot
 		// drift apart.
+		//
+		// The constraint is looked up by the key it was FILED under, which is
+		// the VALUE OBJECT's name for a composite and the field's own only for
+		// a plain one. Matching the part's JSONName — which is what this did —
+		// never found a composite's constraint at all, so one scoped `within`
+		// something reported as unique across the whole table while the
+		// migration created the scoped index.
+		key := f.JSONName
+		if f.Composite != nil {
+			key = naming.Camel(f.Composite.Owner)
+		}
 		within := "across the whole table"
 		for _, c := range m.Constraints {
-			if c.Kind == "unique" && c.Field == f.JSONName && len(c.Within) > 0 {
+			if c.Kind == "unique" && c.Field == key && len(c.Within) > 0 {
 				within = "per " + strings.Join(c.Within, " + ")
 			}
 		}
-		fmt.Fprintf(b, "| Unique | `%s` — %s, scope `%s` (%s) | %s; a duplicate is refused at "+
-			"the database and reported as `%s`. |\n",
-			f.Name, within, scope, f.Unique.Enforce, reuse, f.Unique.Notification)
+		// WHAT is unique. Uniqueness declared on a composite lands on its FIRST
+		// PART, so the constraint is built once over the whole run — and naming
+		// that part here described a single-column index over one half of the
+		// value object, while the migration created one over the tuple. The
+		// reviewer who trusts the summary verifies a constraint that does not
+		// exist; the one who reads it against the DDL has no reason to trust
+		// the rest of the table.
+		subject := "`" + f.Name + "`"
+		tuple := ""
+		if f.Composite != nil {
+			subject = "`" + f.Composite.VOName + "` (" +
+				strings.Join(compositePartNames(m.Fields, f), " + ") + ")"
+			tuple = " Unique as a TUPLE: the parts identify together, so a row differing " +
+				"in either one is a different value — a constraint over a single part " +
+				"would refuse rows the domain accepts."
+		}
+		fmt.Fprintf(b, "| Unique | %s — %s, scope `%s` (%s) | %s; a duplicate is refused at "+
+			"the database and reported as `%s`.%s |\n",
+			subject, within, scope, f.Unique.Enforce, reuse, f.Unique.Notification, tuple)
 	}
 
 	if m.Surfaces.GraphQL {
@@ -861,6 +888,22 @@ func renderCheck(b *strings.Builder, in Input) {
 			j.Target, j.Verb(), j.FKColumn, joinWhere(j), joinNote(m, j))
 	}
 	b.WriteString("\n")
+}
+
+// compositePartNames lists the exposed names of the composite value object
+// whose first part is `head`, in declaration order — the tuple its unique
+// constraint covers, in the spelling the entity carries the parts under.
+func compositePartNames(fields []ir.Field, head ir.Field) []string {
+	var out []string
+	for _, g := range ir.Composites(fields) {
+		if g.Head.Owner != head.Composite.Owner {
+			continue
+		}
+		for _, p := range g.Parts {
+			out = append(out, "`"+p.Name+"`")
+		}
+	}
+	return out
 }
 
 func joinWhere(j ir.Join) string {

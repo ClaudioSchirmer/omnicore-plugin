@@ -179,6 +179,74 @@ func TestManualValueObjectStopsBeingOwedOnceWritten(t *testing.T) {
 	}
 }
 
+// TestUniqueLineNamesTheWholeTuple pins the row for the uniqueness a reviewer
+// cannot see from one column.
+//
+// A composite's uniqueness is declared on the VALUE OBJECT and lands on its
+// first part alone, so the constraint is built once over the whole run. The row
+// printed that part's name, which described a single-column index over
+// `chave_recurso` while the migration created a partial one over
+// (chave_recurso, chave_acao) — the migration's own comment says "over the
+// TUPLE", so the report contradicted the file it is supposed to summarize.
+//
+// The scope half is the same bug one layer down: the constraint of a composite
+// is FILED under the value object's name, so the `within` lookup keyed on the
+// part's JSONName never matched, and a composite unique per tenant reported as
+// unique across the whole table.
+func TestUniqueLineNamesTheWholeTuple(t *testing.T) {
+	model := func(within []string) *ir.Model {
+		return &ir.Model{
+			Entity: ir.Names{Pascal: "Permissao"}, Table: "permissoes",
+			Fields: []ir.Field{
+				{
+					Name: "ChaveRecurso", Column: "chave_recurso", JSONName: "chaveRecurso",
+					Unique: &ir.Unique{
+						Enforce: "service-precheck+constraint", Scope: "active-only",
+						Notification: "ChaveJaExisteNotification", Within: within,
+					},
+					Composite: &ir.CompositePart{
+						VOName: "ChavePermissao", Owner: "Chave", First: true,
+					},
+				},
+				{
+					Name: "ChaveAcao", Column: "chave_acao", JSONName: "chaveAcao",
+					Composite: &ir.CompositePart{
+						VOName: "ChavePermissao", Owner: "Chave", Last: true,
+					},
+				},
+			},
+			// Filed under the value object, exactly as resolveConstraints files it.
+			Constraints: []ir.Constraint{{
+				Kind: "unique", Table: "permissoes", Field: "chave",
+				Columns: append(within, "chave_recurso", "chave_acao"),
+				Within:  within, Scope: "active-only", Archived: "deleted_at",
+			}},
+		}
+	}
+
+	line := lineWith(Render(Input{
+		Model: model(nil), SpecPath: "omnicore-gen/permissao.omnicore.yaml",
+	}), "| Unique |")
+
+	for _, want := range []string{"ChavePermissao", "ChaveRecurso", "ChaveAcao", "TUPLE"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the unique row omits %q, so a two-column constraint reads as one "+
+				"column:\n%s", want, line)
+		}
+	}
+
+	scoped := lineWith(Render(Input{
+		Model: model([]string{"Tenant"}), SpecPath: "omnicore-gen/permissao.omnicore.yaml",
+	}), "| Unique |")
+	if !strings.Contains(scoped, "per Tenant") {
+		t.Errorf("a composite scoped by tenant does not say so:\n%s", scoped)
+	}
+	if strings.Contains(scoped, "across the whole table") {
+		t.Errorf("a scoped composite is reported as unique across the whole table, which is "+
+			"the opposite of the index that was created:\n%s", scoped)
+	}
+}
+
 func storageLine(report string) string { return lineWith(report, "| Storage |") }
 
 func lineWith(report, prefix string) string {
