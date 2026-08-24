@@ -1810,16 +1810,12 @@ func emitQueryTests(m *ir.Model) (fsplan.File, error) {
 	if !m.Read.Enabled || (!m.Read.ByID && !m.Read.ByParams) {
 		return fsplan.File{}, nil
 	}
+	// The BODY first, the header after: this file's imports are decided from
+	// what it actually writes, and it writes values it did not used to. A
+	// derivation whose source is an `id` builds a domain.ID; one whose source is
+	// a timestamp builds a time.Date. Either under a hard-coded import block is
+	// `undefined: domain` in a file the author did not write.
 	s := &src{}
-	s.Blank()
-	s.L("package queries")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("testing"))
-	s.Blank()
-	s.L("\t%s", quote(fwImport("application/configuration")))
-	s.L(")")
-	s.Blank()
 
 	s.Doc(
 		"The criteria mappers must not fail on a well-formed query.",
@@ -1890,8 +1886,54 @@ func emitQueryTests(m *ir.Model) (fsplan.File, error) {
 	s.L("\t}")
 	s.L("}")
 
+	out := &src{}
+	out.Blank()
+	out.L("package queries")
+	out.Blank()
+	queryTestImports(out, queryTestTypeNames(m))
+	out.Blank()
+	out.Write(s.Bytes())
+
 	return goFile("internal/application/queries/"+m.Entity.Snake+"_queries_test.go",
-		fsplan.Owned, "the read criteria tests", s)
+		fsplan.Owned, "the read criteria tests", out)
+}
+
+// queryTestTypeNames is every type this test file NAMES beyond the builtins.
+//
+// Two places construct typed values in it, and both took a widening in the same
+// round that per-entry derivations arrived: the derivation cases build one
+// Result with every source filled, and the fieldRestrict case builds a sample
+// for the restricted field. Both go through literalFor, which spells an id as
+// domain.NewID and a timestamp as time.Date.
+func queryTestTypeNames(m *ir.Model) []string {
+	out := derivationTypeNames(m)
+	if len(m.Read.FieldRestrict) > 0 {
+		for _, f := range m.AllOwnerFields() {
+			if f.Name == m.Read.FieldRestrict[0].Field {
+				out = append(out, f.GoType, f.BaseGoType)
+			}
+		}
+	}
+	return out
+}
+
+// queryTestImports writes the block, adding `time` and `domain` only when a type
+// above names them — an import Go does not need is as fatal as one it does.
+func queryTestImports(s *src, types []string) {
+	joined := strings.Join(types, " ")
+	needTime := strings.Contains(joined, "time.")
+	needDomain := strings.Contains(joined, "domain.")
+	s.L("import (")
+	s.L("\t%s", quote("testing"))
+	if needTime {
+		s.L("\t%s", quote("time"))
+	}
+	s.Blank()
+	s.L("\t%s", quote(fwImport("application/configuration")))
+	if needDomain {
+		s.L("\t%s", quote(fwImport("domain")))
+	}
+	s.L(")")
 }
 
 // emitViewTests builds the view definition.

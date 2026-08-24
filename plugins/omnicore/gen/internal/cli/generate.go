@@ -319,6 +319,20 @@ func Doctor(w io.Writer, projectDir string) error {
 					line += " — " + rec.Why
 				}
 				fmt.Fprintln(w, line+"\n      (it no longer tracks the spec: emitter improvements will not reach it)")
+			case rec.Class == fsplan.Hook:
+				// A hook carries no checksum on purpose, so neither branch below
+				// could say anything true about it — both would announce a
+				// refusal that regeneration never makes.
+				//
+				// What IS worth saying is the opposite of drift: the file is
+				// still byte for byte what the generator created, which means
+				// nobody has written the body yet. That is the quiet failure the
+				// hook kinds share — an underived field renders absent and an
+				// unenforced rule simply does not fire — and this is the one
+				// command in a position to notice it.
+				if fsplan.Hash(content) == rec.Hash {
+					fmt.Fprintf(w, "  ! %s is %s\n", path, fsplan.UnwrittenHookReason(path))
+				}
 			default:
 				// The FILE decides, through the checksum in its own header —
 				// the same authority `generate` refuses on. The lock's hash is a

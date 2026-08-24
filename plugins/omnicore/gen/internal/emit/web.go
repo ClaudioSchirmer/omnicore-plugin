@@ -616,6 +616,12 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 				}
 				s.L("\t%s %s `%s`", f.Name, typ, readFieldTag(f, pointered))
 			}
+			// The entry's DERIVED fields, carrying the same `computed:` tag the
+			// root's do. It is what earns them the whole contract at this level
+			// too: ?fields=<segment>.<name> pushes the entry's SOURCES down
+			// instead of a name no column has, and ?orderBy= over it is a typed
+			// 400 rather than a query the store cannot answer.
+			emitComputedFieldTags(s, c.Computed, pointered)
 			s.L("}")
 			s.Blank()
 		}

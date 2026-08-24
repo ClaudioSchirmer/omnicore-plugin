@@ -137,8 +137,115 @@ func TestHookFileIsWrittenOnceAndKept(t *testing.T) {
 	if string(got) != "package domain\n// real rules\n" {
 		t.Errorf("the hook file was overwritten: %q", got)
 	}
-	if _, hashed := lock.Entities["Student"].Files["internal/domain/student_rules_manual.go"]; hashed {
-		t.Error("a hook file must never be hashed — hashing it would make edits look like drift")
+	// The record is the CREATION hash and stays that way. It must never follow
+	// the file: a record that tracked the edit would make a hand edit look like
+	// drift, which is the one thing a hook exists to be safe from.
+	rec, recorded := lock.Entities["Student"].Files["internal/domain/student_rules_manual.go"]
+	if !recorded {
+		t.Fatal("a hook must be recorded, or an orphaned one is invisible to prune")
+	}
+	if rec.Class != Hook {
+		t.Errorf("a hook must be recorded AS a hook, got class %q", rec.Class)
+	}
+	if rec.Hash != Hash(hook.Content) {
+		t.Error("the record must hold what the generator CREATED, not what the author wrote — " +
+			"re-hashing it would report every edit as drift")
+	}
+}
+
+// TestOrphanedHookIsReported is the tool path back from a spec that shrank.
+//
+// Removing the last computed field (or the last manual rule) stops producing
+// the hook, and the file stays on disk declaring functions nothing calls. It
+// used to be invisible to every command here — the lock recorded no hook, and
+// prune reads the lock — so the only way out was knowing which file to delete.
+func TestOrphanedHookIsReported(t *testing.T) {
+	root := t.TempDir()
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{}}
+	hook := File{Path: "internal/application/queries/role_computed_manual.go", Class: Hook,
+		Content: []byte("package queries\n\nfunc ComputeRoleDisplay() {}\n")}
+
+	d, _ := Plan(root, "Role", []File{hook}, lock, nil)
+	_ = Apply(root, "Role", "s.yaml", "h", "v1", nil, ViewState{}, d, lock)
+
+	// The spec no longer declares the field, so this run produces no hook.
+	untouched := PlanPrune(root, "Role", nil, lock)
+	if len(untouched) != 1 || untouched[0].Kind != PruneDelete {
+		t.Fatalf("an untouched orphaned hook is the generator's own to remove, got %+v", untouched)
+	}
+
+	write(t, root, "internal/application/queries/role_computed_manual.go",
+		"package queries\n\nfunc ComputeRoleDisplay() { /* mine */ }\n")
+	written := PlanPrune(root, "Role", nil, lock)
+	if len(written) != 1 || written[0].Kind != PruneKeep {
+		t.Fatalf("a hook somebody wrote in is theirs, got %+v", written)
+	}
+	if !strings.Contains(written[0].Reason, "it is yours") {
+		t.Errorf("the reason must say WHY it is being left, got %q", written[0].Reason)
+	}
+}
+
+// TestAHookGeneratedBeforeHooksWereRecordedIsPickedUp is the half that decides
+// whether this fix reaches an EXISTING project or only new ones.
+//
+// A tree generated before hooks were recorded has the file on disk and nothing
+// in the lock, so prune — which reads the lock — would go on never seeing it,
+// forever. The next regeneration adopts it into the record.
+//
+// It is recorded as what the generator WOULD write, never as the file's own
+// bytes: recording those would make a hook somebody had already filled in look
+// untouched, and "untouched" is the one verdict that authorises deletion.
+func TestAHookGeneratedBeforeHooksWereRecordedIsPickedUp(t *testing.T) {
+	root := t.TempDir()
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{}}
+	path := "internal/application/queries/role_computed_manual.go"
+	hook := File{Path: path, Class: Hook,
+		Content: []byte("package queries\n\nfunc ComputeRoleDisplay() {}\n")}
+
+	// The state an older version left behind: the entity is known, the file is
+	// on disk with a body in it, and no record mentions it.
+	lock.Entities["Role"] = LockEntity{Files: map[string]LockFile{}}
+	write(t, root, path, "package queries\n\nfunc ComputeRoleDisplay() { /* mine */ }\n")
+
+	d, _ := Plan(root, "Role", []File{hook}, lock, nil)
+	if d[0].Action != KeptHook {
+		t.Fatalf("an existing hook must still be kept, got %s", d[0].Action)
+	}
+	_ = Apply(root, "Role", "s.yaml", "h", "v1", nil, ViewState{}, d, lock)
+
+	rec, recorded := lock.Entities["Role"].Files[path]
+	if !recorded {
+		t.Fatal("a pre-existing hook was not adopted into the lock — prune would never see it")
+	}
+	if rec.Hash == Hash([]byte("package queries\n\nfunc ComputeRoleDisplay() { /* mine */ }\n")) {
+		t.Fatal("the record holds the AUTHOR's bytes — an orphan would then look untouched " +
+			"and prune would delete a hand-written body")
+	}
+
+	// And it is now visible, on the conservative side: reported, not removed.
+	files := PlanPrune(root, "Role", nil, lock)
+	if len(files) != 1 || files[0].Kind != PruneKeep {
+		t.Fatalf("a retrofitted hook must be reported and left, got %+v", files)
+	}
+}
+
+// TestMigrationsAreNotTrackedAsHooks pins the exception. A migration RAN; the
+// tracking table in every environment says so, and no report may offer to clean
+// one up.
+func TestMigrationsAreNotTrackedAsHooks(t *testing.T) {
+	root := t.TempDir()
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{}}
+	mig := File{Path: "migrations/0001_create_student.up.sql", Class: Hook,
+		Content: []byte("CREATE TABLE student ();\n")}
+
+	d, _ := Plan(root, "Student", []File{mig}, lock, nil)
+	_ = Apply(root, "Student", "s.yaml", "h", "v1", nil, ViewState{}, d, lock)
+
+	if _, tracked := lock.Entities["Student"].Files[mig.Path]; tracked {
+		t.Error("a migration must stay out of the lock: recorded, it would be offered as an orphan")
+	}
+	if orphans := Orphans("Student", nil, lock); len(orphans) != 0 {
+		t.Errorf("no report may present a migration as a leftover, got %v", orphans)
 	}
 }
 

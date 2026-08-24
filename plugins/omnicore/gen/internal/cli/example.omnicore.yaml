@@ -577,6 +577,30 @@ children:
         example: 8c1d0f77-5b41-4a35-8f11-6d6e4c9b0a3e
         description: The city the guardian lives in, when it is on record.
         labelKey: GuardianCityIDField
+    # A COMPUTED read field on the ENTRY — the per-entry twin of read.computed
+    # below, and the seat that key cannot be.
+    #
+    # A root derivation runs once per DOCUMENT and is handed values; what the
+    # root holds for a collection is a slice, so it has no single entry to be
+    # handed. Declared here the derivation runs once per ENTRY, taking that
+    # entry's own fields — which is the shape of every "one label per row".
+    #
+    # `from:` names the ENTRY's fields, bare: the entry is the scope, so
+    # `Guardians` is not spelled in front of them. The framework records a nested
+    # field's sources under the same segment prefix as the field itself, so
+    # ?fields=guardians.contactLabel pushes guardians.FullName + guardians.Phone
+    # down without either side spelling the segment out.
+    #
+    # Read only, and one step more so than the root's: the per-entry write verbs
+    # return the entry through its own <Entry>Response, which carries what was
+    # STORED.
+    computed:
+      - name: ContactLabel
+        type: string
+        from: [FullName, Phone]
+        labelKey: GuardianContactLabelField
+        example: "Martin Reid — +1 555 0134 8890"
+        description: The guardian's name and phone on one line, for listings.
     rules:
       list:
         - id: guardian-name-required

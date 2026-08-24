@@ -589,6 +589,29 @@ type Child struct {
 	BusinessIdentity []string `yaml:"businessIdentity"`
 	// Fields are the entry's own fields.
 	Fields []Field `yaml:"fields"`
+	// Computed declares derived READ fields on the ENTRY — the per-entry twin of
+	// read.computed, and the seat a root derivation cannot be.
+	//
+	// The root's derivation runs once per document and is handed values; what
+	// the root holds for a collection is a SLICE, so it has no single entry to
+	// be handed and no way to produce one answer per row. Declared here, the
+	// derivation runs once per ENTRY and takes that entry's own fields — which
+	// is the shape of every "one label per grant", "one flag per line" question,
+	// and the reason the root key alone was not enough.
+	//
+	// `from` names the ENTRY's fields, bare and unqualified: the entry is the
+	// scope, so there is no collection to name in front of them. That is also
+	// what the framework expects — it records a nested field's computed sources
+	// under the same segment prefix as the field itself, so
+	// `?fields=<collection>.<name>` pushes `<collection>.<source>` down without
+	// either side having to spell the segment out.
+	//
+	// READ ONLY, like its root twin, and one step more so: the write verbs
+	// return an entry through its own `<Entry>Response`, which carries what was
+	// STORED. A derived value there would be computed from the entity the caller
+	// just sent rather than from the document the store answered with, and those
+	// are not the same question.
+	Computed []Computed `yaml:"computed"`
 	// Rules are the invariants checked on each entry of the collection.
 	Rules Rules `yaml:"rules"`
 	// SoftRemove makes removal reversible: the entry is archived (see
@@ -1096,9 +1119,31 @@ type Computed struct {
 	// Type is the derived value's type, from the same closed set a persisted
 	// field draws from.
 	Type string `yaml:"type"`
-	// From names the persisted fields the derivation reads. They are what the
-	// framework pushes to the store when the caller selects this field, so the
-	// list has to be complete — a source left out is a source that arrives nil.
+	// From names the STORED fields the derivation reads, in the scope where it
+	// is declared: the ENTITY's own fields under read.computed, and the ENTRY's
+	// own fields — bare, with no collection spelled in front of them — under
+	// children[].computed.
+	//
+	// The scope belongs in the first sentence because this comment is ALL that
+	// `explain keys` prints for the key (it shows one sentence), and it is
+	// printed under both paths — one struct serves both. Written for the root
+	// alone, it sent an author declaring a per-entry derivation straight at the
+	// root's fields, which is the one mistake the key exists to make impossible.
+	//
+	// They are what the framework pushes to the store when the caller selects
+	// this field, so the list has to be complete: a source left out is a source
+	// that arrives nil. The per-entry form needs no prefix precisely because the
+	// framework records a nested field's sources under the same segment as the
+	// field itself.
+	//
+	// A ROOT derivation reads the entity's own fields, its root-attached facets,
+	// a column listed under read.managed, and a ROOT join's fields. It may not
+	// read a collection's: it runs once per document, and what the root holds
+	// for a collection is a slice, so there is no single value to hand it.
+	//
+	// Each source becomes a PARAMETER of the derivation, under its camelCase
+	// name, so two sources that camel-case to one word are refused — two
+	// parameters of one name do not compile.
 	From []string `yaml:"from"`
 	// LabelKey is the translation-catalog key the tabular exports render as
 	// this column's header; absent, the header is the wire name.

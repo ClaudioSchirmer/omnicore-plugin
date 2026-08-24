@@ -412,10 +412,21 @@ func labelledFields(m *ir.Model) []ir.Field {
 // this line has a column to speak of.
 func computedLabels(m *ir.Model) []ir.Field {
 	var out []ir.Field
-	for _, c := range m.Read.Computed {
-		out = append(out, ir.Field{
+	label := func(c ir.ComputedField) ir.Field {
+		return ir.Field{
 			Name: c.Name, LabelKey: c.LabelKey, Text: c.Text, Description: c.Description,
-		})
+		}
+	}
+	for _, c := range m.Read.Computed {
+		out = append(out, label(c))
+	}
+	// A collection's derived fields come through here too: a hierarchical export
+	// gives every level its own columns, so an entry's derived column needs a
+	// header for exactly the reason the root's does.
+	for _, ch := range m.Children {
+		for _, c := range ch.Computed {
+			out = append(out, label(c))
+		}
 	}
 	return out
 }

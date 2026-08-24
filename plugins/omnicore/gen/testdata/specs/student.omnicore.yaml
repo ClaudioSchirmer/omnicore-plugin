@@ -569,6 +569,26 @@ children:
         example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4
         description: Campus de referencia do responsavel, quando houver.
         labelKey: GuardianCampusIDField
+    # Um campo COMPUTADO por ENTRADA. Esta fixture BOOTA, e o boot e o unico
+    # lugar que prova o que o compilador nao ve: que o Response e o Result se
+    # alinham por nome em cada nivel, e que a disciplina de ponteiro do
+    # `?fields=` vale recursivamente — as duas coisas que o framework recusa no
+    # boot e mais nada aqui pegaria.
+    #
+    # O NOME e deliberadamente o mesmo que role.RolePermission usa, e NAO e
+    # descuido: as quatro fixtures deste host compilam para UM pacote,
+    # internal/application/queries, e a derivacao era `Compute<Campo>`. Duas
+    # entidades com um computado homonimo emitiam ComputeLabel duas vezes e o
+    # pacote parava de compilar — num arquivo write-once, onde a saida obvia e
+    # editar um dos dois a mao e perder o corpo que ja estava la. Renomear um
+    # dos dois aqui apaga a unica prova que existe disso.
+    computed:
+      - name: Label
+        type: string
+        from: [FullName, Phone]
+        labelKey: GuardianLabelField
+        example: "Marcos Ribeiro — +55 51 99999-0000"
+        description: Nome e telefone do responsavel numa linha so.
     rules:
       list:
         - id: guardian-name-required

@@ -7,6 +7,153 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-08-24
+
+A derived read field that validated green, generated happily, compiled, and was empty
+forever — plus the four defects around it that made that one possible.
+
+### Added
+
+- **`children[].computed` — a derived read field on the ENTRY.** `read.computed` only ever
+  had a seat at the ROOT, and a root derivation runs once per DOCUMENT: what the root holds
+  for a collection is a slice, so there was nothing to hand it and no way to produce one
+  answer per row. Every "one label per grant", "one flag per line" question had no key at
+  all. Declared here, the derivation runs once per entry and takes that entry's own fields.
+
+  `from:` names the entry's fields **bare** — its own, a facet folded into it, a field a
+  join declared `inChild` brought onto it. The entry is the scope, so the collection is not
+  spelled in front of them, and that is also what the framework expects: it records a
+  nested field's computed sources under the same segment prefix as the field itself, so
+  `?fields=<collection>.<name>` pushes `<collection>.<source>` down without either side
+  spelling the segment out. The entry's row therefore earns the whole contract at its own
+  level: the sources are fetched instead of a name no column has, `?orderBy=` over it is a
+  typed 400, and the hierarchical export keeps the column under its `labelKey`.
+
+  The bodies land in the same hook file as the root's, one exported function per field.
+  Naming a ROOT field under `from:` is refused — the store would be asked for
+  `<collection>.<rootField>`, a path no document has — and the refusal points at
+  `read.computed`, which is the seat that can answer it. Read only, and one step more so
+  than the root's: the per-entry write verbs return the entry through its own
+  `<Entry>Response`, which carries what was STORED. A collection owned by a shared identity
+  declares its derivations on the spec that owns the identity, so both roles serve the same
+  field from one shape.
+
+### Changed
+
+- **⚠️ BREAKING — a computed read field's derivation is now named for its entity.**
+  `Compute<Field>` became `Compute<Entity><Field>` (and `Compute<Entity><Entry><Field>` for
+  a per-entry one). Every entity of a project writes its derivations into ONE package,
+  `internal/application/queries`, so two specs that each declared a computed field called
+  `Permission` emitted `ComputePermission` twice and the package stopped compiling — with
+  the worse half being that the file is a hook, written once and never rewritten, so the
+  obvious way out was editing one of the two by hand and losing whichever body was already
+  there.
+
+  **What a consumer has to do:** rename the function in each existing
+  `<entity>_computed_manual.go` to match the new signature — the report and the generated
+  call sites both print it. The build fails loudly at the call site until you do, which is
+  the good kind of failure; nothing is lost and nothing is rewritten.
+
+- **Every key that addresses a collection now accepts EITHER of its two names.** A
+  collection has two, and both are real: `name` is the entry's Go type, `plural` is the
+  collection's name — the document segment, the read DTO's field and the notification's
+  wire path. The keys disagreed about which one they wanted, and they disagreed silently:
+  `joins[].inChild`, `rules.list[].fields` and `read.computed.from` resolved the singular;
+  `service.facts[].filters` resolved the plural, and its refusal argued that plural was
+  "the name the projection, the read DTO and the notification path already use" — true of
+  the framework and the exact opposite of what the other three keys did. One spec, one
+  collection, three spellings, and the only way to learn which key wanted which word was to
+  be refused by it.
+
+  All of them now go through one resolver and the IR canonicalises to a single spelling
+  below that line, so no emitter learns there were two — including the dotted head of
+  `read.indexes` and `read.fieldRestrict`, which resolves a collection's field to a document
+  path and would otherwise have declared an index over the literal string
+  `"Permissoes.PermissaoID"`. Messages show the `plural`. The one new refusal is the
+  ambiguity that would make "either name" impossible: one word naming the entry type of one
+  collection and the plural of another.
+
+### Fixed
+
+- **A computed read field's `from:` was resolved TWICE, against two different sets, and the
+  gap was swallowed in silence.** Validation blessed six categories — a root join's field,
+  a collection's field, a collection's joined field, a `read.managed` column, the entity's
+  own fields, a facet's. Emission resolved two. A source in the gap was dropped with a bare
+  `continue`, so the derivation's signature came out one parameter short — which compiles,
+  because a function with fewer parameters is valid Go — and the field rendered empty on
+  REST, on GraphQL and in the export at once. `check` was green, `generate` succeeded, the
+  tree built, the tests passed, and nothing anywhere could detect it.
+
+  Resolution now happens exactly once, in the IR, and the emitters read the result. A
+  source a ROOT JOIN brings onto the read model resolves, which is the most natural use of
+  the feature and the one that silently vanished. A name that resolves to nothing is a hard
+  failure of the generator, not a shorter signature: if the two halves ever drift again,
+  the run stops instead of shipping an empty column.
+
+  Validation was narrowed to match in the same round: a source that lives inside a
+  collection is refused at the root with the reason — this derivation is handed values, not
+  an entry — and pointed at `children[].computed`.
+
+- **An orphaned hook was invisible to every command.** Take the last computed field (or the
+  last manual rule) out of a spec and regenerate: the hook file stays on disk declaring
+  functions nothing calls. `prune` reads the lock, and a hook was recorded nowhere at all —
+  by construction, since a hook carries no checksum — so it saw nothing, and the report
+  listed the orphaned translation keys next to it while never naming the Go file. There was
+  no tool path back to a tree that compiles.
+
+  The lock now records what the generator CREATED a hook as, and only that: the record
+  never follows the file, so a hand edit still is not drift and the hook is still written
+  once and never rewritten. It is enough to tell the two cases apart — untouched since it
+  was written, an orphan is removed like any other leftover; written in, it is reported as
+  yours and left, because deleting somebody's body is not a tool's call. Migrations stay
+  out, deliberately: a migration RAN, and no report may offer to clean one up.
+
+  Two commands gained the same knowledge. `adopt` refuses a hook and says why (there is no
+  refusal here for an adoption to lift), and `doctor` says something true about one instead
+  of announcing a refusal regeneration never makes: a hook still byte-for-byte as it was
+  created is one nobody has written in — and it says which KIND of silence that is, because
+  the three are not interchangeable: unenforced rules accept a write the spec calls invalid,
+  a derivation renders a column empty on every surface, and an unimplemented service fact
+  PANICS the first time a rule asks it. One sentence for all three is the sentence that gets
+  somebody paged.
+
+  **A project generated before this version is picked up on its next regeneration**, or the
+  fix would only ever reach new trees while every hook already on disk stayed invisible.
+  What gets recorded there is what the generator WOULD write, never the file's own bytes —
+  recording those would make a hook somebody had already filled in look untouched, and
+  "untouched" is the one verdict that authorises deletion. The comparison is therefore
+  conservative for a retrofitted hook: it is reported and left, not removed.
+
+- **A derivation over an `id` or a timestamp emitted a hook that did not compile.** The
+  derivation file's import block was hard-coded to `application/configuration`, on the
+  assumption that a derivation only ever sees builtins. It does not: `type: id` is
+  `domain.ID` and `type: time` is `time.Time`, in a source or in the derived value — so
+  `read.computed` with `from: [<an id field>]` wrote `undefined: domain`, in a write-once
+  file the author is then left to repair by hand. The generated test file alongside it had
+  the same block and the same defect, since it BUILDS one of each. Both now decide their
+  imports from the types they actually name, which is the rule the query files already
+  followed.
+
+  It survived this long because no fixture that BUILDS had ever derived from an id — the
+  gate's boot host now does, on a per-child collection, which is where it surfaced.
+
+- **A derivation's sources were never proved to be distinct PARAMETERS.** Each source
+  becomes one, under its camelCase name, and a leading run of capitals lowercases as a unit
+  — so `from: [IDNumber, IdNumber]` emitted `func Compute…(ctx …, idNumber string, idNumber
+  string)`, and a source listed twice did the same trivially. Neither compiles, and neither
+  is fixable from the spec that produced it without knowing why. The domain-service facts
+  have refused exactly this since a manual fact could take two filters; the read side's
+  derivations went without it. Refused now at both levels, `ctx` included — every
+  derivation already takes the AppContext under that name.
+
+- **A computed read field could take a collection's name and emit a struct with two fields
+  under it.** `children[].plural` is already refused against `fields[]` — the read DTO
+  cannot carry a collection and a value under one name — and `read.computed` was the half
+  that check never covered, so the collision surfaced as a compile error in a tree the
+  author did not write. Refused at `check` now, by name. The entry TYPE stays accepted:
+  `<Name>RowResult` collides with nothing, and refusing it would be a refusal with no defect
+  behind it.
+
 ## [0.35.0] — 2026-08-24
 
 The hand-off page said a two-column constraint was a one-column one — and the reviewer

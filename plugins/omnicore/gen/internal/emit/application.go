@@ -478,14 +478,16 @@ func emitWriteComputedCalls(s *src, m *ir.Model, computed []ir.ComputedField, ta
 	for _, c := range computed {
 		var args []string
 		for _, src := range c.Sources {
-			f, ok := entitySourceField(m, src)
-			if !ok {
-				continue
-			}
+			// Every source resolves: writeComputedFields already dropped any
+			// derivation with one that does not, precisely so the argument list
+			// here lines up with the signature the hook declares. A skip would
+			// silently call it with one argument fewer, which does not compile —
+			// and that is the good failure, not one to code around.
+			f, _ := entitySourceField(m, src)
 			args = append(args, factArgValue(f, recv))
 		}
 		s.L("\t{")
-		s.L("\t\tv, err := appqueries.%s(ctx, %s)", computedFuncName(c), strings.Join(args, ", "))
+		s.L("\t\tv, err := appqueries.%s(ctx, %s)", computedFuncName(m.Entity, c), strings.Join(args, ", "))
 		s.L("\t\tif err != nil {")
 		s.L("\t\t\treturn %s, err", target)
 		s.L("\t\t}")

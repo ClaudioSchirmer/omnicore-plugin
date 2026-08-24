@@ -142,6 +142,15 @@ IS the collection's `CollectionName()` — a persisted document key), each
 them, in the domain's language. A guessed plural compiles, boots, and writes the document
 under a key nothing reads back.
 
+**A collection has TWO names, and every key that addresses one takes either.** `name` is
+the entry's Go type, `plural` is the collection's name; `joins[].inChild`,
+`rules.list[].fields` on a `childDuplicate`/`groupCap`, `read.computed.from`,
+`children[].computed`, `siblings[].attachTo: child:<…>` and `service.facts[].filters` all
+resolve both. Messages show the `plural`. What is refused is the ambiguity that would make
+that impossible: one word naming the entry type of one collection and the plural of
+another. (These keys used to disagree — three resolved the singular, one the plural, and
+its refusal argued the opposite of what the other three did.)
+
 ## Step 2 — write the spec from the APPROVED model
 
     omnicore-gen init <Entity> -project <service-dir>
@@ -393,6 +402,30 @@ Four things to get right, because they are the ones that cost a migration later:
   - So it is neither filterable nor sortable nor indexable, and naming it under
     `byParams.filters`, `byParams.sort`, `controls.search`, `read.indexes` or
     `read.fieldRestrict` is refused with the reason.
+  - **`from:` names what the ROOT's own shape holds** — its fields and its root-attached
+    facets, a `read.managed` column, a ROOT join's field. A collection's field is not in
+    that set and naming one is refused: this derivation runs once per DOCUMENT, and what
+    the root holds for a collection is a slice, so there is no single value to hand it.
+- **`children[].computed` is the same declaration, one level down: a derived field on the
+  ENTRY.** It is the seat for every "one label per row" question — `read.computed` cannot
+  answer those, for the reason above. The derivation runs once per entry, and `from:` names
+  the ENTRY's fields **bare** (its own, a facet folded into it, a field a join declared
+  `inChild` brought onto it) — the entry is the scope, so the collection is not spelled in
+  front of them. The framework records a nested field's sources under the same segment
+  prefix as the field, so `?fields=<collection>.<name>` pushes `<collection>.<source>` down
+  by itself.
+  - The bodies land in the **same** hook file as the root's, one exported function per
+    field, named for both owners: `Compute<Entity><Entry><Field>`.
+  - Naming a ROOT field under `from:` is refused: the store would be asked for
+    `<collection>.<rootField>`, which is not a path any document has. If the derivation is
+    really about the record as a whole, it belongs in `read.computed`.
+  - **Read only, and one step more so than the root's.** The per-entry write verbs return
+    the entry through its own `<Entry>Response`, which carries what was STORED — a derived
+    value there would come from the entity the caller just sent, not from the document the
+    store answered with.
+  - A collection belonging to a shared identity (`ownedBy: base` under `reuse: true`)
+    declares its derivations on the spec that OWNS the identity: the entry's read shape is
+    written once, and both roles then serve the same derived field.
   - **The failure mode is SILENT, unlike a manual fact's.** A fact panics until it is
     written; an unwritten derivation renders the field absent and nothing reports it —
     the read answers 200 and one column is empty on REST, on GraphQL and in the export at
@@ -521,15 +554,14 @@ Four things to get right, because they are the ones that cost a migration later:
     value object may be absent and there is nothing to pass; call that fact from
     `rules.manual`, where the absent case is a branch you write.
 
-  - a fact may ask about **ONE ENTRY of a collection**: `filters: [<collection>.<field>]`,
-    where the collection is a `children[].plural`. It emits a method taking that entry
-    field's type, asked once per entry — the shape of every "these referenced ids must
-    exist and be active" rule and of every per-entry authorization check. Only on
-    `kind: manual`: a computed fact is a query over this entity's own table, and the
-    entry's column is on another one. Naming the entry's field BARE, or naming the entry's
-    Go type instead of the collection, is refused with the spelling that works — for a
-    while it was accepted in silence and the method arrived with no parameter at all,
-    uncallable, discovered while hand-writing the rule that needed it.
+  - a fact may ask about **ONE ENTRY of a collection**: `filters: [<collection>.<field>]`.
+    It emits a method taking that entry field's type, asked once per entry — the shape of
+    every "these referenced ids must exist and be active" rule and of every per-entry
+    authorization check. Only on `kind: manual`: a computed fact is a query over this
+    entity's own table, and the entry's column is on another one. Naming the entry's field
+    BARE is refused with the spelling that works — for a while it was accepted in silence
+    and the method arrived with no parameter at all, uncallable, discovered while
+    hand-writing the rule that needed it.
   - **name a fact for the PROBLEM, not for the healthy state.** The generated test suite
     stubs the service so every probe answers "nothing found", which is what lets the valid
     fixture through. `TenantIsUnavailable`, `WorkspaceTaken`, `PermissionKeyTaken` read
@@ -659,6 +691,7 @@ hashed**. The same shape exists three times more:
 | an invariant the rule DSL cannot say | `rules.manual` | `internal/domain/<entity>_rules_manual.go` |
 | a question the service cannot answer declaratively | `service.facts[].kind: manual` | `internal/infra/<entity>_service_manual.go` |
 | a read field no column holds | `read.computed` | `internal/application/queries/<entity>_computed_manual.go` |
+| the same, one per ENTRY of a collection | `children[].computed` | the same file — `Compute<Entity><Entry><Field>` |
 | a VALUE OBJECT whose rule is neither a shape nor a set | `valueObjects[].kind: manual` | `internal/domain/vos/<name>.go` — **you create the file** |
 | a COMPOSITE value object whose invariant no rule kind states | `valueObjects[].written: manual` | `internal/domain/vos/<name>.go` — **you create the file**, and the parts stay declared |
 
@@ -735,7 +768,14 @@ notifications file and in all seven catalogs. Both are cleaned by one command:
 It is DRY by default — read the three lists (remove · forget in the lock · left alone with
 the reason) before `-apply`. It touches only text the lock still recognises as the
 generator's own, byte for byte: a hand-edited file, an adopted one, a declaration another
-entity also claims and every migration are reported and left. Build and run the tests after:
+entity also claims and every migration are reported and left.
+
+**An orphaned HOOK is in those lists too.** Take the last computed field (or the last
+manual rule) out of a spec and the hook file stays on disk declaring functions nothing
+calls. The lock records what the generator CREATED it as, so prune can tell the two cases
+apart: untouched since it was written, it is removed like any other leftover; written in,
+it is reported as yours and left, because deleting somebody's body is not a tool's call.
+Either way the file is now named — before, it was invisible to every command here. Build and run the tests after:
 a notification type removed while the code still references it is a compile error, which is
 the good kind.
 
@@ -843,8 +883,9 @@ Do not re-read every file. Read against the plan the dev approved and against th
    an empty VALUE, so a token without the claim walked through it in production.
 5. **The read side** — the view name and `Version`, the declared filters and controls,
    the indexes. A `?search=` needs a declared text index. If the spec declares
-   `read.computed`, the derivation hook is the one place where a green build still means
-   an empty column — check its bodies are written.
+   `read.computed` or `children[].computed`, the derivation hook is the one place where a
+   green build still means an empty column — check its bodies are written. `doctor` says so
+   too: a hook still byte-for-byte as it was created is one nobody has written in.
 6. **If the entity has a facet and GraphQL**, check that both clear paths are there: the
    root's PUT with the facet's fields null, and `clear<Facet>Of<Entity>`. The report lists
    them side by side. A facet a caller can grant and never revoke is the failure this

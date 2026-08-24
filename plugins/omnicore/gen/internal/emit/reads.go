@@ -88,7 +88,7 @@ func emitQueries(m *ir.Model) ([]fsplan.File, error) {
 		}
 		out = append(out, f)
 	}
-	if len(m.Read.Computed) > 0 {
+	if hasDerivations(m) {
 		f, err := emitComputedHook(m)
 		if err != nil {
 			return nil, err
@@ -96,6 +96,34 @@ func emitQueries(m *ir.Model) ([]fsplan.File, error) {
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// hasDerivations reports whether this entity derives ANY read field — at the
+// root, or inside one of its collections. The two scopes share one hook file
+// and one seat, so every gate that used to ask only about the root has to ask
+// about both, or a spec that derives only per entry generates the field and
+// nothing that fills it.
+// HasDerivations is hasDerivations for the report, which asks the same question
+// to decide whether the hook file has a section at all.
+func HasDerivations(m *ir.Model) bool { return hasDerivations(m) }
+
+func hasDerivations(m *ir.Model) bool {
+	if len(m.Read.Computed) > 0 {
+		return true
+	}
+	for _, c := range m.Children {
+		if len(c.Computed) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// childComputedFuncName qualifies a per-entry derivation by BOTH owners: the
+// entity, because every entity of a project writes into one queries package, and
+// the collection, because two collections of one entity may each want a Rotulo.
+func childComputedFuncName(e ir.Names, c ir.Child, cf ir.ComputedField) string {
+	return "Compute" + e.Pascal + c.Name + cf.Name
 }
 
 func emitByIDQuery(m *ir.Model) (fsplan.File, error) {
@@ -216,7 +244,7 @@ func emitListQuery(m *ir.Model) (fsplan.File, error) {
 // derived values. Doing it in a Response's FromResult instead would give each
 // surface its own answer.
 func emitFromQueryResult(s *src, m *ir.Model, query, result string) {
-	computed := len(m.Read.Computed) > 0
+	computed := hasDerivations(m)
 	doc := []string{
 		"FromQueryResult is the read-side twin of a command's FromEntity: the framework " +
 			"hands it the Result already filled from the stored document, BEFORE any " +
@@ -318,6 +346,15 @@ func emitChildRowResults(m *ir.Model) (fsplan.File, error) {
 		for _, f := range m.ServedJoinFields(c) {
 			s.L("\t%s %s", f.Name, sh.resultType(f))
 		}
+		// The entry's DERIVED fields. They sit at the end for the same reason the
+		// root's do — nothing reads them off the document, FromQueryResult fills
+		// them once per entry — and they are the only fields here that no column
+		// anywhere backs.
+		for _, cf := range c.Computed {
+			s.L("\t// %s is COMPUTED per entry: no column backs it, and", cf.Name)
+			s.L("\t// FromQueryResult fills it from %s.", strings.Join(cf.Sources, "+"))
+			s.L("\t%s %s", cf.Name, sh.computedType(cf))
+		}
 		s.L("}")
 		s.Blank()
 	}
@@ -369,56 +406,135 @@ func emitComputedHook(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package queries")
 	s.Blank()
-	s.L("import %s", quote(fwImport("application/configuration")))
+	computedHookImports(s, derivationTypeNames(m))
 	s.Blank()
 
 	s.Doc(
 		"The derivations behind this entity's computed read fields.",
 		"",
-		"Each runs ONCE per document, below the web boundary, so REST, GraphQL and "+
-			"the CSV/XLSX export all render the same value — that is the whole reason "+
-			"read-side computation lives at this seat instead of in a Response.",
+		"Each runs below the web boundary, so REST, GraphQL and the CSV/XLSX export "+
+			"all render the same value — that is the whole reason read-side computation "+
+			"lives at this seat instead of in a Response. A root derivation runs once "+
+			"per document; a collection's runs once per ENTRY, and is handed that entry.",
 		"",
 		"Until a body is written the field renders ABSENT, quietly. The framework "+
 			"cannot detect that: as far as it is concerned the derivation ran and "+
 			"produced nothing.")
 
+	count := 0
 	for _, c := range m.Read.Computed {
-		params := computedParams(m, c)
-		s.Blank()
-		doc := []string{
-			fmt.Sprintf("%s derives %s from %s.", computedFuncName(c), c.Name,
-				strings.Join(c.Sources, ", ")),
+		emitOneDerivation(s, c, computedFuncName(m.Entity, c), "")
+		count++
+	}
+	for _, ch := range m.Children {
+		for _, c := range ch.Computed {
+			emitOneDerivation(s, c, childComputedFuncName(m.Entity, ch, c), ch.Plural)
+			count++
 		}
-		if c.Description != "" {
-			doc = append(doc, "", c.Description)
-		}
-		doc = append(doc,
-			"",
-			"A source declared NULLABLE arrives as a pointer, and nil is a value the "+
-				"derivation has to decide about; the rest arrive as values, and the caller "+
-				"has already established they were fetched.",
-			"",
-			"An error here fails the whole read, so return one only when the derivation "+
-				"genuinely cannot produce a value — a missing source is absence, not a "+
-				"failure.")
-		s.Doc(doc...)
-		s.L("func %s(ctx *configuration.AppContext, %s) (%s, error) {",
-			computedFuncName(c), strings.Join(params.decls, ", "), c.GoType)
-		s.L("\t// TODO: derive %s from %s.", c.Name, strings.Join(params.names, ", "))
-		s.L("\tvar %s %s", naming.Camel(c.Name), c.GoType)
-		s.L("\treturn %s, nil", naming.Camel(c.Name))
-		s.L("}")
 	}
 
 	f, err := goFile(computedHookFile(m), fsplan.Hook,
-		fmt.Sprintf("the derivations for %d computed read field(s)", len(m.Read.Computed)), s)
+		fmt.Sprintf("the derivations for %d computed read field(s)", count), s)
 	if err != nil {
 		return f, err
 	}
 	f.Consequence = "every computed read field renders absent until its derivation is written — " +
 		"quietly, because an empty derivation is indistinguishable from one that had nothing to say"
 	return f, nil
+}
+
+// derivationTypeNames is every type string the hook file writes: each
+// derivation's own type, and every source's.
+//
+// The file used to import `application/configuration` and nothing else, on the
+// assumption that a derivation only ever sees builtins. It does not: `type: id`
+// is `domain.ID` and `type: time` is `time.Time`, in a source OR in the derived
+// value. A single such declaration emitted a hook that did not compile —
+// `undefined: domain`, in a write-once file the author is then left to repair by
+// hand. Deciding the imports from what is actually written is the same rule the
+// query files already follow.
+func derivationTypeNames(m *ir.Model) []string {
+	var out []string
+	add := func(cs []ir.ComputedField) {
+		for _, c := range cs {
+			out = append(out, c.GoType)
+			for _, f := range c.SourceFields {
+				out = append(out, f.GoType)
+			}
+		}
+	}
+	add(m.Read.Computed)
+	for _, ch := range m.Children {
+		add(ch.Computed)
+	}
+	return out
+}
+
+// computedHookImports writes the derivation file's import block. It always
+// carries the AppContext — every signature takes one — and adds `time` and
+// `domain` only when a type in the file names them.
+//
+// A caveat this cannot fix, and that the report says out loud instead: the file
+// is written ONCE. A derivation added to the spec later arrives in a file the
+// generator no longer touches, so a first `id` or `time` source among them needs
+// its import added by hand. The compiler names it at the exact line.
+func computedHookImports(s *src, types []string) {
+	joined := strings.Join(types, " ")
+	needTime := strings.Contains(joined, "time.")
+	needDomain := strings.Contains(joined, "domain.")
+	if !needTime && !needDomain {
+		s.L("import %s", quote(fwImport("application/configuration")))
+		return
+	}
+	s.L("import (")
+	if needTime {
+		s.L("\t%s", quote("time"))
+		s.Blank()
+	}
+	s.L("\t%s", quote(fwImport("application/configuration")))
+	if needDomain {
+		s.L("\t%s", quote(fwImport("domain")))
+	}
+	s.L(")")
+}
+
+// emitOneDerivation writes one signature and the TODO body behind it.
+//
+// collection is empty for a root derivation and the collection's name for a
+// per-entry one. It is the one sentence that tells the implementer how often
+// their body runs and what it is looking at — an answer they would otherwise
+// have to reconstruct from the call site.
+func emitOneDerivation(s *src, c ir.ComputedField, fname, collection string) {
+	params := computedParams(c)
+	s.Blank()
+	doc := []string{
+		fmt.Sprintf("%s derives %s from %s.", fname, c.Name, strings.Join(c.Sources, ", ")),
+	}
+	if c.Description != "" {
+		doc = append(doc, "", c.Description)
+	}
+	if collection != "" {
+		doc = append(doc, "",
+			fmt.Sprintf("It runs ONCE PER ENTRY of %s, and its sources are that entry's own "+
+				"fields — the record around it is not in scope, and the framework would not "+
+				"fetch it here if it were.", collection))
+	}
+	doc = append(doc,
+		"",
+		"A source declared NULLABLE arrives as a pointer, and nil is a value the "+
+			"derivation has to decide about; the rest arrive as values, and the caller "+
+			"has already established they were fetched.",
+		"",
+		"An error here fails the whole read, so return one only when the derivation "+
+			"genuinely cannot produce a value — a missing source is absence, not a "+
+			"failure.")
+	s.Doc(doc...)
+	s.L("func %s(ctx *configuration.AppContext, %s) (%s, error) {",
+		fname, strings.Join(params.decls, ", "), c.GoType)
+	s.L("\t// TODO: derive %s from %s.", c.Name, strings.Join(params.names, ", "))
+	s.L("\tvar %s %s", naming.Camel(c.Name), c.GoType)
+	s.L("\treturn %s, nil", naming.Camel(c.Name))
+	s.L("}")
 }
 
 // computedParams renders one derivation's parameter list: the sources it
@@ -429,14 +545,13 @@ type computedParamSet struct {
 	src   []ir.Field
 }
 
-func computedParams(m *ir.Model, c ir.ComputedField) computedParamSet {
+// computedParams reads what the IR already resolved. It does NOT look a source
+// up again: resolution happens once, in ir.Resolve, and a name that answers to
+// nothing fails there rather than quietly costing this signature a parameter.
+func computedParams(c ir.ComputedField) computedParamSet {
 	var out computedParamSet
-	for _, name := range c.Sources {
-		f, ok := readSourceField(m, name)
-		if !ok {
-			continue
-		}
-		param := naming.Camel(name)
+	for i, f := range c.SourceFields {
+		param := naming.Camel(c.Sources[i])
 		out.decls = append(out.decls, param+" "+f.GoType)
 		out.names = append(out.names, param)
 		out.src = append(out.src, f)
@@ -444,75 +559,125 @@ func computedParams(m *ir.Model, c ir.ComputedField) computedParamSet {
 	return out
 }
 
-// readSourceField resolves the field a computed derivation reads. It is not
-// m.Fields alone: a framework-stamped column the read exposes is a legitimate
-// source, and it lives on the read model instead.
-func readSourceField(m *ir.Model, name string) (ir.Field, bool) {
-	for _, f := range m.AllOwnerFields() {
-		if f.Name == name {
-			return f, true
-		}
-	}
-	for _, f := range m.Read.Managed {
-		if f.Name == name {
-			return f, true
-		}
-	}
-	return ir.Field{}, false
+// computedFuncName is the derivation's exported name, qualified by the ENTITY.
+//
+// The qualifier is not decoration. Every entity of a project writes its
+// derivations into the same package — internal/application/queries — so two
+// specs that each declare a computed field called Permission used to emit
+// ComputePermission twice and the package stopped compiling. Worse than the
+// build break: the file is a hook, written once and never rewritten, so the
+// obvious way out is to edit one of the two by hand and lose whichever body was
+// already there.
+func computedFuncName(e ir.Names, c ir.ComputedField) string {
+	return "Compute" + e.Pascal + c.Name
 }
-
-func computedFuncName(c ir.ComputedField) string { return "Compute" + c.Name }
 
 // ComputedSignature renders one derivation's Go signature, for the report to ask
 // the implementer for. It is derived from the same place the file is written, so
 // the two cannot describe different functions.
 func ComputedSignature(m *ir.Model, c ir.ComputedField) string {
-	p := computedParams(m, c)
+	p := computedParams(c)
 	return fmt.Sprintf("func %s(ctx *configuration.AppContext, %s) (%s, error)",
-		computedFuncName(c), strings.Join(p.decls, ", "), c.GoType)
+		computedFuncName(m.Entity, c), strings.Join(p.decls, ", "), c.GoType)
 }
 
-// emitComputedCalls writes the derivations for one Result shape: unwrap what
-// this shape holds, call the derivation, assign what it returned.
+// ChildComputedSignature is the same for a per-entry derivation.
+func ChildComputedSignature(m *ir.Model, ch ir.Child, c ir.ComputedField) string {
+	p := computedParams(c)
+	return fmt.Sprintf("func %s(ctx *configuration.AppContext, %s) (%s, error)",
+		childComputedFuncName(m.Entity, ch, c), strings.Join(p.decls, ", "), c.GoType)
+}
+
+// derivationSeat is one place derivations run: the shape that HOLDS the derived
+// fields, the indent its statements are written at, and what a failing
+// derivation hands back.
 //
-// sparse says every field of the Result is a pointer because the read serves
+// The three travel together because the per-entry seat differs from the root's
+// in all three at once — it writes into r.Permissoes[i], one tab deeper, and
+// still returns r, since the method's result is the whole document however deep
+// the failure was.
+type derivationSeat struct {
+	recv   string
+	fail   string
+	pad    string
+	sparse bool
+}
+
+// emitDerivationCalls unwraps what this seat holds, calls the derivation, and
+// assigns what it returned.
+//
+// sparse says every field of the shape is a pointer because the read serves
 // `?fields=`. There a source that was not selected is nil, and the derivation
 // does not run at all — the field stays absent, which is what the caller asked
 // for by not selecting the source.
-func emitComputedCalls(s *src, m *ir.Model, recv string, sparse bool) {
-	for _, c := range m.Read.Computed {
-		p := computedParams(m, c)
+func emitDerivationCalls(s *src, seat derivationSeat, computed []ir.ComputedField,
+	name func(ir.ComputedField) string) {
+	for _, c := range computed {
+		p := computedParams(c)
 		var args, guards []string
-		for i, f := range p.src {
-			ref := recv + "." + f.Name
-			switch {
-			case !sparse || f.Nullable:
-				// Either the shape holds values, or the source is a pointer on both
-				// sides; nothing to unwrap in either case.
+		for _, f := range p.src {
+			ref := seat.recv + "." + f.Name
+			if !seat.sparse || f.Nullable {
+				// Either the shape holds values, or the source is a pointer on
+				// both sides; nothing to unwrap in either case.
 				args = append(args, ref)
-			default:
-				guards = append(guards, ref+" != nil")
-				args = append(args, "*"+ref)
+				continue
 			}
-			_ = i
+			guards = append(guards, ref+" != nil")
+			args = append(args, "*"+ref)
 		}
-		indent := "\t"
 		if len(guards) > 0 {
-			s.L("\tif %s {", strings.Join(guards, " && "))
-			indent = "\t\t"
+			s.L("%sif %s {", seat.pad, strings.Join(guards, " && "))
 		} else {
-			s.L("\t{")
-			indent = "\t\t"
+			s.L("%s{", seat.pad)
 		}
-		s.L("%sv, err := %s(ctx, %s)", indent, computedFuncName(c), strings.Join(args, ", "))
-		s.L("%sif err != nil {", indent)
-		s.L("%s\treturn %s, err", indent, recv)
-		s.L("%s}", indent)
-		if sparse {
-			s.L("%s%s.%s = &v", indent, recv, c.Name)
+		in := seat.pad + "\t"
+		s.L("%sv, err := %s(ctx, %s)", in, name(c), strings.Join(args, ", "))
+		s.L("%sif err != nil {", in)
+		s.L("%s\treturn %s, err", in, seat.fail)
+		s.L("%s}", in)
+		if seat.sparse {
+			s.L("%s%s.%s = &v", in, seat.recv, c.Name)
 		} else {
-			s.L("%s%s.%s = v", indent, recv, c.Name)
+			s.L("%s%s.%s = v", in, seat.recv, c.Name)
 		}
+		s.L("%s}", seat.pad)
+	}
+}
+
+// emitComputedCalls writes every derivation this Result shape carries: the
+// root's, then each collection's, once per entry.
+//
+// The collection loop is `for i := range` rather than `for _, e :=` on purpose —
+// the ranged copy would be written into and thrown away, which is the silent
+// version of not deriving at all.
+func emitComputedCalls(s *src, m *ir.Model, recv string, sparse bool) {
+	emitDerivationCalls(s,
+		derivationSeat{recv: recv, fail: recv, pad: "\t", sparse: sparse},
+		m.Read.Computed,
+		func(c ir.ComputedField) string { return computedFuncName(m.Entity, c) })
+
+	// The ENTRY's pointer discipline is not the root's. One <Child>RowResult
+	// serves BOTH reads — that is the point of the shared type — so it is sparse
+	// whenever the listing is, including inside the by-id Result, whose own
+	// fields are plain values. Reading the root's shape here unwrapped a pointer
+	// that was still a pointer and assigned a value where one was expected: two
+	// compile errors, in the tree the author was handed.
+	entryShape := listShape(m)
+	for _, ch := range m.Children {
+		if len(ch.Computed) == 0 {
+			continue
+		}
+		s.L("\tfor i := range %s.%s {", recv, ch.GoPlural)
+		emitDerivationCalls(s,
+			derivationSeat{
+				recv:   fmt.Sprintf("%s.%s[i]", recv, ch.GoPlural),
+				fail:   recv,
+				pad:    "\t\t",
+				sparse: entryShape.sparse,
+			},
+			ch.Computed,
+			func(c ir.ComputedField) string { return childComputedFuncName(m.Entity, ch, c) })
 		s.L("\t}")
 	}
 }
@@ -584,6 +749,9 @@ func childRowTypeNames(m *ir.Model, sh readShape) []string {
 		// join vocabulary has — needs its import decided from here too.
 		for _, f := range m.ServedJoinFields(c) {
 			out = append(out, sh.resultType(f))
+		}
+		for _, cf := range c.Computed {
+			out = append(out, sh.computedType(cf))
 		}
 	}
 	return out
@@ -666,7 +834,19 @@ func readFieldTag(f ir.Field, pointered bool) string {
 // The sources need not appear here. One that exists only on the Result is
 // read, feeds the derivation, and never reaches the wire.
 func emitComputedResponseFields(s *src, m *ir.Model, pointered bool) {
-	for _, c := range m.Read.Computed {
+	emitComputedFieldTags(s, m.Read.Computed, pointered)
+}
+
+// emitComputedFieldTags is the same for ANY level of the response.
+//
+// A collection's entry carries derived fields exactly as the root does, and the
+// tag it needs is spelled the same way: the framework records a nested field's
+// sources under the SAME segment prefix as the field itself, so the entry's
+// sources are named bare here and arrive at the store as
+// <collection>.<source>. Prefixing them here would ask for
+// <collection>.<collection>.<source>, which resolves to nothing.
+func emitComputedFieldTags(s *src, computed []ir.ComputedField, pointered bool) {
+	for _, c := range computed {
 		typ, name := c.GoType, c.JSONName
 		if pointered {
 			typ, name = "*"+c.BaseGoType, c.JSONName+",omitempty"
@@ -829,7 +1009,7 @@ func emitFromQueryResultTest(s *src, m *ir.Model) {
 // the call and the assignment would go untested, on the one seat whose body is
 // written by hand.
 func emitDerivationRunsTest(s *src, m *ir.Model) {
-	if len(m.Read.Computed) == 0 {
+	if !hasDerivations(m) {
 		return
 	}
 	s.Doc(
@@ -853,26 +1033,59 @@ func emitDerivationRunsTest(s *src, m *ir.Model) {
 // emitFilledResultCase builds one Result with every declared source present and
 // drives the seat with it. A pointer field needs an addressable value, so those
 // sources land in a local first.
+//
+// A collection that derives anything gets ONE entry, filled the same way: the
+// per-entry seat is a loop the root's inputs never enter, so a Result with an
+// empty collection would leave the loop body — the unwrapping, the call, the
+// write back through the index — untested.
 func emitFilledResultCase(s *src, m *ir.Model, query, result string, sh readShape, label string) {
-	seen := map[string]bool{}
-	var assigns []string
-	s.L("\t{")
-	for _, c := range m.Read.Computed {
-		for _, name := range c.Sources {
-			f, ok := readSourceField(m, name)
-			if !ok || seen[name] {
-				continue
-			}
-			seen[name] = true
-			lit := literalFor(f)
-			if sh.sparse || f.Nullable {
-				local := naming.Camel(name)
-				s.L("\t\t%s := %s(%s)", local, f.BaseGoType, lit)
-				assigns = append(assigns, fmt.Sprintf("%s: &%s", name, local))
-				continue
-			}
-			assigns = append(assigns, fmt.Sprintf("%s: %s", name, lit))
+	// One namespace for every local in this case: a root source and an entry
+	// source may legitimately share a name, and two `:=` of one name is a
+	// generated tree that does not compile.
+	used := map[string]bool{}
+	local := func(base string) string {
+		name := naming.Camel(base)
+		for n := 2; used[name]; n++ {
+			name = fmt.Sprintf("%s%d", naming.Camel(base), n)
 		}
+		used[name] = true
+		return name
+	}
+	// The entry's own shape, which is the listing's whatever the root read is:
+	// one <Child>RowResult serves both reads.
+	entryShape := listShape(m)
+	fill := func(computed []ir.ComputedField, prefix string, sh readShape) []string {
+		seen := map[string]bool{}
+		var assigns []string
+		for _, c := range computed {
+			for i, f := range c.SourceFields {
+				name := c.Sources[i]
+				if seen[name] {
+					continue
+				}
+				seen[name] = true
+				lit := literalFor(f)
+				if sh.sparse || f.Nullable {
+					l := local(prefix + name)
+					s.L("\t\t%s := %s(%s)", l, f.BaseGoType, lit)
+					assigns = append(assigns, fmt.Sprintf("%s: &%s", name, l))
+					continue
+				}
+				assigns = append(assigns, fmt.Sprintf("%s: %s", name, lit))
+			}
+		}
+		return assigns
+	}
+
+	s.L("\t{")
+	assigns := fill(m.Read.Computed, "", sh)
+	for _, ch := range m.Children {
+		if len(ch.Computed) == 0 {
+			continue
+		}
+		entry := fill(ch.Computed, naming.Camel(ch.Name), entryShape)
+		assigns = append(assigns, fmt.Sprintf("%s: []%s{{%s}}",
+			ch.GoPlural, childRowResult(ch), strings.Join(entry, ", ")))
 	}
 	s.L("\t\tr := %s{%s}", result, strings.Join(assigns, ", "))
 	s.L("\t\tif _, err := (%s{}).FromQueryResult(ctx, r); err != nil {", query)
