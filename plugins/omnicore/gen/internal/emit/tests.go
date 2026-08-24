@@ -1455,15 +1455,24 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 	s.L(")")
 	s.Blank()
 
+	emitChildRuleSeat(s, m)
+
 	for _, c := range m.Children {
 		s.Doc(
-			fmt.Sprintf("rulesFor%s opens a rule run for one entry.", c.Name),
+			fmt.Sprintf("rulesFor%s runs one entry through the framework's own seat.", c.Name),
 			"",
-			"The gates fire as they are declared rather than on a later call, so the "+
-				"notifications are read from the context afterwards.")
-		s.L("func rulesFor%s%s() (*domain.NotificationContext, *domain.Rules) {", m.Entity.Pascal, c.Name)
-		s.L("\tctx := domain.NewNotificationContext(%s)", quote(c.Name))
-		s.L("\treturn ctx, domain.NewRules(domain.ModeInsert, ctx, reflect.TypeOf(%s{}))", c.Name)
+			"Not %s.BuildRules directly. A rule may end the validation pass — the "+
+				"`guard: true` barrier — and the framework unwinds that from inside the "+
+				"seat that invoked the rules; a body called by hand would let the unwind "+
+				"escape as a panic, and every test below would fail on a rule doing "+
+				"exactly what it was declared to do.",
+			"",
+			"The seat also validates the entry's value objects, which is what a write "+
+				"does, so what these tests see is what the service sees.")
+		s.L("func rulesFor%s%s(v %s) *domain.NotificationContext {", m.Entity.Pascal, c.Name, c.Name)
+		s.L("\thost := &%sRuleHost{}", naming.Camel(m.Entity.Pascal))
+		s.L("\tdomain.ValidateAggregateChild(host, v, domain.ModeInsert, %s, nil)", quote("insert"))
+		s.L("\treturn host.GetAggregateRoot().NotificationContext()")
 		s.L("}")
 		s.Blank()
 		emitValidChildBuilder(s, m, c)
@@ -1510,8 +1519,7 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 			"The negative cases below are only meaningful if the positive one holds: a "+
 				"builder that never validates would make every rejection vacuous.")
 		s.L("func Test%s%s_ValidPasses(t *testing.T) {", m.Entity.Pascal, c.Name)
-		s.L("\tctx, r := rulesFor%s%s()", m.Entity.Pascal, c.Name)
-		s.L("\tvalid%s%s().BuildRules(%s, nil, r)", m.Entity.Pascal, c.Name, quote("insert"))
+		s.L("\tctx := rulesFor%s%s(valid%s%s())", m.Entity.Pascal, c.Name, m.Entity.Pascal, c.Name)
 		s.L("\tif msgs := ctx.Messages(); len(msgs) > 0 {")
 		s.L("\t\tt.Errorf(\"a valid %s was refused: %%v\", msgs)", c.Name)
 		s.L("\t}")
@@ -1537,10 +1545,9 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 				seenChild[name] = true
 				s.Doc(fmt.Sprintf("%s.%s is required.", c.Name, f.Name))
 				s.L("func Test%s%s_%s_IsRequired(t *testing.T) {", m.Entity.Pascal, c.Name, f.Name)
-				s.L("\tctx, r := rulesFor%s%s()", m.Entity.Pascal, c.Name)
 				s.L("\tv := valid%s%s()", m.Entity.Pascal, c.Name)
 				s.L("\tv.%s = %s", f.Name, zeroValue(f))
-				s.L("\tv.BuildRules(%s, nil, r)", quote("insert"))
+				s.L("\tctx := rulesFor%s%s(v)", m.Entity.Pascal, c.Name)
 				s.L("\tif len(ctx.Messages()) == 0 {")
 				s.L("\t\tt.Errorf(\"an empty %s was accepted\")", f.Name)
 				s.L("\t}")
@@ -1552,6 +1559,42 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 
 	return goFile("internal/domain/aggregatevos/"+m.Entity.Snake+"_children_test.go",
 		fsplan.Owned, "tests for the collection types", s)
+}
+
+// emitChildRuleSeat writes the stand-in root the entry tests validate through.
+//
+// domain.ValidateAggregateChild is the framework's public seat for running ONE
+// entry's rules, and it takes an AggregateRootProvider. The real root lives in
+// internal/domain, which imports THIS package — so it cannot be imported back.
+// A local stand-in satisfies the interface with the framework types this file
+// already has in hand, and costs the tests nothing: the seat only reads the
+// root for the notification context and the collection's index.
+func emitChildRuleSeat(s *src, m *ir.Model) {
+	if len(m.Children) == 0 {
+		return
+	}
+	name := naming.Camel(m.Entity.Pascal) + "RuleHost"
+	s.Doc(
+		fmt.Sprintf("%s stands in for the aggregate root so an entry can be validated "+
+			"through the framework's own seat.", name),
+		"",
+		"The real root is in internal/domain, which imports this package: importing it "+
+			"back is a cycle. What the seat needs of a root is the notification context "+
+			"and the collection index, both of which this carries.")
+	s.L("type %s struct {", name)
+	s.L("\tdomain.AggregateRoot")
+	s.L("}")
+	s.Blank()
+	s.L("func (h *%s) GetAggregateRoot() *domain.AggregateRoot { return &h.AggregateRoot }", name)
+	s.Blank()
+	s.L("func (h *%s) AggregateChildren() []domain.AggregateValueObject {", name)
+	s.L("\treturn []domain.AggregateValueObject{")
+	for _, c := range m.Children {
+		s.L("\t\t%s{},", c.Name)
+	}
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
 }
 
 func emitValidChildBuilder(s *src, m *ir.Model, c ir.Child) {

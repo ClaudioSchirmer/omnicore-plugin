@@ -234,11 +234,16 @@ rules:
       fields: [Name]
       notification: RequiredFieldNotification
 
+    # guard — the BARRIER, and the gate's runtime case for it. It is positional:
+    # name-required above still reports, so a write missing BOTH names comes back
+    # naming both; everything BELOW stops, so the same write says nothing about
+    # the grade it also got wrong. That asymmetry is what the boot lane asserts.
     - id: enrollment-required
       kind: required
       scope: [insertOrUpdate]
       fields: [EnrollmentNumber]
       notification: RequiredFieldNotification
+      guard: true
 
     - id: enrollment-immutable
       kind: immutable

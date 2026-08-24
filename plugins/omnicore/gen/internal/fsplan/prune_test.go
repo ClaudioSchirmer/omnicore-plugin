@@ -141,3 +141,41 @@ func TestForgetRegistrationDropsOneNameAndEmptiesThePath(t *testing.T) {
 // layoutLockRel keeps the test honest about where Save writes, without
 // importing the layout package for one string.
 func layoutLockRel() string { return LockName }
+
+// TestPruneKeepsWhatAnotherEntityStillGenerates — the file is on disk ONCE,
+// whichever spec wrote it. This entity no longer producing it says nothing
+// about whether it is a leftover, and the case is silent until the compiler
+// speaks: the vos package comment is emitted by every spec that has a value
+// object, so pruning the first of them used to delete a file the others still
+// generate on their next run.
+func TestPruneKeepsWhatAnotherEntityStillGenerates(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "internal/domain/vos/doc.go", "generated")
+	writeFile(t, root, "internal/mine.go", "generated")
+
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{
+		"Tenant": {Files: map[string]LockFile{
+			"internal/domain/vos/doc.go": {Class: Owned, Hash: Hash([]byte("generated"))},
+			"internal/mine.go":           {Class: Owned, Hash: Hash([]byte("generated"))},
+		}},
+		"Role": {Files: map[string]LockFile{
+			"internal/domain/vos/doc.go": {Class: Owned, Hash: Hash([]byte("generated"))},
+		}},
+	}}
+
+	plan := PlanPrune(root, "Tenant", nil, lock)
+
+	if got, ok := kindOf(plan, "internal/domain/vos/doc.go"); !ok || got != PruneKeep {
+		t.Errorf("a file another entity still generates was planned as %q, want %q", got, PruneKeep)
+	}
+	if got, ok := kindOf(plan, "internal/mine.go"); !ok || got != PruneDelete {
+		t.Errorf("a file only this entity generated was planned as %q, want %q", got, PruneDelete)
+	}
+
+	if err := ApplyPrune(root, "Tenant", plan, lock); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "internal/domain/vos/doc.go")); err != nil {
+		t.Error("the shared file was deleted out from under the entity that still generates it")
+	}
+}

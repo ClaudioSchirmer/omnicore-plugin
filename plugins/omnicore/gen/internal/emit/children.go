@@ -182,13 +182,17 @@ func emitChildRules(s *src, m *ir.Model, c ir.Child) {
 	}
 	for _, clause := range c.Clauses {
 		s.L("\tr.%s(func() {", clause.Gate)
-		for _, rule := range clause.Rules {
+		for i, rule := range clause.Rules {
 			// No model, on purpose: it is what tells the shared emitters they are
 			// writing INSIDE aggregatevos, where a notification of this package
 			// is spelled bare. The aggregate-wide kinds — the only ones that
 			// would need the model for anything else — are refused in a
 			// collection's scope, so nothing here is left without it.
 			emitRuleOn(s, clause.Gate, rule, "c")
+			// A child carries its own Rules, so the barrier here ends the child's
+			// pass: the rest of ITS BuildRules, its own value objects, and every
+			// sibling still queued behind it.
+			emitGuardBarrier(s, rule, "\t\t", i < len(clause.Rules)-1)
 		}
 		s.L("\t})")
 		s.Blank()

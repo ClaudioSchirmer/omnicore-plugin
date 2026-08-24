@@ -589,6 +589,33 @@ Four things to get right, because they are the ones that cost a migration later:
   told where to land; over a grouped fact, name the key field and the caller sees which
   group. **Only reach for `rules.manual` when the comparison itself is not a bound** — an
   arithmetic combination of two facts, or the table's count plus what this write adds.
+- **`guard: true` ends the validation pass — declare it where the rules BELOW depend on
+  this one having passed.** The barrier is positional: it lands after the rule that carries
+  the key, so everything declared ABOVE it has already had its say and every notification
+  they raised reaches the caller, while everything below stops — the remaining rules, the
+  entity's automatic value-object validation, and the `BuildRules` and value objects of
+  every collection. Four preconditions that must all be reported before the pass stops are
+  four ordinary rules with the key on the **last** of them, not four barriers.
+  - **It can never skip validation.** The framework stops only where something has ALREADY
+    been rejected, so a clean write runs whole and a stop happens exclusively on a write
+    that is already refused. What changes is the SHAPE of a 422: what was found up to the
+    barrier, instead of that plus every other field the write would have failed on. Say so
+    to whoever consumes the API — a response that used to list five problems and now lists
+    two is the feature working, and reads exactly like a regression.
+  - **Order matters, and only inside a verb gate.** Rules keep their declared order, so the
+    barrier falls where you put it. The GATES do not: they are emitted `insert`,
+    `insertOrUpdate`, `update`, `archive`, `unarchive`, `delete`, so on an insert a guard
+    under `insertOrUpdate` sits after everything under `insert`, whatever the yaml order.
+  - **Write nothing around the call.** `StopIfInvalid` is the condition itself — it does
+    nothing when nothing has been rejected — so the generated line is bare, with no `if`
+    and no `return`: the framework unwinds the rule body from the seat that invoked it.
+  - **On a collection's rule it ends the ENTRY's pass** — the rest of that entry's
+    `BuildRules`, its own value objects, and every sibling still queued behind it. A
+    barrier at the ROOT stops every collection outright, so pick the seat by which of the
+    two you mean.
+  - **Refused on a composite value object's rule.** There is no validation pass to end: a
+    value object checks itself inside `IsValid`, which is handed a `NotificationContext`
+    and no `Rules`. Declare the barrier on the ENTITY's rule that reaches the value object.
 - **Rules on a collection are declared on the collection.** `children[].rules` takes the
   same DSL the root does, including `transition` and `skipWhen`, plus `rules.manual` with
   a hook of its own (`aggregatevos/<child>_rules_manual.go`). Two kinds are refused there

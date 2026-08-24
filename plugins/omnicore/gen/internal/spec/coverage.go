@@ -50,6 +50,7 @@ const (
 	CapArchiveOnUpdate  Capability = "an update that finishes as an archive (CompleteAsArchive)"
 	CapComputedRead     Capability = "computed read fields (derived per document, no column)"
 	CapPerEntryComputed Capability = "computed read fields on a COLLECTION ENTRY (derived per entry, no column)"
+	CapGuardRule        Capability = "guard rules (a barrier that ends the validation pass once something has been rejected)"
 	CapReadJoin         Capability = "read joins (reaching another aggregate across a foreign key: on the entity for the rules, and on a relational read model for filter/sort/projection)"
 )
 
@@ -90,6 +91,7 @@ var implemented = map[Capability]bool{
 	CapComputedRead:     true,
 	CapPerEntryComputed: true,
 	CapReadJoin:         true,
+	CapGuardRule:        true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -111,7 +113,7 @@ func AllCapabilities() []Capability {
 		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild,
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
-		CapComputedRead, CapPerEntryComputed, CapReadJoin,
+		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
 	}
 }
 

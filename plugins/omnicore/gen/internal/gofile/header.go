@@ -50,6 +50,15 @@ type Meta struct {
 	// panic on first use, which is not. A reader deciding what to do next needs
 	// to know which one they are holding.
 	Consequence string
+	// Shared marks a file the generator writes once PER PROJECT, identically,
+	// whichever spec happens to be running. Such a file has no honest answer to
+	// "which entity?", and answering with the one that ran last costs twice: the
+	// header states something false, and the bytes change every time ANOTHER
+	// entity is generated — so a regeneration stops being a no-op and a CI that
+	// checks "regenerating changes nothing" can never pass on a project with more
+	// than one entity. A shared file names no entity and no spec instead, which
+	// makes its content independent of who wrote it.
+	Shared bool
 }
 
 const blankChecksum = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -182,8 +191,7 @@ func ownedHeader(c string, m Meta, checksum string) string {
 		b.WriteString(c + " " + line + "\n")
 	}
 	b.WriteString(c + "\n")
-	fmt.Fprintf(&b, c+" entity:     %s\n", m.Entity)
-	fmt.Fprintf(&b, c+" spec:       %s\n", m.Spec)
+	b.WriteString(attribution(c, m))
 	fmt.Fprintf(&b, c+" generator:  %s\n", generatedBy)
 	fmt.Fprintf(&b, c+" generated:  %s\n", m.Date)
 	fmt.Fprintf(&b, "%s%s\n", checksumPrefixFor(c), checksum)
@@ -208,8 +216,7 @@ func hookHeader(c string, m Meta) string {
 		b.WriteString(c + " " + line + "\n")
 	}
 	b.WriteString(c + "\n")
-	fmt.Fprintf(&b, c+" entity:     %s\n", m.Entity)
-	fmt.Fprintf(&b, c+" spec:       %s\n", m.Spec)
+	b.WriteString(attribution(c, m))
 	fmt.Fprintf(&b, c+" generator:  %s (created this file, does not maintain it)\n", generatedBy)
 	fmt.Fprintf(&b, c+" created:    %s\n", m.Date)
 	b.WriteString(c + "\n")
@@ -226,6 +233,20 @@ func hookHeader(c string, m Meta) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// attribution is the two lines that say where a file came from — and the one
+// line that says a file came from nowhere in particular.
+//
+// The shared form is not cosmetic. A per-project file stamped with the last
+// entity to run is a file that differs from itself between two runs of the same
+// unchanged tree, which is exactly the churn the recorded date is blanked to
+// avoid elsewhere in this file.
+func attribution(c string, m Meta) string {
+	if m.Shared {
+		return c + " shared:     the whole project \u2014 no single spec owns this file\n"
+	}
+	return fmt.Sprintf(c+" entity:     %s\n"+c+" spec:       %s\n", m.Entity, m.Spec)
 }
 
 func wrapComment(text string, width int) []string {

@@ -628,6 +628,30 @@ func renderCheck(b *strings.Builder, in Input) {
 			strings.Join(hoisted, ", "), pairingNote(m, hoisted))
 	}
 
+	// A barrier changes what a REVIEWER has to check, which is why it is here and
+	// not only in the file: a 422 that carries one field instead of four is the
+	// correct behaviour of a guard and the classic symptom of a broken one, and
+	// nothing else in this report would tell the two apart.
+	var barriers []string
+	for _, cl := range m.Clauses {
+		for _, r := range cl.Rules {
+			if r.Guard {
+				barriers = append(barriers, fmt.Sprintf("`%s` (in `%s`)", r.ID, cl.Gate))
+			}
+		}
+	}
+	if len(barriers) > 0 {
+		b.WriteString("### Rules that END the validation pass\n\n")
+		fmt.Fprintf(b, "%s — declared `guard: true`. After each of them the pass stops if "+
+			"anything has already been rejected: the rules below it, this entity's "+
+			"automatic value-object validation, and the `BuildRules` and value objects of "+
+			"every collection. A clean write is unaffected — the barrier fires only where "+
+			"something was ALREADY refused — so what changes is the SHAPE of a 422: it "+
+			"carries what was found up to the barrier, not that plus every other field the "+
+			"write would have failed on. Check that against what the API consumers expect "+
+			"to receive in one response.\n\n", strings.Join(barriers, ", "))
+	}
+
 	// A field that vanished from the API is the kind of thing a reader notices
 	// as a bug rather than as a decision, so the report says it was one.
 	if assigned := m.AssignedFields(); len(assigned) > 0 {

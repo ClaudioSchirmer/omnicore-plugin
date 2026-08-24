@@ -442,3 +442,22 @@ func contains(s, sub string) bool {
 		return false
 	})()
 }
+
+// TestOrphansIgnoresWhatANeighbourStillGenerates — the orphan list is what
+// `generate` offers to prune, so it must not name a file another spec of the
+// same project still writes.
+func TestOrphansIgnoresWhatANeighbourStillGenerates(t *testing.T) {
+	lock := &Lock{Version: 1, Entities: map[string]LockEntity{
+		"Tenant": {Files: map[string]LockFile{
+			"internal/domain/vos/doc.go": {Class: Owned},
+			"internal/domain/gone.go":    {Class: Owned},
+		}},
+		"Role": {Files: map[string]LockFile{
+			"internal/domain/vos/doc.go": {Class: Owned},
+		}},
+	}}
+	orph := Orphans("Tenant", nil, lock)
+	if len(orph) != 1 || orph[0] != "internal/domain/gone.go" {
+		t.Fatalf("unexpected orphans: %v", orph)
+	}
+}

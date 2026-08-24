@@ -175,16 +175,39 @@ fi
 echo "  (not booted: a mongo-backed view needs a Mongo, and the boot host is infra-free)"
 
 # ── Lane 3: regeneration is a no-op ──────────────────────────────────────────
+#
+# Checked TWICE, and the second check is the one that earns its place. Comparing
+# the tree before and after a full sweep only proves the END STATE matches — and
+# it does even when every entity rewrites a file the previous one just wrote, as
+# long as the sweep runs in the same order both times. That is exactly what a
+# shared file attributed to one entity did: internal/domain/vos/doc.go named
+# whichever spec ran last, so each generation reported the others' copy as
+# updated and the working tree was never clean. So each run is also required to
+# report NOTHING written, which is the promise a CI check actually needs.
 echo "── regeneration"
 BEFORE=$(cd "$WORK" && find internal bootstrap migrations -type f | sort | while read -r f; do SUM "$f"; done | SUM)
+churn=""; churn_spec=""
 for f in $FIXTURES; do
-  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$WORK/specs/omnicore-gen/$(basename "$f")" -project "$WORK" >/tmp/gg-regen.log 2>&1)
+  target="$WORK/specs/omnicore-gen/$(basename "$f")"
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$target" -project "$WORK" >/tmp/gg-regen.log 2>&1)
+  wrote=$(awk '/^  (created|updated) +[0-9]+$/ {n += $2} END {print n+0}' /tmp/gg-regen.log)
+  if [[ "$wrote" != "0" ]]; then
+    churn="$churn $(basename "$f" .omnicore.yaml):$wrote"
+    [[ -z "$churn_spec" ]] && churn_spec="$target"
+  fi
 done
 AFTER=$(cd "$WORK" && find internal bootstrap migrations -type f | sort | while read -r f; do SUM "$f"; done | SUM)
 if [[ "$BEFORE" == "$AFTER" ]]; then
   ok "a second run changes nothing"
 else
   bad "regeneration is not idempotent"
+fi
+if [[ -z "$churn" ]]; then
+  ok "no entity rewrites another's files"
+else
+  bad "regenerating one entity still writes files:$churn"
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$churn_spec" -project "$WORK" -dry-run 2>&1 \
+     | grep -E '^  (create|update) ' | head -5)
 fi
 
 # ── Lane 4: a hand edit is refused, never clobbered ──────────────────────────
@@ -587,6 +610,49 @@ PYID
     else
       bad "the tenant-scoped entity refused a write on the bench, or did not answer with an id"
       sed -n '1,25p' /tmp/gg-boot.log
+    fi
+
+    # ── the guard barrier, at runtime ────────────────────────────────────────
+    #
+    # `guard: true` on enrollment-required. Its whole effect is the SHAPE of a
+    # 422, which no unit test on the generated file can see: the barrier is
+    # positional, so a write that gets three things wrong must name the two
+    # DECLARED ABOVE the barrier and stay silent about the one below it.
+    #
+    # Both halves are asserted. Only checking that the pass stopped would pass
+    # just as happily on a barrier emitted too early, which would swallow
+    # name-required as well and hand the caller one field out of three.
+    GUARD=$(curl -s -X POST "http://127.0.0.1:18099/students" \
+      -H 'Content-Type: application/json' \
+      -d '{"name":"","enrollmentNumber":"","email":"ana@escola.br","status":"active","grade":99,"enrolledAt":"2026-02-01T09:00:00Z","tuitionAmount":185000,"tuitionCurrency":"BRL","campusId":"'"$CAMPUS_ID"'","guardians":[]}')
+    GUARD_FIELDS=$(python3 -c '
+import json, sys
+try:
+    body = json.loads(sys.stdin.read())
+except Exception:
+    sys.exit(0)
+out = []
+def walk(node):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in ("field", "fieldName") and isinstance(v, str):
+                out.append(v)
+            walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            walk(v)
+walk(body)
+print(" ".join(sorted(set(out))))
+' <<<"$GUARD")
+    if grep -qw "name" <<<"$GUARD_FIELDS" && grep -qw "enrollmentNumber" <<<"$GUARD_FIELDS"; then
+      ok "a guard reports every rule declared above it (got: $GUARD_FIELDS)"
+    else
+      bad "a guard swallowed a rule declared ABOVE the barrier (got: ${GUARD_FIELDS:-nothing})"
+    fi
+    if grep -qw "grade" <<<"$GUARD_FIELDS"; then
+      bad "the barrier did not stop the pass — a rule below it still reported (got: $GUARD_FIELDS)"
+    else
+      ok "a guard stops every rule declared below it"
     fi
 
     OPENAPI=$(curl -fsS "http://127.0.0.1:18099/openapi.json")
