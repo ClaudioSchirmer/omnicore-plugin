@@ -500,6 +500,21 @@ joins:
         example: Campus Norte
         description: Campus de referencia do responsavel, quando houver.
         labelKey: GuardianCampusNameField
+      # Um CARIMBO DE TEMPO dentro da entrada. A colecao nao tem coluna de tempo
+      # nenhuma, entao este campo e a UNICA razao para o resultado de leitura da
+      # colecao falar time.Time — e o unico tipo do vocabulario de join que
+      # carrega import. Um join de raiz ja atravessa estas mesmas colunas mais
+      # acima; o que se prova aqui e que o lado da COLECAO tambem compila.
+      - name: GuardianCampusCriadoEm
+        column: created_at
+        example: "2026-02-01T09:00:00Z"
+        description: Quando o campus de referencia foi criado.
+        labelKey: GuardianCampusCriadoEmField
+      - name: GuardianCampusArquivadoEm
+        column: deleted_at
+        example: "2026-02-01T09:00:00Z"
+        description: Quando o campus de referencia foi arquivado, se foi.
+        labelKey: GuardianCampusArquivadoEmField
 
 children:
   - name: Guardian
