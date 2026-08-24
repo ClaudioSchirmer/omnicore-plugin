@@ -45,6 +45,13 @@ type Model struct {
 	ValueObjects  []ValueObject
 	Service       *ServiceModel
 
+	// Joins are the READ JOINS this repository declares: read-only traversals
+	// across a foreign key into another aggregate. They are deliberately NOT in
+	// Fields — nothing about them is persisted, so no write shape, no migration
+	// and no TableSchema may ever see them — and every consumer that DOES serve
+	// them names them explicitly.
+	Joins []Join
+
 	Ops  []Operation
 	Read ReadModel
 
@@ -250,6 +257,41 @@ type Operation struct {
 	Description string
 }
 
+// Join is one resolved read-join declaration.
+type Join struct {
+	// Kind is "inner" or "left"; it decides the framework verb AND whether the
+	// mapped Go fields are nullable.
+	Kind string
+	// Target is the joined entity, and TargetSchemaFunc the schema function the
+	// generated repository hands to the framework.
+	Target           string
+	TargetSchemaFunc string
+	// FKColumn is the foreign key on the JOINING table.
+	FKColumn string
+	// Child is the collection this join hangs off, empty for a root join;
+	// ChildSchemaFunc is that collection's schema function.
+	Child           string
+	ChildSchemaFunc string
+	// Fields are what the traversal brings back. Their Column is the column on
+	// the TARGET — the join's own side — not a column of this entity, which has
+	// none for them.
+	Fields []Field
+	// TargetHandWritten says no spec of this project declares the target, so
+	// every field's type and nullability came from the AUTHOR rather than from a
+	// declaration the generator could read. Nothing downstream changes; it is
+	// carried so the gen-report can tell a reviewer which rows were taken on
+	// somebody's word and are checked by the framework at boot instead.
+	TargetHandWritten bool
+}
+
+// Verb is the framework call this declaration renders as.
+func (j Join) Verb() string {
+	if j.Kind == "inner" {
+		return "InnerJoin"
+	}
+	return "LeftJoin"
+}
+
 type ReadModel struct {
 	Enabled         bool
 	DeleteOnArchive bool
@@ -287,6 +329,16 @@ type ReadModel struct {
 	// Computed are the derived read fields: no column, filled by the hook the
 	// generator writes once and the author owns from then on.
 	Computed []ComputedField
+	// JoinFields are the ROOT joins' fields, as the read model serves them.
+	//
+	// Populated on a RELATIONAL backing only, and that is not a policy choice: a
+	// join leaves the TableSchema untouched, so a Mongo projection over the same
+	// entity never carries these columns. Putting them in the projected Result
+	// would serve a zero value on every document.
+	//
+	// A CHILD join's fields are not here — they live on the collection's own
+	// entry (Child.JoinFields), which is where the document carries them.
+	JoinFields []Field
 }
 
 // ComputedField is a read field with no column behind it.
@@ -474,6 +526,9 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 			}
 		}
 	}
+	// Before the read: a relational read model serves the ROOT joins' fields, so
+	// the read side has to be resolved with them already in hand.
+	resolveJoins(s, p, m)
 	m.Read = resolveRead(s, m)
 	m.Ops = resolveOps(s, m)
 	// After the ops, not with the children: what an undeclared per-entry verb
@@ -872,6 +927,13 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 	for _, n := range s.Read.Managed {
 		r.Managed = append(r.Managed, managedReadField(s, m, n))
 	}
+	// A ROOT join's fields are served by a relational read model — it reads
+	// through the very loader that declares them. A Mongo one is composed from
+	// the TableSchema, which a join deliberately never touches, so the same
+	// fields would be a zero value on every document.
+	if r.Backing == "relational" {
+		r.JoinFields = m.RootJoinFields()
+	}
 	if s.Read.ByParams != nil {
 		r.Controls = s.Read.ByParams.Controls
 		for _, f := range s.Read.ByParams.Filters {
@@ -886,6 +948,10 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 			// lookupField: m.Read is still the previous (empty) value at this
 			// point, so a filter on CreatedAt resolved to nothing and the query
 			// parameter was silently never emitted.
+			if fld := joinNamed(r.JoinFields, f.Field); fld != nil {
+				r.Filters = append(r.Filters, Filter{Field: *fld, Ops: f.Ops})
+				continue
+			}
 			if fld := managedNamed(r.Managed, f.Field); fld != nil {
 				r.Filters = append(r.Filters, Filter{Field: *fld, Ops: f.Ops})
 				continue
@@ -896,6 +962,10 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 		}
 		for _, name := range s.Read.ByParams.Sort {
 			if fld := identityReadField(m, name); fld != nil {
+				r.Sortable = append(r.Sortable, *fld)
+				continue
+			}
+			if fld := joinNamed(r.JoinFields, name); fld != nil {
 				r.Sortable = append(r.Sortable, *fld)
 				continue
 			}
@@ -1416,8 +1486,18 @@ func resolveValueObjects(s *spec.Spec) []ValueObject {
 			Name: vo.Name, Kind: vo.Kind, Backing: vo.Backing, GoBacking: backing,
 			Description: vo.Description, Regex: vo.Regex,
 			MinLength: vo.MinLength, MaxLength: vo.MaxLength,
-			Min: vo.Min, Max: vo.Max, Notification: vo.Notification,
-			UnknownNotification: vo.UnknownNotification,
+			Min: vo.Min, Max: vo.Max,
+			// QUALIFIED here, not at the emission site. A notification the
+			// service declares is generated INTO the vos package, so it is
+			// referenced bare; a FRAMEWORK one lives in the framework's own
+			// domain package, which the generated file already imports. Emitting
+			// the bare name for a framework notification produced a file that
+			// referenced an identifier nothing in its package declares — and the
+			// generator's own refusal message offers exactly those names as a
+			// legitimate choice, so following the advice produced a tree that
+			// did not compile.
+			Notification:        qualifyVONotification(vo.Notification),
+			UnknownNotification: qualifyVONotification(vo.UnknownNotification),
 			Written:             vo.Written,
 		}
 		if vo.Kind == "composite" {
@@ -1735,10 +1815,15 @@ type Child struct {
 	Description string
 	OwnedBy     string
 	Fields      []Field
-	Identity    []Field // the business-identity subset
-	ArchivedAt  string
-	InputType   string
-	AddMethod   string
+	// JoinFields are what a read join declared IN this collection brings back:
+	// ordinary fields of the entry, filled on every load, served inside the
+	// entry — and never filterable or sortable, because narrowing the root by a
+	// field of a 1:N collection is a pushdown one root SELECT cannot express.
+	JoinFields []Field
+	Identity   []Field // the business-identity subset
+	ArchivedAt string
+	InputType  string
+	AddMethod  string
 	// PerChild says the collection is edited one entry at a time: its own
 	// endpoints, its own commands, and a 404 when the entry is not there. The
 	// alternative — atomic-replace — has no entry to address, because the root's
@@ -2554,4 +2639,22 @@ func resolveArchiveWhen(s *spec.Spec, m *Model) *ArchiveWhen {
 	return &ArchiveWhen{
 		Field: *f, Equals: aw.Equals, Becomes: aw.Becomes, Description: aw.Description,
 	}
+}
+
+// qualifyVONotification renders a value object's notification as the reference
+// the generated vos package must write.
+//
+// The two live in different packages and only one of them needs saying: the
+// service's own notifications are generated into internal/domain/vos beside the
+// value objects that raise them, while the framework's live in its domain
+// package — already imported by every generated value-object file, because the
+// RequiredFieldNotification path writes it unconditionally.
+func qualifyVONotification(name string) string {
+	if name == "" {
+		return ""
+	}
+	if spec.IsFrameworkNotification(name) {
+		return "domain." + name
+	}
+	return name
 }

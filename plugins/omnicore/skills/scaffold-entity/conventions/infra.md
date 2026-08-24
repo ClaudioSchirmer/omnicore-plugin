@@ -109,11 +109,23 @@ root; the domain-service implementation in its own file here.
   auto-projects as the read-only twin of `ID` — filterable/sortable/`?fields=`-able
   with NO hand mapping; never map the FK column yourself. `table-schema.html`.
 - **View backing (relational vs Mongo).** Per the project read-side posture / the spec's
-  §9 slot. Relational = `.RelationalSource(repo.Loader)` on the plain per-entity view —
-  the aggregate's OWN loader (shared with the repo; boot guard `BoundTable()==schema.Table()`),
-  never a second one; no collection. Mongo = the plain `View(name).Schema(...)`.
-  Only the plain per-entity view is eligible — never a view KIND. What it serves:
+  §9 slot. Relational = its OWN declaration type, taking the aggregate's EXISTING loader
+  (shared with the repo) as its only structural input — the loader carries the schema, so
+  no schema is restated and there is no version, no indexes, no collection and no
+  `DeleteOnArchive` (they are not methods on it). Mongo = the plain projected view, with a
+  schema and a `Version`. Never build a second loader: it is what carries both the schema
+  AND the declared read joins, so a duplicate is a view that quietly serves a different
+  reach. Only the plain per-entity view is eligible — never a view KIND. What it serves:
   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`; version-exact: `relational-view.html`.
+- **Read joins live HERE, on the repository — never on the `TableSchema` and never on a
+  view** (pin ≥ v0.57.0). This is the layer that answers "a rule needs a field belonging
+  to another aggregate": declare the traversal beside the schema binding and the value is
+  an ordinary field of the entity, filled on every load, unreachable by any write (the
+  `TableSchema` is untouched, so `WriteFields` cannot see it). One declaration reaches
+  every read through the loader — `FindByID` included — and a relational read model over
+  that loader inherits it and declares nothing. Whether the caller also RECEIVES the field
+  is a SEPARATE decision from whether the entity carries it. Owner:
+  `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`; version-exact: `read-joins.html`.
 - **Never `Embed` the aggregate's OWN data** — its children/siblings/shared base
   auto-project from the schema, and a write-anchored embed source is a fatal boot error.
   Embed legs are `JoinUpstream(...)` (an external/upstream mirror) or `JoinView(...)`

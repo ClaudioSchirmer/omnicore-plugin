@@ -109,7 +109,7 @@ valueObjects:
       - {name: Cancelado, value: cancelado}
 read:
   backing: relational
-  view: {name: pedidos_rf, version: 1}
+  view: {name: pedidos_rf}
   byId: true
   byParams:
     filters:

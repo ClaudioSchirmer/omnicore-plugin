@@ -31,7 +31,7 @@ notifications:
     text: {ptbr: Já existe um fornecedor com este CNPJ., eng: A supplier with this tax id already exists., esp: Ya existe un proveedor con este CNPJ., fra: Un fournisseur avec ce numéro existe déjà., deu: Ein Lieferant mit dieser Nummer existiert bereits., ita: Esiste già un fornitore con questa partita IVA., nld: Er bestaat al een leverancier met dit nummer.}
 read:
   backing: relational
-  view: {name: fornecedores, version: 1}
+  view: {name: fornecedores}
   byId: true
   byParams:
     filters: [{field: RazaoSocial, ops: [eq, contains, icontains]}]

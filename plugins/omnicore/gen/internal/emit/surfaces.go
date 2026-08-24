@@ -120,7 +120,7 @@ func emitGraphQL(m *ir.Model) (*src, bool) {
 	if m.Service != nil {
 		s.L("\tsvc domain.Service,")
 	}
-	s.L("\tview *query.ViewDefinition,")
+	s.L("\tview %s,", viewType(m))
 	s.L("\td bootstrap.Deps,")
 	s.L(") {")
 

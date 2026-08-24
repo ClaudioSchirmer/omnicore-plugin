@@ -111,7 +111,7 @@ notifications:
       nld: De reservering zit al aan het gastenlimiet van de partnerstichting.
 read:
   backing: relational
-  view: {name: reservas, version: 1}
+  view: {name: reservas}
   byId: true
   byParams:
     filters:

@@ -25,7 +25,7 @@ rules:
     - {id: name-required, kind: required, scope: [insertOrUpdate], fields: [Name], notification: RequiredFieldNotification}
 read:
   backing: relational
-  view: {name: mentors, version: 1, maxLimit: 50}
+  view: {name: mentors, maxLimit: 50}
   byId: true
   byParams:
     filters: [{field: Name, ops: [eq, contains]}]

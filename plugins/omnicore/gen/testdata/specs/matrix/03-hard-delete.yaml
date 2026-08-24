@@ -15,7 +15,7 @@ update: {shape: put}
 delete: {root: hard}
 read:
   backing: relational
-  view: {name: rascunhos, version: 1}
+  view: {name: rascunhos}
   byId: true
 surfaces: {rest: true}
 authz:

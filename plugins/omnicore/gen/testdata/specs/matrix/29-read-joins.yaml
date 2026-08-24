@@ -1,0 +1,60 @@
+# Eixo: READ JOINS — o alcance a outra agregada, nas duas formas (raiz e filho)
+# e sobre um alvo ESCRITO A MAO, que e a forma que um projeto que adotou o
+# gerador no meio do caminho tem por definicao. O alvo vive em 29-read-joins.hand/.
+specVersion: 1
+entity: Evento
+plural: Eventos
+language: pt-BR
+storage:
+  kind: flat
+  table: eventos
+  description: Eventos realizados nas sedes.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 80, livesOn: root, example: "Colacao", description: Nome do evento.}
+  - {name: SedeID, type: id, column: sede_id, livesOn: root, example: "1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4", description: Sede do evento.}
+children:
+  - name: Ingresso
+    plural: Ingressos
+    table: evento_ingressos
+    parentColumn: evento_id
+    description: Ingressos emitidos para o evento.
+    ownedBy: root
+    editStrategy: atomic-replace
+    businessIdentity: [Codigo]
+    fields:
+      - {name: Codigo, type: string, column: codigo, length: 20, example: "ING-1", description: Codigo do ingresso.}
+      - {name: SedeID, type: id, column: sede_id, nullable: true, example: "1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4", description: "Sede de retirada, quando houver."}
+joins:
+  # Raiz, INNER sobre chave nao-nula: sempre no FROM, filtravel e ordenavel.
+  - to: Sede
+    kind: inner
+    on: sede_id
+    fields:
+      - {name: NomeSede, type: string, column: nome, example: "Sede Norte", description: Nome da sede., labelKey: EventoNomeSedeField}
+      # hidden: na entidade, fora da API.
+      - {name: CodigoSede, type: string, column: codigo, hidden: true, description: Codigo interno da sede., labelKey: EventoCodigoSedeField}
+  # Filho, LEFT: so-carga, servido dentro da entrada, nunca filtravel.
+  - to: Sede
+    kind: left
+    on: sede_id
+    inChild: Ingresso
+    fields:
+      - {name: NomeSedeRetirada, type: string, column: nome, example: "Sede Norte", description: Sede de retirada., labelKey: IngressoNomeSedeRetiradaField}
+modes: [display, insert]
+read:
+  backing: relational
+  view: {name: eventos}
+  byId: true
+  byParams:
+    filters:
+      - {field: Nome, ops: [eq, contains]}
+      # Um campo de join de RAIZ filtra como coluna qualquer.
+      - {field: NomeSede, ops: [eq, contains]}
+    sort: [Nome, NomeSede]
+    controls: {pagination: true, orderBy: true, fields: true}
+surfaces: {rest: true}
+authz:
+  resource: evento
+  dataAccess: anyone-with-permission
+  permissions: {insert: "evento:escrever", read: "evento:ler"}

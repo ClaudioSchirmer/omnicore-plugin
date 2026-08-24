@@ -27,7 +27,7 @@ commands beyond reading docs and code.
   an answer never describes something the dev's pinned version doesn't have.
   For posture/availability questions ("why can't my SQLite service have a
   ComposedView?"), the plugin's `${CLAUDE_PLUGIN_ROOT}/shared/*.md` owner sheets
-  (read-side, boot-contract, capabilities) supply the plugin-consistent FRAMING
+  (read-side, read-joins, boot-contract, capabilities) supply the plugin-consistent FRAMING
   (what to offer, the upgrade path) — the pin's docs stay the factual authority.
   Asked about a feature that only exists in a newer release → say exactly that
   ("not at your vX — it arrived in vY") and point at `/omnicore:upgrade`, never

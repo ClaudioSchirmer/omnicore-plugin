@@ -200,7 +200,8 @@ Self-configure by reading the project:
 - **The read-side posture (view backing default).** In order: a delegated
   `domain-map.md` §1p / this entity's §9 `View backing` (authoritative when present) →
   else `specs/scaffold-service/spec.md` (a fresh project just scaffolded)
-  → else INFER from existing per-entity views (do any carry `.RelationalSource()`?). It
+  → else INFER from existing per-entity views (are any declared as RELATIONAL read
+  models — their own type, on the relational feature seam?). It
   sets the DEFAULT for item 5's view-backing decision; only when NONE of these is on
   record does that item ASK. Never silently pick one when nothing is found.
   **INVARIANT — the infra posture NEVER constrains WRITE-SIDE modeling; it restricts
@@ -799,6 +800,7 @@ only a genuinely missing docs file does.
 | view: the ViewDefinition surface itself (declaration, `Version`, SharedBaseView contract, DeleteOnArchive, archived rule) | views |
 | view: indexes / options / Version bump rules | auto-query-handlers · mongo-schema-evolution |
 | view backing: relational (SoR) vs Mongo — posture, elicitation, gating | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
+| reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | SharedBaseView / ComposedView (read) | views · query-side |
 | domain events (`RegisterEvent`, post-commit publish) | auto-handlers · command-handler |
 | the read's Result + `FromQueryResult`, and the Response's `FromResult` (`responses.Map`) — the read side's Result anatomy | auto-query-handlers · custom-query-handler |
@@ -847,10 +849,23 @@ only a genuinely missing docs file does.
   absent from zero.
 - **View `Version(N)`** — bump on rebuild-relevant change (root/embeds/DeleteOnArchive/
   jsonSchema/collation/capped/time-series); index-only does NOT; forgetting panics.
-- **A relational view (`.RelationalSource`) has NO Mongo collection** — SyncEngine,
-  Mongo-spec and reconcile skip it by name; its reads are read-your-writes (provable
-  immediately, no CDC round-trip). What it serves vs rejects (typed 400, never 500):
+  **MONGO-PROJECTED VIEWS ONLY** — a relational read model has no version at all.
+- **A relational read model is its OWN TYPE, not a flag on the projected one** (pin ≥
+  v0.57.0): no version, no collection, no registry row, no rebuild, no drift, no indexes,
+  no `DeleteOnArchive` — none of those are even methods on it. It is declared by name over
+  the aggregate's EXISTING loader (which carries the schema, so nothing about the shape is
+  restated) and contributed through the relational feature seam, the sibling of the Mongo
+  one. Its reads are read-your-writes, provable immediately with no CDC round-trip.
+  What it serves vs rejects (typed 400, never 500):
   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`; version-exact contract: `relational-view`.
+- **A read-model NAME may not end in `__0` or `__1`** — reserved for the blue-green slots
+  a projected view's two physical collections are addressed by. Refused at boot in EVERY
+  read-model family, because the namespace is one.
+- **A rule needing a field of ANOTHER aggregate is a READ JOIN, not a copied column**
+  (pin ≥ v0.57.0) — declared on the repository, never on the `TableSchema` and never on a
+  view; the field is an ordinary field of the entity, filled on every load. Whether the
+  caller also RECEIVES it is a separate decision. Owner:
+  `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`; version-exact contract: `read-joins`.
 - **Every `.up.sql` needs a `.down.sql`** (may be a no-op) or boot aborts.
 - **A ComposedView 1:N leg's FK must be indexed** or boot is fatal.
 - **`Modes()` ⟺ the schema's archive-column declaration** must agree.

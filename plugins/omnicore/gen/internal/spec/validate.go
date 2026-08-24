@@ -38,6 +38,12 @@ type Neighbour struct {
 	Entity   string
 	ViewName string
 	Route    string
+	// Table and Fields are that entity's ROOT — what a READ JOIN declared here
+	// traverses INTO. A join names a column of the target and lands it on a Go
+	// field of this entity, so both the column's existence and its type come
+	// from the target's own declaration rather than from a restatement.
+	Table  string
+	Fields []NeighbourField
 	// Children is what that spec declares its collections to be, so a role that
 	// MOUNTS one can be checked against the declaration instead of trusted to
 	// have restated it correctly.
@@ -57,6 +63,12 @@ type NeighbourField struct {
 	Name   string
 	Column string
 	Type   string
+	// Nullable and LivesOn are what a read join has to ask about the target and
+	// about its own foreign key: an inner join is legal only over a NON-NULLABLE
+	// key, and a traversal reaches the target's OWN table — never its shared
+	// base or one of its siblings.
+	Nullable bool
+	LivesOn  string
 }
 
 // Validate checks a spec against the language's closed vocabularies AND against
@@ -80,7 +92,8 @@ func Validate(s *Spec, opt Options) *Problems {
 	validateRules(s, ps)
 	validateNotifications(s, ps, opt)
 	validateService(s, ps)
-	validateRead(s, ps)
+	validateJoins(s, opt, ps)
+	validateRead(s, joinReachOf(s, opt), ps)
 	validateSurfaces(s, ps)
 	validateAuthz(s, ps)
 
@@ -1587,6 +1600,15 @@ var frameworkNotifications = map[string]bool{
 	"ArchiveNotAllowedNotification":  true,
 }
 
+// IsFrameworkNotification reports whether a name is one the FRAMEWORK supplies.
+//
+// It exists so the resolver can qualify a reference correctly: a notification
+// the service declares is generated into the package that names it, while a
+// framework one lives in the framework's own domain package and needs its
+// qualifier. Keeping the set here, with the validator that already owns it,
+// is what stops a second copy from disagreeing with this one.
+func IsFrameworkNotification(name string) bool { return frameworkNotifications[name] }
+
 func validateRules(s *Spec, ps *Problems) {
 	validateRuleSet(s, s.Rules, ruleScopeOfRoot(s), "rules", ps)
 	for i, c := range s.Children {
@@ -2526,7 +2548,7 @@ func validateManualFact(f Fact, where string, ps *Problems) {
 	}
 }
 
-func validateRead(s *Spec, ps *Problems) {
+func validateRead(s *Spec, jr joinReach, ps *Problems) {
 	r := s.Read
 	display := contains(s.Modes, "display")
 	reading := r.ByID || r.ByParams != nil
@@ -2551,16 +2573,24 @@ func validateRead(s *Spec, ps *Problems) {
 	}
 	if r.View.Name == "" {
 		ps.Blockerf("read.view.name", "the view needs a name")
-	}
-	if r.View.Version < 1 {
-		ps.BlockerFix("read.view.version",
-			"the view version must start at 1",
-			"the framework uses it to decide when a rebuild is due; 0 is not a version")
+	} else if why := ReservedViewSuffix(r.View.Name); why != "" {
+		ps.BlockerFix("read.view.name",
+			fmt.Sprintf("%q %s", r.View.Name, why),
+			"rename the view — the framework refuses the name at boot, in every "+
+				"read-model family, because all of them share one namespace")
 	}
 
 	if r.Backing == "relational" {
-		// A relational view has no Mongo collection, so these are not merely
-		// useless — they would be silently discarded, which is worse.
+		// A relational read model is a DIFFERENT TYPE from a projected one, and
+		// none of these exist on it. They are not merely useless here — they
+		// would be silently discarded, which is worse.
+		if r.View.Version != 0 {
+			ps.BlockerFix("read.view.version",
+				"a relational read model has no version",
+				"nothing is materialised, so there is no stored shape to grow stale "+
+					"against, nothing to rebuild and no boot to refuse — remove the key, "+
+					"or set read.backing: mongo")
+		}
 		if len(r.Indexes) > 0 {
 			ps.BlockerFix("read.indexes",
 				"a relational view has no collection to index",
@@ -2576,6 +2606,10 @@ func validateRead(s *Spec, ps *Problems) {
 				"a time-to-live is a Mongo collection option",
 				"remove it, or set read.backing: mongo")
 		}
+	} else if r.View.Version < 1 {
+		ps.BlockerFix("read.view.version",
+			"the view version must start at 1",
+			"the framework uses it to decide when a rebuild is due; 0 is not a version")
 	}
 
 	for i, idx := range r.Indexes {
@@ -2584,7 +2618,7 @@ func validateRead(s *Spec, ps *Problems) {
 			ps.Blockerf(where+".fields", "an index needs at least one field")
 		}
 		for _, fn := range idx.Fields {
-			if !readableField(s, fn) {
+			if !readableField(s, jr, fn) {
 				reportUnreadable(s, fn, where+".fields", ps)
 			}
 		}
@@ -2598,7 +2632,7 @@ func validateRead(s *Spec, ps *Problems) {
 	}
 
 	if r.ByParams != nil {
-		validateByParams(s, r, ps)
+		validateByParams(s, r, jr, ps)
 	}
 
 	seenManaged := map[string]bool{}
@@ -2632,7 +2666,7 @@ func validateRead(s *Spec, ps *Problems) {
 
 	for i, fr := range r.FieldRestrict {
 		where := fmt.Sprintf("read.fieldRestrict[%d]", i)
-		if !readableField(s, fr.Field) {
+		if !readableField(s, jr, fr.Field) {
 			reportUnreadable(s, fr.Field, where+".field", ps)
 		}
 		if fr.Permission == "" {
@@ -2652,7 +2686,7 @@ func validateRead(s *Spec, ps *Problems) {
 		}
 	}
 
-	validateComputed(s, r, ps)
+	validateComputed(s, r, jr, ps)
 
 	if r.IdentityView != "" {
 		if !IdentityViews.Has(r.IdentityView) {
@@ -2674,7 +2708,7 @@ func validateRead(s *Spec, ps *Problems) {
 // cannot be filtered, cannot be ordered by, and cannot feed another computed
 // field — and its sources have to be real, stored fields, because pushing them
 // to the store is what makes `?fields=<computed>` work at all.
-func validateComputed(s *Spec, r Read, ps *Problems) {
+func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 	if len(r.Computed) == 0 {
 		return
 	}
@@ -2696,7 +2730,7 @@ func validateComputed(s *Spec, r Read, ps *Problems) {
 			ps.BlockerFix(where,
 				fmt.Sprintf("%q is not a usable Go field name", c.Name),
 				"use exported PascalCase, e.g. DisplayName")
-		case readableField(s, c.Name):
+		case readableField(s, jr, c.Name):
 			ps.BlockerFix(where,
 				fmt.Sprintf("%q is already a field of this entity", c.Name),
 				"a computed field is one the STORE does not hold — rename it, or drop "+
@@ -2723,7 +2757,7 @@ func validateComputed(s *Spec, r Read, ps *Problems) {
 					"name the STORED fields behind it instead")
 				continue
 			}
-			if !readableField(s, src) {
+			if !readableField(s, jr, src) {
 				reportUnreadable(s, src, where+".from", ps)
 			}
 		}
@@ -2777,7 +2811,7 @@ func validateComputed(s *Spec, r Read, ps *Problems) {
 	}
 }
 
-func validateByParams(s *Spec, r Read, ps *Problems) {
+func validateByParams(s *Spec, r Read, jr joinReach, ps *Problems) {
 	bp := r.ByParams
 	for i, f := range bp.Filters {
 		where := fmt.Sprintf("read.byParams.filters[%d] (%s)", i, orUnnamed(f.Field))
@@ -2786,9 +2820,9 @@ func validateByParams(s *Spec, r Read, ps *Problems) {
 		// wider set readableField accepts, and every spelling in the gap
 		// (a collection's field, dotted or not) validated green and was then
 		// silently dropped from the generated request type.
-		fld := filterableField(s, f.Field)
+		fld := filterableField(s, jr, f.Field)
 		if fld == nil {
-			if readableField(s, f.Field) {
+			if readableField(s, jr, f.Field) {
 				ps.BlockerFix(where,
 					fmt.Sprintf("%q belongs to a collection, and a filter reaches only "+
 						"the root's own fields — it would be silently dropped", f.Field),
@@ -2857,10 +2891,10 @@ func validateByParams(s *Spec, r Read, ps *Problems) {
 		seenSort[sf] = true
 		// Ordering happens in the STORE, so the path needs a column there — the
 		// same requirement a filter has, and the same set it draws from.
-		if filterableField(s, sf) != nil {
+		if filterableField(s, jr, sf) != nil {
 			continue
 		}
-		if readableField(s, sf) {
+		if readableField(s, jr, sf) {
 			ps.BlockerFix("read.byParams.sort",
 				fmt.Sprintf("%q is readable but has no column this listing can order by", sf),
 				"order by a field of the entity's own row (its facets and the "+
@@ -2871,11 +2905,11 @@ func validateByParams(s *Spec, r Read, ps *Problems) {
 		reportUnreadable(s, sf, "read.byParams.sort", ps)
 	}
 	for _, sf := range bp.Controls.Search {
-		if !readableField(s, sf) {
+		if !readableField(s, jr, sf) {
 			reportUnreadable(s, sf, "read.byParams.controls.search", ps)
 			continue
 		}
-		if f := filterableField(s, sf); f != nil && f.Type != "string" {
+		if f := filterableField(s, jr, sf); f != nil && f.Type != "string" {
 			ps.BlockerFix("read.byParams.controls.search",
 				fmt.Sprintf("%q is not text, so a search cannot match it", sf),
 				"search covers string fields")
@@ -3215,20 +3249,6 @@ func findSibling(ss []Sibling, name string) *Sibling {
 	return nil
 }
 
-// findAnyField looks through the root and its siblings — everything that lands
-// on the aggregate's own struct.
-func findAnyField(s *Spec, name string) *Field {
-	if f := findField(s.Fields, name); f != nil {
-		return f
-	}
-	for i := range s.Siblings {
-		if f := findField(s.Siblings[i].Fields, name); f != nil {
-			return f
-		}
-	}
-	return nil
-}
-
 // readableField also accepts a child field addressed as Child.Field, which is
 // how the read side names it inside the projected document.
 // checkTableName applies the same reserved-word and format rules the root
@@ -3306,7 +3326,14 @@ func checkFieldDups(fields []Field, where string, ps *Problems) {
 // root's own fields plus its root-attached facets, nothing dotted, nothing of
 // a collection. Validation and lowering disagreeing here is exactly how a
 // blessed filter used to vanish from the generated request type.
-func filterableField(s *Spec, name string) *Field {
+func filterableField(s *Spec, jr joinReach, name string) *Field {
+	// A ROOT join's field is filterable and sortable: it rides the root SELECT,
+	// so the store can compare and order by it like any column of the table.
+	// A CHILD join's is not — narrowing the root by a field of a 1:N collection
+	// is a pushdown one root SELECT cannot express.
+	if f := fieldNamedIn(jr.root, name); f != nil {
+		return f
+	}
 	// The aggregate id is answered first and unconditionally: it is on the
 	// root's row before any field is declared, and nothing in the spec can put
 	// it into — or keep it out of — the declared set.
@@ -3678,7 +3705,15 @@ func ManagedColumn(s *Spec, name string) string {
 	return ""
 }
 
-func readableField(s *Spec, name string) bool {
+func readableField(s *Spec, jr joinReach, name string) bool {
+	if fieldNamedIn(jr.root, name) != nil {
+		return true
+	}
+	if i := strings.Index(name, "."); i > 0 {
+		if fieldNamedIn(jr.child[name[:i]], name[i+1:]) != nil {
+			return true
+		}
+	}
 	if managedRead(s, name) {
 		return true
 	}

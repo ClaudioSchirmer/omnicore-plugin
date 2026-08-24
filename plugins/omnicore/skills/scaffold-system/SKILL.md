@@ -123,7 +123,16 @@ per section:
   here. The natural key of each base is the highest-risk slot of the whole map: propose,
   justify, CONFIRM.
 - **References (§4).** Direction and nullability of every cross-aggregate link — the
-  referenced side scaffolds first (§7).
+  referenced side scaffolds first (§7). **And, per reference, whether it is READ ACROSS:**
+  does a rule, a service fact or a listing on the referencing side need a value from the
+  referenced aggregate? That is a READ JOIN on the repository, not a copied column
+  (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`, pin ≥ v0.57.0) — and it is worth settling
+  here rather than per entity, because it is exactly the question a system description
+  answers implicitly ("the order listing shows the customer's name") and nobody asks
+  literally. Nullability decides the kind: a nullable foreign key can only be a `left`
+  join. It is NOT a join when the reach is 1:N, when the match is on anything but the
+  target's id, or when the referencing side is Mongo-projected (there a projection is what
+  carries it — §5).
 - **Read-side posture (system-wide, §1p).** Decide ONCE, neutrally (no default — MVP
   vs solid build, same doctrine as `scaffold-service` #8): entity views relational
   (SoR, read-your-writes, defer the pipeline) or Mongo-projected (canonical). If

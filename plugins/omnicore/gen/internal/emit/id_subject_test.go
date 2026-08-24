@@ -58,7 +58,7 @@ notifications:
     text: {ptbr: Nao e sua., eng: Not yours., esp: No es suya., fra: Pas la votre., deu: Nicht Ihre., ita: Non e tua., nld: Niet van jou.}
 read:
   backing: relational
-  view: {name: notas, version: 1}
+  view: {name: notas}
   byId: true
 surfaces: {rest: true}
 authz:

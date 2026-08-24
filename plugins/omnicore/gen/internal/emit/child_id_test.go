@@ -51,7 +51,7 @@ service:
       description: Se o dono não existe ou foi arquivado. Vive em outra tabela.
 read:
   backing: relational
-  view: {name: papeis, version: 1}
+  view: {name: papeis}
   byId: true
 surfaces: {rest: true}
 authz:

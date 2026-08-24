@@ -319,6 +319,16 @@ func labelledFields(m *ir.Model) []ir.Field {
 	// key, so leaving them out heads a column with an internal name — the defect
 	// the computed fields above were added here to close.
 	add(m.Read.Managed)
+	// A JOINED field is a column of the tabular export like any other, and its
+	// header resolves through the same key. It reaches no other set — it is
+	// nowhere in the TableSchema by design — so leaving it out heads a column
+	// with an internal name, which is the defect the two sets above were added
+	// here to close. Every join's fields are collected, not only the served
+	// ones: a rule may attach a notification to a joined field whatever the
+	// read side does with it.
+	for _, j := range m.Joins {
+		add(j.Fields)
+	}
 	return out
 }
 

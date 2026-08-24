@@ -60,7 +60,7 @@ notifications:
     text: {ptbr: Ja concedida., eng: Already granted., esp: Ya concedida., fra: Deja accordee., deu: Bereits gewaehrt., ita: Gia concessa., nld: Al verleend.}
 read:
   backing: relational
-  view: {name: papeis, version: 1}
+  view: {name: papeis}
   byId: true
 surfaces: {rest: true}
 authz:

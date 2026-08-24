@@ -240,6 +240,13 @@ func neighboursOf(p *discover.Project) []spec.Neighbour {
 	for _, c := range p.SiblingSpecs {
 		n := spec.Neighbour{
 			Path: c.Path, Entity: c.Entity, ViewName: c.ViewName, Route: c.Route,
+			Table: c.Table,
+		}
+		for _, f := range c.Fields {
+			n.Fields = append(n.Fields, spec.NeighbourField{
+				Name: f.Name, Column: f.Column, Type: f.Type,
+				Nullable: f.Nullable, LivesOn: f.LivesOn,
+			})
 		}
 		for _, ch := range c.Children {
 			nc := spec.NeighbourChild{Name: ch.Name, Table: ch.Table, OwnedBy: ch.OwnedBy}

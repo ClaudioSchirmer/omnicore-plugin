@@ -262,6 +262,13 @@ func emitResultStruct(s *src, m *ir.Model, name string, sh readShape) {
 	for _, f := range m.Read.Managed {
 		s.L("\t%s %s", f.Name, sh.resultType(f))
 	}
+	// The ROOT joins' fields. They sit with the entity's own because that is
+	// what they are on the loaded entity — the read model serves them through
+	// the very loader that declares them, and it inherits the reach without
+	// declaring anything itself.
+	for _, f := range m.Read.JoinFields {
+		s.L("\t%s %s", f.Name, sh.resultType(f))
+	}
 	for _, c := range m.Read.Computed {
 		s.L("\t// %s is COMPUTED: no column backs it, and FromQueryResult fills it", c.Name)
 		s.L("\t// from %s.", strings.Join(c.Sources, "+"))
@@ -303,6 +310,12 @@ func emitChildRowResults(m *ir.Model) (fsplan.File, error) {
 		s.L("type %s struct {", childRowResult(c))
 		s.L("\tID %s", sh.idType())
 		for _, f := range c.Fields {
+			s.L("\t%s %s", f.Name, sh.resultType(f))
+		}
+		// A CHILD join's fields are served INSIDE the entry — the document
+		// carries them under <segment>.<field>, which is also how ?fields= names
+		// them. They are load-only: no filter and no order reaches them.
+		for _, f := range m.ServedJoinFields(c) {
 			s.L("\t%s %s", f.Name, sh.resultType(f))
 		}
 		s.L("}")
@@ -545,6 +558,9 @@ func resultTypeNames(m *ir.Model, sh readShape) []string {
 		out = append(out, sh.resultType(f))
 	}
 	for _, f := range m.Read.Managed {
+		out = append(out, sh.resultType(f))
+	}
+	for _, f := range m.Read.JoinFields {
 		out = append(out, sh.resultType(f))
 	}
 	for _, c := range m.Read.Computed {

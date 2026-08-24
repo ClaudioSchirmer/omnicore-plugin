@@ -113,7 +113,6 @@ read:
   backing: relational
   view:
     name: teachers
-    version: 1
   byId: true
   byParams:
     filters:

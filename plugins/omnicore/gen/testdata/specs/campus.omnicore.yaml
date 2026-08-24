@@ -1,0 +1,140 @@
+# O ALVO de um read join — uma agregada flat que outra alcança por uma chave
+# estrangeira.
+#
+# Ela existe para ser atravessada: o spec do aluno declara joins até aqui, e é
+# deste arquivo que o gerador tira as colunas e os tipos. Alvo invisível não
+# tem coluna que se possa conferir.
+specVersion: 1
+entity: Campus
+plural: Campi
+language: pt-BR
+
+storage:
+  kind: flat
+  table: campi
+  description: Campi da instituição.
+  managed:
+    createdAt: created_at
+    updatedAt: updated_at
+    revision: revision
+
+valueObjects:
+  # Um VO que nomeia uma notificacao DO FRAMEWORK — que e o que a propria
+  # recusa do gerador oferece quando a notificacao nao esta declarada. Ela mora
+  # no pacote domain do framework, nao no vos gerado, entao a referencia sai
+  # qualificada; emiti-la nua produzia um arquivo que citava um identificador
+  # que nenhum pacote dele declara.
+  - name: CampusCode
+    kind: raw
+    backing: string
+    description: Codigo do campus — tres letras maiusculas.
+    regex: '^[A-Z]{3}$'
+    maxLength: 3
+    notification: SchemaViolationNotification
+
+  - name: Coordinates
+    kind: composite
+    description: Um ponto geografico — latitude e longitude juntas.
+    parts:
+      - name: Latitude
+        type: float64
+        description: A latitude, em graus decimais.
+        labelKey: CoordinatesLatitudeField
+      - name: Longitude
+        type: float64
+        description: A longitude, em graus decimais.
+        labelKey: CoordinatesLongitudeField
+
+fields:
+  - name: CampusLabel
+    type: string
+    column: label
+    length: 120
+    livesOn: root
+    example: Campus Norte
+    description: Nome do campus.
+    labelKey: CampusLabelField
+
+  - name: BudgetCode
+    type: string
+    column: budget_code
+    length: 20
+    livesOn: root
+    example: ORC-2026-11
+    description: Código orçamentário do campus.
+    labelKey: CampusBudgetCodeField
+
+  # Duas colunas de IDENTIDADE, uma obrigatoria e uma opcional. Elas existem
+  # para serem ATRAVESSADAS: um campo de join nao carrega tipo de dominio, entao
+  # do outro lado elas chegam como texto — string quando a coluna e obrigatoria,
+  # *string quando ela admite NULL.
+  - name: OwnerID
+    type: id
+    column: owner_id
+    livesOn: root
+    example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4
+    description: Responsavel pelo campus.
+    labelKey: CampusOwnerIDField
+
+  - name: AuditorID
+    type: id
+    column: auditor_id
+    nullable: true
+    livesOn: root
+    example: 8c1d0f77-5b41-4a35-8f11-6d6e4c9b0a3e
+    description: Auditor do campus, quando houver.
+    labelKey: CampusAuditorIDField
+
+  # Um VALUE OBJECT COMPOSTO: nao tem coluna propria, o valor mora em duas.
+  # Essas colunas sao colunas comuns da tabela — entram na bijecao do schema
+  # sob as mesmas regras de um campo simples — entao um read join pode
+  # atravessar ate uma delas.
+  - name: Location
+    livesOn: root
+    vo: {kind: composite, ref: Coordinates}
+    description: Localizacao geografica do campus.
+    labelKey: CampusLocationField
+    parts:
+      - {part: Latitude,  column: latitude,  as: Latitude,  example: "-30.0346"}
+      - {part: Longitude, column: longitude, as: Longitude, example: "-51.2177"}
+
+  - name: Code
+    type: string
+    column: code
+    length: 3
+    livesOn: root
+    vo: {kind: raw, ref: CampusCode}
+    example: NOR
+    description: Codigo do campus.
+    labelKey: CampusCodeField
+
+  # Uma coluna comum ANULAVEL. Ela existe para ser atravessada por um join
+  # INNER: a linha do alvo existe, mas esta coluna dela pode estar vazia — sao
+  # duas perguntas diferentes, e o campo que a recebe precisa saber dizer
+  # "ausente" ou a leitura quebra na primeira linha com NULL.
+  - name: Nickname
+    type: string
+    column: nickname
+    length: 40
+    nullable: true
+    livesOn: root
+    example: Norte
+    description: Apelido do campus, quando houver.
+    labelKey: CampusNicknameField
+
+modes: [display, insert]
+
+read:
+  backing: relational
+  view: {name: campi}
+  byId: true
+  byParams:
+    filters:
+      - {field: CampusLabel, ops: [eq, contains]}
+
+surfaces: {rest: true}
+
+authz:
+  resource: campus
+  dataAccess: anyone-with-permission
+  permissions: {insert: "campus:escrever", read: "campus:ler"}

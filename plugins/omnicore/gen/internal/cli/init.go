@@ -207,6 +207,9 @@ func renderTemplate(entity string, p *discover.Project) string {
 		b.WriteString("  # relational: reads come straight from the tables, so a write is visible\n")
 		b.WriteString("  # to the very next read. This project has no mongo block, so it is the\n")
 		b.WriteString("  # only backing that can serve here.\n")
+		b.WriteString("  # It is its own KIND of read model, not a flag on the projected one:\n")
+		b.WriteString("  # nothing is materialised, so there is no view.version, no rebuild, no\n")
+		b.WriteString("  # collection and no indexes here — those keys are refused.\n")
 	} else {
 		b.WriteString("  # mongo: reads come from a projection updated shortly after the write.\n")
 		b.WriteString("  # Bump view.version whenever the projected shape changes, or the service\n")
@@ -214,7 +217,9 @@ func renderTemplate(entity string, p *discover.Project) string {
 	}
 	b.WriteString("  view:\n")
 	fmt.Fprintf(&b, "    name: %s\n", table)
-	b.WriteString("    version: 1\n")
+	if backing == "mongo" {
+		b.WriteString("    version: 1\n")
+	}
 	b.WriteString("    maxLimit: 100\n")
 	if backing == "mongo" {
 		b.WriteString("  # indexes:\n")

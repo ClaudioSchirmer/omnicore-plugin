@@ -105,8 +105,16 @@ Map what exists before proposing — this is the whole safety of the run:
   present WITHOUT `transport:` ⇒ collections boot but the sync consumer is skipped — see the
   anchor-postures note above.)
 - **Transport** — a `transport:` block + which build tag (`kafka`/`nats`/tagless)?
-- **Views** — which carry `.RelationalSource()` (SoR-served) vs Mongo-projected; the
+- **Views** — which are declared as RELATIONAL read models (SoR-served, their own type,
+  contributed through the relational feature seam) vs Mongo-projected; the
   composed/shared/embed ones (Mongo-only by construction).
+- **Read joins** — which repositories declare one, and which of their fields a read model
+  currently FILTERS, SORTS or SERVES. The DECLARATION is backing-independent and no
+  conversion touches it: a join reaches the entity and the rules on either posture, so
+  never propose removing one as part of a posture change. Its READ-side reach is NOT
+  backing-independent, and that asymmetry is the consequence to carry into item 3 — a
+  relational read model inherits the traversal, a Mongo projection cannot see it at all
+  (`shared/read-joins.md`).
 - **Integration events** — `integration.publishes` / `integration.subscribes` declared?
 - **Devops** — is there a `devops/` bench (compose + Debezium)? Which dialect × transport?
 - **Surfaces** — REST / GraphQL / gRPC.
@@ -126,8 +134,18 @@ structural (`N/A — <why>`):
    `integration:` config. Phase 2 edits NOTHING outside it.
 3. **Consequences, taught per axis** [high-risk] — from the pin's docs:
    - **Add Mongo** — requires a Debezium-tailable engine (so on SQLite this implies an engine
-     swap) + the broker + the CDC relay; each view flipped relational→Mongo triggers an online
-     blue-green rebuild (`mongo-schema-evolution`, `Version` bump — delegated to `evolve-view`).
+     swap) + the broker + the CDC relay; each view flipped relational→Mongo is re-declared as
+     a projected view and its first rebuild provisions the collection (`mongo-schema-evolution`,
+     `Version(1)` — delegated to `evolve-view`). **A view that inherited a READ JOIN loses
+     that reach in the flip**: the traversal survives untouched on the repository and the
+     entity and its rules still read the field, but the projection cannot carry it, so
+     every filter and sort declared over a joined field dies with the flip and the field
+     leaves the served shape. That is a consumer-visible LOSS, not a detail — name it per
+     view in the plan, from the Phase 0 inventory (`shared/read-joins.md`), and let the
+     delegated `evolve-view` run own the wording of each one.
+     **A flip the OTHER way leaves a collection and an `omnicore_mongo_views` row behind
+     that nothing drops for you** — the DB-per-service guard then aborts the boot outside
+     `dev`; the drop belongs IN the plan, not in the incident afterwards.
      **And say WHAT it unlocks** — usually the actual reason for the conversion: the view KINDS
      that were unavailable (identity / `SharedBaseView`, `ComposedView`, the Embed/Link family,
      Upstream) and integration events. Name the ones THIS project was told it could not have —
@@ -170,11 +188,15 @@ One pass in dependency order — read the owning `/docs` section BEFORE each art
 4. `migrations/<target>/` — on an engine swap, generate the ported DDL (docs-first per dialect);
    flag it for dev review — and repoint `migrations.dir` in every profile (impact-map
    item 2).
-5. **View backings** — delegate each flip to `/omnicore:evolve-view` (it owns the `Version` bump
-   + rebuild discipline); this skill never rewrites a view declaration itself. When a flip
-   lands a relational view, its feature must reuse the aggregate's EXISTING `repo.Loader` —
-   never a second loader (the rule and why: `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`,
-   Mechanics). See the feature example in `relational-view.html`.
+5. **View backings** — delegate each flip to `/omnicore:evolve-view` (it owns the
+   re-declaration, the `Version`/rebuild discipline on the Mongo side AND the by-hand
+   collection + registry-row drop on the relational side); this skill never rewrites a view
+   declaration itself. **A flip is a conversion between two declaration TYPES, not a flag**
+   (pin ≥ v0.57.0), so it also moves the view between two feature seams. When a flip lands a
+   relational read model, its feature must reuse the aggregate's EXISTING loader — never a
+   second one, which would quietly serve a different reach (the rule and why:
+   `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`, Mechanics). See the feature example in
+   `relational-view.html`.
 6. `integration:` — enable/disable publishes/subscribes per the target.
 Edit ONLY what the plan lists.
 
@@ -190,6 +212,7 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 | strict-decoded blocks · publicRoutes validation · autoRun modes · env-var posture | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) |
 | what the posture gates vs what works everywhere · integration-style choice | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) |
 | read-side posture · MVP framing · what each backing serves | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact parity |
+| reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | view flip / Version / rebuild | mongo-schema-evolution · evolve-view (skill) |
 | broker / CDC relay / transport swap / tagless | transport |
 | integration events (publish rides CDC · subscribe) | integration-events |

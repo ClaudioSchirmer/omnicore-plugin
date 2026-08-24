@@ -173,6 +173,15 @@ of deletion):
    `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`'s elicitation contract (relational serves
    no `DeleteOnArchive()`); never a silent default — the scaffold side asks this at
    birth, adding the mode later doesn't get to skip it.
+4b. **Is the "new field" a COLUMN at all?** If what the change adds is a value that
+   belongs to ANOTHER aggregate this entity already holds a foreign key to, the answer is
+   a READ JOIN on the repository, not a column: no migration, no data to backfill, nothing
+   to keep in step (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`, pin ≥ v0.57.0). Two
+   decisions belong in the impact map and they are separate — WHICH columns it brings
+   across, and whether the caller RECEIVES them or the field exists for the rules alone.
+   A join declared for a rule and then quietly published is an API break nobody planned.
+   It is NOT the answer for a 1:N reach, a match on anything but the target's id, a second
+   hop, or a value that is genuinely this entity's own — say which one applies.
 5. **API impact** [high-risk]: wire-visible changes (json names, removed/renamed fields,
    validation tightening) are BREAKING for consumers — list them, flag them, let the dev
    decide; never smuggle a break in silently.
@@ -351,6 +360,7 @@ change at hand — never sweep the whole manual; the Documentation Map in
 | write handlers / in-TX hooks | auto-handlers · lifecycle-hooks |
 | full write-path ripple of a change (SQL ↔ outbox ↔ Mongo op ↔ audit verb) | lifecycle-map |
 | read-side impact of a write change (backing, kinds, archive regime) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) |
+| reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | a new/changed domain Service fact — existence, counts, totals, extremes, per-key breakdowns — and which primitive answers it | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner) · custom-command-handler · service-to-service |
 | **a field added to a read: it must land on the query's RESULT, not only on the Response.** The Result owns field existence — a Response field with no same-named Result field behind it is a BOOT PANIC, not a silently empty column, and a Result carrying `json` tags is refused. The reverse is safe and sometimes deliberate: a Result-only field feeds a computed field's derivation and never reaches the wire | auto-query-handlers · custom-query-handler |
 | **a field removed from a read Response disappears from the EXPORT too** — the Response is the export's column source, so this is one change with two wire consequences, and `?fields=` stops accepting the name on both. Its column header lives in the same place: `exportLabelKey` on the Response field | auto-query-handlers · reference |

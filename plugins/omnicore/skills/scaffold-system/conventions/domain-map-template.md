@@ -62,7 +62,7 @@ base; `N/A — no shared identity detected` if none.
 
 ## §4 Cross-aggregate references
 
-| From (#) | To (#) | Field | Nullable? | Why this direction |
+| From (#) | To (#) | Field | Nullable? | Reached on read? | Why this direction |
 |---|---|---|---|---|
 
 The referenced side scaffolds first (§7). `N/A — single cluster, no cross links` if
@@ -116,3 +116,6 @@ re-derive them; everything absent stays the run's own to decide or ask.
   delegation time>
 - **Slice of §0:** <the sentences of the source request this entity owns>
 - **View backing:** relational · Mongo (default = §1p posture; override only with a reason)
+- **Read joins:** <the §4 references this entity READS ACROSS, per the "Reached on read?"
+  column — which columns each brings back, and whether they are served to callers or exist
+  for the rules alone. Blank = none.>

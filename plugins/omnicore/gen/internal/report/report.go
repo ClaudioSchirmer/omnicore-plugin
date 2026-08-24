@@ -832,7 +832,80 @@ func renderCheck(b *strings.Builder, in Input) {
 		fmt.Fprintf(b, "| Read backing | %s | %s |\n", m.Read.Backing,
 			backingNote(m.Read.Backing))
 	}
+	// A read join reaches OUTSIDE this aggregate, which is the one decision on
+	// this page a reviewer cannot see by reading the entity — the fields look
+	// like the entity's own. Each one gets its own row, with the two things that
+	// bite: what a missing counterpart does, and whether the value is on the
+	// wire.
+	for _, j := range m.Joins {
+		fmt.Fprintf(b, "| Read join → %s | `%s` on `%s`%s | %s |\n",
+			j.Target, j.Verb(), j.FKColumn, joinWhere(j), joinNote(m, j))
+	}
 	b.WriteString("\n")
+}
+
+func joinWhere(j ir.Join) string {
+	if j.Child == "" {
+		return ""
+	}
+	return ", from " + j.Child
+}
+
+// joinNote is what a reviewer has to check about one traversal.
+func joinNote(m *ir.Model, j ir.Join) string {
+	var b strings.Builder
+	switch {
+	case j.Child != "" && j.Kind == "inner":
+		b.WriteString("An entry with no counterpart is NOT returned — a silent hole in the " +
+			"collection, not a missing aggregate. Prefer left wherever the relationship is " +
+			"genuinely optional. ")
+	case j.Child != "":
+		b.WriteString("Filled on every loaded entry; nil where there is no counterpart. " +
+			"Load-only: no filter and no `?orderBy=` reaches a field of a 1:N collection. ")
+	case j.Kind == "inner":
+		b.WriteString("An aggregate with no counterpart is NOT returned, on EVERY read " +
+			"through this repository — FindByID included, which the write handlers load " +
+			"through. Legal only because the foreign key is non-nullable. ")
+	default:
+		b.WriteString("Always in the FROM, so the fields are populated on every read; nil " +
+			"means there is no counterpart, never the zero value. ")
+	}
+	b.WriteString("Nothing here is a write path: the fields are absent from the TableSchema, " +
+		"so no INSERT or UPDATE can carry them and no migration creates them. ")
+
+	// The one row on this page the generator did NOT verify. With a target it can
+	// read, the column, its type and its nullability are checked against that
+	// spec; with a hand-written one there is nothing to check them against and
+	// the declaration was taken on the author's word. The framework checks the
+	// same things at repository construction — so the cost of a wrong word here
+	// is a boot that refuses, and a reviewer is the last chance to catch it
+	// before that.
+	if j.TargetHandWritten {
+		fmt.Fprintf(&b, "%s is HAND-WRITTEN — no spec of this project declares it — so the "+
+			"column names, their types and their nullability came from the spec's author, "+
+			"unchecked here. Confirm each against %s's own schema: the framework validates "+
+			"them at repository construction, and a nullable column landing in a "+
+			"non-pointer field aborts the boot rather than the build. ", j.Target, j.Target)
+	}
+
+	var served, hidden []string
+	for _, f := range j.Fields {
+		if f.Hidden {
+			hidden = append(hidden, f.Name)
+			continue
+		}
+		served = append(served, f.Name)
+	}
+	if len(hidden) > 0 {
+		fmt.Fprintf(&b, "On the entity and OFF the wire: %s — read by the rules, in no "+
+			"response body and in no export. ", strings.Join(hidden, ", "))
+	}
+	if len(served) > 0 && m.Read.Backing == "mongo" {
+		fmt.Fprintf(&b, "The read side is Mongo-backed, so %s reach the entity and the "+
+			"rules but NOT the view — a projection is composed from the TableSchema, "+
+			"which a join never enters.", strings.Join(served, ", "))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func dataAccessNote(kind string) string {
@@ -877,7 +950,9 @@ func bypassNote(m *ir.Model) string {
 
 func backingNote(backing string) string {
 	if backing == "relational" {
-		return "Reads come straight from the tables, so a write is visible immediately."
+		return "Reads come straight from the tables, so a write is visible immediately. " +
+			"Nothing is materialised: there is no collection, no version and no rebuild — " +
+			"a shape change here needs no bump and no operational step."
 	}
 	return "Reads come from a projection, which is updated shortly after a write rather than instantly."
 }

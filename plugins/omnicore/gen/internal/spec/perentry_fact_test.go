@@ -49,7 +49,7 @@ service:
       description: Se a permissão não existe ou foi arquivada. Vive em outra tabela.
 read:
   backing: relational
-  view: {name: papeis, version: 1}
+  view: {name: papeis}
   byId: true
 surfaces: {rest: true}
 authz:
