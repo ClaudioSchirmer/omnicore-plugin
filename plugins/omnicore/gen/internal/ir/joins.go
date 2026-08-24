@@ -26,27 +26,31 @@ func resolveJoins(s *spec.Spec, p *discover.Project, m *Model) {
 		// already demanded an explicit type per field for exactly that case, so
 		// the resolution below falls back to it rather than skipping the join.
 		target := claimNamed(p.SiblingSpecs, j.To)
+		// inChild takes either of the collection's two names; below this line
+		// there is one, and it is the entry type's — which is also what the
+		// generated schema function is called.
+		inChild := canonicalCollection(s.Children, j.InChild)
 		rj := Join{
 			Kind:              j.Kind,
 			Target:            j.To,
 			TargetSchemaFunc:  j.To + "Schema",
 			FKColumn:          j.On,
-			Child:             j.InChild,
+			Child:             inChild,
 			TargetHandWritten: target == nil,
 		}
-		if j.InChild != "" {
-			rj.ChildSchemaFunc = j.InChild + "Schema"
+		if inChild != "" {
+			rj.ChildSchemaFunc = inChild + "Schema"
 		}
 		for _, f := range j.Fields {
 			rj.Fields = append(rj.Fields, resolveJoinField(m.Entity.Pascal, j, f, target))
 		}
 		m.Joins = append(m.Joins, rj)
 
-		if j.InChild == "" {
+		if inChild == "" {
 			continue
 		}
 		for i := range m.Children {
-			if m.Children[i].Name == j.InChild {
+			if m.Children[i].Name == inChild {
 				m.Children[i].JoinFields = append(m.Children[i].JoinFields, rj.Fields...)
 			}
 		}

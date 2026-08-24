@@ -1,0 +1,100 @@
+# Eixos: campo COMPUTADO por ENTRADA de uma colecao (children[].computed), ao
+# lado de um computado de raiz — e a colecao referenciada pelo PLURAL numa
+# regra que antes so aceitava o singular.
+#
+# O que faltava: read.computed so tinha assento na RAIZ. A derivacao roda uma
+# vez por DOCUMENTO e o que a raiz guarda de uma colecao e uma fatia, entao nao
+# havia nada para entregar a ela — quem precisava de um rotulo por linha nao
+# tinha chave nenhuma. Um `from:` apontando para o campo do filho passava na
+# validacao e sumia na emissao: a assinatura saia com um parametro a menos e o
+# campo ficava vazio para sempre.
+#
+# Aqui o backing e MONGO de proposito: as fontes de um campo aninhado sao
+# empurradas sob o prefixo do proprio segmento, entao `?fields=linhas.rotulo`
+# tem de buscar `linhas.Sku` + `linhas.Quantidade` no documento projetado.
+specVersion: 1
+entity: CestaCF
+plural: CestasCF
+language: pt-BR
+storage:
+  kind: flat
+  table: cestas_cf
+  description: Cestas de compra com suas linhas.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "CST-2026-001", description: Código da cesta.}
+  - {name: Cliente, type: string, column: cliente, length: 120, livesOn: root, example: "Alice Reis", description: Nome do cliente.}
+children:
+  - name: LinhaCF
+    plural: LinhasCF
+    table: cesta_cf_linhas
+    parentColumn: cesta_cf_id
+    description: Linhas da cesta.
+    ownedBy: root
+    editStrategy: atomic-replace
+    businessIdentity: [Sku]
+    fields:
+      - {name: Sku, type: string, column: sku, length: 20, example: "SKU-9", description: Código do item.}
+      - {name: Quantidade, type: int, column: quantidade, example: "3", description: Quantas unidades.}
+      - {name: Observacao, type: string, column: observacao, length: 60, nullable: true, example: "sem gelo", description: "Observação da linha, quando há."}
+    # O assento por ENTRADA. `from:` nomeia os campos da propria entrada, sem
+    # prefixo: a entrada e o escopo, e o framework registra as fontes de um
+    # campo aninhado sob o mesmo segmento do campo.
+    computed:
+      - name: Rotulo
+        type: string
+        from: [Sku, Quantidade, Observacao]
+        labelKey: LinhaCFRotuloField
+        example: "SKU-9 ×3 (sem gelo)"
+        description: O item, a quantidade e a observação numa linha só.
+    rules:
+      list:
+        - {id: sku-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Sku], notification: CampoObrigatorioNotification}
+modes: [display, insert, update, archive]
+update: {shape: both}
+delete: {root: soft}
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: CampoObrigatorioNotification}
+    # A colecao pelo PLURAL. Esta chave resolvia so o singular (`LinhaCF`)
+    # enquanto service.facts[].filters resolvia so o plural — um spec, uma
+    # colecao, duas grafias, e nenhuma mensagem dizendo qual chave queria qual.
+    - id: linha-nao-se-repete
+      kind: childDuplicate
+      scope: [insertOrUpdate]
+      fields: [LinhasCF]
+      notification: LinhaDuplicadaNotification
+notifications:
+  - name: CampoObrigatorioNotification
+    semantic: validation
+    description: Campo obrigatorio nao preenchido.
+    text: {ptbr: "Este campo é obrigatório.", eng: "This field is required.", esp: "Este campo es obligatorio.", fra: "Ce champ est obligatoire.", deu: "Dieses Feld ist erforderlich.", ita: "Questo campo è obbligatorio.", nld: "Dit veld is verplicht."}
+  - name: LinhaDuplicadaNotification
+    semantic: conflict
+    description: Duas linhas para o mesmo item.
+    text: {ptbr: "Esse item já está na cesta.", eng: "That item is already in the basket.", esp: "Ese artículo ya está en la cesta.", fra: "Cet article est déjà dans le panier.", deu: "Dieser Artikel ist bereits im Korb.", ita: "Questo articolo è già nel cestino.", nld: "Dat item zit al in de mand."}
+read:
+  backing: mongo
+  view: {name: cestas_cf, version: 1}
+  managed: [CreatedAt]
+  # O computado de RAIZ, ao lado do de entrada: os dois moram no mesmo arquivo
+  # de hook e cada um leva o nome da ENTIDADE, entao duas entidades com um
+  # computado homonimo nao colidem mais no pacote queries.
+  computed:
+    - name: Resumo
+      type: string
+      from: [Codigo, Cliente]
+      labelKey: CestaCFResumoField
+      example: "CST-2026-001 — Alice Reis"
+      description: O código e o cliente numa linha só.
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, contains]}
+    controls: {pagination: true, fields: true}
+surfaces:
+  rest: true
+authz:
+  resource: cestacf
+  dataAccess: anyone-with-permission
+  permissions: {insert: "cestacf:escrever", update: "cestacf:escrever", patch: "cestacf:escrever", archive: "cestacf:arquivar", read: "cestacf:ler"}

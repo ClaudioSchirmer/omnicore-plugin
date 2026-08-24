@@ -358,6 +358,17 @@ type ComputedField struct {
 	// the wire as the `computed:"A,B"` tag, which is what makes `?fields=`
 	// fetch the columns behind the derivation instead of a name no column has.
 	Sources []string
+	// SourceFields are those same sources RESOLVED, in declaration order, and
+	// they are the only form the emitters may read.
+	//
+	// They exist because resolution used to happen twice, against two different
+	// sets: the validator blessed a name and the emitter looked it up again in a
+	// narrower one, dropping what it could not find with a bare `continue`. The
+	// two halves cannot drift apart when there is only one of them, and a name
+	// that resolves to nothing is now a hard failure of Resolve — a derivation
+	// that quietly loses a parameter publishes a permanently empty field, which
+	// is the one outcome nothing downstream can detect.
+	SourceFields []Field
 }
 
 type Filter struct {
@@ -529,7 +540,17 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	// Before the read: a relational read model serves the ROOT joins' fields, so
 	// the read side has to be resolved with them already in hand.
 	resolveJoins(s, p, m)
-	m.Read = resolveRead(s, m)
+	// After the joins, for the same reason the read model is: a field a join
+	// declared `inChild` is on the entry now, and a per-entry derivation may
+	// read it.
+	if err := bindChildComputedSources(m); err != nil {
+		return nil, err
+	}
+	read, err := resolveRead(s, m)
+	if err != nil {
+		return nil, err
+	}
+	m.Read = read
 	m.Ops = resolveOps(s, m)
 	// After the ops, not with the children: what an undeclared per-entry verb
 	// inherits is the root's update permission, and that only exists once the
@@ -770,8 +791,29 @@ func GateRank(gate string) int {
 	return len(gateOrder)
 }
 
+// canonicalCollection is the ONE spelling of a collection below this line.
+//
+// A key that addresses a collection accepts either name the collection has —
+// the entry type's `name` or the collection's `plural`; see
+// spec.CollectionNamed for why both are real, and why they used to disagree
+// from key to key. Everything under the IR resolves collections by `name`: the
+// schema function a join calls is <Name>Schema, a facet's owner is matched
+// against Child.Name, and the emitters walk m.Children by name. So the author's
+// spelling is translated exactly once, here, and no emitter ever learns there
+// were two.
+//
+// An unresolvable name is returned unchanged rather than blanked: validation has
+// already refused it, and turning it into "" downstream would swap a reported
+// blocker for a rule that silently applies to nothing.
+func canonicalCollection(children []spec.Child, written string) string {
+	if c := spec.CollectionNamed(children, written); c != nil {
+		return c.Name
+	}
+	return written
+}
+
 func resolveClauses(s *spec.Spec, m *Model) []Clause {
-	return resolveClauseSet(s.Rules, func(n string) *Field { return lookupField(m, n) })
+	return resolveClauseSet(s.Rules, s.Children, func(n string) *Field { return lookupField(m, n) })
 }
 
 // resolveClauseSet turns declared rules into the clauses an emitter writes.
@@ -785,7 +827,7 @@ func resolveClauses(s *spec.Spec, m *Model) []Clause {
 // reading the generated file and seeing an empty IfUpdate. Two copies of one
 // mapping is how that happens; the lookup is the only part that legitimately
 // differs, so it is the only part that is a parameter.
-func resolveClauseSet(rs spec.Rules, lookup func(string) *Field) []Clause {
+func resolveClauseSet(rs spec.Rules, children []spec.Child, lookup func(string) *Field) []Clause {
 	byGate := map[string][]Rule{}
 	for _, r := range rs.List {
 		rule := Rule{
@@ -799,7 +841,7 @@ func resolveClauseSet(rs spec.Rules, lookup func(string) *Field) []Clause {
 		// they ask what the aggregate holds, not what one record says.
 		if r.Kind == "childDuplicate" || r.Kind == "groupCap" {
 			if len(r.Fields) > 0 {
-				rule.Collection = r.Fields[0]
+				rule.Collection = canonicalCollection(children, r.Fields[0])
 			}
 		}
 		if r.Only != nil {
@@ -883,7 +925,7 @@ func resolveNotifications(s *spec.Spec) []Notification {
 	return out
 }
 
-func resolveRead(s *spec.Spec, m *Model) ReadModel {
+func resolveRead(s *spec.Spec, m *Model) (ReadModel, error) {
 	r := ReadModel{
 		Enabled: s.Read.ByID || s.Read.ByParams != nil,
 		Backing: s.Read.Backing, ViewName: s.Read.View.Name,
@@ -909,7 +951,7 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 		})
 	}
 	if !r.Enabled {
-		return r
+		return r, nil
 	}
 	r.QueryByID = "Find" + m.Entity.Pascal + "ByIDQuery"
 	r.QueryList = "Find" + m.Entity.PluralPascal + "ByParamsQuery"
@@ -978,7 +1020,112 @@ func resolveRead(s *spec.Spec, m *Model) ReadModel {
 			}
 		}
 	}
-	return r
+	// LAST, and not with the declarations above: a derivation may read a
+	// framework-stamped column or a root join's field, and neither exists on the
+	// read model until this point.
+	if err := bindComputedSources(&r, m.AllOwnerFields()); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
+// bindComputedSources resolves every root derivation's `from:` against the read
+// model that will actually be served, and refuses a name that answers to
+// nothing.
+//
+// The refusal is the point. The set a derivation may read from is the ONE set
+// the Result carries — the entity's own fields and its root-attached facets, the
+// framework-stamped columns the read declared, and a root join's fields — and
+// the validator blesses exactly that. If a name still fails here, the two halves
+// have drifted, and the honest outcome is a generator that stops: the alternative
+// is a signature short one parameter, which compiles, ships, and renders a field
+// that is empty forever.
+func bindComputedSources(r *ReadModel, owner []Field) error {
+	for i := range r.Computed {
+		c := &r.Computed[i]
+		c.SourceFields = nil
+		for _, name := range c.Sources {
+			f, ok := readSourceField(r, owner, name)
+			if !ok {
+				return fmt.Errorf("read.computed (%s): %q names no field this read serves — "+
+					"the derivation reads the entity's own fields and its root-attached "+
+					"facets, the framework-stamped columns under read.managed, and a root "+
+					"join's fields", c.Name, name)
+			}
+			c.SourceFields = append(c.SourceFields, f)
+		}
+	}
+	return nil
+}
+
+// bindChildComputedSources is bindComputedSources for the per-entry scope: same
+// rule, one level down, and the same refusal to carry on with a source that
+// answered to nothing.
+//
+// The scope is the ENTRY — its own fields, the facets folded into it, and what a
+// join declared `inChild` brought onto it — because that is what the derivation
+// is handed and what the framework will push down under the collection's own
+// segment. A root field is not in it, deliberately.
+func bindChildComputedSources(m *Model) error {
+	for i := range m.Children {
+		c := &m.Children[i]
+		for j := range c.Computed {
+			cc := &c.Computed[j]
+			cc.SourceFields = nil
+			for _, name := range cc.Sources {
+				f, ok := entrySourceField(c, name)
+				if !ok {
+					return fmt.Errorf("children (%s).computed (%s): %q names no field this "+
+						"entry serves — a per-entry derivation reads the entry's own fields, "+
+						"the facets folded into it, and what a join declared inChild brought "+
+						"onto it", c.Plural, cc.Name, name)
+				}
+				cc.SourceFields = append(cc.SourceFields, f)
+			}
+		}
+	}
+	return nil
+}
+
+func entrySourceField(c *Child, name string) (Field, bool) {
+	for _, f := range c.Fields {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	for _, f := range c.JoinFields {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return Field{}, false
+}
+
+// readSourceField resolves ONE derivation source against the read model.
+//
+// It is not the entity's field list: a framework-stamped column the read
+// exposes and a root join's field are both legitimate sources, and neither
+// lives there. A collection's field is deliberately absent — the root's Result
+// holds a slice of entries, not one entry, so a root derivation has nothing to
+// be handed. That question is `children[].computed`, which is answered per
+// entry.
+func readSourceField(r *ReadModel, owner []Field, name string) (Field, bool) {
+	for _, f := range owner {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	for _, f := range r.Managed {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	for _, f := range r.JoinFields {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return Field{}, false
 }
 
 func resolveOps(s *spec.Spec, m *Model) []Operation {
@@ -1850,6 +1997,14 @@ type Child struct {
 	// entry — and never filterable or sortable, because narrowing the root by a
 	// field of a 1:N collection is a pushdown one root SELECT cannot express.
 	JoinFields []Field
+	// Computed are the entry's DERIVED read fields — the per-entry twin of
+	// ReadModel.Computed, filled once per entry by a hook the author owns.
+	//
+	// They live on the collection rather than on the read model because that is
+	// where their scope is: the derivation is handed ONE entry, so its sources
+	// are the entry's own fields and nothing above them. A root derivation
+	// cannot stand in — what the root holds for a collection is a slice.
+	Computed   []ComputedField
 	Identity   []Field // the business-identity subset
 	ArchivedAt string
 	InputType  string
@@ -2031,6 +2186,18 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			}
 			ch.Fields = append(ch.Fields, resolveField(c.Name, f))
 		}
+		// The SHAPE only: the sources are bound later, once the joins have hung
+		// their fields on the entry, because a join declared inChild is a
+		// legitimate source and does not exist yet at this point.
+		for _, cc := range c.Computed {
+			base := goTypeOf(cc.Type)
+			ch.Computed = append(ch.Computed, ComputedField{
+				Name: cc.Name, GoType: base, BaseGoType: base,
+				JSONName: naming.Camel(cc.Name), LabelKey: cc.LabelKey, Text: cc.Text.Map(),
+				Example: cc.Example, Description: cc.Description,
+				Sources: append([]string(nil), cc.From...),
+			})
+		}
 		for _, id := range c.BusinessIdentity {
 			for _, f := range ch.Fields {
 				if f.Name == id {
@@ -2048,7 +2215,7 @@ func resolveSiblings(s *spec.Spec, m *Model) []Sibling {
 	for _, sib := range s.Siblings {
 		r := Sibling{Name: sib.Name, Description: sib.Description, Table: sib.Table, AttachTo: sib.AttachTo}
 		if rest, ok := strings.CutPrefix(sib.AttachTo, "child:"); ok {
-			r.OwnerChild = rest
+			r.OwnerChild = canonicalCollection(s.Children, rest)
 		}
 		for _, f := range sib.Fields {
 			if spec.IsComposite(f) {
@@ -2165,8 +2332,11 @@ func mergeClauses(into, extra []Clause) []Clause {
 
 // resolveClausesFor is the collection's entry into the shared resolver: the
 // scope is the child's own fields plus any facet declared inside it.
+// The nil children are not an omission: the two kinds that name a collection
+// ask what the AGGREGATE holds, and validateAggregateWideKinds refuses both
+// inside children[] — an entry has no collection in scope to name.
 func resolveClausesFor(rs spec.Rules, scope []Field) []Clause {
-	return resolveClauseSet(rs, func(n string) *Field {
+	return resolveClauseSet(rs, nil, func(n string) *Field {
 		for i := range scope {
 			if scope[i].Name == n {
 				return &scope[i]
@@ -2363,8 +2533,16 @@ type FieldRestrict struct {
 // silently match nothing.
 func readColumn(sp *spec.Spec, m *Model, name string) string {
 	if i := strings.Index(name, "."); i > 0 {
+		// The collection through the canonical resolver, not by Name alone:
+		// read.indexes and read.fieldRestrict address a collection like every
+		// other key, so they take either of its two names — and a head matched
+		// only against the singular fell through to `return name`, declaring an
+		// index over the literal string "Permissoes.PermissaoID" instead of the
+		// document path. Silently: the spec validated, the view was built, and
+		// nothing indexed anything.
+		head := canonicalCollection(sp.Children, name[:i])
 		for _, c := range m.Children {
-			if c.Name != name[:i] {
+			if c.Name != head {
 				continue
 			}
 			for _, f := range c.Fields {

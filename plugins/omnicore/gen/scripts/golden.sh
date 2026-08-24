@@ -402,6 +402,56 @@ PYJOIN
         bad "the read joins did not behave as declared — $JOINS"
       fi
 
+      # A PER-ENTRY computed field, on the served document. Building proves the
+      # loop compiles; only this proves it RAN and wrote back through the index,
+      # on both read shapes — the by-id Result holds values while the entry it
+      # nests holds pointers, and a seat that read the root's discipline instead
+      # of the entry's is a tree that does not build at all.
+      #
+      # The body is a hook nobody has written, so the VALUE is deliberately not
+      # asserted: what is under test is the seat, and the key being present on
+      # every entry is exactly the seat having run once per entry.
+      PERENTRY=$(python3 - "$NEW_ID" <<'PYENTRY'
+import json, sys, urllib.request
+
+entry_id = sys.argv[1]
+base = "http://127.0.0.1:18099/students"
+bad = []
+
+
+def data(url):
+    with urllib.request.urlopen(url) as fh:
+        return json.load(fh)["data"]
+
+
+for label, doc in (("by-id", data(base + "/" + entry_id)),
+                   ("the listing", next(r for r in data(base) if r["id"] == entry_id))):
+    entries = doc.get("guardians") or []
+    if not entries:
+        bad.append("%s served no collection to derive into" % label)
+        continue
+    for g in entries:
+        if "label" not in g:
+            bad.append("%s: the per-entry derivation did not run for %r"
+                       % (label, g.get("fullName")))
+
+# ?fields= over the derived field must fetch its SOURCES, under the entry's own
+# segment — there is no column behind the name itself.
+rows = data(base + "?fields=id,guardians.label")
+row = next(r for r in rows if r["id"] == entry_id)
+for g in row.get("guardians") or []:
+    if "label" not in g:
+        bad.append("?fields= on the derived field did not serve it")
+
+print("; ".join(bad))
+PYENTRY
+)
+      if [[ -z "$PERENTRY" ]]; then
+        ok "a per-entry computed field is derived on every entry, on both reads"
+      else
+        bad "the per-entry derivation did not run — $PERENTRY"
+      fi
+
       # The TABULAR EXPORT is a third rendering of the same read, written by its
       # own emitter, and a joined field reaches it through the labelKey like any
       # other column. It is the surface where a missing header shows up as an
@@ -417,6 +467,15 @@ PYJOIN
       done
       grep -q "Campus Norte" <<<"$CSVROW" || csvbad="$csvbad; the joined value is not in the row"
       grep -q "Campus Budget Code" <<<"$CSVHEAD" && csvbad="$csvbad; a hidden join field reached the export"
+      # The ROOT's derived column heads the export under its labelKey — that half
+      # of the contract is real and asserted.
+      grep -q "Enrollment Label" <<<"$CSVHEAD" || csvbad="$csvbad; the root's derived column has no header"
+      # A COLLECTION's does not, and neither does any stored field of one: a
+      # tabular row is FLAT. Pinned because it is a claim that rots — the natural
+      # sentence to write about a derived field is "every surface renders it",
+      # and for the per-entry seat that sentence is false.
+      grep -q "Guardian Full Name" <<<"$CSVHEAD" && csvbad="$csvbad; a collection's stored field reached the flat export"
+      grep -qi "guardian.*label" <<<"$CSVHEAD" && csvbad="$csvbad; a collection's derived field reached the flat export"
       if [[ -z "$csvbad" ]]; then
         ok "the CSV export carries the joined columns, headed and without the hidden one"
       else

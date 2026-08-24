@@ -520,10 +520,25 @@ func joinReachOf(s *Spec, opt Options) joinReach {
 				jr.root = append(jr.root, rf)
 				continue
 			}
-			jr.child[j.InChild] = append(jr.child[j.InChild], rf)
+			// Keyed by the collection's CANONICAL name, so a join declared with
+			// one of the two spellings is still found by a key that used the
+			// other. Keying by whatever the join happened to write is how the
+			// same collection could be two entries of this map.
+			jr.child[canonicalChildName(s, j.InChild)] = append(
+				jr.child[canonicalChildName(s, j.InChild)], rf)
 		}
 	}
 	return jr
+}
+
+// canonicalChildName is the spec-side twin of ir.canonicalCollection: one
+// spelling for a collection, chosen once, wherever a map or a comparison would
+// otherwise have to know which of the two the author wrote.
+func canonicalChildName(s *Spec, written string) string {
+	if c := CollectionNamed(s.Children, written); c != nil {
+		return c.Name
+	}
+	return written
 }
 
 func fieldNamedIn(fs []Field, name string) *Field {

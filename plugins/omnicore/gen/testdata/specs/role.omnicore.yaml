@@ -164,6 +164,23 @@ children:
         example: granted for the migration window
         description: Why this permission was granted.
         labelKey: RolePermissionNoteField
+    # Um derivado por ENTRADA numa colecao PER-CHILD. A combinacao importa: os
+    # verbos por entrada devolvem <Entry>Response, que carrega o que foi
+    # GRAVADO, enquanto o derivado vive so no <Entry>Row das leituras. Se as
+    # duas metades se misturassem, o framework recusaria no boot — e esta
+    # fixture boota.
+    #
+    # O NOME repete o de student.Guardian de proposito — as duas entidades
+    # compilam para o mesmo pacote queries, e essa colisao e a unica prova de
+    # que a derivacao leva o nome da ENTIDADE. Renomear um dos dois apaga a
+    # prova sem apagar o defeito.
+    computed:
+      - name: Label
+        type: string
+        from: [PermissionID, Note]
+        labelKey: RolePermissionLabelField
+        example: "tenant:read — granted for the migration window"
+        description: The permission and why it was granted, on one line.
 
 service:
   required: true

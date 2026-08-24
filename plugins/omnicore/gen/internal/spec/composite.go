@@ -234,11 +234,13 @@ func factField(s *Spec, name string) *Field {
 // express it: the field is on the child's table, under the child's name. So the
 // filter names the collection first.
 //
-// The collection is addressed by its COLLECTION NAME — `plural` — and not by
-// the entry's Go type, because plural is the single name the framework already
-// uses for this collection everywhere else: the document segment the projection
-// nests it under, the Go field the read DTO declares, the notification's wire
-// path. One spelling, and it is the one already on screen.
+// The collection is addressed in EITHER spelling — the collection name
+// (`plural`) or the entry's Go type (`name`) — through CollectionNamed, which is
+// the one resolver every key that addresses a collection now goes through. This
+// key used to take the plural alone, and its refusal for the singular argued
+// that plural was the name everything already used; three other keys resolved
+// the singular and only the singular, so the argument was true of the framework
+// and false of the spec language it was printed in.
 //
 // The three returns are what the caller needs to say something useful: the
 // collection (nil when nothing is addressed), the field (nil when the
@@ -250,13 +252,11 @@ func ChildFactField(s *Spec, name string) (*Child, *Field, bool) {
 	if !dotted {
 		return nil, nil, false
 	}
-	for i := range s.Children {
-		if s.Children[i].Plural != coll {
-			continue
-		}
-		return &s.Children[i], findField(s.Children[i].Fields, field), true
+	c := CollectionNamed(s.Children, coll)
+	if c == nil {
+		return nil, nil, true
 	}
-	return nil, nil, true
+	return c, findField(c.Fields, field), true
 }
 
 // childOwningField reports the collection a BARE field name belongs to — the
@@ -266,18 +266,6 @@ func ChildFactField(s *Spec, name string) (*Child, *Field, bool) {
 func childOwningField(s *Spec, name string) *Child {
 	for i := range s.Children {
 		if findField(s.Children[i].Fields, name) != nil {
-			return &s.Children[i]
-		}
-	}
-	return nil
-}
-
-// childNamedByType reports the collection whose ENTRY TYPE is spelled `name` —
-// the other near-miss, `RolePermission.PermissionID` for a collection called
-// Permissions.
-func childNamedByType(s *Spec, name string) *Child {
-	for i := range s.Children {
-		if s.Children[i].Name == name {
 			return &s.Children[i]
 		}
 	}
@@ -314,28 +302,45 @@ func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
 }
 
 // reportUnknownPerEntryFilter explains a dotted filter that resolved to nothing.
-// The three shapes it tells apart are the three ways the report's author spelled
-// the same intent before giving up and declaring the method by hand.
+//
+// It used to tell THREE shapes apart, and the middle one was a refusal this
+// language no longer makes: naming the collection by the entry's Go type is now
+// simply one of the two spellings that work. What is left is the honest pair —
+// a head that names no collection at all, and a collection whose fields do not
+// include the one named.
 func reportUnknownPerEntryFilter(s *Spec, name string, coll *Child, field *Field, where string, ps *Problems) {
 	head, tail, _ := strings.Cut(name, ".")
 	if coll == nil {
-		if c := childNamedByType(s, head); c != nil {
-			ps.BlockerFix(where,
-				fmt.Sprintf("%q is the entry's Go type, and a per-entry filter names the "+
-					"COLLECTION", head),
-				fmt.Sprintf("spell it %s.%s — plural is the name the projection, the read "+
-					"DTO and the notification path already use", c.Plural, tail))
-			return
-		}
 		ps.BlockerFix(where,
 			fmt.Sprintf("%q does not name a collection of this entity", head),
-			"a per-entry filter is <collection>.<field>, where the collection is a "+
-				"children[].plural")
+			"a per-entry filter is <collection>.<field>, and the collection is a "+
+				"children[] entry addressed by either of its names — its `plural` or "+
+				"the entry type's `name`"+collectionNames(s))
 		return
 	}
 	ps.BlockerFix(where,
 		fmt.Sprintf("%q does not name a field of the collection %q", tail, coll.Plural),
 		fmt.Sprintf("one of: %s", childFieldNames(*coll)))
+}
+
+// collectionNames lists what this entity's collections answer to, both
+// spellings, so a refusal ends in the words that would have worked.
+func collectionNames(s *Spec) string {
+	var out []string
+	for _, c := range s.Children {
+		switch {
+		case c.Name != "" && c.Plural != "" && c.Name != c.Plural:
+			out = append(out, c.Plural+" (or "+c.Name+")")
+		case c.Plural != "":
+			out = append(out, c.Plural)
+		case c.Name != "":
+			out = append(out, c.Name)
+		}
+	}
+	if len(out) == 0 {
+		return " — this entity declares no collection"
+	}
+	return ". This entity declares: " + strings.Join(out, ", ")
 }
 
 // childFieldNames lists a collection's field names for a refusal that offers the

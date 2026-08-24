@@ -104,15 +104,30 @@ func TestBareCollectionFieldNamesTheCollection(t *testing.T) {
 	}
 }
 
-// The second spelling tried: the entry's Go type instead of the collection.
-func TestEntryTypeNameIsCorrectedToThePlural(t *testing.T) {
+// The second spelling: the entry's Go type instead of the collection name.
+//
+// It used to be REFUSED here and accepted by joins[].inChild, rules.list[].fields
+// and read.computed.from — one spec, one collection, and the author had to know
+// which key wanted which word. Both spellings now resolve everywhere, and this
+// key is the one that has to give ground: its refusal was the one arguing that
+// plural was the name everything already used.
+func TestEntryTypeNameIsAlsoAccepted(t *testing.T) {
 	ps := perEntryProblems(t, "manual", "      returns: bool\n", "PapelPermissao.PermissaoID")
-	got := blockerSaying(ps, "PapelPermissao")
-	if got == "" {
-		t.Fatalf("the entry's type name is accepted as a collection:\n%v", ps.Error())
+	if ps.HasBlockers() {
+		t.Fatalf("the entry's type name is still refused as a collection:\n%v", ps.Error())
 	}
-	if !strings.Contains(got, "Permissoes.PermissaoID") {
-		t.Errorf("the refusal does not name the collection: %s", got)
+}
+
+// A head that names NO collection is still refused, and the refusal now ends in
+// the words that would have worked — both of them.
+func TestUnknownCollectionHeadListsBothSpellings(t *testing.T) {
+	ps := perEntryProblems(t, "manual", "      returns: bool\n", "NaoExiste.PermissaoID")
+	got := blockerSaying(ps, "NaoExiste")
+	if got == "" {
+		t.Fatalf("a head that names no collection is accepted:\n%v", ps.Error())
+	}
+	if !strings.Contains(got, "Permissoes") || !strings.Contains(got, "PapelPermissao") {
+		t.Errorf("the refusal does not offer the collection under both its names: %s", got)
 	}
 }
 

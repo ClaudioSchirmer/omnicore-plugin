@@ -18,38 +18,39 @@ import (
 type Capability string
 
 const (
-	CapFlat            Capability = "flat storage"
-	CapSharedBase      Capability = "shared-base role"
-	CapValueObjects    Capability = "value objects"
-	CapChildren        Capability = "child collections"
-	CapSiblings        Capability = "sibling facets (with their clear path on both surfaces)"
-	CapRulesDSL        Capability = "the declarative rule set"
-	CapManualRules     Capability = "hand-written rules (hook file)"
-	CapService         Capability = "domain service"
-	CapMongoView       Capability = "mongo-backed view"
-	CapRelationalView  Capability = "relational-backed view"
-	CapREST            Capability = "REST surface"
-	CapGraphQL         Capability = "GraphQL surface"
-	CapExports         Capability = "CSV/XLSX exports"
-	CapFieldRestrict   Capability = "field-level read restriction"
-	CapIdentityView    Capability = "shared identity view"
-	CapOwnerAccess     Capability = "owner-only data access (read filter AND write guard)"
-	CapTenantAccess    Capability = "tenant data access (read filter AND write guard)"
-	CapScopeBypass     Capability = "a permission that crosses the row scope (operator support)"
-	CapPerEntryFact    Capability = "per-entry facts (a service question about ONE entry of a collection)"
-	CapScopedUnique    Capability = "uniqueness scoped by other fields (unique per tenant, per workspace)"
-	CapChildUnique     Capability = "uniqueness of a collection entry (index per owner + its 409 binding)"
-	CapGeneratedTests  Capability = "generated unit tests"
-	CapPerChild        Capability = "per-entry child operations"
-	CapAssignedField   Capability = "server-assigned fields (from the caller's identity)"
-	CapDerivedField    Capability = "server-derived fields (computed from the entity's own, kept out of every write DTO)"
-	CapMountedChild    Capability = "a shared identity's collection, exposed on a second role"
-	CapGroupedFact     Capability = "per-group facts, computed by the database (GROUP BY)"
-	CapCompositeVO     Capability = "composite value objects (a value spanning several columns)"
-	CapManualVO        Capability = "hand-written value objects (declared here, written by you): a scalar with kind: manual, a composite with written: manual"
-	CapArchiveOnUpdate Capability = "an update that finishes as an archive (CompleteAsArchive)"
-	CapComputedRead    Capability = "computed read fields (derived per document, no column)"
-	CapReadJoin        Capability = "read joins (reaching another aggregate across a foreign key: on the entity for the rules, and on a relational read model for filter/sort/projection)"
+	CapFlat             Capability = "flat storage"
+	CapSharedBase       Capability = "shared-base role"
+	CapValueObjects     Capability = "value objects"
+	CapChildren         Capability = "child collections"
+	CapSiblings         Capability = "sibling facets (with their clear path on both surfaces)"
+	CapRulesDSL         Capability = "the declarative rule set"
+	CapManualRules      Capability = "hand-written rules (hook file)"
+	CapService          Capability = "domain service"
+	CapMongoView        Capability = "mongo-backed view"
+	CapRelationalView   Capability = "relational-backed view"
+	CapREST             Capability = "REST surface"
+	CapGraphQL          Capability = "GraphQL surface"
+	CapExports          Capability = "CSV/XLSX exports"
+	CapFieldRestrict    Capability = "field-level read restriction"
+	CapIdentityView     Capability = "shared identity view"
+	CapOwnerAccess      Capability = "owner-only data access (read filter AND write guard)"
+	CapTenantAccess     Capability = "tenant data access (read filter AND write guard)"
+	CapScopeBypass      Capability = "a permission that crosses the row scope (operator support)"
+	CapPerEntryFact     Capability = "per-entry facts (a service question about ONE entry of a collection)"
+	CapScopedUnique     Capability = "uniqueness scoped by other fields (unique per tenant, per workspace)"
+	CapChildUnique      Capability = "uniqueness of a collection entry (index per owner + its 409 binding)"
+	CapGeneratedTests   Capability = "generated unit tests"
+	CapPerChild         Capability = "per-entry child operations"
+	CapAssignedField    Capability = "server-assigned fields (from the caller's identity)"
+	CapDerivedField     Capability = "server-derived fields (computed from the entity's own, kept out of every write DTO)"
+	CapMountedChild     Capability = "a shared identity's collection, exposed on a second role"
+	CapGroupedFact      Capability = "per-group facts, computed by the database (GROUP BY)"
+	CapCompositeVO      Capability = "composite value objects (a value spanning several columns)"
+	CapManualVO         Capability = "hand-written value objects (declared here, written by you): a scalar with kind: manual, a composite with written: manual"
+	CapArchiveOnUpdate  Capability = "an update that finishes as an archive (CompleteAsArchive)"
+	CapComputedRead     Capability = "computed read fields (derived per document, no column)"
+	CapPerEntryComputed Capability = "computed read fields on a COLLECTION ENTRY (derived per entry, no column)"
+	CapReadJoin         Capability = "read joins (reaching another aggregate across a foreign key: on the entity for the rules, and on a relational read model for filter/sort/projection)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -61,33 +62,34 @@ var implemented = map[Capability]bool{
 	CapREST:           true,
 	CapRelationalView: true,
 
-	CapValueObjects:    true,
-	CapService:         true,
-	CapGroupedFact:     true,
-	CapChildren:        true,
-	CapSiblings:        true,
-	CapSharedBase:      true,
-	CapIdentityView:    false, // F3
-	CapMongoView:       true,
-	CapGraphQL:         true,
-	CapExports:         true,
-	CapFieldRestrict:   true,
-	CapOwnerAccess:     true,
-	CapTenantAccess:    true,
-	CapScopeBypass:     true,
-	CapPerEntryFact:    true,
-	CapScopedUnique:    true,
-	CapChildUnique:     true,
-	CapGeneratedTests:  true,
-	CapPerChild:        true,
-	CapAssignedField:   true,
-	CapDerivedField:    true,
-	CapMountedChild:    true,
-	CapCompositeVO:     true,
-	CapManualVO:        true,
-	CapArchiveOnUpdate: true,
-	CapComputedRead:    true,
-	CapReadJoin:        true,
+	CapValueObjects:     true,
+	CapService:          true,
+	CapGroupedFact:      true,
+	CapChildren:         true,
+	CapSiblings:         true,
+	CapSharedBase:       true,
+	CapIdentityView:     false, // F3
+	CapMongoView:        true,
+	CapGraphQL:          true,
+	CapExports:          true,
+	CapFieldRestrict:    true,
+	CapOwnerAccess:      true,
+	CapTenantAccess:     true,
+	CapScopeBypass:      true,
+	CapPerEntryFact:     true,
+	CapScopedUnique:     true,
+	CapChildUnique:      true,
+	CapGeneratedTests:   true,
+	CapPerChild:         true,
+	CapAssignedField:    true,
+	CapDerivedField:     true,
+	CapMountedChild:     true,
+	CapCompositeVO:      true,
+	CapManualVO:         true,
+	CapArchiveOnUpdate:  true,
+	CapComputedRead:     true,
+	CapPerEntryComputed: true,
+	CapReadJoin:         true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -109,7 +111,7 @@ func AllCapabilities() []Capability {
 		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild,
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
-		CapComputedRead, CapReadJoin,
+		CapComputedRead, CapPerEntryComputed, CapReadJoin,
 	}
 }
 
@@ -183,6 +185,13 @@ func CheckCoverage(s *Spec) *Problems {
 	}
 	if len(s.Read.Computed) > 0 {
 		uses(CapComputedRead, "read.computed", "computed read fields")
+	}
+	for i := range s.Children {
+		if len(s.Children[i].Computed) > 0 {
+			uses(CapPerEntryComputed, fmt.Sprintf("children[%d].computed", i),
+				"computed read fields on a collection entry")
+			break
+		}
 	}
 	if s.Read.IdentityView != "" && s.Read.IdentityView != "skip" {
 		uses(CapIdentityView, "read.identityView", "a shared identity view")

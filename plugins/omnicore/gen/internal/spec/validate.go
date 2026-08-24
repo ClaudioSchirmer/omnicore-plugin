@@ -935,7 +935,38 @@ func validateEnumMembers(vo ValueObject, where string, ps *Problems) {
 	}
 }
 
+// validateCollectionSpellings keeps the two names of two different collections
+// from being the same word.
+//
+// Every key that addresses a collection accepts either spelling (see
+// CollectionNamed), and that only stays unambiguous while one word names one
+// collection. A spec with children [Permission/Permissions] and
+// [Permissions/PermissionGroups] makes "Permissions" mean the second collection
+// to one reader and the first to another — and the reader who loses is the
+// author, who wrote a rule about one collection and got the other with no
+// message at all.
+func validateCollectionSpellings(s *Spec, ps *Problems) {
+	for i := range s.Children {
+		for j := range s.Children {
+			if i == j || s.Children[i].Name == "" {
+				continue
+			}
+			if s.Children[i].Name != s.Children[j].Plural {
+				continue
+			}
+			ps.BlockerFix(fmt.Sprintf("children[%d].name", i),
+				fmt.Sprintf("%q is also the collection name of children[%d] (%s), and every "+
+					"key that addresses a collection accepts both spellings — so the word "+
+					"names two different collections", s.Children[i].Name, j,
+					orUnnamed(s.Children[j].Name)),
+				"rename one of them: the entry type and the collection name are two "+
+					"names for ONE collection, never a name shared between two")
+		}
+	}
+}
+
 func validateChildren(s *Spec, ps *Problems, opt Options) {
+	validateCollectionSpellings(s, ps)
 	seen := map[string]bool{}
 	seenPlural := map[string]bool{}
 	for i, c := range s.Children {
@@ -1649,10 +1680,12 @@ func validateAggregateWideKinds(c Child, where string, ps *Problems) {
 			continue
 		}
 		if strings.Contains(fix, "%s") {
-			// The child's NAME, not its plural: the root-level shape check (and
-			// the emitter) resolve the collection by name, so a fix that spelled
-			// the plural sent the author straight into a second refusal.
-			fix = fmt.Sprintf(fix, orUnnamed(c.Name))
+			// The collection name, which is what every message here shows now
+			// that both spellings resolve. It used to have to be the singular —
+			// the root-level shape check took only that one, so a fix spelling
+			// the plural sent the author straight into a second refusal — and
+			// that asymmetry is exactly what CollectionNamed removed.
+			fix = fmt.Sprintf(fix, orUnnamed(c.Plural))
 		}
 		ps.BlockerFix(fmt.Sprintf("%s.list[%d] (%s).kind", where, i, orUnnamed(r.ID)),
 			fmt.Sprintf("%q asks about the whole collection, and a rule declared here "+
@@ -2713,7 +2746,11 @@ func validateRead(s *Spec, jr joinReach, ps *Problems) {
 // field — and its sources have to be real, stored fields, because pushing them
 // to the store is what makes `?fields=<computed>` work at all.
 func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
-	if len(r.Computed) == 0 {
+	perEntry := 0
+	for i := range s.Children {
+		perEntry += len(s.Children[i].Computed)
+	}
+	if len(r.Computed) == 0 && perEntry == 0 {
 		return
 	}
 	if !r.ByID && r.ByParams == nil {
@@ -2724,6 +2761,10 @@ func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 	seen := map[string]bool{}
 	for _, c := range r.Computed {
 		seen[c.Name] = true
+	}
+	for i := range s.Children {
+		validateChildComputed(s, s.Children[i], jr,
+			fmt.Sprintf("children[%d] (%s)", i, orUnnamed(s.Children[i].Name)), ps)
 	}
 	for i, c := range r.Computed {
 		where := fmt.Sprintf("read.computed[%d] (%s)", i, orUnnamed(c.Name))
@@ -2739,6 +2780,24 @@ func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 				fmt.Sprintf("%q is already a field of this entity", c.Name),
 				"a computed field is one the STORE does not hold — rename it, or drop "+
 					"the declaration and read the stored field")
+		case collectionFieldNamed(s, c.Name) != nil:
+			// The Result declares one Go field per collection, under the
+			// collection's PLURAL — that name and no other, which is why this
+			// asks about the plural rather than through CollectionNamed: the
+			// entry TYPE is `<Name>RowResult` and collides with nothing, so
+			// refusing a derived field called Guardian would be a refusal with
+			// no defect behind it.
+			//
+			// A derived field taking the plural, though, is two struct fields
+			// with one name — a compile error in a tree the author did not
+			// write. The same collision is already refused for a stored field
+			// (children[].plural against fields[]); this is the half the
+			// computed key left open.
+			ps.BlockerFix(where,
+				fmt.Sprintf("%q is the collection name of children[] on this entity, and the "+
+					"read shape already declares a field under it", c.Name),
+				"rename the derived field — the read DTO cannot carry a collection and a "+
+					"value under one name")
 		}
 		if c.Type == "" {
 			ps.Blockerf(where+".type", "the computed field needs a type")
@@ -2761,17 +2820,39 @@ func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 					"name the STORED fields behind it instead")
 				continue
 			}
-			if !readableField(s, jr, src) {
-				reportUnreadable(s, src, where+".from", ps)
+			if readableAsRootSource(s, jr, src) {
+				continue
 			}
+			if coll := collectionScopedSource(s, jr, src); coll != nil {
+				// The fix names the source AS THE PER-ENTRY KEY SPELLS IT —
+				// bare, with no collection in front of it. Echoing back the
+				// dotted form the author wrote would send them to a key that
+				// refuses exactly that, which is the shape of defect this whole
+				// round is about: a message arguing the opposite of the key it
+				// points at.
+				inScope := src
+				if _, tail, dotted := strings.Cut(src, "."); dotted {
+					inScope = tail
+				}
+				ps.BlockerFix(where+".from",
+					fmt.Sprintf("%q belongs to the collection %s, and this derivation runs "+
+						"once per DOCUMENT — what the root holds for a collection is a slice "+
+						"of entries, so there is no single value to hand it", src, coll.Plural),
+					fmt.Sprintf("derive it per entry: declare the field under children[] on %s, "+
+						"with from: [%s] — the entry is the scope there, so the collection is "+
+						"not spelled in front of it", coll.Plural, inScope))
+				continue
+			}
+			reportUnreadable(s, src, where+".from", ps)
 		}
+		proveDerivationParamsDistinct(c.From, where, ps)
 	}
 	// A filter and a sort are both evaluated in the store. Declaring either
 	// over a computed field is refused HERE rather than at the framework's boot
 	// guard, so the author reads it against the spec they wrote.
 	if bp := r.ByParams; bp != nil {
 		for i, f := range bp.Filters {
-			if seen[f.Field] {
+			if computedNamed(s, f.Field) {
 				ps.BlockerFix(fmt.Sprintf("read.byParams.filters[%d]", i),
 					fmt.Sprintf("%q is computed — a filter is evaluated in the store, and "+
 						"there is no column there to compare", f.Field),
@@ -2779,7 +2860,7 @@ func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 			}
 		}
 		for _, sf := range bp.Sort {
-			if seen[sf] {
+			if computedNamed(s, sf) {
 				ps.BlockerFix("read.byParams.sort",
 					fmt.Sprintf("%q is computed, so it backs no column to order by — "+
 						"ordering happens in the store and the keyset cursor is built from "+
@@ -2788,7 +2869,7 @@ func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 			}
 		}
 		for _, sf := range bp.Controls.Search {
-			if seen[sf] {
+			if computedNamed(s, sf) {
 				ps.BlockerFix("read.byParams.controls.search",
 					fmt.Sprintf("%q is computed, so no index covers it", sf),
 					"search the stored fields it is derived from")
@@ -2797,7 +2878,7 @@ func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 	}
 	for i, idx := range r.Indexes {
 		for _, fn := range idx.Fields {
-			if seen[fn] {
+			if computedNamed(s, fn) {
 				ps.BlockerFix(fmt.Sprintf("read.indexes[%d]", i),
 					fmt.Sprintf("%q is computed — there is no stored value to index", fn),
 					"index the stored fields it is derived from")
@@ -2805,12 +2886,203 @@ func validateComputed(s *Spec, r Read, jr joinReach, ps *Problems) {
 		}
 	}
 	for i, fr := range r.FieldRestrict {
-		if seen[fr.Field] {
+		if computedNamed(s, fr.Field) {
 			ps.BlockerFix(fmt.Sprintf("read.fieldRestrict[%d]", i),
 				fmt.Sprintf("%q is computed — Restrict scrubs a COLUMN from the "+
 					"projection, sort and filter, and there is none", fr.Field),
 				"restrict the stored fields it is derived from; the derivation then "+
 					"receives them absent")
+		}
+	}
+}
+
+// computedNamed reports whether a name addresses a derived read field, in
+// either scope: the root's own, or a collection's as `<collection>.<name>`.
+//
+// Everything that reaches the STORE consults it — filters, sort, search,
+// indexes, fieldRestrict — because the answer is the same wherever the
+// derivation lives: there is no column, so there is nothing to compare, order,
+// index or scrub. The per-entry scope had to be added here in the same round it
+// was added to the language, or `read.indexes: [Permissoes.Rotulo]` would have
+// declared an index over a field the projection does not store.
+func computedNamed(s *Spec, name string) bool {
+	if head, tail, dotted := strings.Cut(name, "."); dotted {
+		c := CollectionNamed(s.Children, head)
+		if c == nil {
+			return false
+		}
+		for _, cc := range c.Computed {
+			if cc.Name == tail {
+				return true
+			}
+		}
+		return false
+	}
+	for _, cc := range s.Read.Computed {
+		if cc.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// entryReadableField resolves a name against ONE ENTRY of a collection — the
+// scope a per-entry derivation runs in.
+//
+// Three sources, and they are exactly what the entry's Result carries: the
+// entry's own fields (a composite's parts included, like everywhere else), the
+// fields a join declared `inChild` brings onto it, and a 1:1 facet attached to
+// the collection, whose fields are folded into the entry's struct.
+//
+// The ROOT's fields are deliberately absent, and that is the framework's rule
+// rather than this generator's taste: a nested field's computed sources are
+// recorded under the SAME segment prefix as the field, so naming a root field
+// here would push `<collection>.<rootField>` down to a store that has no such
+// path.
+func entryReadableField(s *Spec, jr joinReach, c Child, name string) *Field {
+	if f := fieldNamedIn(jr.child[c.Name], name); f != nil {
+		return f
+	}
+	if f := findLogicalField(c.Fields, s, name); f != nil {
+		return f
+	}
+	for i := range s.Siblings {
+		attached, isChildFacet := strings.CutPrefix(s.Siblings[i].AttachTo, "child:")
+		if !isChildFacet || CollectionNamed(s.Children, attached) == nil ||
+			CollectionNamed(s.Children, attached).Name != c.Name {
+			continue
+		}
+		if f := findLogicalField(s.Siblings[i].Fields, s, name); f != nil {
+			return f
+		}
+	}
+	return nil
+}
+
+// validateChildComputed is validateComputed's per-entry half.
+//
+// It asks the same questions in a smaller scope, and the two refusals worth
+// reading are the ones that point at each other: a source the ENTRY does not
+// hold but the root does belongs in read.computed, and a name the entry already
+// holds is a stored field being shadowed. Everything else — the name being a Go
+// identifier, the type being a type, `from` being non-empty — is the same
+// contract as the root's, because it is the same declaration.
+func validateChildComputed(s *Spec, c Child, jr joinReach, where string, ps *Problems) {
+	if len(c.Computed) == 0 {
+		return
+	}
+	if s.Read.Backing == "" && !s.Read.ByID && s.Read.ByParams == nil {
+		return // the root gate already said this entity serves no read
+	}
+	if c.OwnedBy == "base" && s.Storage.Base != nil && s.Storage.Base.Reuse {
+		ps.BlockerFix(where+".computed",
+			fmt.Sprintf("%s belongs to the shared identity, and this role only EXPOSES it — "+
+				"the entry's read shape is declared once, by the role that owns the identity",
+				c.Plural),
+			"declare the derivation on that role's spec; both roles then serve the same "+
+				"derived field, which is the point of one shape per collection")
+		return
+	}
+	seen := map[string]bool{}
+	for _, cc := range c.Computed {
+		seen[cc.Name] = true
+	}
+	for i, cc := range c.Computed {
+		w := fmt.Sprintf("%s.computed[%d] (%s)", where, i, orUnnamed(cc.Name))
+		switch {
+		case cc.Name == "":
+			ps.Blockerf(w, "the computed field needs a name")
+		case !goIdentRe.MatchString(cc.Name):
+			ps.BlockerFix(w,
+				fmt.Sprintf("%q is not a usable Go field name", cc.Name),
+				"use exported PascalCase, e.g. Rotulo")
+		case cc.Name == IdentityName:
+			ps.BlockerFix(w,
+				"the entry's id is carried by the framework, so a derived field cannot take its name",
+				"name the derived field for what it MEANS, not for the handle it rides next to")
+		case entryReadableField(s, jr, c, cc.Name) != nil:
+			ps.BlockerFix(w,
+				fmt.Sprintf("%q is already a field of the collection %s", cc.Name, c.Plural),
+				"a computed field is one the STORE does not hold — rename it, or drop "+
+					"the declaration and read the stored field")
+		}
+		if cc.Type == "" {
+			ps.Blockerf(w+".type", "the computed field needs a type")
+		} else if !FieldTypes.Has(cc.Type) {
+			ps.BlockerFix(w+".type",
+				fmt.Sprintf("%q is not a field type", cc.Type),
+				"one of: "+FieldTypes.String())
+		}
+		if len(cc.From) == 0 {
+			ps.BlockerFix(w+".from",
+				"the computed field names no source",
+				fmt.Sprintf("list the ENTRY's fields the derivation reads, bare — the "+
+					"entry is the scope, so %s is not spelled in front of them", c.Plural))
+		}
+		for _, src := range cc.From {
+			if seen[src] {
+				ps.BlockerFix(w+".from",
+					fmt.Sprintf("%q is itself computed, so it has no column to push down", src),
+					"name the STORED fields behind it instead")
+				continue
+			}
+			if entryReadableField(s, jr, c, src) != nil {
+				continue
+			}
+			if readableAsRootSource(s, jr, src) {
+				ps.BlockerFix(w+".from",
+					fmt.Sprintf("%q is a field of the entity, not of one entry of %s — and the "+
+						"framework pushes a nested field's sources down under its OWN segment, "+
+						"so this would ask the store for %s.%s", src, c.Plural, c.Plural, src),
+					"name a field the entry holds; if the derivation is really about the "+
+						"record as a whole, it belongs in read.computed")
+				continue
+			}
+			ps.BlockerFix(w+".from",
+				fmt.Sprintf("%q does not name a field of the collection %s", src, c.Plural),
+				fmt.Sprintf("one of: %s", childFieldNames(c)))
+		}
+		proveDerivationParamsDistinct(cc.From, w, ps)
+	}
+}
+
+// proveDerivationParamsDistinct keeps a derivation's signature COMPILABLE.
+//
+// Each source becomes a parameter under its camelCase name, so two sources that
+// camel to one word emit `func Compute…(ctx …, idNumber string, idNumber string)`
+// — generated code the author did not write and cannot fix from the spec that
+// produced it. The collision is real rather than theoretical: a leading run of
+// capitals lowercases as a unit, so `IDNumber` and `IdNumber` are one parameter,
+// and a source listed twice is trivially one.
+//
+// `ctx` is claimed before the loop, because every derivation already takes the
+// AppContext under that name. The domain-service facts have had this exact check
+// since a manual fact could take two filters; the read side's derivations went
+// without it, and the failure mode is the same one.
+func proveDerivationParamsDistinct(from []string, where string, ps *Problems) {
+	params := map[string]string{"ctx": ""}
+	for _, src := range from {
+		name := naming.Camel(src)
+		prev, clash := params[name]
+		switch {
+		case !clash:
+			params[name] = src
+		case prev == src:
+			ps.BlockerFix(where+".from",
+				fmt.Sprintf("%q is listed twice, and each source is one parameter", src),
+				"name it once — the derivation receives it once either way")
+		case prev == "":
+			ps.BlockerFix(where+".from",
+				fmt.Sprintf("%q reaches the derivation as the parameter %q, which is the "+
+					"AppContext's", src, name),
+				"rename the field, or derive from a different one — two parameters of one "+
+					"name do not compile")
+		default:
+			ps.BlockerFix(where+".from",
+				fmt.Sprintf("%s and %s both reach the derivation as the parameter %q",
+					prev, src, name),
+				"two parameters of one name do not compile; drop one, or rename the field "+
+					"so the two are told apart")
 		}
 	}
 }
@@ -3235,14 +3507,43 @@ func findField(fs []Field, name string) *Field {
 	return nil
 }
 
-func findChild(cs []Child, name string) *Child {
+// CollectionNamed resolves the collection a key addresses, in EITHER spelling.
+//
+// A collection has two names and both are real. `name` is the ENTRY's Go type —
+// what a single row is — and `plural` is the COLLECTION's name, which the
+// framework persists in three places at once: the document segment the
+// projection nests the entries under, the read DTO's field, and the
+// notification's wire path. Neither is a nickname for the other.
+//
+// The keys that address a collection used to disagree about which one they
+// wanted, and they disagreed silently. joins[].inChild, rules.list[].fields and
+// read.computed.from resolved the singular; service.facts[].filters resolved the
+// plural — and its refusal argued that plural was "the name everything already
+// uses", which was true of the framework and the exact opposite of what the
+// other three keys did. One spec, one collection, three spellings, and the only
+// way to learn which was which was to be refused.
+//
+// So every key takes both, and the generator canonicalises to `name` on the way
+// into the IR — there is exactly one spelling below this line, and it is not the
+// author's problem which. The singular answers first so that a collection
+// deliberately named after another's plural still resolves to itself;
+// validateCollectionSpellings refuses that overlap outright, which is what makes
+// the order a tie-break rather than a policy.
+func CollectionNamed(cs []Child, name string) *Child {
 	for i := range cs {
 		if cs[i].Name == name {
 			return &cs[i]
 		}
 	}
+	for i := range cs {
+		if cs[i].Plural == name {
+			return &cs[i]
+		}
+	}
 	return nil
 }
+
+func findChild(cs []Child, name string) *Child { return CollectionNamed(cs, name) }
 
 func findSibling(ss []Sibling, name string) *Sibling {
 	for i := range ss {
@@ -3709,12 +4010,95 @@ func ManagedColumn(s *Spec, name string) string {
 	return ""
 }
 
+// readableAsRootSource is the set a ROOT derivation may read from, and it is
+// deliberately narrower than readableField.
+//
+// The difference is the two dotted forms — a collection's own field and a
+// collection's joined field — plus a facet attached to a collection. All three
+// are readable, and none of them is on the root's Result: what the root holds
+// for a collection is a SLICE of entries, so there is no single value to hand a
+// derivation that runs once per document. Blessing them here is what let a spec
+// validate green and then generate a signature one parameter short, with the
+// field empty forever.
+//
+// Per-entry derivation is a real question and it has its own seat:
+// children[].computed, which runs once per entry, where the entry IS in hand.
+// collectionFieldNamed answers whether a name is the Go FIELD a collection
+// occupies on the read shape — its `plural`, and only that.
+func collectionFieldNamed(s *Spec, name string) *Child {
+	for i := range s.Children {
+		if s.Children[i].Plural == name {
+			return &s.Children[i]
+		}
+	}
+	return nil
+}
+
+func readableAsRootSource(s *Spec, jr joinReach, name string) bool {
+	if fieldNamedIn(jr.root, name) != nil {
+		return true
+	}
+	if managedRead(s, name) {
+		return true
+	}
+	if findLogicalField(s.Fields, s, name) != nil {
+		return true
+	}
+	for i := range s.Siblings {
+		// A facet of a COLLECTION entry is folded into that entry, not into the
+		// root — the same boundary the dotted forms above run into.
+		if strings.HasPrefix(s.Siblings[i].AttachTo, "child:") {
+			continue
+		}
+		if findLogicalField(s.Siblings[i].Fields, s, name) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// collectionScopedSource names the collection a source lives inside, or "" when
+// the name has nothing to do with one.
+//
+// It is what turns a flat refusal into a direction. All three spellings mean the
+// same thing — the value is on an ENTRY — and the author who wrote one of them
+// was asking for a per-entry derivation, which is a key that exists.
+func collectionScopedSource(s *Spec, jr joinReach, name string) *Child {
+	if head, tail, dotted := strings.Cut(name, "."); dotted {
+		c := CollectionNamed(s.Children, head)
+		if c == nil {
+			return nil
+		}
+		if fieldNamedIn(jr.child[c.Name], tail) != nil || findLogicalField(c.Fields, s, tail) != nil {
+			return c
+		}
+		return nil
+	}
+	// The bare spelling: the author named the entry's field with no collection
+	// in front of it, which resolves against the root and finds nothing.
+	for i := range s.Children {
+		if findLogicalField(s.Children[i].Fields, s, name) != nil {
+			return &s.Children[i]
+		}
+	}
+	for i := range s.Siblings {
+		attached, isChildFacet := strings.CutPrefix(s.Siblings[i].AttachTo, "child:")
+		if !isChildFacet {
+			continue
+		}
+		if findLogicalField(s.Siblings[i].Fields, s, name) != nil {
+			return CollectionNamed(s.Children, attached)
+		}
+	}
+	return nil
+}
+
 func readableField(s *Spec, jr joinReach, name string) bool {
 	if fieldNamedIn(jr.root, name) != nil {
 		return true
 	}
 	if i := strings.Index(name, "."); i > 0 {
-		if fieldNamedIn(jr.child[name[:i]], name[i+1:]) != nil {
+		if fieldNamedIn(jr.child[canonicalChildName(s, name[:i])], name[i+1:]) != nil {
 			return true
 		}
 	}

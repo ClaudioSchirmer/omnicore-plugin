@@ -148,6 +148,13 @@ type LockFile struct {
 	// it merely found on disk. Recording a foreign hash here would make a
 	// refusal last exactly one run: the next comparison would match, and the
 	// file the generator had just declined to touch would be overwritten.
+	//
+	// It means one thing per class, and the difference decides what may be done
+	// with the file. For an OWNED file it is what the last run wrote, and a
+	// mismatch is a hand edit to refuse. For a HOOK it is what the generator
+	// wrote when it CREATED the file and never anything since — a mismatch is
+	// not drift, it is the file being used for what it exists for, and the only
+	// thing it authorises is telling the author the file is theirs.
 	Hash string `json:"hash"`
 	// AdjustedFor records that a hand edit was DELIBERATELY accepted through
 	// `adopt`, and the framework version it was accepted at. The version is
@@ -365,9 +372,17 @@ func ApplyWith(root, entity, specPath, specHash, framework string, ordinals map[
 			if err := os.WriteFile(abs, d.File.Content, 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", d.File.Path, err)
 			}
-			if d.File.Class == Owned {
+			switch {
+			case d.File.Class == Owned:
 				entry.Files[d.File.Path] = LockFile{Class: Owned, Hash: Hash(d.File.Content)}
-			} else {
+			case tracksAsHook(d.File.Path, d.File.Class):
+				// The CREATION hash, and the only one this record will ever
+				// hold: a hook is written once, so what the generator put there
+				// is a fixed fact. Everything a hook needs from the lock follows
+				// from that one comparison — whether the author has written in
+				// it yet, and therefore whether an orphaned one may be removed.
+				entry.Files[d.File.Path] = LockFile{Class: Hook, Hash: Hash(d.File.Content)}
+			default:
 				delete(entry.Files, d.File.Path)
 			}
 		case Unchanged:
@@ -381,20 +396,44 @@ func ApplyWith(root, entity, specPath, specHash, framework string, ordinals map[
 			// this generator wrote, so the file keeps being recognised as edited
 			// and keeps being refused until it is adopted or explicitly forced.
 		case KeptHook:
-			// Never hashed: the author owns it outright.
+			// Never RE-hashed: the author owns the contents outright, so the
+			// record keeps the hash of what the generator first wrote and
+			// nothing else. That is what tells an untouched hook apart from one
+			// somebody has written in, which is the whole question prune asks.
 			//
-			// The delete is what lets a file CHANGE class between builds without
-			// leaving a lie behind. Migrations became hooks after projects had
-			// been generated with them as owned, and a stale owned record would
-			// have kept `doctor` verifying a checksum on a file the author is now
-			// invited to edit — reporting a hand edit as drift, on the one
-			// command whose whole job is telling the truth about drift.
+			// The delete below is what lets a file CHANGE class between builds
+			// without leaving a lie behind. Migrations became hooks after
+			// projects had been generated with them as owned, and a stale owned
+			// record would have kept `doctor` verifying a checksum on a file the
+			// author is now invited to edit — reporting a hand edit as drift, on
+			// the one command whose whole job is telling the truth about drift.
 			//
 			// An ADOPTED owned file also lands here, and its record must stay:
 			// that record IS the adoption.
-			if d.File.Class != Owned {
-				delete(entry.Files, d.File.Path)
+			if d.File.Class == Owned {
+				break
 			}
+			if !tracksAsHook(d.File.Path, d.File.Class) {
+				delete(entry.Files, d.File.Path)
+				break
+			}
+			if rec, ok := entry.Files[d.File.Path]; ok && rec.Class == Hook {
+				break
+			}
+			// A hook this project generated BEFORE hooks were recorded at all.
+			// Without this line the fix would only reach trees generated from
+			// here on: every hook already on disk would stay invisible to
+			// `prune` forever, which is precisely the state being fixed.
+			//
+			// What is recorded is what the generator WOULD write for it now,
+			// which is the closest thing to a creation record that still exists.
+			// It is deliberately not the file's own bytes: recording those would
+			// make a hook somebody had already filled in look untouched, and the
+			// one thing this record must never do is authorise deleting a body.
+			// The comparison is therefore conservative rather than exact — a
+			// retrofitted hook is reported and left, not removed — and that is
+			// the right side to be wrong on.
+			entry.Files[d.File.Path] = LockFile{Class: Hook, Hash: Hash(d.File.Content)}
 		}
 	}
 
@@ -415,6 +454,12 @@ func Adopt(root, entity, path, framework, why string, lock *Lock) error {
 	if !ok {
 		return fmt.Errorf("%s is not a generated file of %s — "+
 			"only a file this generator wrote can carry an adopted fix", path, entity)
+	}
+	if rec.Class == Hook {
+		return fmt.Errorf("%s is a hook: it was written once and is already yours, so "+
+			"there is no refusal here for an adoption to lift — regeneration never "+
+			"touches it. The record exists only so `prune` can tell you when the spec "+
+			"stops producing it", path)
 	}
 	content, err := os.ReadFile(filepath.Join(root, path))
 	if err != nil {
@@ -451,6 +496,50 @@ func Orphans(entity string, files []File, lock *Lock) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// UnwrittenHookReason says what an UNTOUCHED hook is costing, by kind.
+//
+// The three are silent in three different ways and only one of them is safe to
+// defer, so one sentence for all three is the sentence that gets somebody
+// paged. It is told from the PATH for the same reason keptHookReason is: the
+// reader of `doctor` has no model in hand, and a reason written for the other
+// kind is worse than none.
+func UnwrittenHookReason(path string) string {
+	switch {
+	case strings.HasSuffix(path, "_service_manual.go"):
+		return "still exactly as it was created — the facts it declares PANIC the first " +
+			"time a rule asks one, which is a running service falling over rather than a " +
+			"field arriving empty"
+	case strings.HasSuffix(path, "_computed_manual.go"):
+		return "still exactly as it was created — every derived field it backs renders " +
+			"ABSENT, quietly, on REST, on GraphQL and in the exports at once"
+	case strings.HasSuffix(path, "_rules_manual.go"):
+		return "still exactly as it was created — the invariants it holds are declared and " +
+			"NOT enforced, so a write the spec calls invalid is accepted"
+	}
+	return "still exactly as it was created — nothing has been written in it, and what it " +
+		"was created for is not happening"
+}
+
+// tracksAsHook reports whether a hook is one the lock should remember.
+//
+// Every hook except a migration. A hook used to be recorded nowhere at all,
+// which made an ORPHANED one invisible to every command this generator has:
+// take the last computed field out of a spec, regenerate, and the derivation
+// file stays on disk declaring a function nothing calls — `prune` iterates the
+// lock, so it never saw the file, and the author was left with a tree only a
+// manual `rm` could finish. Recording the hook's creation hash is what gives
+// them a tool path back, and it costs the hook nothing: the file is still
+// written once, still never rewritten, still carries no checksum of its own.
+//
+// A MIGRATION stays out, and not by omission. Its effect outlives the file — it
+// ran, and a tracking table in every environment says so — which is exactly why
+// prune already refuses to consider one. Recording it would only teach the
+// other reader of this map, `generate`'s orphan report, to offer a cleanup that
+// must never happen.
+func tracksAsHook(path string, class Class) bool {
+	return class == Hook && !IsMigration(path)
 }
 
 // IsMigration reports whether a path is one of the SQL pairs.
@@ -559,6 +648,21 @@ func PlanPrune(root, entity string, current []File, lock *Lock) []PruneFile {
 		case rec.AdjustedFor != "":
 			out = append(out, PruneFile{path, PruneKeep,
 				"carries a hand edit adopted at framework " + rec.AdjustedFor})
+		case Hash(content) != rec.Hash && rec.Class == Hook:
+			// An orphaned hook whose contents are not the generator's. Saying
+			// WHICH kind of leftover it is matters more here than anywhere else
+			// in this list: the file compiles, declares functions nothing calls
+			// anymore, and no other command will ever mention it again.
+			//
+			// The sentence deliberately does not claim "you wrote in it". For a
+			// hook recorded at creation that is what a mismatch means; for one
+			// recorded retroactively — a project generated before hooks were
+			// recorded at all — the record is only what the generator WOULD
+			// write, so a mismatch means "not mine" and no more than that.
+			out = append(out, PruneFile{path, PruneKeep,
+				"the spec no longer produces it, and its contents are not what the " +
+					"generator writes for it — it is yours, and removing it is a hand " +
+					"edit only you can make"})
 		case Hash(content) != rec.Hash:
 			out = append(out, PruneFile{path, PruneKeep,
 				"it was edited by hand since it was generated"})

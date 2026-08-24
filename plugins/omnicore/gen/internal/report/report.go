@@ -316,7 +316,7 @@ func renderTodo(b *strings.Builder, in Input) {
 		}
 	}
 
-	if len(m.Read.Computed) > 0 {
+	if emit.HasDerivations(m) {
 		empty = false
 		path := fmt.Sprintf("internal/application/queries/%s_computed_manual.go", m.Entity.Snake)
 		fmt.Fprintf(b, "### `%s`\n\n", path)
@@ -353,6 +353,20 @@ func renderTodo(b *strings.Builder, in Input) {
 				fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(c.Description, "\n", " "))
 			}
 			fmt.Fprintf(b, "```go\n%s\n```\n\n", emit.ComputedSignature(m, c))
+		}
+		// The per-entry derivations, said to be per-entry. A reviewer reading a
+		// signature that takes one id has no way to tell from it alone whether
+		// the body runs once per record or once per row of a collection — and
+		// that is the difference between a lookup and N lookups per response.
+		for _, ch := range m.Children {
+			for _, c := range ch.Computed {
+				fmt.Fprintf(b, "**`%s.%s` (%s)** ← `%s` — ONCE PER ENTRY of `%s`\n\n",
+					ch.Plural, c.Name, c.GoType, strings.Join(c.Sources, "`, `"), ch.Plural)
+				if c.Description != "" {
+					fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(c.Description, "\n", " "))
+				}
+				fmt.Fprintf(b, "```go\n%s\n```\n\n", emit.ChildComputedSignature(m, ch, c))
+			}
 		}
 		b.WriteString("**Until a body is written the field renders absent, and nothing says so** " +
 			"— unlike a manual fact, which panics. The read answers 200, the other columns are " +

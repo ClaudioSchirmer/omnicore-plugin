@@ -113,6 +113,24 @@ read:
   backing: relational
   view:
     name: teachers
+  # O NOME repete o computado de RAIZ do student de proposito. As quatro
+  # fixtures deste host compilam para UM pacote, internal/application/queries, e
+  # a derivacao era `Compute<Campo>`: duas entidades com um computado homonimo
+  # emitiam ComputeEnrollmentLabel duas vezes e o pacote parava de compilar.
+  #
+  # O par student.Guardian/role.RolePermission ja prova a colisao entre dois
+  # computados de ENTRADA; este prova a de RAIZ, que e a forma exata do defeito
+  # relatado. Renomear um dos dois apaga a prova sem apagar o defeito.
+  #
+  # A listagem deste read NAO serve ?fields=, e o do student serve — entao o par
+  # tambem cobre as duas disciplinas de ponteiro do assento de raiz.
+  computed:
+    - name: EnrollmentLabel
+      type: string
+      from: [FullName, RegistrationCode]
+      labelKey: TeacherEnrollmentLabelField
+      example: "Marta Nogueira (DOC-2026-0031)"
+      description: Nome do professor seguido do codigo de registro, para listagens.
   byId: true
   byParams:
     filters:
