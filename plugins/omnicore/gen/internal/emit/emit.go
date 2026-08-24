@@ -27,6 +27,12 @@ type Result struct {
 	// placeholder, so the report can list them instead of letting an
 	// untranslated string look finished.
 	MissingTranslations []string
+	// UntranslatedEnumValues names every enum member whose text the spec left
+	// out, per catalog. It is separate from MissingTranslations because the two
+	// have different fallbacks and different costs: a notification with no text
+	// is emitted as a loud placeholder, an enum member falls back to its own
+	// name and is merely in the wrong language.
+	UntranslatedEnumValues []string
 	// StaleRegistrations names what a shared registration file already declares
 	// with content that no longer matches this spec. The generator does not
 	// rewrite those files — they carry other entities' declarations and edits
@@ -250,6 +256,7 @@ func All(m *ir.Model, root string, meta FileMeta) (*Result, error) {
 	}
 	res.Files = append(res.Files, regs...)
 	res.MissingTranslations = missing
+	res.UntranslatedEnumValues = UntranslatedEnumValues(m)
 	res.StaleRegistrations = stale
 	res.Registrations = written
 

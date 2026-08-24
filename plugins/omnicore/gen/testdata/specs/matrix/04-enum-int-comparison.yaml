@@ -28,9 +28,19 @@ valueObjects:
     description: Nível de prioridade, do menor para o maior.
     unknownNotification: NivelDesconhecidoNotification
     members:
-      - {name: Baixo, value: 1}
-      - {name: Medio, value: 2}
-      - {name: Alto,  value: 3}
+      # As sete traduções de cada membro viram uma entrada de catálogo sob a
+      # chave que o framework deriva por reflexão — "NivelContrato.1" —, que é
+      # o que translator.EnumDescription resolve. Backing int: a chave leva o
+      # NÚMERO, nunca o nome do membro.
+      - name: Baixo
+        value: 1
+        text: {ptbr: Baixo, eng: Low, esp: Bajo, fra: Faible, deu: Niedrig, ita: Basso, nld: Laag}
+      - name: Medio
+        value: 2
+        text: {ptbr: Médio, eng: Medium, esp: Medio, fra: Moyen, deu: Mittel, ita: Medio, nld: Gemiddeld}
+      - name: Alto
+        value: 3
+        text: {ptbr: Alto, eng: High, esp: Alto, fra: Élevé, deu: Hoch, ita: Alto, nld: Hoog}
 modes: [display, insert, update, archive, unarchive]
 update:
   shape: patch

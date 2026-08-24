@@ -1473,6 +1473,24 @@ type EnumMember struct {
 	ConstName string
 	Literal   string
 	Name      string
+	// DescriptionKey is the catalog key the FRAMEWORK derives for this member,
+	// and the reason the member's text has anywhere to go:
+	// domain.EnumDescriptionKey reflects over the value and answers
+	// "<TypeName>.<value>" — "NivelContrato.1", "SituacaoCurso.aberto". So the
+	// key is built from the VALUE, never from the member's Go name, and a
+	// catalog entry filed under anything else is one Translator.EnumDescription
+	// will never find.
+	DescriptionKey string
+	// Text is the member's human-facing text per catalog, and Missing names the
+	// catalogs the spec left empty.
+	//
+	// This is a LABEL, with the same discipline as a field's: a couple of words,
+	// and an empty catalog falls back to the member's own name spaced out rather
+	// than to a loud TODO. A notification's text is a sentence nobody can guess,
+	// which is why that one gets a placeholder; "Aberto" is a heading, and a
+	// placeholder in its place is what the end user reads.
+	Text    map[string]string
+	Missing []string
 }
 
 func resolveValueObjects(s *spec.Spec) []ValueObject {
@@ -1513,10 +1531,22 @@ func resolveValueObjects(s *spec.Spec) []ValueObject {
 				v.UnknownValue = `""`
 			}
 			for _, mem := range vo.Members {
+				texts := mem.Text.Map()
+				var missing []string
+				for _, code := range LangOrder {
+					if strings.TrimSpace(texts[code]) == "" {
+						missing = append(missing, code)
+					}
+				}
 				v.Members = append(v.Members, EnumMember{
 					ConstName: vo.Name + mem.Name,
 					Literal:   enumLiteral(mem.Value, backing),
 					Name:      mem.Name,
+					// The framework builds this key by reflection over the
+					// value, so it is built here the same way — from the value.
+					DescriptionKey: fmt.Sprintf("%s.%v", vo.Name, mem.Value),
+					Text:           texts,
+					Missing:        missing,
 				})
 			}
 		}

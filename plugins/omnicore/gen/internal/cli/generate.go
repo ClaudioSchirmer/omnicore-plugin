@@ -165,11 +165,12 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 
 	md := report.Render(report.Input{
 		Model: model, SpecPath: specRel, Decisions: decisions,
-		MissingTranslations: result.MissingTranslations,
-		StaleRegistrations:  result.StaleRegistrations,
-		MigrationsKept:      migrationsKept,
-		TargetTables:        result.TargetTables,
-		Orphans:             orphans,
+		MissingTranslations:    result.MissingTranslations,
+		UntranslatedEnumValues: result.UntranslatedEnumValues,
+		StaleRegistrations:     result.StaleRegistrations,
+		MigrationsKept:         migrationsKept,
+		TargetTables:           result.TargetTables,
+		Orphans:                orphans,
 		// Discovery ran BEFORE anything was written, which is what makes this
 		// answer meaningful: the generator writes no file for a `kind: manual`
 		// value object, so a name in here is one the author already wrote.

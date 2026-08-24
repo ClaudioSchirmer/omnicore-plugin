@@ -228,14 +228,34 @@ valueObjects:
     description: The status of a student's enrollment.
     unknownNotification: UnknownEnrollmentStatusNotification
     members:
-      - {name: Active,    value: active}
-      - {name: Suspended, value: suspended}
-      - {name: Graduated, value: graduated}
+      # `text` on a member is its LABEL, and it lands in the seven catalogs under
+      # the key the FRAMEWORK derives for the value — domain.EnumDescriptionKey
+      # answers "<Type>.<value>", so "EnrollmentStatus.active" — which is what
+      # translator.EnumDescription(lang, v) resolves at the boundary. Leave it
+      # out and the entry is still written, filled with the member's own name
+      # spaced out, and the report says which catalogs got that instead.
+      #
+      # It does NOT change the wire: REST, GraphQL and gRPC carry `active` in
+      # every language by the framework's own design. This is what a screen
+      # asking for a human-readable status gets instead of the bare key.
+      - name: Active
+        value: active
+        text: {ptbr: Ativa, eng: Active, esp: Activa, fra: Active, deu: Aktiv, ita: Attiva, nld: Actief}
+      - name: Suspended
+        value: suspended
+        text: {ptbr: Suspensa, eng: Suspended, esp: Suspendida, fra: Suspendue, deu: Ausgesetzt, ita: Sospesa, nld: Opgeschort}
+      - name: Graduated
+        value: graduated
+        text: {ptbr: Concluída, eng: Graduated, esp: Graduada, fra: Diplômé, deu: Abgeschlossen, ita: Diplomata, nld: Afgestudeerd}
       # Two members for ONE ending, and the pair is the point: "withdrawing" is
       # what a caller asks for, "dropped" is where the record rests. See
       # delete.archiveWhen — without the pair there is nowhere to rest.
-      - {name: Withdrawing, value: withdrawing}
-      - {name: Dropped,   value: dropped}
+      - name: Withdrawing
+        value: withdrawing
+        text: {ptbr: Em trancamento, eng: Withdrawing, esp: En baja, fra: En retrait, deu: In Abmeldung, ita: In ritiro, nld: In afmelding}
+      - name: Dropped
+        value: dropped
+        text: {ptbr: Trancada, eng: Dropped, esp: Abandonada, fra: Abandonnée, deu: Abgebrochen, ita: Ritirata, nld: Gestopt}
 
   # A COMPOSITE value object: no backing, because its value is its PARTS. It
   # declares no Value() either — that absence is what tells the framework to

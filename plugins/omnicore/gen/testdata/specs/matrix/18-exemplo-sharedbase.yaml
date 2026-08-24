@@ -181,6 +181,11 @@ valueObjects:
     backing: string
     description: The status of a teaching contract.
     unknownNotification: UnknownTeacherStatusNotification
+    # No `text` on these members, deliberately — this is what the shorthand
+    # costs. Each one still gets its catalog entry (under "TeacherStatus.active",
+    # the key the framework derives), filled with the member's own name in all
+    # seven languages, and the report names every catalog that got it. Declare
+    # members[].text to translate them; the flat example shows the long form.
     members:
       - {name: Active, value: active}
       - {name: Suspended, value: suspended}

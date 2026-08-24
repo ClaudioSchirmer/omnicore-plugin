@@ -442,8 +442,11 @@ type ValueObject struct {
 	// UnknownNotification names the answer raised when a value outside the
 	// enum's set arrives.
 	UnknownNotification string `yaml:"unknownNotification"`
-	// DescriptionKeys asks for a translation key per enum member. Refused by
-	// this build — per-value translation keys are not generated.
+	// DescriptionKeys asks for a translation key per enum member. Refused —
+	// the per-value catalog entries are not asked for by a flag: EVERY member is
+	// registered under the key the framework derives for it ("<Type>.<value>",
+	// what domain.EnumDescriptionKey answers), and what fills that entry is the
+	// member's own text. Declare members[].text instead.
 	DescriptionKeys bool `yaml:"descriptionKeys"`
 }
 
@@ -487,7 +490,22 @@ type EnumMember struct {
 	Name string `yaml:"name"`
 	// Value is the wire/storage value the member maps to.
 	Value any `yaml:"value"`
-	// Text carries the member's human-facing text, per language catalog.
+	// Text is the member's LABEL per language catalog, registered under the key
+	// the framework derives for its VALUE ("<Type>.<value>") and resolved at the
+	// boundary by translator.EnumDescription — it does NOT change the wire.
+	//
+	// The key is domain.EnumDescriptionKey's, which reflects over the value:
+	// "SituacaoCurso.aberto" for a string backing, "NivelContrato.1" for an int
+	// one. Never the member's Go name — an entry under that would be complete
+	// and never found.
+	//
+	// It is a LABEL: a couple of words, and a catalog left out falls back to the
+	// member's own name rather than to a placeholder. A catalog left out is
+	// named in the report.
+	//
+	// It does NOT change the wire. REST, GraphQL and gRPC carry the raw value in
+	// every language by the framework's own design; this is what a screen asking
+	// for a human-readable label gets instead of the bare key.
 	Text Texts `yaml:"text"`
 }
 

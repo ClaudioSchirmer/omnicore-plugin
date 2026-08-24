@@ -33,9 +33,16 @@ valueObjects:
     description: Situações possíveis de um curso.
     unknownNotification: SituacaoCursoDesconhecidaNotification
     members:
-      - {name: Aberto,    value: aberto}
-      - {name: Fechado,   value: fechado}
-      - {name: Suspenso,  value: suspenso}
+      # Backing string: a chave é "SituacaoCurso.aberto" — o VALOR, não o nome
+      # do membro. Suspenso fica sem `text` de propósito: é a cobertura do
+      # fallback, que é o nome do membro espaçado e nunca a chave crua.
+      - name: Aberto
+        value: aberto
+        text: {ptbr: Aberto, eng: Open, esp: Abierto, fra: Ouvert, deu: Offen, ita: Aperto, nld: Open}
+      - name: Fechado
+        value: fechado
+        text: {ptbr: Fechado, eng: Closed, esp: Cerrado, fra: Fermé, deu: Geschlossen, ita: Chiuso, nld: Gesloten}
+      - {name: Suspenso, value: suspenso}
 
 children:
   - name: Modulo

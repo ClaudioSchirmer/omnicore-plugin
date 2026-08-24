@@ -199,6 +199,101 @@ func TestEveryLabelKeyIsTranslated(t *testing.T) {
 	}
 }
 
+// TestEveryEnumMemberTextReachesACatalog is the third instance of the same bug,
+// and the one that stayed open longest.
+//
+// `valueObjects[].members[].text` was a first-class key of the spec language:
+// documented in `explain keys`, parsed, validated, and accepted by `check` with
+// "✓ this spec can be generated". It reached the IR and stopped there — the IR's
+// EnumMember carried ConstName, Literal and Name, so no emitter could ever see
+// the seven translations. Nothing failed. The author declared "Aberto"/"Open"/
+// "Ouvert", got a green check, and read `SituacaoCurso.aberto` on the screen in
+// all seven languages, because that is what Translator.EnumDescription answers
+// when the catalog has no entry.
+//
+// The asymmetry was the tell: the sibling key `descriptionKeys` was REFUSED by
+// name, so the one that did nothing announced it and the one that did nothing
+// silently was the one carrying the text.
+//
+// This asserts the property over whatever the matrix contains: every member of
+// every enum gets an entry, in every catalog, under the key the framework
+// derives — and never the key itself as the value.
+func TestEveryEnumMemberTextReachesACatalog(t *testing.T) {
+	for name, m := range matrixModels(t) {
+		var members []ir.EnumMember
+		for _, vo := range m.ValueObjects {
+			members = append(members, vo.Members...)
+		}
+		if len(members) == 0 {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			entries := catalogEntries(m)
+			for _, lang := range ir.LangOrder {
+				byKey := map[string]string{}
+				for _, e := range entries[lang] {
+					byKey[e.Key] = e.Value
+				}
+				for _, mem := range members {
+					got, ok := byKey[mem.DescriptionKey]
+					if !ok {
+						t.Errorf("%s is in no %s catalog — the member's text was declared, "+
+							"parsed and dropped, and EnumDescription answers the raw key",
+							mem.DescriptionKey, lang)
+						continue
+					}
+					if got == "" || got == mem.DescriptionKey {
+						t.Errorf("%s in %s resolves to %q — an entry whose value is the key "+
+							"is the same nothing as no entry at all",
+							mem.DescriptionKey, lang, got)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestEnumDescriptionKeyMatchesTheFramework pins the key SHAPE, which is the
+// half of this that no amount of emitting can fix from the inside.
+//
+// domain.EnumDescriptionKey reflects over the value: "<TypeName>.<value>". A
+// catalog filed under the member's Go NAME — SituacaoCurso.Aberto — is
+// well-formed, complete, and never found, because the framework never asks for
+// that key. So the entry has to be built from the value, and this is what says
+// so.
+func TestEnumDescriptionKeyMatchesTheFramework(t *testing.T) {
+	models := matrixModels(t)
+	for _, tc := range []struct{ spec, vo, key string }{
+		// backing: int — the key carries the number.
+		{"04-enum-int-comparison.yaml", "NivelContrato", "NivelContrato.1"},
+		// backing: string — the key carries the wire value, lowercase and all.
+		{"11-mysql-nats-mongo-graphql.yaml", "SituacaoCurso", "SituacaoCurso.aberto"},
+	} {
+		m, ok := models[tc.spec]
+		if !ok {
+			t.Fatalf("%s left the matrix — this test is about the enum it declares", tc.spec)
+		}
+		var found bool
+		for _, vo := range m.ValueObjects {
+			if vo.Name != tc.vo {
+				continue
+			}
+			for _, mem := range vo.Members {
+				if mem.DescriptionKey == tc.key {
+					found = true
+				}
+				if strings.Contains(mem.DescriptionKey, "."+mem.Name) {
+					t.Errorf("%s is keyed by the member NAME; the framework reflects over the "+
+						"VALUE and will look up something else", mem.DescriptionKey)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no member of %s is keyed %q", tc.vo, tc.key)
+		}
+	}
+}
+
 // TestNoSymbolIsDeclaredTwice guards the seam that opened the moment two roles
 // could share one identity.
 //

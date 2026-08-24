@@ -7,6 +7,79 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-08-24
+
+A key the spec language documented, validated and threw away — and the guard that makes
+its whole class visible from now on.
+
+### Fixed
+
+- **The seven texts of an enum member now reach the catalogs.**
+  `valueObjects[].members[].text` was a first-class key of the language: listed by
+  `explain keys` as *"the member's human-facing text, per language catalog"*, parsed,
+  validated, and accepted by `check` with *"✓ this spec can be generated"*. It reached the
+  IR and stopped there — `ir.EnumMember` carried `ConstName`, `Literal` and `Name`, so no
+  emitter could ever see the translations. Nothing failed anywhere. The author declared
+  *Aberto* / *Open* / *Ouvert*, got a green check, and read `SituacaoCurso.aberto` on the
+  screen in all seven languages, because that is exactly what
+  `Translator.EnumDescription` answers when the catalog has no entry for the value.
+
+  **The key is the framework's, not the generator's.** `domain.EnumDescriptionKey`
+  reflects over the value and answers `"<Type>.<value>"` — `EnrollmentStatus.active` for a
+  string backing, `NivelContrato.1` for an int one — and that is the only key
+  `translator.EnumDescription(lang, v)` ever looks up. An entry filed under the member's
+  Go NAME would be well-formed, complete, and never found, so the entry is built from the
+  VALUE and a test pins that shape. A `written: manual` value object contributes its
+  entries too: the TYPE is the author's, the member set is still the spec's, and the
+  framework derives the key by reflection either way — translating the generated enums and
+  not the hand-written ones would be a new silence in place of the old one.
+
+  A member left without `text` still gets its entry, filled with its own name spaced out.
+  That is the LABEL discipline, deliberately, and not the notification one: a notification
+  with no text is emitted as a loud `TODO(LANG):` placeholder because nobody can guess the
+  sentence, while `Aberto` is a heading — a placeholder in its place is what the end user
+  reads. The report names every catalog that got the fallback (see below).
+
+  **What this does NOT change is the wire.** REST, GraphQL and gRPC carry the raw value in
+  every language, by the framework's own design — *"standardized value in, standardized
+  value out"*; `EnumDescription` is a deliberate per-request helper for showing a label,
+  never a step in persistence, audit or the response DTO. So a status still arrives as
+  `active`. What the entry buys is that the helper has something to find, and that the
+  field's `labelKey` translating the column HEADING is no longer the only half that works.
+
+  The asymmetry was the tell, and it is worth naming: the sibling key `descriptionKeys`
+  was REFUSED by name, so the key that did nothing announced it while the key actually
+  carrying the text failed in silence.
+
+### Added
+
+- **`### Enum values reading in the wrong language`, a new section of the gen-report.** It
+  names every `<Type>.<value>` whose text the spec left out, per catalog. It is separate
+  from *Missing translations* on purpose: that list is about entries emitted as marked
+  placeholders, and these are emitted as a real word. Nothing in the generated code looks
+  wrong, the build is green and the screen is in one language — the hand-off is the only
+  place that can say so.
+
+- **Two guards in `internal/emit/silence_test.go`**, the file whose whole subject is
+  *declared, then forgotten*. `TestEveryEnumMemberTextReachesACatalog` asserts the property
+  over whatever the coverage matrix contains — every member of every enum has an entry in
+  every catalog, and never the key itself as the value.
+  `TestEnumDescriptionKeyMatchesTheFramework` pins the key SHAPE, which is the half no
+  amount of emitting can fix from the inside. The matrix gained the two backings to exercise them (`04` int, `11` string, with
+  one member deliberately textless to cover the fallback).
+
+### Changed
+
+- **`valueObjects[].descriptionKeys` is still refused, and no longer for the wrong
+  reason.** It used to say *"per-value translation keys are not generated"*, which was
+  true of the build and false as advice — it sent an author away from the feature instead
+  of to it. It now says the entries are not asked for by a flag: every member is registered
+  under the key the framework derives, and what fills that entry is `members[].text`.
+
+- **Both `explain example` specs and `skills/omnicore-gen/SKILL.md` teach the key.** The
+  flat example declares all seven texts on `EnrollmentStatus` with the key shape spelled
+  out; the sharedbase one deliberately declares none and says what the shorthand costs.
+
 ## [0.33.1] — 2026-08-24
 
 A one-line hole in the read-join work of 0.33.0, and the guard that makes its whole
