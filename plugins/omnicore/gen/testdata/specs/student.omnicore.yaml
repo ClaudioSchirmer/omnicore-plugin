@@ -461,6 +461,27 @@ joins:
         example: Norte
         description: Apelido do campus, quando houver.
         labelKey: StudentCampusNicknameField
+      # Uma coluna CARIMBADA PELO FRAMEWORK no alvo. Ela nao aparece em fields[]
+      # de spec nenhum — e declarada por presenca em storage.managed — e mesmo
+      # assim e uma coluna da tabela como outra qualquer: o TableSchema a resolve
+      # na leitura sob um nome logico fixo, que e exatamente o que o WithJoins
+      # confere. Entao a travessia e legal e o tipo sai do alvo: time.
+      - name: CampusCriadoEm
+        column: created_at
+        example: "2026-02-01T09:00:00Z"
+        description: Quando o campus foi criado.
+        labelKey: StudentCampusCriadoEmField
+      # A coluna de ARQUIVO do alvo, sob um join INNER. Ela pousa em PONTEIRO, e
+      # nao por causa do kind: "nao arquivado" e o estado NORMAL de uma linha,
+      # entao deleted_at e NULL na primeira linha lida. O framework nao consegue
+      # exigir isso — os campos de domain.Managed nao sao exportados, e a
+      # checagem reflexiva dele responde "nao anulavel" em vez de chutar — entao
+      # quem fecha o buraco e o gerador, que le a coluna no spec do alvo.
+      - name: CampusArquivadoEm
+        column: deleted_at
+        example: "2026-02-01T09:00:00Z"
+        description: Quando o campus foi arquivado, se foi.
+        labelKey: StudentCampusArquivadoEmField
 
   # Join a partir de uma COLECAO desta entidade. O verbo nomeia a colecao, `on`
   # nomeia a chave estrangeira NA TABELA DELA, e o campo pousa na entrada.

@@ -657,6 +657,34 @@ joins:
         hidden: true
         description: The campus's budget code — read by the rules, never served.
         labelKey: StudentCampusBudgetCodeField
+      # The framework-STAMPED columns of the target are reachable too, and no
+      # fields[] entry anywhere declares them: the createdAt, updatedAt and
+      # archivedAt slots of the target's storage.managed are declared BY
+      # PRESENCE, and its TableSchema resolves whatever column sits in each one
+      # under a fixed logical name — which is exactly what the join's column
+      # check consults. `column:` is still the TARGET's own spelling: deleted_at
+      # here because that is what this Campus calls it, not because the
+      # framework fixes the name. When the target is a spec of this project both
+      # the type and the nullability come off that declaration; here Campus is
+      # hand-written, so this side states them.
+      #
+      # The archive column is a POINTER even under an INNER join: "never
+      # archived" is the NORMAL state of a row, so it is NULL on the first row
+      # read. It is also the one nullability the framework cannot check for you —
+      # the fields of domain.Managed are unexported, so its reflective check has
+      # nothing to point at and answers "not nullable" rather than guessing.
+      #
+      # The REVISION is the one managed column that does not cross: it guards the
+      # target's own writes, so a copy of it here is stale the moment that
+      # aggregate is written again, and the traversal onto it is refused.
+      - name: CampusArchivedAt
+        type: time
+        nullable: true
+        column: deleted_at
+        example: "2026-02-01T09:00:00Z"
+        description: When the campus was archived, if it was.
+        labelKey: StudentCampusArchivedAtField
+        text: {eng: Campus archived at, ptbr: Campus arquivado em}
 
   # A join FROM ONE OF THIS ENTITY'S OWN COLLECTIONS. The verb names the
   # collection, `on` names the foreign key on ITS table, and the mapped field

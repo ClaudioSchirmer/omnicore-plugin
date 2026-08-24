@@ -274,6 +274,22 @@ func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
 	// the join never reaches.
 	tf := neighbourFieldByColumn(target.Fields, f.Column)
 	if tf == nil {
+		// The revision is a real column of that table and still unreachable: the
+		// framework's read path resolves the stamped TIMESTAMPS under fixed
+		// logical names and stops there, so a traversal onto it fails at
+		// repository construction. "Not a column of X" would send the author to
+		// fix a declaration that is already right.
+		if target.Revision != "" && f.Column == target.Revision {
+			ps.BlockerFix(where+".column",
+				fmt.Sprintf("%q is %s's optimistic-concurrency column, and no read resolves it",
+					f.Column, j.To),
+				"the revision guards "+j.To+"'s OWN writes: it is the value that update is "+
+					"matched on, so a copy carried across a join is stale the moment that "+
+					"aggregate is written again and there is nothing this entity could "+
+					"correctly do with it. Drop the field — the stamped timestamps are "+
+					"reachable when what you need is WHEN it last changed")
+			return
+		}
 		ps.BlockerFix(where+".column",
 			fmt.Sprintf("%q is not a column of %s", f.Column, j.To),
 			fmt.Sprintf("%s declares: %s", j.To, columnList(target.Fields)))
@@ -322,6 +338,9 @@ func shadowedOnOwner(s *Spec, inChild string, ownerFields []Field, name string) 
 	if findField(ownerFields, name) != nil {
 		return "a field it already declares"
 	}
+	if what := managedOnOwner(s, inChild)[name]; what != "" {
+		return what
+	}
 	attachTo := "child:" + inChild
 	for i := range s.Siblings {
 		sib := s.Siblings[i]
@@ -340,6 +359,53 @@ func shadowedOnOwner(s *Spec, inChild string, ownerFields []Field, name string) 
 		}
 	}
 	return ""
+}
+
+// managedOnOwner names the framework-stamped fields the JOINING table's schema
+// answers to by itself, each mapped to what it is.
+//
+// They are the second thing `owner.Resolve` reaches, right after the owner's own
+// columns: CreatedAt, UpdatedAt and DeletedAt wherever the schema names those
+// columns, and ParentID wherever it has a link to resolve — a collection's
+// foreign key back to its owner, or a role's to its shared identity. Not one of
+// them appears under fields[]; they are declared by presence, or by the shape of
+// the node itself. So a joined Go field spelled like one is refused by the
+// framework at repository construction, and the whole point of this file is that
+// the author not pay a boot to learn it.
+func managedOnOwner(s *Spec, inChild string) map[string]string {
+	archivedAt, parentID := s.Storage.Managed.ArchivedAt, ""
+	if inChild != "" {
+		c := findChild(s.Children, inChild)
+		if c == nil {
+			return nil // not a collection of this spec; already refused
+		}
+		// A collection carries the root's timestamp columns and its OWN archive
+		// column, and its parent key is what makes it a collection at all.
+		archivedAt, parentID = c.ArchivedAt, c.ParentColumn
+	} else if s.Storage.Kind == "sharedbase-role" && s.Storage.Base != nil {
+		// A role's schema holds the link to the identity, and the framework
+		// resolves it under the fixed name ParentID: the declared column for a
+		// separate-fk link, the role's own primary key for a shared-pk one.
+		parentID = "id"
+		if s.Storage.Base.Link == "separate-fk" {
+			parentID = s.Storage.Base.LinkColumn
+		}
+	}
+	out := map[string]string{}
+	stamped := func(goName, column, what string) {
+		if column != "" {
+			out[goName] = fmt.Sprintf("the framework-stamped column %s (%s), which its schema "+
+				"resolves under that very name", column, what)
+		}
+	}
+	stamped("CreatedAt", s.Storage.Managed.CreatedAt, "when the row was inserted")
+	stamped("UpdatedAt", s.Storage.Managed.UpdatedAt, "when it was last written")
+	stamped("DeletedAt", archivedAt, "when it was archived")
+	if parentID != "" {
+		out["ParentID"] = fmt.Sprintf("the link column %s, which its schema resolves read-only "+
+			"under the fixed name ParentID", parentID)
+	}
+	return out
 }
 
 func neighbourNamed(ns []Neighbour, entity string) *Neighbour {

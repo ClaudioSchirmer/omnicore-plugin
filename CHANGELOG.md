@@ -7,6 +7,47 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-08-23
+
+The first release of read joins met a real project, and it refused a traversal the
+framework accepts. Both halves of that gap are closed here.
+
+### Fixed
+
+- **A read join now reaches the target's framework-STAMPED columns.** The columns a spec
+  registers under `storage.managed` — `createdAt`, `updatedAt`, `archivedAt`, under
+  whatever names its author chose — are columns of its table like any other: the schema
+  resolves them on the read path under the fixed LOGICAL names `CreatedAt`, `UpdatedAt` and
+  `DeletedAt`, which is exactly what the framework's own join check consults. The generator
+  read a neighbouring spec's `fields:` and nothing else, and those columns are declared BY
+  PRESENCE, never there. So a legal traversal was refused with the one message an author
+  cannot act on: *"`deleted_at` is not a column of Campus"* — about a column that is one.
+  The claim now carries all three, read out of the target's own `storage.managed`, so the
+  declaration names the column as THAT spec spells it and the type and nullability are
+  derived as they are for any other column.
+
+  **The archive column crosses into a POINTER, on either kind of join**, and that half is
+  the generator's alone to get right. The framework deliberately does not police the
+  nullability of a managed slot: the fields of `domain.Managed` are unexported, so its
+  reflective check has nothing to point at and answers "not nullable" rather than
+  guessing. A non-pointer `time.Time` therefore passed repository construction and failed
+  on the first ACTIVE row scanned — `deleted_at IS NULL` being the normal state of a row,
+  not the exception. The column is named in the target's own spec, so the generator says
+  what the framework cannot.
+
+  **The revision is still refused, now by name.** It is the guard of the target's OWN
+  writes, so a copy carried across a join is stale the moment that aggregate is written
+  again; the read path does not resolve it and the framework would fail at construction.
+  Falling back to "is not a column of" sent the author to fix a declaration that was
+  already right.
+
+- **A join field may no longer shadow what the JOINING table's own schema stamps.** The
+  same blind spot on the other side of the traversal: `owner.Resolve` reaches the owner's
+  stamped columns and its link column right after its own — `CreatedAt`, `UpdatedAt`,
+  `DeletedAt`, and `ParentID` on a collection or a shared-base role — and none of them is
+  under `fields:`. The framework refuses those names at repository construction; the
+  generator accepted them, which is a boot to find what the file could have said.
+
 ## [0.32.0] — 2026-08-23
 
 The framework's v0.57.0 landed two things at once: it turned a relational read model into
