@@ -842,6 +842,38 @@ type Rule struct {
 	EchoValue *bool `yaml:"echoValue"`
 	// Description is one optional line on why the rule exists.
 	Description string `yaml:"description"`
+	// Guard makes this rule a BARRIER: the validation pass ends after it when
+	// anything has already been rejected.
+	//
+	// It is positional, and deliberately so. The barrier lands on the line after
+	// this rule's block, so every rule declared ABOVE it — this one included —
+	// has already had its say and every notification they raised reaches the
+	// caller. Four preconditions that must all be reported before the pass stops
+	// are four ordinary rules with `guard: true` on the LAST of them, not four
+	// barriers.
+	//
+	// What it stops is everything the pass has not done yet: the rules below it,
+	// the automatic value-object validation of this owner, and the BuildRules
+	// and value objects of every aggregate child. The framework's structural
+	// gates — the verb being allowed at all, and id validity — sit outside the
+	// barrier and always report.
+	//
+	// It can never skip validation. The framework's StopIfInvalid fires only
+	// where a notification has ALREADY been emitted, so a clean write runs whole
+	// and a stop happens exclusively on a write that is already rejected. What
+	// changes is how much the 422 carries: what was found up to the barrier,
+	// instead of that plus every field the entity would also have failed on.
+	//
+	// Order matters, and only within a verb gate. Rules keep the order they are
+	// declared in, so the barrier falls where you put it; but the GATES are
+	// emitted in a fixed order (insert, insertOrUpdate, update, archive,
+	// unarchive, delete), so on an insert a guard declared under insertOrUpdate
+	// sits after everything declared under insert, whatever the yaml order.
+	//
+	// Refused on a composite value object's rules: those are checked inside the
+	// value object's own IsValid, which is handed a NotificationContext and no
+	// Rules — there is nothing there to stop.
+	Guard bool `yaml:"guard"`
 
 	// kind-specific
 

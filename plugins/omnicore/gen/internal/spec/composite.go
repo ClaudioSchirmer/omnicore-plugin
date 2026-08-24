@@ -1054,6 +1054,18 @@ func validateCompositeRules(s *Spec, vo ValueObject, where string, ps *Problems)
 					"every value-object field on every write",
 				"drop scope; a rule that must fire on one verb only belongs to the entity's rules")
 		}
+		// A barrier needs a pass to end, and a value object's rules run inside
+		// its own IsValid — handed a NotificationContext and nothing else. There
+		// is no Rules there, so the key would be accepted and emit nothing,
+		// which is the one outcome a rule language must never have.
+		if r.Guard {
+			ps.BlockerFix(w+".guard",
+				"a value object checks itself inside IsValid, which is handed no Rules — "+
+					"there is no validation pass here for a barrier to end",
+				"declare the barrier on the ENTITY's rule that reaches this value object: "+
+					"the pass it would stop is the entity's, and that is where the rules "+
+					"below it live")
+		}
 		if r.Notification == "" {
 			ps.BlockerFix(w+".notification",
 				"a rule needs the notification it raises when it refuses",

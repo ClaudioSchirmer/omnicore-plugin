@@ -310,6 +310,7 @@ func sealFiles(files []fsplan.File, root string, meta FileMeta) {
 			Date:        meta.Date,
 			Hook:        f.Class == fsplan.Hook,
 			Consequence: f.Consequence,
+			Shared:      f.Shared,
 		}, previous)
 	}
 }

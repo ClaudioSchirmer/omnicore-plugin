@@ -179,6 +179,12 @@ type Rule struct {
 	// says who may attempt the verb at all, this says who may attempt it on a row
 	// that is not theirs.
 	AdminField *Field
+	// Guard makes the rule a barrier: the emitters put r.StopIfInvalid() on the
+	// line after its block, so nothing below runs once anything above has
+	// rejected. It rides on the rule rather than being a clause of its own
+	// because that is what makes it positional — it lands where the rule was
+	// declared, and the rule keeps its declared position.
+	Guard bool
 	// FactName is the fact a factRange reads, by name; Fact is the resolved one,
 	// bound after the service is. Two steps because the rules are lowered before
 	// the port is, and a rule holding a copy of a fact resolved too early would
@@ -835,7 +841,7 @@ func resolveClauseSet(rs spec.Rules, children []spec.Child, lookup func(string) 
 			Min: r.Min, Max: r.Max, Notification: r.Notification,
 			AttachTo: r.AttachTo, EchoValue: r.Echoes(), Description: r.Description,
 			Transitions: r.Transitions, GroupBy: r.GroupBy, Cap: r.Cap,
-			SkipWhen: r.SkipWhen, FactName: r.Fact,
+			SkipWhen: r.SkipWhen, FactName: r.Fact, Guard: r.Guard,
 		}
 		// The two set-wide kinds name a COLLECTION where the others name fields:
 		// they ask what the aggregate holds, not what one record says.

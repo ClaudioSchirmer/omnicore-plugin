@@ -390,6 +390,10 @@ func RefusedKeys() map[string]string {
 		"valueObjects[].rules.list[].scope": "a value object's rule has no verb to gate on — " +
 			"the framework validates every value-object field on every write; a rule that " +
 			"must fire on one verb only belongs to the entity's rules",
+		"valueObjects[].rules.list[].guard": "a value object checks itself inside IsValid, " +
+			"which is handed a NotificationContext and no Rules — there is no validation " +
+			"pass here for a barrier to end; declare the barrier on the ENTITY's rule that " +
+			"reaches this value object",
 	}
 }
 

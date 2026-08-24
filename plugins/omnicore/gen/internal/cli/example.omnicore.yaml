@@ -400,11 +400,27 @@ rules:
       fields: [Name]
       notification: RequiredFieldNotification
 
+    # guard — the BARRIER. It is positional: it lands after THIS rule, so
+    # name-required above has already had its say and both missing fields are
+    # reported. Everything below stops: the remaining rules, the automatic
+    # value-object validation, and every collection of the aggregate. Four
+    # preconditions that must all be reported before the pass stops are four
+    # ordinary rules with guard: true on the LAST of them, not four barriers.
+    #
+    # It can never skip validation: the framework stops only where something has
+    # ALREADY been rejected, so a clean write runs whole. What it changes is how
+    # much the 422 carries — what was found up to here, instead of that plus
+    # every field the entity would also have failed on.
+    #
+    # Declare it where the rules below DEPEND on this one having passed: an
+    # owner that must exist before it is dereferenced, a snapshot that must have
+    # been captured, a parse that must have succeeded.
     - id: enrollment-required
       kind: required
       scope: [insertOrUpdate]
       fields: [EnrollmentNumber]
       notification: RequiredFieldNotification
+      guard: true
 
     - id: enrollment-immutable
       kind: immutable

@@ -201,8 +201,9 @@ func emitBuildRules(s *src, m *ir.Model) {
 	sawUpdate := false
 	for _, clause := range m.Clauses {
 		s.L("\tr.%s(func() {", clause.Gate)
-		for _, rule := range clause.Rules {
+		for i, rule := range clause.Rules {
 			emitRule(s, m, clause.Gate, rule)
+			emitGuardBarrier(s, rule, "\t\t", i < len(clause.Rules)-1)
 		}
 		// The lifecycle decision goes LAST in the update clause: every invariant
 		// above it has had its say, and what this reads is the entity as the
@@ -405,6 +406,34 @@ func scopeText(f ir.Field, recv string) string {
 
 func emitRule(s *src, m *ir.Model, gate string, rule ir.Rule) {
 	emitRuleWith(s, m, gate, rule, "e")
+}
+
+// emitGuardBarrier writes the line that ends the validation pass after a rule
+// the spec marked `guard: true`.
+//
+// It goes OUTSIDE the rule's own block — at the clause's own indentation, on
+// the lines after it — and that placement is the whole design. Pushed inside
+// the if, the barrier would fire on the first arm that rejected and hide the
+// rest of what the same rule found; out here, every rule declared above it has
+// already had its say, so four preconditions that must all be reported are four
+// ordinary rules with the key on the LAST of them.
+//
+// StopIfInvalid is itself the condition — it returns without doing anything
+// when nothing has been rejected — so there is no `if` to write around it and
+// no `return` to write after it. The framework unwinds the body itself.
+// more says whether a rule still follows in this clause; it only decides the
+// blank line that sets the barrier apart from what it guards. A barrier that
+// ends the clause has nothing to be set apart from, and the blank would be a
+// gap above the closing brace.
+func emitGuardBarrier(s *src, rule ir.Rule, indent string, more bool) {
+	if !rule.Guard {
+		return
+	}
+	s.L("%s// guard (%s): the rules below depend on these having passed.", indent, rule.ID)
+	s.L("%sr.StopIfInvalid()", indent)
+	if more {
+		s.Blank()
+	}
 }
 
 // emitRuleOn writes a rule against an arbitrary receiver, which is what lets a

@@ -226,7 +226,19 @@ func emitVOPackageDoc(m *ir.Model) (fsplan.File, error) {
 		"This package is a leaf: it imports nothing from the rest of the domain.",
 	)
 	s.L("package vos")
-	return goFile("internal/domain/vos/doc.go", fsplan.Owned, "the vos package documentation", s)
+
+	f, err := goFile("internal/domain/vos/doc.go", fsplan.Owned, "the vos package documentation", s)
+	if err != nil {
+		return f, err
+	}
+	// SHARED, and the only file here that is. Its bytes say nothing about any one
+	// entity — every spec that declares a value object emits this same package
+	// comment — so the header must not claim one either. It did, and the cost was
+	// a project with three entities where each generation reported the other two's
+	// doc.go as updated: the file flipped between owners forever, and `generate`
+	// could never leave the working tree clean.
+	f.Shared = true
+	return f, nil
 }
 
 // backquote prefers a raw string literal so a regex's backslashes survive

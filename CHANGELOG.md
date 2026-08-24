@@ -7,6 +7,120 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-08-24
+
+The one file no entity owns, stamped with the name of whichever entity ran last — and a
+rule that can now end the validation pass it is a precondition for.
+
+### Added
+
+- **`rules.list[].guard` — a rule that ENDS the validation pass.** The framework gives the
+  domain `Rules.StopIfInvalid()`, a barrier that halts a pass where something has already
+  been rejected instead of letting the rules below it run on a premise that is already
+  false. A rule marked `guard: true` now emits it:
+
+  ```go
+  if e.EnrollmentNumber == "" {
+      r.AddNotification("EnrollmentNumber", domain.RequiredFieldNotification{})
+  }
+  // guard (enrollment-required): the rules below depend on these having passed.
+  r.StopIfInvalid()
+  ```
+
+  The call is bare. `StopIfInvalid` is itself the condition — it returns without doing
+  anything when nothing has been rejected — so there is no `if` around it and no `return`
+  to write; the framework unwinds the body from the seat that invoked the rules.
+
+  **It is positional, and that is the design.** The barrier lands on the line after the
+  rule's block, at the clause's own indentation, never inside it. Pushed into the `if`, it
+  would fire on the first arm that rejected and hide the rest of what the same rule found;
+  out here, every rule declared above has already had its say — which is what lets four
+  preconditions all be reported with the key on the LAST of them. It sits outside a
+  `skipWhen` gate too: the barrier is about the pass, not about whether this rule was
+  evaluated.
+
+  What it stops is everything the pass has not done yet: the rules below it, the entity's
+  automatic value-object validation, and the `BuildRules` and value objects of every
+  collection. The framework's structural gates — the verb being allowed at all, and id
+  validity — sit outside it and always report.
+
+  **It can never skip validation.** The framework stops only where a notification has
+  ALREADY been emitted, so a clean write runs whole. What changes is the shape of a 422:
+  what was found up to the barrier, instead of that plus every field the write would also
+  have failed on. The gen-report lists every barrier for exactly that reason — a response
+  that used to name five problems and now names two is the feature working, and reads like
+  a regression.
+
+  Order is the author's inside a verb gate and fixed between them: rules keep their
+  declared order, but the gates are emitted `insert`, `insertOrUpdate`, `update`,
+  `archive`, `unarchive`, `delete` — so on an insert a guard under `insertOrUpdate` sits
+  after everything under `insert`, whatever the yaml said.
+
+  It takes the key at both seats. On a **collection's** rule it ends that entry's pass —
+  the rest of its `BuildRules`, its own value objects, and every sibling still queued
+  behind it; at the root it stops every collection outright. Refused on a **composite value
+  object's** rule, where there is nothing to stop: a value object checks itself inside
+  `IsValid`, which is handed a `NotificationContext` and no `Rules`.
+
+- **A collection's rule tests now run through the framework's own seat.** They called
+  `BuildRules` directly, which was fine while nothing in a rule could end the pass — a
+  barrier unwinds from inside the seat that invoked the rules, so a body called by hand
+  let the unwind escape and every test failed on a rule doing exactly what it was declared
+  to do. They go through `domain.ValidateAggregateChild` now, against a stand-in root
+  declared in the test file itself: the real root is in `internal/domain`, which imports
+  `aggregatevos`, so it cannot be imported back. The seat also validates the entry's value
+  objects, which a write does too — so what these tests see is what the service sees.
+
+  Opt-in: a spec without the key generates exactly the tree it generated before.
+
+### Changed
+
+- **The generator now targets framework `v0.59.0`** (was `v0.57.0`). That is the release
+  carrying `Rules.StopIfInvalid()`, which `rules.list[].guard` emits, so the pin and the
+  capability move together. `internal/compat` keeps floor == ceiling — one supported
+  version, one shape of emitted code — so a project still pinned below it is refused with
+  the usual overridable message rather than handed a tree that will not compile.
+
+### Fixed
+
+- **`generate` is a no-op again in a project with more than one entity.**
+  `internal/domain/vos/doc.go` is written by EVERY spec that declares a value object —
+  it documents the package, not an aggregate — but its header named the entity and the
+  spec of the run that produced it. So generating `role` rewrote what `permission` had
+  just written, generating `permission` rewrote `tenant`'s, and each run reported
+  `updated 1` forever: the file cycled between owners and the working tree was never
+  clean.
+
+  Two things were wrong and only one of them was cosmetic. The header stated something
+  false — a comment about the whole `vos` package attributed to a single spec — and,
+  worse, it made the file's bytes depend on WHO generated it. That rules out the cheap
+  CI check this generator's whole model rests on: regenerate, and prove nothing moved.
+
+  Such a file now says what it is instead of guessing an owner:
+
+  ```
+  // shared:     the whole project — no single spec owns this file
+  ```
+
+  Nothing else about it changes: still owned, still checksummed, still refused when
+  edited by hand. Every other generated file keeps naming its entity and its spec — the
+  exception is narrow, and `internal/domain/vos/doc.go` is the only file that meets it.
+  The first regeneration after upgrading rewrites that one header once.
+
+- **`prune` no longer deletes a file another entity still generates.** The same shared
+  file was recorded under every entity that produced it, so pruning the first of them
+  removed it from disk while the others still emit it on their next run — and
+  `generate` listed it as an orphan, which is how a reader would have been talked into
+  doing exactly that. Both now recognise a neighbour's claim: prune reports the file as
+  left alone and says which entity still generates it, and the orphan list leaves it
+  out. This is the rule the registration merge already applied one declaration at a
+  time, applied to whole files.
+
+- **The gate could not have caught either.** Its regeneration lane compared the tree
+  before and after a full sweep, which matches even when every entity rewrites the
+  previous one's files — as long as the sweep runs in the same order both times, the end
+  state is identical. Each run is now also required to report nothing written.
+
 ## [0.36.0] — 2026-08-24
 
 A derived read field that validated green, generated happily, compiled, and was empty
