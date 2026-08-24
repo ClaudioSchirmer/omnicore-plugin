@@ -108,10 +108,13 @@ Map what exists before proposing — this is the whole safety of the run:
 - **Views** — which are declared as RELATIONAL read models (SoR-served, their own type,
   contributed through the relational feature seam) vs Mongo-projected; the
   composed/shared/embed ones (Mongo-only by construction).
-- **Read joins** — which repositories declare one. They are backing-INDEPENDENT and no
-  conversion touches them: a join reaches the entity and the rules on either posture, and
-  a relational view additionally inherits it. Never propose removing one as part of a
-  posture change (`shared/read-joins.md`).
+- **Read joins** — which repositories declare one, and which of their fields a read model
+  currently FILTERS, SORTS or SERVES. The DECLARATION is backing-independent and no
+  conversion touches it: a join reaches the entity and the rules on either posture, so
+  never propose removing one as part of a posture change. Its READ-side reach is NOT
+  backing-independent, and that asymmetry is the consequence to carry into item 3 — a
+  relational read model inherits the traversal, a Mongo projection cannot see it at all
+  (`shared/read-joins.md`).
 - **Integration events** — `integration.publishes` / `integration.subscribes` declared?
 - **Devops** — is there a `devops/` bench (compose + Debezium)? Which dialect × transport?
 - **Surfaces** — REST / GraphQL / gRPC.
@@ -133,10 +136,16 @@ structural (`N/A — <why>`):
    - **Add Mongo** — requires a Debezium-tailable engine (so on SQLite this implies an engine
      swap) + the broker + the CDC relay; each view flipped relational→Mongo is re-declared as
      a projected view and its first rebuild provisions the collection (`mongo-schema-evolution`,
-     `Version(1)` — delegated to `evolve-view`). **A flip the OTHER way leaves a collection and
-     an `omnicore_mongo_views` row behind that nothing drops for you** — the DB-per-service
-     guard then aborts the boot outside `dev`; the drop belongs IN the plan, not in the
-     incident afterwards.
+     `Version(1)` — delegated to `evolve-view`). **A view that inherited a READ JOIN loses
+     that reach in the flip**: the traversal survives untouched on the repository and the
+     entity and its rules still read the field, but the projection cannot carry it, so
+     every filter and sort declared over a joined field dies with the flip and the field
+     leaves the served shape. That is a consumer-visible LOSS, not a detail — name it per
+     view in the plan, from the Phase 0 inventory (`shared/read-joins.md`), and let the
+     delegated `evolve-view` run own the wording of each one.
+     **A flip the OTHER way leaves a collection and an `omnicore_mongo_views` row behind
+     that nothing drops for you** — the DB-per-service guard then aborts the boot outside
+     `dev`; the drop belongs IN the plan, not in the incident afterwards.
      **And say WHAT it unlocks** — usually the actual reason for the conversion: the view KINDS
      that were unavailable (identity / `SharedBaseView`, `ComposedView`, the Embed/Link family,
      Upstream) and integration events. Name the ones THIS project was told it could not have —

@@ -65,7 +65,12 @@ session." Never a gate: this run continues on the installed skills.
   names, view names, translation keys, route paths): domain type + rules + service ·
   TableSchema + children/sibling tables · commands/queries + DTOs + mappers · routes on
   every surface (REST, GraphQL, gRPC) · views it owns AND views of others it appears in
-  (SharedBaseView roles, ComposedView legs, embeds) · translation keys in the seven
+  (SharedBaseView roles, ComposedView legs, embeds) · **read joins ANOTHER entity
+  declares INTO this one** — a traversal is declared on the OTHER aggregate's repository
+  and names this entity only as its target, so nothing under this entity's own layers
+  carries it and a sweep organised per layer walks straight past it; look for it where
+  every reach is declared, beside the other repositories' schema bindings
+  (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`) · translation keys in the seven
   catalogs · migrations that created its tables · feature/bootstrap wiring · tests ·
   topics/subjects and integration events it publishes · **the `microservice.*.yaml`
   blocks that reference it** (`integration:` publishes AND subscribes,
@@ -101,7 +106,19 @@ never defaulted. Sections (structural — `N/A — <why>`, never deleted):
    the rest of the project does not compile without. Grep the type name across `internal/`
    before listing any `vos/` file for deletion; a composite VO is the easiest to get wrong,
    because the entity that reuses it names the type once and its parts appear as ordinary
-   columns everywhere else. Each one `⚠️ OPEN` until decided. **Two shared-base cases need their
+   columns everywhere else. Each one `⚠️ OPEN` until decided. **A read join reaching INTO
+   this entity is a dependent like any other, and the one a per-layer inventory misses:**
+   the declaration lives on the OTHER aggregate's repository, so removing this entity
+   leaves it pointing at a target that no longer exists — the build breaks on a plan that
+   was approved as complete, and on a spec-driven project the generator only degrades to a
+   warning about an unseen target rather than naming the removal. Every joining repository
+   is an EDIT in the inventory and `⚠️ OPEN` here until the dev says whether the traversal
+   goes with this entity or the removal stops. Two follow-ons belong in the same slot,
+   because they land on the OTHER entity's contract rather than on this one's: the joined
+   FIELDS disappear from it (a rules-only field changes a rule; a SERVED one is an API
+   break for that entity's consumers), and where that entity's read model is RELATIONAL,
+   any filter or sort declared over one of those fields goes with them
+   (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`). **Two shared-base cases need their
    own verdict, never improvised:** removing the BASE itself while any role lives is
    forbidden by design — but the PHYSICAL guard exists only if the dev's migrations
    declared the role→base FKs `ON DELETE RESTRICT` (the framework asks for it, never
@@ -185,6 +202,7 @@ index for concepts this table doesn't list.
 | feature unmounting / boot wiring | bootstrap |
 | tables / drop DDL / down twins (the pair lands in EVERY target dialect's `migrations/<dialect>/`, same number) | migrations · table-schema |
 | view-registry row hygiene / stale-row re-add trap | relational-view |
+| read joins another entity declares INTO this one (inbound dependents) | read-joins |
 | shared base / role slices | table-schema · views |
 | views / surviving embeds / `Version` | views · mongo-schema-evolution · auto-query-handlers |
 | routes / OpenAPI cleanup | openapi · reference |
