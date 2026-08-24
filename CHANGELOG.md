@@ -105,6 +105,22 @@ v0.56 or below has to upgrade first.
   argument — `omnicore-gen` answers `explain keys joins` with "unknown topic", so the
   skill sent an agent at a command that prints nothing it asked for.
 
+  Three routings the first pass left open close with it. **`remove-entity` now sweeps the
+  joins that reach INTO the entity being removed** — the declaration lives on the OTHER
+  aggregate's repository and names this entity only as its target, so an inventory
+  organised per layer walked straight past it and the build broke on a plan that had been
+  approved as complete. Every joining repository is now an edit in the inventory and a
+  blocking `⚠️ OPEN` under Dependents, carrying the two follow-ons that land on the OTHER
+  entity's contract rather than on this one's: its joined FIELDS go (a rules-only one
+  changes a rule, a served one is an API break for that entity's consumers), and with them
+  any filter or sort a relational read model declared over one. **`configure` stops calling
+  a join backing-independent without qualifying it** — the DECLARATION is, its READ-side
+  reach is not: a view flipped relational→Mongo keeps the traversal and loses every filter,
+  sort and served field that came through it, a consumer-visible loss that now has to be
+  named per view in the plan. And **`help` lists `read-joins` among the owner sheets it
+  frames availability from**, which is where "can my service do this, and from which pin"
+  gets answered.
+
 - **Seven golden-gate lanes** (`78 passed`, was 71). The running service is asked to prove
   a join end to end — an inner join serves the counterpart's value, a hidden field never
   reaches the wire, a left join with no counterpart answers an ABSENCE rather than the
@@ -113,7 +129,9 @@ v0.56 or below has to upgrade first.
   written by its own emitter and a missing header there surfaces as an internal name
   rather than as an error. The prune lane compiles a join whose target is HAND-WRITTEN,
   and a new **coverage-matrix row** (`29-read-joins`) carries both join shapes over a
-  hand-written target through build, vet and the generated tests.
+  hand-written target through build, vet and the generated tests. With v0.57.0 published,
+  the vendored golden host pins the released tag instead of a local checkout, so the gate
+  measures the emitters against the API consumers actually receive.
 
 - **`doctor` and `adopt` have a lane at all.** Neither had one: the pair that decides
   whether a hand edit is recoverable was proven by nobody. The gate now checks the whole
