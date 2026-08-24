@@ -44,6 +44,10 @@ type Neighbour struct {
 	// from the target's own declaration rather than from a restatement.
 	Table  string
 	Fields []NeighbourField
+	// Revision is that entity's optimistic-concurrency column: the one managed
+	// column the framework's read path does NOT resolve, and therefore the one a
+	// join must be refused for by name rather than by "no such column".
+	Revision string
 	// Children is what that spec declares its collections to be, so a role that
 	// MOUNTS one can be checked against the declaration instead of trusted to
 	// have restated it correctly.

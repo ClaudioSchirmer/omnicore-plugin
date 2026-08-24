@@ -231,6 +231,18 @@ Four things to get right, because they are the ones that cost a migration later:
     it is filled, so a non-pointer field receiving a NULL is refused at repository
     construction — a boot to find what the file could have said. The naming assumption
     fails at BUILD time if it is wrong, which is the honest failure — do not paper over it.
+  - **the framework-STAMPED columns of the target are reachable too**, and nothing in its
+    `fields:` names them: the three it registers under `storage.managed` — `createdAt`,
+    `updatedAt` and `archivedAt` — are declared by presence, and its schema resolves them
+    on the read path. So "when was it archived?" is a traversal, not a copied column.
+    **Write the column exactly as THAT spec spells it** (`deleted_at`, `dt_exclusao`,
+    whatever its author chose): the SLOT is what the framework fixes, never the column
+    name, and `check` reads the name out of the target's own `storage.managed`. Two
+    consequences: the archive column lands in a POINTER on EITHER kind of join (a row that
+    was never archived holds NULL there, which is the normal state, and it is the one
+    nullability the framework cannot check for you — the fields of `domain.Managed` are
+    unexported), and the REVISION slot is refused, because it guards the target's own
+    writes and a copy of it goes stale the moment that aggregate is written again.
   What it is NOT: a 1:N reach, a match on anything but the target's id, a second hop, or a
   way to bring a collection. `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` owns the
   boundary and the alternatives; `explain keys` prints the language half.

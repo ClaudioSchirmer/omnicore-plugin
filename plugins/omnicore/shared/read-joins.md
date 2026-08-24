@@ -55,6 +55,40 @@ supplier's country, and it is not on this entity"*:
    expressible.** The predicate is always `fk = target.id`. Model it as a real foreign key,
    or read it with the raw querier.
 
+## Which columns of the target you can reach
+
+**Every column of the target's OWN table — including the ones the framework stamps.** A
+schema registers those columns in SLOTS (`CreatedAt(col)`, `UpdatedAt(col)`,
+`DeletedAt(col)`, `Revision(col)`; `storage.managed.*` in the generator's spec), and the
+column each slot holds is whatever that aggregate's author named it. What is fixed is the
+LOGICAL name the read path resolves it back to — `CreatedAt`, `UpdatedAt`, `DeletedAt` —
+and that resolution is exactly what the join's column check consults. So *"when was the
+campus archived?"* is a traversal like any other, and it costs no denormalized copy, even
+though no field declaration anywhere names those columns.
+
+**Name the column as the TARGET spells it.** `deleted_at` is a convention, not the
+contract: the mapping is slot → column, per aggregate. Read the target's own declaration —
+its schema's `DeletedAt(...)` call, or its `storage.managed.archivedAt` — and write that.
+
+Two edges of that reach are worth knowing BEFORE the declaration is written:
+
+- **The archive column is NULL on every ACTIVE row**, which is the normal state — so it
+  crosses into a POINTER even under an `inner` join. It is also the one nullability the
+  framework cannot check for you: the fields of `domain.Managed` are unexported, so the
+  reflective check has nothing to point at and answers "not nullable" rather than guessing.
+  A non-pointer field there passes repository construction and fails on the first row
+  scanned. Against a spec target the generator derives it from that spec's own
+  `storage.managed`; against a hand-written one, the author says it (`nullable: true`, or a
+  pointer field).
+- **The revision does NOT cross.** It is the optimistic-concurrency guard of the TARGET's
+  own writes — the value its `UPDATE` is matched on — so a copy carried across a join is
+  stale the moment that aggregate is written again, and there is nothing this side could
+  correctly do with it. The read path does not resolve it, and the traversal is refused.
+
+What stays out of reach is the other direction: one predicate onto ONE table, so the
+target's shared base and its facets are not reachable across the join — their columns live
+in tables it never enters. Reach them from the spec that owns them.
+
 ## A joined field carries NO domain type
 
 Not an identity, not a value object of any kind — scalar, enum or composite. The

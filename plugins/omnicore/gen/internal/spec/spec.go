@@ -1468,6 +1468,20 @@ type JoinField struct {
 	// Column is the column on the TARGET's own table. A column of the target's
 	// shared base or of one of its siblings is not reachable: the traversal is
 	// one predicate onto one table.
+	//
+	// The framework-STAMPED columns count as columns of that table: whatever the
+	// target registers under storage.managed.createdAt, .updatedAt and
+	// .archivedAt is resolved on the read path under a fixed LOGICAL name, so a
+	// traversal may reach it even though no fields[] entry ever names it. The
+	// column itself is the target author's to name — read it off that spec and
+	// write it here as spelled there; only the slot is the framework's. The
+	// archive column crosses into a POINTER on either kind of join, because NULL
+	// there is the normal state of a row that was never archived.
+	//
+	// The revision is the one managed column that does NOT cross. It is the
+	// guard of the target's own writes — the value its update is matched on — so
+	// a copy carried across a join is stale the moment that aggregate is written
+	// again, and the read path does not resolve it.
 	Column string `yaml:"column"`
 	// Type is the Go type the value lands in. Derived from the target's own
 	// declaration of that column when omitted, which is the spelling to prefer —

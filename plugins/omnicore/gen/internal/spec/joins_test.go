@@ -359,3 +359,197 @@ func TestReservedViewSuffixMatchesTheFrameworksRule(t *testing.T) {
 		}
 	}
 }
+
+// campusThatStamps is the same target with its framework-managed columns
+// visible — the shape discoverSpecs reads out of `storage.managed`, where those
+// columns are declared BY PRESENCE and never appear under fields[].
+func campusThatStamps() Neighbour {
+	n := campusNeighbour()
+	n.Revision = "revision"
+	n.Fields = append(n.Fields,
+		NeighbourField{Name: "CreatedAt", Column: "created_at", Type: "time", LivesOn: "root"},
+		NeighbourField{Name: "UpdatedAt", Column: "updated_at", Type: "time", LivesOn: "root"},
+		NeighbourField{Name: "DeletedAt", Column: "deleted_at", Type: "time", LivesOn: "root", Nullable: true})
+	return n
+}
+
+// TestAJoinReachesTheTargetsStampedColumns is the gap this file was refusing to
+// let anyone cross.
+//
+// The framework accepts it: whatever columns the target registers in its managed
+// slots are resolved on the read path under fixed logical names, and
+// read.WithJoins checks a mapped column against exactly that. The generator saw
+// only fields[], so it answered "not a column of X" about a column that is one —
+// a refusal an author cannot act on, because the target's declaration is already
+// right. The columns below are this FIXTURE's; the framework fixes the slot, and
+// each spec names its own column.
+//
+// The nullability is the half only this side can get right. An INNER join proves
+// the joined ROW exists, never that every column of it is filled, and "not
+// archived" is the NORMAL state of a row — so the archive column has to land in
+// a pointer or the scan fails on the first active row.
+func TestAJoinReachesTheTargetsStampedColumns(t *testing.T) {
+	s := joiningSpec()
+	s.Joins[0].Fields = append(s.Joins[0].Fields,
+		JoinField{Name: "CampusCreatedAt", Column: "created_at", Description: "Quando o campus entrou."},
+		JoinField{Name: "CampusUpdatedAt", Column: "updated_at", Description: "Quando mudou."},
+		JoinField{Name: "CampusArchivedAt", Column: "deleted_at", Description: "Quando foi arquivado."})
+
+	opts := Options{Neighbours: []Neighbour{campusThatStamps()}}
+	if ps := Validate(s, opts); ps.HasBlockers() {
+		t.Fatalf("the framework resolves these columns on the read path, got:\n%v", ps.Error())
+	}
+
+	jr := joinReachOf(s, opts)
+	for _, tc := range []struct {
+		field    string
+		nullable bool
+	}{
+		{"CampusCreatedAt", false},
+		{"CampusUpdatedAt", false},
+		{"CampusArchivedAt", true},
+	} {
+		f := fieldNamedIn(jr.root, tc.field)
+		if f == nil {
+			t.Fatalf("%s did not resolve on the read side", tc.field)
+		}
+		if f.Type != "time" {
+			t.Errorf("%s must cross as a timestamp, got %q", tc.field, f.Type)
+		}
+		if f.Nullable != tc.nullable {
+			t.Errorf("%s nullable = %v, want %v — an archive column is NULL on every "+
+				"active row, and a non-pointer field cannot hold that",
+				tc.field, f.Nullable, tc.nullable)
+		}
+	}
+}
+
+// TestAChildJoinReachesTheStampedColumnsToo: the traversal reads the same target
+// declaration whichever table it hangs off, so nothing about the collection case
+// may weaken it.
+func TestAChildJoinReachesTheStampedColumnsToo(t *testing.T) {
+	s := joiningSpec()
+	s.Children = []Child{{
+		Name: "Guardiao", Plural: "Guardioes", Table: "guardioes", OwnedBy: "root",
+		Description:      "Os responsáveis pelo aluno.",
+		ParentColumn:     "matricula_id",
+		EditStrategy:     "atomic-replace",
+		BusinessIdentity: []string{"CampusID"},
+		Fields: []Field{{
+			Name: "CampusID", Type: "id", Column: "campus_id",
+			Example: "1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4", Description: "O campus.",
+		}},
+	}}
+	s.Joins = append(s.Joins, Join{
+		Kind: "left", To: "Campus", On: "campus_id", InChild: "Guardiao",
+		Fields: []JoinField{{
+			Name: "CampusArchivedAt", Column: "deleted_at", Description: "Quando foi arquivado.",
+		}},
+	})
+	opts := Options{Neighbours: []Neighbour{campusThatStamps()}}
+	if ps := Validate(s, opts); ps.HasBlockers() {
+		t.Fatalf("a collection reaches the target's stamped columns as well, got:\n%v", ps.Error())
+	}
+}
+
+// TestAStampedColumnTheTargetDoesNotDeclareIsStillRefused keeps the reach honest:
+// the columns are declared BY PRESENCE, so a target with no archive column has
+// no deleted_at to traverse onto and the ordinary refusal is the right one.
+func TestAStampedColumnTheTargetDoesNotDeclareIsStillRefused(t *testing.T) {
+	s := joiningSpec()
+	s.Joins[0].Fields[0].Column = "deleted_at"
+	// campusNeighbour declares no managed columns at all.
+	ps := Validate(s, joinOpts())
+	if !ps.HasBlockers() {
+		t.Fatal("a column the target does not declare must be refused, stamped or not")
+	}
+	if !strings.Contains(ps.Error().Error(), "not a column of Campus") {
+		t.Errorf("the refusal must say the column is not there; got:\n%v", ps.Error())
+	}
+}
+
+// TestAJoinOntoTheTargetsRevisionIsRefusedByName covers the one managed column
+// that stays out of reach — and the reason it is worth its own message.
+//
+// The framework's read path resolves the stamped TIMESTAMPS and stops, so a
+// traversal onto the revision fails at repository construction. Falling back to
+// "is not a column of Campus" would send the author to fix a declaration that is
+// already correct; the column IS there, it is the crossing that is refused.
+func TestAJoinOntoTheTargetsRevisionIsRefusedByName(t *testing.T) {
+	s := joiningSpec()
+	s.Joins[0].Fields[0].Column = "revision"
+	ps := Validate(s, Options{Neighbours: []Neighbour{campusThatStamps()}})
+	if !ps.HasBlockers() {
+		t.Fatal("the revision is not resolvable on the read path — the join must be refused")
+	}
+	if !strings.Contains(ps.Error().Error(), "optimistic-concurrency") {
+		t.Errorf("the refusal must say WHY this column and not the timestamps; got:\n%v", ps.Error())
+	}
+}
+
+// TestAJoinFieldCannotShadowWhatTheOwnersSchemaStamps is the same blind spot on
+// the OTHER side of the traversal.
+//
+// read.WithJoins refuses a Go name `owner.Resolve` already answers, and Resolve
+// reaches the owner's stamped columns and its link column right after its own —
+// none of which is under fields[]. So these names were accepted here and paid
+// for at repository construction, which is a boot to find.
+func TestAJoinFieldCannotShadowWhatTheOwnersSchemaStamps(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field string
+		mut   func(*Spec)
+	}{
+		{"the created_at the entity itself stamps", "CreatedAt", func(*Spec) {}},
+		{"the updated_at the entity itself stamps", "UpdatedAt", func(*Spec) {}},
+		{"the archive column the entity declares", "DeletedAt",
+			func(s *Spec) { s.Storage.Managed.ArchivedAt = "deleted_at" }},
+		{"the link column a role resolves as ParentID", "ParentID", func(s *Spec) {
+			s.Storage.Kind = "sharedbase-role"
+			s.Storage.Base = &Base{
+				Table: "people", Description: "A identidade.", NaturalKey: "Name",
+				Link: "shared-pk", SchemaFunc: "PersonSchema",
+				RowUniqueness: "unique-fk", OrphanPolicy: "keep",
+			}
+			s.Fields[0].LivesOn = "base"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := joiningSpec()
+			tc.mut(s)
+			s.Joins[0].Fields[0].Name = tc.field
+			ps := Validate(s, joinOpts())
+			if !ps.HasBlockers() {
+				t.Fatal("the framework refuses this name at construction — refuse it here")
+			}
+			if !strings.Contains(ps.Error().Error(), tc.field) {
+				t.Errorf("the refusal must name the field; got:\n%v", ps.Error())
+			}
+		})
+	}
+}
+
+// TestAChildJoinFieldCannotShadowTheCollectionsParentKey: the owner of a child
+// join is the COLLECTION's schema, and what it resolves on its own is the
+// collection's link back to the root, not the root's.
+func TestAChildJoinFieldCannotShadowTheCollectionsParentKey(t *testing.T) {
+	s := joiningSpec()
+	s.Children = []Child{{
+		Name: "Guardiao", Plural: "Guardioes", Table: "guardioes", OwnedBy: "root",
+		Description:      "Os responsáveis pelo aluno.",
+		ParentColumn:     "matricula_id",
+		EditStrategy:     "atomic-replace",
+		BusinessIdentity: []string{"CampusID"},
+		Fields: []Field{{
+			Name: "CampusID", Type: "id", Column: "campus_id",
+			Example: "1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4", Description: "O campus.",
+		}},
+	}}
+	s.Joins = append(s.Joins, Join{
+		Kind: "left", To: "Campus", On: "campus_id", InChild: "Guardiao",
+		Fields: []JoinField{{Name: "ParentID", Column: "label", Description: "A cidade."}},
+	})
+	if ps := Validate(s, joinOpts()); !ps.HasBlockers() {
+		t.Fatal("a collection resolves ParentID itself — a join field may not take that name")
+	}
+}

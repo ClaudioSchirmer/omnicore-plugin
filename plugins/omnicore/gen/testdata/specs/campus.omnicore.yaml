@@ -17,6 +17,13 @@ storage:
     createdAt: created_at
     updatedAt: updated_at
     revision: revision
+    # A coluna de arquivo existe aqui sem que o Campus arquive: ela e o ALVO da
+    # travessia que o Student declara sobre uma coluna carimbada e ANULAVEL, que
+    # e a unica que o framework nao consegue fiscalizar sozinho (os campos de
+    # domain.Managed nao sao exportados, entao a checagem reflexiva dele nao tem
+    # onde apontar e responde "nao anulavel"). O framework so exige o contrario —
+    # arquivar sem a coluna e que e recusado no boot.
+    archivedAt: deleted_at
 
 valueObjects:
   # Um VO que nomeia uma notificacao DO FRAMEWORK — que e o que a propria

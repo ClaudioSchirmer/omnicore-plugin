@@ -81,6 +81,12 @@ type SpecClaim struct {
 	// field it lands on must have — is to read the target's own declaration.
 	Table  string
 	Fields []FieldClaim
+	// Revision is that spec's optimistic-concurrency column, and it is carried
+	// here to be REFUSED BY NAME. It is the one managed column the framework's
+	// read path does not resolve — goNameForRead answers the timestamps and
+	// stops — so a traversal onto it fails at repository construction. Knowing
+	// which column it is turns a generic "not a column of X" into the reason.
+	Revision string
 	// Children is what this spec declares its collections to be. A role that
 	// MOUNTS one of them restates its shape, and the two statements have to
 	// agree: a column named on one side and not the other compiles on both and
@@ -407,6 +413,16 @@ func discoverSpecs(root string) []SpecClaim {
 			Plural  string `yaml:"plural"`
 			Storage struct {
 				Table string `yaml:"table"`
+				// The framework-managed columns, declared BY PRESENCE. They are
+				// columns of the table like any other and a read join may
+				// traverse onto them, so they are read here even though nothing
+				// under fields[] ever mentions them.
+				Managed struct {
+					CreatedAt  string `yaml:"createdAt"`
+					UpdatedAt  string `yaml:"updatedAt"`
+					ArchivedAt string `yaml:"archivedAt"`
+					Revision   string `yaml:"revision"`
+				} `yaml:"managed"`
 			} `yaml:"storage"`
 			Fields []struct {
 				Name     string `yaml:"name"`
@@ -465,7 +481,47 @@ func discoverSpecs(root string) []SpecClaim {
 		claim := SpecClaim{
 			Path: filepath.Join(layout.Dir, e.Name()), Entity: doc.Entity,
 			ViewName: doc.Read.View.Name, Route: doc.Plural,
-			Table: doc.Storage.Table,
+			Table: doc.Storage.Table, Revision: doc.Storage.Managed.Revision,
+		}
+		// The framework-stamped columns are columns of the target's own table
+		// like any other, and the READ path resolves them: whatever column the
+		// spec puts in each managed slot, TableSchema's goNameForRead answers it
+		// under a fixed logical name (CreatedAt, UpdatedAt, DeletedAt), which is
+		// exactly what read.WithJoins checks a mapped column against. The NAMES
+		// below are the logical ones and are the framework's; the columns are the
+		// author's, which is why they are read from this file rather than
+		// assumed. Nothing declares them under fields[] — they are declared BY
+		// PRESENCE under storage.managed — so this is the only place they can
+		// enter the claim, and while they did not, the generator refused a
+		// traversal the framework accepts with the one message that is certainly
+		// wrong: "not a column of X" — it is one.
+		//
+		// The archive column is NULLABLE, and the generator is the only side
+		// that can say so. The framework deliberately does not police the
+		// nullability of a managed slot: domain.Managed keeps those fields
+		// unexported, so its reflective check has nothing to point at and
+		// answers "not nullable" rather than guessing. A non-pointer Go field
+		// therefore survives construction and fails on the first ACTIVE row
+		// scanned — "never archived" being the normal state. The column is named
+		// right here in the file, so this states what the framework cannot.
+		//
+		// The revision column is deliberately NOT claimed: the read path does
+		// not resolve it, so a join onto it is refused rather than emitted.
+		for _, mc := range []struct {
+			name, column string
+			nullable     bool
+		}{
+			{"CreatedAt", doc.Storage.Managed.CreatedAt, false},
+			{"UpdatedAt", doc.Storage.Managed.UpdatedAt, false},
+			{"DeletedAt", doc.Storage.Managed.ArchivedAt, true},
+		} {
+			if mc.column == "" {
+				continue // declared by presence: no name, no column
+			}
+			claim.Fields = append(claim.Fields, FieldClaim{
+				Name: mc.name, Column: mc.column, Type: "time",
+				Nullable: mc.nullable, LivesOn: "root",
+			})
 		}
 		for _, f := range doc.Fields {
 			// A composite contributes its PARTS instead of itself: it owns no
