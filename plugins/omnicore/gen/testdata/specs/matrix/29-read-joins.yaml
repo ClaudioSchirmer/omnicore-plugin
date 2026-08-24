@@ -41,6 +41,10 @@ joins:
     inChild: Ingresso
     fields:
       - {name: NomeSedeRetirada, type: string, column: nome, example: "Sede Norte", description: Sede de retirada., labelKey: IngressoNomeSedeRetiradaField}
+      # Um CARIMBO DE TEMPO dentro da entrada. Ele nao e campo da colecao — a
+      # colecao nao tem coluna nenhuma de tempo — entao e a unica coisa que
+      # obriga o arquivo de resultado da colecao a importar "time".
+      - {name: SedeAbertaEm, type: time, column: aberta_em, example: "2026-01-01T00:00:00Z", description: Quando a sede de retirada abriu., labelKey: IngressoSedeAbertaEmField}
 modes: [display, insert]
 read:
   backing: relational

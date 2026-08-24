@@ -578,6 +578,13 @@ func childRowTypeNames(m *ir.Model, sh readShape) []string {
 		for _, f := range c.Fields {
 			out = append(out, sh.resultType(f))
 		}
+		// The collection's JOINED fields, for the same reason resultTypeNames
+		// walks the root's: emitChildRowResults writes them into the same
+		// struct, so a type they alone bring in — time.Time is the only one the
+		// join vocabulary has — needs its import decided from here too.
+		for _, f := range m.ServedJoinFields(c) {
+			out = append(out, sh.resultType(f))
+		}
 	}
 	return out
 }

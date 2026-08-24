@@ -7,6 +7,50 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.33.1] — 2026-08-24
+
+A one-line hole in the read-join work of 0.33.0, and the guard that makes its whole
+class visible from now on.
+
+### Fixed
+
+- **A collection that gains a TIMESTAMP through a read join no longer emits a file
+  missing its `time` import.** The read shape of a collection —
+  `internal/application/queries/<entity>_row_results.go` — carries the collection's own
+  fields AND the fields a `joins[]` entry with `inChild:` lands inside each entry. The
+  struct was written from both; the IMPORT was decided from the first alone. So a child
+  join onto any `time` column emitted `*time.Time` under an import block that names only
+  `domain`, and the tree stopped compiling at the consumer:
+
+      internal/application/queries/role_row_results.go:27:24: undefined: time
+
+  The place it broke is the worst one a generator has: `check` answered *"✓ this spec can
+  be generated"* and `generate` wrote the file without a word, because neither of them
+  compiles anything. Only `go build` found it, in the developer's own tree, minutes after
+  the generator had said everything was fine.
+
+  It is not specific to the framework-stamped columns 0.33.0 taught a join to reach. An
+  ordinary `time` column of the target breaks identically, and always did — a child join
+  simply had no way to carry a timestamp before, so the defect was unreachable rather than
+  absent. The import decision now unions the collection's served join fields, which closes
+  both readings at once: `time` is the only import-bearing type in the join field
+  vocabulary (`string | int | int64 | float64 | bool | time`).
+
+  The root-level query files were never affected — their own import decision already walked
+  the root joins' fields — which is why the breakage showed on exactly one file.
+
+### Added
+
+- **Every emitted Go file is now checked to import what it qualifies**, over every spec in
+  the coverage matrix. `internal/gofile` has always pruned the OPPOSITE class — an import
+  nothing uses — once, for every emitter at once; nothing covered this direction, and a
+  qualifier used with no import is invisible to `check`, survives `generate`, and lands as
+  a build error somebody else has to read. The property is asserted structurally now, so an
+  emitter that grows a new type cannot forget its import quietly, and a spec added to the
+  matrix widens the guard for free. The matrix and the golden fixture both grew a
+  time-carrying child join, so the gate compiles the case end to end rather than only
+  inspecting it.
+
 ## [0.33.0] — 2026-08-23
 
 The first release of read joins met a real project, and it refused a traversal the
