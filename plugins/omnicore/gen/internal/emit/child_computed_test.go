@@ -1,6 +1,8 @@
 package emit
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -242,5 +244,105 @@ func TestADerivedFieldIsNeverProjected(t *testing.T) {
 	}
 	if saw == 0 {
 		t.Fatal("no infra file was inspected, so nothing was actually asserted")
+	}
+}
+
+// A hook written before the derivations were qualified by entity is REFUSED,
+// not renamed around.
+//
+// On its own the rename is a loud, harmless failure — the call sites move and
+// the linker names the missing symbol. What is not harmless is the file: a hook
+// is written once and never rewritten, so by the time this lands the body is the
+// author's work. A run that says nothing leaves them with a function nobody
+// calls beside call sites for a function nobody wrote, and no statement anywhere
+// that the two are the same derivation.
+func TestAHookCarryingTheOldUnqualifiedNameIsRefused(t *testing.T) {
+	// A ROOT derivation, because that is the only kind a project can carry the
+	// old name for: the per-entry seat is new, so no tree predates its naming.
+	src := strings.Replace(childComputedSpec,
+		"  backing: relational",
+		`  computed:
+    - {name: Resumo, type: string, from: [Codigo], example: x, description: Um resumo.}
+  backing: relational`, 1)
+	sp, err := spec.Parse([]byte(src), "cesta.omnicore.yaml")
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if ps := spec.Validate(sp, spec.Options{}); ps.HasBlockers() {
+		t.Fatalf("the fixture does not validate:\n%v", ps.Error())
+	}
+	m, err := ir.Resolve(sp, &discover.Project{
+		ModulePath: "example.test/svc", Dialects: []string{"sqlite"}, Root: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("resolving: %v", err)
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal/application/queries")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(dir, "cesta_e_computed_manual.go")
+
+	// Nothing on disk yet: there is no rename to report.
+	if got := StaleDerivationNames(root, m); len(got) != 0 {
+		t.Fatalf("a project with no hook was reported as stale: %v", got)
+	}
+
+	// The shape an older generation left behind.
+	old := "package queries\n\nfunc ComputeResumo(ctx int) (string, error) { return \"mine\", nil }\n"
+	if err := os.WriteFile(hook, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := StaleDerivationNames(root, m)
+	if len(got) != 1 {
+		t.Fatalf("the stale name was not reported: %v", got)
+	}
+	for _, want := range []string{"cesta_e_computed_manual.go", "ComputeResumo", "ComputeCestaEResumo"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("the refusal does not name %q — the author cannot act on it: %s", want, got[0])
+		}
+	}
+
+	// Once renamed, it is silent again: the check must not survive the fix.
+	renamed := strings.Replace(old, "ComputeResumo", "ComputeCestaEResumo", 1)
+	if err := os.WriteFile(hook, []byte(renamed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := StaleDerivationNames(root, m); len(got) != 0 {
+		t.Fatalf("the refusal persists after the rename: %v", got)
+	}
+}
+
+// The report is the hand-off, so the signature it prints has to be the one on
+// disk — byte for byte, both scopes.
+//
+// They were two format strings that happened to agree, which is a pair that
+// agrees until somebody edits one. A reviewer copying a stale signature writes a
+// function nothing calls, in the one file the generator will never correct.
+func TestTheReportsSignatureIsTheEmittedOne(t *testing.T) {
+	m := childComputedModel(t)
+	hook := emittedBody(t, emitAll(t, m),
+		"internal/application/queries/cesta_e_computed_manual.go")
+
+	seen := 0
+	for _, c := range m.Read.Computed {
+		seen++
+		if !strings.Contains(hook, ComputedSignature(m, c)+" {") {
+			t.Errorf("the report prints a root signature the hook does not carry:\n  %s",
+				ComputedSignature(m, c))
+		}
+	}
+	for _, ch := range m.Children {
+		for _, c := range ch.Computed {
+			seen++
+			if !strings.Contains(hook, ChildComputedSignature(m, ch, c)+" {") {
+				t.Errorf("the report prints a per-entry signature the hook does not carry:\n  %s",
+					ChildComputedSignature(m, ch, c))
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("the fixture declares no derivation, so nothing was compared")
 	}
 }

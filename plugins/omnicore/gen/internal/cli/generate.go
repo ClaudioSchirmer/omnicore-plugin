@@ -113,6 +113,16 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 			model.Read.ViewName, was, was+1)
 	}
 
+	// A hook still carrying the pre-qualification name. Refused BEFORE anything
+	// is written: the file holds hand-written work, and a run that renames the
+	// call sites without saying so leaves the author with a linker error to
+	// interpret instead of a decision to make.
+	if stale := emit.StaleDerivationNames(proj.Root, model); len(stale) > 0 {
+		return fmt.Errorf("this project carries a derivation hook written before the "+
+			"derivations were qualified by entity:\n\n  %s\n\n  → %s",
+			strings.Join(stale, "\n  "), emit.StaleDerivationFix)
+	}
+
 	specRel, _ := filepath.Rel(proj.Root, opt.SpecPath)
 	if specRel == "" {
 		specRel = opt.SpecPath

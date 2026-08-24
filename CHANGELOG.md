@@ -10,7 +10,8 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 ## [0.36.0] — 2026-08-24
 
 A derived read field that validated green, generated happily, compiled, and was empty
-forever — plus the four defects around it that made that one possible.
+forever — plus the six defects around it that made that one survivable, and the seat it
+never had.
 
 ### Added
 
@@ -25,9 +26,15 @@ forever — plus the four defects around it that made that one possible.
   spelled in front of them, and that is also what the framework expects: it records a
   nested field's computed sources under the same segment prefix as the field itself, so
   `?fields=<collection>.<name>` pushes `<collection>.<source>` down without either side
-  spelling the segment out. The entry's row therefore earns the whole contract at its own
-  level: the sources are fetched instead of a name no column has, `?orderBy=` over it is a
-  typed 400, and the hierarchical export keeps the column under its `labelKey`.
+  spelling the segment out. The entry's row therefore earns the read contract at its own
+  level: the sources are fetched instead of a name no column has, and `?orderBy=` over it is
+  a typed 400.
+
+  **It does not reach the tabular export, and neither does any other field of a
+  collection** — a CSV/XLSX row is FLAT, so the export carries the root's columns and stops.
+  That is the framework's shape rather than a gap here, and the root's `read.computed` is
+  the one that does head a column. The derived field's `labelKey` is still registered in all
+  seven catalogs: it is what a flattening export would need, and it costs nothing meanwhile.
 
   The bodies land in the same hook file as the root's, one exported function per field.
   Naming a ROOT field under `from:` is refused — the store would be asked for
@@ -51,8 +58,15 @@ forever — plus the four defects around it that made that one possible.
 
   **What a consumer has to do:** rename the function in each existing
   `<entity>_computed_manual.go` to match the new signature — the report and the generated
-  call sites both print it. The build fails loudly at the call site until you do, which is
-  the good kind of failure; nothing is lost and nothing is rewritten.
+  call sites both print it. Nothing is lost and nothing is rewritten.
+
+  **And `check` says so before anything is written.** A hook is written once, so by the time
+  this rename lands the body is the author's work; a run that renamed the call sites and said
+  nothing would leave them with a function nobody calls beside call sites for a function
+  nobody wrote, and no statement anywhere that the two are the same derivation. Both `check`
+  and `generate` refuse, naming the file, the function that is there and the one the tree now
+  expects. The signature they print is the emitted one by construction — one format string
+  serves the hook and the report, which used to be two that happened to agree.
 
 - **Every key that addresses a collection now accepts EITHER of its two names.** A
   collection has two, and both are real: `name` is the entry's Go type, `plural` is the
@@ -136,6 +150,13 @@ forever — plus the four defects around it that made that one possible.
 
   It survived this long because no fixture that BUILDS had ever derived from an id — the
   gate's boot host now does, on a per-child collection, which is where it surfaced.
+
+- **A shared-base role's insert Result mapper had no generated test at all.** The round-trip
+  test skipped any command whose input method is `ApplyTo` — which is every role's insert,
+  since it is an upsert — so `FromEntity` went unexercised there. It is the same mapper
+  either way, and on a role it is also where a computed field's derivation is called, so the
+  one seat whose body is hand-written had no coverage on that shape. Found by adding a
+  derivation to a role fixture and watching the coverage lane, not by reading the emitter.
 
 - **A derivation's sources were never proved to be distinct PARAMETERS.** Each source
   becomes one, under its camelCase name, and a leading run of capitals lowercases as a unit

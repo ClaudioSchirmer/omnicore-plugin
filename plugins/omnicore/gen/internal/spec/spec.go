@@ -611,6 +611,11 @@ type Child struct {
 	// STORED. A derived value there would be computed from the entity the caller
 	// just sent rather than from the document the store answered with, and those
 	// are not the same question.
+	//
+	// It reaches REST and GraphQL, and NOT the tabular export — a CSV/XLSX row is
+	// flat, so no field of a collection is in one, derived or stored. The
+	// labelKey is still registered in every catalog: it is what a flattening
+	// export would need, and it costs nothing until there is one.
 	Computed []Computed `yaml:"computed"`
 	// Rules are the invariants checked on each entry of the collection.
 	Rules Rules `yaml:"rules"`

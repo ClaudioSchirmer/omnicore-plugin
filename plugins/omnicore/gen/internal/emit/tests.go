@@ -2584,15 +2584,19 @@ func emitAggregateContractTest(s *src, m *ir.Model) {
 // field dropped there is a write that succeeded and an answer that omits what
 // was just saved, which reads to the caller as data loss.
 func emitFromEntityTest(s *src, m *ir.Model, op *ir.Operation) {
-	if op.InputMethod != "ToEntity" {
-		return // the entity is not built here; emitPartialResultTest covers that shape
-	}
 	s.Doc(
 		"What was written reads back through the result mapper.",
 		"",
 		"The round trip is the point: the same command builds the entity and then "+
 			"projects it, so a field that survives one direction and not the other "+
-			"fails here rather than in a caller's response.")
+			"fails here rather than in a caller's response.",
+		"",
+		"A SHARED-BASE role reaches the entity through ApplyTo rather than ToEntity "+
+			"— its insert is an upsert, because another role may already have created "+
+			"the identity — and this test used to skip that shape entirely. The result "+
+			"mapper is the same mapper either way, and on a role it is also where a "+
+			"computed field's derivation is called, so skipping it left the one seat "+
+			"whose body is hand-written with no generated coverage at all.")
 	s.L("func Test%sResultCarriesWhatWasWritten(t *testing.T) {", op.CommandType)
 	s.L("\tctx := &configuration.AppContext{}")
 	s.L("\tc := &%s{", op.CommandType)
@@ -2610,10 +2614,20 @@ func emitFromEntityTest(s *src, m *ir.Model, op *ir.Operation) {
 		s.L("\t\t}},")
 	}
 	s.L("\t}")
-	s.L("\te, err := c.ToEntity(ctx)")
-	s.L("\tif err != nil {")
-	s.L("\t\tt.Fatalf(%s, err)", quote("ToEntity: %v"))
-	s.L("\t}")
+	if op.InputMethod == "ToEntity" {
+		s.L("\te, err := c.ToEntity(ctx)")
+		s.L("\tif err != nil {")
+		s.L("\t\tt.Fatalf(%s, err)", quote("ToEntity: %v"))
+		s.L("\t}")
+	} else {
+		// ApplyTo is handed an entity that may already exist, and it must stay
+		// pure because the handler may run it twice. An empty one is the
+		// first-write case, which is the one this asserts.
+		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
+		s.L("\tif err := c.ApplyTo(ctx, e); err != nil {")
+		s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
+		s.L("\t}")
+	}
 	// An id is minted by the framework on write; the projection dereferences it,
 	// so the test has to stand one in or it panics on a nil.
 	s.L("\te.SetID(domain.NewRandomID())")

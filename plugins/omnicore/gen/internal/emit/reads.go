@@ -2,6 +2,8 @@ package emit
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
@@ -118,6 +120,57 @@ func hasDerivations(m *ir.Model) bool {
 	}
 	return false
 }
+
+// StaleDerivationNames reports derivations whose hook file on disk still
+// declares the OLD, unqualified name — `Compute<Field>` instead of
+// `Compute<Entity><Field>`.
+//
+// The rename is what stopped two entities from emitting one function into one
+// package, and on its own it is a loud, harmless failure: the call sites move,
+// the old function goes unreferenced, and `go build` names the missing symbol.
+// What is NOT harmless is the file it happens in. A hook is written once and
+// never rewritten, so by the time this rename lands the body is the author's
+// work — and a regeneration that says nothing leaves them with a file declaring
+// a function nobody calls, next to call sites for a function nobody wrote, and
+// no statement anywhere that the two are the same derivation.
+//
+// So it is refused BEFORE anything is written, naming the file, the function
+// that is there and the one the tree now expects. Moving a body is a
+// deliberate act; discovering it from a linker error is not.
+//
+// The match is textual on purpose: parsing the file would mean deciding what to
+// do about one that does not parse, and a hook mid-edit legitimately does not.
+// A false positive here costs one rename; reading the file is the author's next
+// step either way.
+func StaleDerivationNames(root string, m *ir.Model) []string {
+	if len(m.Read.Computed) == 0 {
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(root, computedHookFile(m)))
+	if err != nil {
+		return nil // no hook yet: nothing to have been renamed
+	}
+	text := string(body)
+	var out []string
+	for _, c := range m.Read.Computed {
+		want := computedFuncName(m.Entity, c)
+		if strings.Contains(text, "func "+want+"(") {
+			continue
+		}
+		if old := "Compute" + c.Name; strings.Contains(text, "func "+old+"(") {
+			out = append(out, fmt.Sprintf("%s declares %s, and this tree now calls %s",
+				computedHookFile(m), old, want))
+		}
+	}
+	return out
+}
+
+// StaleDerivationFix is the one sentence that turns the report above into an
+// action. It is shared so `check` and `generate` cannot phrase it differently.
+const StaleDerivationFix = "rename the function in that file — the body is yours and is not " +
+	"otherwise affected. The qualifier exists because every entity of a project writes its " +
+	"derivations into one package, so two entities with a computed field of the same name " +
+	"used to emit one function twice"
 
 // childComputedFuncName qualifies a per-entry derivation by BOTH owners: the
 // entity, because every entity of a project writes into one queries package, and
@@ -412,10 +465,12 @@ func emitComputedHook(m *ir.Model) (fsplan.File, error) {
 	s.Doc(
 		"The derivations behind this entity's computed read fields.",
 		"",
-		"Each runs below the web boundary, so REST, GraphQL and the CSV/XLSX export "+
-			"all render the same value — that is the whole reason read-side computation "+
-			"lives at this seat instead of in a Response. A root derivation runs once "+
-			"per document; a collection's runs once per ENTRY, and is handed that entry.",
+		"Each runs below the web boundary, so every surface renders the SAME value — "+
+			"that is the whole reason read-side computation lives at this seat instead of "+
+			"in a Response. A root derivation runs once per document and heads a column of "+
+			"the CSV/XLSX export; a collection's runs once per ENTRY, is handed that entry, "+
+			"and reaches REST and GraphQL only — a tabular row is flat, so no field of a "+
+			"collection is in one, derived or stored.",
 		"",
 		"Until a body is written the field renders ABSENT, quietly. The framework "+
 			"cannot detect that: as far as it is concerned the derivation ran and "+
@@ -529,8 +584,11 @@ func emitOneDerivation(s *src, c ir.ComputedField, fname, collection string) {
 			"genuinely cannot produce a value — a missing source is absence, not a "+
 			"failure.")
 	s.Doc(doc...)
-	s.L("func %s(ctx *configuration.AppContext, %s) (%s, error) {",
-		fname, strings.Join(params.decls, ", "), c.GoType)
+	// ONE format string for the emitted function and the one the report prints.
+	// They used to be two that happened to agree, which is a pair that agrees
+	// until somebody edits one — and the report is the hand-off, so a reviewer
+	// copying a signature that no longer matches writes a function nothing calls.
+	s.L("%s {", derivationSignature(fname, params, c.GoType))
 	s.L("\t// TODO: derive %s from %s.", c.Name, strings.Join(params.names, ", "))
 	s.L("\tvar %s %s", naming.Camel(c.Name), c.GoType)
 	s.L("\treturn %s, nil", naming.Camel(c.Name))
@@ -576,16 +634,19 @@ func computedFuncName(e ir.Names, c ir.ComputedField) string {
 // the implementer for. It is derived from the same place the file is written, so
 // the two cannot describe different functions.
 func ComputedSignature(m *ir.Model, c ir.ComputedField) string {
-	p := computedParams(c)
+	return derivationSignature(computedFuncName(m.Entity, c), computedParams(c), c.GoType)
+}
+
+// derivationSignature is the single authority on what a derivation looks like.
+// Everything that renders one — the hook, the report — goes through here.
+func derivationSignature(fname string, p computedParamSet, goType string) string {
 	return fmt.Sprintf("func %s(ctx *configuration.AppContext, %s) (%s, error)",
-		computedFuncName(m.Entity, c), strings.Join(p.decls, ", "), c.GoType)
+		fname, strings.Join(p.decls, ", "), goType)
 }
 
 // ChildComputedSignature is the same for a per-entry derivation.
 func ChildComputedSignature(m *ir.Model, ch ir.Child, c ir.ComputedField) string {
-	p := computedParams(c)
-	return fmt.Sprintf("func %s(ctx *configuration.AppContext, %s) (%s, error)",
-		childComputedFuncName(m.Entity, ch, c), strings.Join(p.decls, ", "), c.GoType)
+	return derivationSignature(childComputedFuncName(m.Entity, ch, c), computedParams(c), c.GoType)
 }
 
 // derivationSeat is one place derivations run: the shape that HOLDS the derived

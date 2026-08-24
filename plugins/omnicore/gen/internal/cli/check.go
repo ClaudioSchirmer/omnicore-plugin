@@ -130,6 +130,18 @@ func Check(w io.Writer, opt CheckOptions) (CheckResult, error) {
 				Shape:   fsplan.Hash([]byte(emit.ViewShape(model))),
 				Version: model.Read.Version,
 			}
+			// A hook written before the derivations were qualified by entity.
+			// It belongs here and not only in `generate` for the reason this
+			// whole block exists: this JSON claims to be the only authority on
+			// whether the spec can be generated, and a refusal `generate` makes
+			// one command later breaks that claim.
+			for _, stale := range emit.StaleDerivationNames(proj.Root, model) {
+				res.Blockers = append(res.Blockers, Finding{
+					Where:   "read.computed",
+					Message: stale,
+					Fix:     emit.StaleDerivationFix,
+				})
+			}
 			if was, changed := lock.ViewShapeChangedWithoutBump(model.Entity.Pascal, view); changed {
 				res.Blockers = append(res.Blockers, Finding{
 					Where: "read.view.version",

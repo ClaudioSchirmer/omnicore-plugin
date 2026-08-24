@@ -142,7 +142,8 @@ IS the collection's `CollectionName()` — a persisted document key), each
 them, in the domain's language. A guessed plural compiles, boots, and writes the document
 under a key nothing reads back.
 
-**A collection has TWO names, and every key that addresses one takes either.** `name` is
+**A collection has TWO names, and every key that addresses one takes either** — and
+`explain rules` states it once, under "NAMING A COLLECTION", which is where a refusal points. `name` is
 the entry's Go type, `plural` is the collection's name; `joins[].inChild`,
 `rules.list[].fields` on a `childDuplicate`/`groupCap`, `read.computed.from`,
 `children[].computed`, `siblings[].attachTo: child:<…>` and `service.facts[].filters` all
@@ -416,6 +417,9 @@ Four things to get right, because they are the ones that cost a migration later:
   by itself.
   - The bodies land in the **same** hook file as the root's, one exported function per
     field, named for both owners: `Compute<Entity><Entry><Field>`.
+  - It reaches REST and GraphQL, and **not** the tabular export — a CSV/XLSX row is flat,
+    so no field of a collection is in one, derived or stored. Only the root's
+    `read.computed` heads a column there.
   - Naming a ROOT field under `from:` is refused: the store would be asked for
     `<collection>.<rootField>`, which is not a path any document has. If the derivation is
     really about the record as a whole, it belongs in `read.computed`.

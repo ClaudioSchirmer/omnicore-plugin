@@ -679,10 +679,21 @@ read:
   #
   # It is therefore neither filterable nor sortable, and declaring it under
   # byParams.filters is refused for the same reason.
+  #
+  # As duas ultimas fontes sao campos de JOIN DE RAIZ, e nao por enfeite. Um
+  # join de raiz nao esta em m.Fields nem nos facets — vive so no read model —
+  # entao o resolvedor do emissor nao o achava e a fonte sumia com um `continue`
+  # nu: a assinatura saia com dois parametros a menos, compilava, e o campo
+  # ficava vazio para sempre. Era a forma MAIS NATURAL do recurso ("derive do
+  # nivel que eu ja juntei") e nenhuma fixture que compila a exercitava.
+  #
+  # CampusBudgetCode ainda por cima e `hidden`: esta na entidade e fora da API.
+  # Uma derivacao pode le-lo sem que ele va para o fio — que e exatamente a
+  # composicao que faz o par join+computed valer a pena.
   computed:
     - name: EnrollmentLabel
       type: string
-      from: [Name, EnrollmentNumber]
+      from: [Name, EnrollmentNumber, CampusName, CampusBudgetCode]
       labelKey: StudentEnrollmentLabelField
       example: "Ana Paula Ribeiro (2026-00417)"
       description: Nome do aluno seguido do número de matrícula, para listagens.

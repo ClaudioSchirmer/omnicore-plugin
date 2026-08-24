@@ -137,9 +137,25 @@ convention is not a style preference; it is what makes the generated suite green
 on the day it is written.
 
 A fact may also ask about ONE ENTRY of a collection: filters: [<collection>.<field>]
-— the collection being children[].plural — emits a method taking that entry
-field's type, asked once per entry. Only on kind: manual: a computed fact is a
-query over this entity's own table, and the entry's column is on another one.
+— emits a method taking that entry field's type, asked once per entry. Only on
+kind: manual: a computed fact is a query over this entity's own table, and the
+entry's column is on another one.
+
+NAMING A COLLECTION, once, for every key that does it. A collection has TWO
+names and both are real: "name" is the entry's Go type, "plural" is the
+collection's name — the document segment, the read DTO's field, the notification
+wire path. Every key that addresses a collection takes EITHER of them:
+
+    joins[].inChild · rules.list[].fields (childDuplicate, groupCap)
+    read.computed.from · children[].computed · siblings[].attachTo: child:<...>
+    service.facts[].filters
+
+Messages here quote the plural. The keys used to disagree — three resolved the
+singular, one the plural, and its refusal argued the opposite of the other three
+— so a spec could be correct and refused for spelling one collection the way the
+key beside it demanded. What IS refused now is the ambiguity that would make
+"either name" impossible: one word naming the entry type of one collection and
+the plural of another.
 
 Two things the DSL deliberately does NOT cover, because the framework already
 does them:

@@ -467,6 +467,15 @@ PYENTRY
       done
       grep -q "Campus Norte" <<<"$CSVROW" || csvbad="$csvbad; the joined value is not in the row"
       grep -q "Campus Budget Code" <<<"$CSVHEAD" && csvbad="$csvbad; a hidden join field reached the export"
+      # The ROOT's derived column heads the export under its labelKey — that half
+      # of the contract is real and asserted.
+      grep -q "Enrollment Label" <<<"$CSVHEAD" || csvbad="$csvbad; the root's derived column has no header"
+      # A COLLECTION's does not, and neither does any stored field of one: a
+      # tabular row is FLAT. Pinned because it is a claim that rots — the natural
+      # sentence to write about a derived field is "every surface renders it",
+      # and for the per-entry seat that sentence is false.
+      grep -q "Guardian Full Name" <<<"$CSVHEAD" && csvbad="$csvbad; a collection's stored field reached the flat export"
+      grep -qi "guardian.*label" <<<"$CSVHEAD" && csvbad="$csvbad; a collection's derived field reached the flat export"
       if [[ -z "$csvbad" ]]; then
         ok "the CSV export carries the joined columns, headed and without the hidden one"
       else
