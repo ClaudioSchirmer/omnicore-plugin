@@ -254,6 +254,17 @@ Four things to get right, because they are the ones that cost a migration later:
   out-of-set value to Unknown instead of storing it.
   The reverse holds too: a value with a SHAPE and no fixed set (a document number, a URL,
   a plate) is a `raw` VO, not a regex inline in a rule.
+  **Give every enum member its `text`, and know what it does not buy.** Each member is
+  registered in the seven catalogs under the key the framework derives for it —
+  `domain.EnumDescriptionKey` answers `"<Type>.<value>"`, so `EnrollmentStatus.active` —
+  which is exactly what `translator.EnumDescription(lang, v)` resolves at the boundary.
+  Declaring `members[].text` fills that entry; leaving it out still writes the entry, with
+  the member's own name in all seven languages, and the gen-report names every catalog
+  that got it. What it does NOT change is the wire: REST, GraphQL and gRPC carry the raw
+  value in every language by the framework's own design, so a screen wanting a readable
+  status calls `EnumDescription` — the field's `labelKey` translates the column HEADING,
+  never the value under it. (`descriptionKeys` is refused for exactly this reason: the
+  entries are not asked for by a flag, they are written from the member texts.)
   **And once a field IS a value object, do NOT also declare `kind: required` on it.** The
   framework validates every value-object field by reflection on every write — nothing
   declares it and nothing skips it — and a string-backed raw VO reports an empty value as

@@ -38,6 +38,9 @@ type Input struct {
 	SpecPath            string
 	Decisions           []fsplan.Decision
 	MissingTranslations []string
+	// UntranslatedEnumValues names the enum members the spec declared no text
+	// for, per catalog.
+	UntranslatedEnumValues []string
 	// StaleRegistrations names what a shared registration file declares with
 	// content that no longer matches this spec.
 	StaleRegistrations []string
@@ -374,6 +377,22 @@ func renderTodo(b *strings.Builder, in Input) {
 			fmt.Fprintf(b, "- %s\n", t)
 		}
 		b.WriteString("\n")
+	}
+
+	if len(in.UntranslatedEnumValues) > 0 {
+		empty = false
+		b.WriteString("### Enum values reading in the wrong language\n\n")
+		b.WriteString("Each enum member is now registered in the seven catalogs under the key " +
+			"the framework derives for it (`<Type>.<value>`), which is what " +
+			"`translator.EnumDescription(lang, v)` looks up. These had no `text` in the spec " +
+			"for the catalog named, so they were filled with the member's own name — a real " +
+			"word, not a placeholder, which is why nothing else reports them. It is still the " +
+			"member name in one language, shown to everyone:\n\n")
+		for _, t := range in.UntranslatedEnumValues {
+			fmt.Fprintf(b, "- %s\n", t)
+		}
+		b.WriteString("\nDeclare `valueObjects[].members[].text` and regenerate. The wire is " +
+			"unaffected either way — it carries the raw value by design.\n\n")
 	}
 
 	if len(in.StaleRegistrations) > 0 {

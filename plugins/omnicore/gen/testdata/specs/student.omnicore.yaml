@@ -146,10 +146,22 @@ valueObjects:
     description: Situação da matrícula do aluno.
     unknownNotification: UnknownEnrollmentStatusNotification
     members:
-      - {name: Active,    value: active}
-      - {name: Suspended, value: suspended}
-      - {name: Graduated, value: graduated}
-      - {name: Dropped,   value: dropped}
+      # O texto de cada membro vira a entrada de catálogo sob a chave que o
+      # FRAMEWORK deriva por reflexão — "EnrollmentStatus.active" —, que é o que
+      # translator.EnumDescription resolve no boundary. O fio continua levando o
+      # valor cru em todas as línguas: isto é o rótulo, não a representação.
+      - name: Active
+        value: active
+        text: {ptbr: Ativa, eng: Active, esp: Activa, fra: Active, deu: Aktiv, ita: Attiva, nld: Actief}
+      - name: Suspended
+        value: suspended
+        text: {ptbr: Suspensa, eng: Suspended, esp: Suspendida, fra: Suspendue, deu: Ausgesetzt, ita: Sospesa, nld: Opgeschort}
+      - name: Graduated
+        value: graduated
+        text: {ptbr: Concluída, eng: Graduated, esp: Graduada, fra: Diplômé, deu: Abgeschlossen, ita: Diplomata, nld: Afgestudeerd}
+      - name: Dropped
+        value: dropped
+        text: {ptbr: Trancada, eng: Dropped, esp: Abandonada, fra: Abandonnée, deu: Abgebrochen, ita: Ritirata, nld: Gestopt}
 
   - name: Money
     kind: composite

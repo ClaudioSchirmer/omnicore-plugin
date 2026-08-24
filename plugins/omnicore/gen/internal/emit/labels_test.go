@@ -75,3 +75,44 @@ func TestLabelComesFromTextNotDescription(t *testing.T) {
 		t.Errorf("with no text at all the label is the field name; got %q", got)
 	}
 }
+
+// An ENUM MEMBER's text is a label too, and it follows the label discipline
+// rather than the notification one: an empty catalog falls back to the member's
+// own name, never to a marked placeholder. "TODO(FRA): Aberto" in a status
+// column is what the end user reads; "Aberto" in a French screen is a word in
+// the wrong language, which is worse than nothing only in the report.
+func TestEnumMemberTextFallsBackToTheMemberName(t *testing.T) {
+	mem := ir.EnumMember{
+		Name:           "EmAndamento",
+		DescriptionKey: "SituacaoCurso.em_andamento",
+		Text:           map[string]string{"ptbr": "Em andamento"},
+	}
+	if got := memberText(mem, "ptbr"); got != "Em andamento" {
+		t.Errorf("a declared text is what the catalog gets; got %q", got)
+	}
+	if got := memberText(mem, "fra"); got != "Em Andamento" {
+		t.Errorf("an undeclared catalog falls back to the spaced member name; got %q", got)
+	}
+	if got := memberText(mem, "fra"); got == mem.DescriptionKey {
+		t.Error("the fallback is never the key — that is exactly what the framework " +
+			"already answers when no entry exists, so the entry would buy nothing")
+	}
+}
+
+// The report is the other half of closing the silence: an entry filled from the
+// member name is a real string, so nothing in the emitted code looks wrong and
+// only the hand-off can say the screen is in one language.
+func TestUntranslatedEnumValuesNamesTheMissingCatalogs(t *testing.T) {
+	m := &ir.Model{ValueObjects: []ir.ValueObject{{
+		Name: "SituacaoCurso", Kind: "enum",
+		Members: []ir.EnumMember{
+			{Name: "Aberto", DescriptionKey: "SituacaoCurso.aberto"},
+			{Name: "Fechado", DescriptionKey: "SituacaoCurso.fechado", Missing: []string{"fra", "deu"}},
+		},
+	}}}
+	got := UntranslatedEnumValues(m)
+	want := []string{"SituacaoCurso.fechado / DEU", "SituacaoCurso.fechado / FRA"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("UntranslatedEnumValues = %v, want %v", got, want)
+	}
+}

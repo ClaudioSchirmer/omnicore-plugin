@@ -273,8 +273,83 @@ func catalogEntries(m *ir.Model) map[string][]MapEntry {
 		for _, f := range labelledFields(m) {
 			entries = append(entries, MapEntry{Key: f.LabelKey, Value: labelText(f, lang)})
 		}
+		// EVERY member of every enum this spec declares. The spec has always
+		// accepted a text per language on them and nothing ever emitted one, so
+		// the seven translations were parsed, validated, and dropped — the
+		// author got "this spec can be generated" for a key no build consumed.
+		entries = append(entries, enumDescriptions(m, lang)...)
 		out[lang] = entries
 	}
+	return out
+}
+
+// enumDescriptions is the catalog contribution of the enum value objects: one
+// entry per MEMBER, in one language.
+//
+// The key is the framework's, not ours. domain.EnumDescriptionKey reflects over
+// an enum value and answers "<TypeName>.<value>", and Translator.EnumDescription
+// resolves exactly that key with the request language — falling back to the key
+// itself when the catalog has none. Which is what a project got until now: the
+// spec carried "Aberto"/"Open"/"Ouvert" and the screen read `SituacaoCurso.aberto`
+// in all seven languages.
+//
+// A value object written by hand (written: manual) contributes too. The TYPE is
+// the author's; the member set is still the spec's, and the framework derives
+// the key by reflection over the type name either way — so the entry is just as
+// resolvable and leaving it out would translate the generated enums and no
+// other.
+//
+// Note what this does NOT do: the wire still carries the raw value. The
+// framework is deliberate about that ("standardized value in, standardized value
+// out") — EnumDescription is a per-request helper for showing a label, never a
+// step in persistence, audit, or the response DTO. What the entry buys is that
+// the helper has something to find.
+func enumDescriptions(m *ir.Model, lang string) []MapEntry {
+	var out []MapEntry
+	for _, vo := range m.ValueObjects {
+		for _, mem := range vo.Members {
+			if mem.DescriptionKey == "" {
+				continue
+			}
+			out = append(out, MapEntry{Key: mem.DescriptionKey, Value: memberText(mem, lang)})
+		}
+	}
+	return out
+}
+
+// memberText is the member's text in one catalog: what the spec declared under
+// members[].text, or the member's own name spaced out.
+//
+// The fallback is the LABEL fallback, deliberately — see ir.EnumMember.Text.
+// "Aberto" is a heading; a TODO placeholder in its place is what the end user
+// reads, whereas the spaced member name is at worst an untranslated word.
+func memberText(mem ir.EnumMember, lang string) string {
+	if t := strings.TrimSpace(mem.Text[lang]); t != "" {
+		return t
+	}
+	return spaceOut(mem.Name)
+}
+
+// UntranslatedEnumValues names every enum member the spec left a catalog empty
+// for, as "<Type>.<value> / LANG".
+//
+// It is NOT folded into MissingTranslations: that list is about entries emitted
+// as marked placeholders, and these are emitted as a real (if untranslated)
+// label. The distinction is the point — a notification with no text is broken
+// output, an enum member with no text is a heading in the wrong language.
+func UntranslatedEnumValues(m *ir.Model) []string {
+	var out []string
+	for _, vo := range m.ValueObjects {
+		for _, mem := range vo.Members {
+			if mem.DescriptionKey == "" {
+				continue
+			}
+			for _, lang := range mem.Missing {
+				out = append(out, fmt.Sprintf("%s / %s", mem.DescriptionKey, strings.ToUpper(lang)))
+			}
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

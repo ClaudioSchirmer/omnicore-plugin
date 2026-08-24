@@ -363,8 +363,10 @@ func RefusedKeys() map[string]string {
 	return map[string]string{
 		"read.indexes[].partial": "the framework takes a document filter there, and this " +
 			"language has no way to write one",
-		"read.identityView":                    "the shared identity's own view is not generated yet",
-		"valueObjects[].descriptionKeys":       "per-value translation keys are not generated",
+		"read.identityView": "the shared identity's own view is not generated yet",
+		"valueObjects[].descriptionKeys": "the per-value catalog entries are written from " +
+			"the member texts, not asked for by a flag — declare " +
+			"valueObjects[].members[].text",
 		"rules.list[].actionName":              "gate the rule by verb scope instead",
 		"rules.manual[].actionName":            "describe the condition in the description instead",
 		"children[].rules.list[].actionName":   "gate the rule by verb scope instead",
