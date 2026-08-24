@@ -133,6 +133,14 @@ v0.56 or below has to upgrade first.
   the vendored golden host pins the released tag instead of a local checkout, so the gate
   measures the emitters against the API consumers actually receive.
 
+  The DDL job stages its specs where the generator LOOKS for them — `specs/omnicore-gen/`,
+  not a bare `specs/` — and takes the join's TARGET along. That directory was never only an
+  output location: a read join derives its columns and their Go types from the target's own
+  spec, so a sibling staged beside it rather than in it is invisible, and the join is
+  refused for having no type to derive. Nothing before read joins needed a spec to see
+  another one, which is why a job that had been green for months failed the first time the
+  fixture reached across.
+
 - **`doctor` and `adopt` have a lane at all.** Neither had one: the pair that decides
   whether a hand edit is recoverable was proven by nobody. The gate now checks the whole
   cycle on a join-bearing tree — doctor reports the edit, adopt records the exception,

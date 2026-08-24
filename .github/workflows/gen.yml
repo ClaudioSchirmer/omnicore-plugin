@@ -95,9 +95,17 @@ jobs:
           WORK=/tmp/ddl-host
           rm -rf "$WORK"; mkdir -p "$WORK"
           cp -R testdata/host/. "$WORK/"
-          mkdir -p "$WORK/specs"
-          cp testdata/specs/student.omnicore.yaml testdata/specs/teacher.omnicore.yaml "$WORK/specs/"
-          for f in "$WORK"/specs/*.omnicore.yaml; do
+          # specs/omnicore-gen/ is where the generator LOOKS for a project's
+          # other specs, not merely where it writes them: a read join derives its
+          # columns and their Go types from the TARGET's own spec, so a sibling
+          # staged anywhere else is invisible and the join is refused for having
+          # no type to derive. campus travels with them for that reason — and,
+          # being first alphabetically, it is generated before the student that
+          # joins into it, the same ordering scripts/golden.sh spells out.
+          mkdir -p "$WORK/specs/omnicore-gen"
+          cp testdata/specs/campus.omnicore.yaml testdata/specs/student.omnicore.yaml \
+             testdata/specs/teacher.omnicore.yaml "$WORK/specs/omnicore-gen/"
+          for f in "$WORK"/specs/omnicore-gen/*.omnicore.yaml; do
             go run ./cmd/omnicore-gen generate -spec "$f" -project "$WORK"
           done
 
