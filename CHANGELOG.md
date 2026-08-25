@@ -7,6 +7,11 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-08-24
+
+A value object could never be a precondition: the framework validates every one of them on
+every write, and that pass runs after the rules that depend on it. Now a rule can say where.
+
 ### Added
 
 - **`rules.list[].kind: valueObject` — a value object validated WHERE THE RULE IS, so it can

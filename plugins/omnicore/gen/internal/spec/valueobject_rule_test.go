@@ -119,6 +119,26 @@ func TestValueObjectRuleOverAReusedTypeAsksTheProject(t *testing.T) {
 	}
 }
 
+// A hand-written value object does NOT exist yet — that is what kind: manual
+// says — and the rule reaches it all the same. It has to: the type will write
+// the IsValid the report already asks for by name, with the exact signature, and
+// the automatic pass would call it at the end anyway. Refusing here would make
+// the one kind whose rule is bespoke the one kind that cannot be a premise.
+func TestValueObjectRuleOverAHandWrittenTypeValidates(t *testing.T) {
+	s := voRuleSpec(Rule{
+		ID: "document-first", Kind: "valueObject",
+		Scope: []string{"insertOrUpdate"}, Fields: []string{"Name"}, Guard: true,
+	})
+	s.Fields[0].VO = &FieldVO{Kind: "manual", Ref: "NationalID"}
+	s.ValueObjects = []ValueObject{{
+		Name: "NationalID", Kind: "manual", Backing: "string",
+		Description: "Um documento nacional, validado por dígito verificador.",
+	}}
+	if got := problemsFor(t, s, Options{}); got != "" {
+		t.Fatalf("a value object the author still owes is refused:\n%s", got)
+	}
+}
+
 // The exclusion is a set of names, so naming a field twice costs nothing. The
 // validation call is not: it EMITS, and two of them in one pass hand the caller
 // the same complaint twice — the exact duplicate this kind exists to prevent.
