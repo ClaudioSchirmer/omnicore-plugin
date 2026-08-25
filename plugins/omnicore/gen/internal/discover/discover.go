@@ -56,6 +56,17 @@ type Project struct {
 	// rewrite, everybody's to reference.
 	VOOwner map[string]string
 
+	// VOKind maps a value object to WHAT IT IS — "raw" (it writes its own
+	// IsValid; a composite is one of these) or "enum" (membership, checked by
+	// the framework). A type the reader could not classify is absent.
+	//
+	// It exists for the one question a NAME cannot answer: a field declared
+	// `vo.kind: reuse` names a type this spec never described, and validating
+	// that value in place is `x.IsValid(...)` for one kind and
+	// `domain.ValidateEnum(x, ...)` for the other. Guessing wrong does not
+	// compile, so the generator asks the package instead.
+	VOKind map[string]string
+
 	HasMongo bool
 
 	// SiblingSpecs is what the OTHER specs of this project already claim: the
@@ -129,7 +140,7 @@ func Find(dir string) (*Project, error) {
 	p.Dialects = discoverDialects(root)
 	p.HasMongo = discoverMongo(root)
 	p.FrameworkVersion, p.FrameworkDir, p.LocalCheckout = discoverFramework(root)
-	p.ExistingVOs, p.VOOwner = discoverVOs(root)
+	p.ExistingVOs, p.VOOwner, p.VOKind = discoverVOs(root)
 	p.SiblingSpecs = discoverSpecs(root)
 	for _, d := range p.Dialects {
 		p.NextOrdinal[d] = nextOrdinal(filepath.Join(root, "migrations", d))
@@ -286,6 +297,14 @@ var (
 	// reuse one was refused as naming nothing, and `prune` read its file as an
 	// orphan and offered to delete a type another spec still depended on.
 	voIsValidRe = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*IsValid\s*\(`)
+	// An ENUM value object is the one kind that does NOT write IsValid: it
+	// declares its members and the answer for a value outside them, and the
+	// framework checks membership itself. That is also the one distinction a
+	// caller validating a value object IN PLACE has to make — an enum is
+	// validated with domain.ValidateEnum, everything else by calling its own
+	// IsValid — so the inventory records which kind each type is, not just that
+	// it is one.
+	voUnknownRe = regexp.MustCompile(`(?m)^func\s*\(\s*\w+\s+\*?([A-Z][A-Za-z0-9]*)\s*\)\s*UnknownNotification\s*\(`)
 	// Hand-written files may group declarations — `type ( CPF string; UF string )`
 	// — which the anchored form above never matches, so those types vanished
 	// from the inventory and a legitimate reuse was refused as unknown.
@@ -310,14 +329,15 @@ var (
 // object is a type with a Value() method (the framework's contract); a
 // notification has none. That is the test, rather than a suffix rule that a
 // type named without one would slip past.
-func discoverVOs(root string) ([]string, map[string]string) {
+func discoverVOs(root string) ([]string, map[string]string, map[string]string) {
 	dir := filepath.Join(root, "internal", "domain", "vos")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, map[string]string{}
+		return nil, map[string]string{}, map[string]string{}
 	}
 	var out []string
 	owner := map[string]string{}
+	kind := map[string]string{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
 			continue
@@ -334,8 +354,14 @@ func discoverVOs(root string) ([]string, map[string]string) {
 		for _, m := range voValueRe.FindAllSubmatch(b, -1) {
 			isVO[string(m[1])] = true
 		}
+		selfValidating := map[string]bool{}
 		for _, m := range voIsValidRe.FindAllSubmatch(b, -1) {
 			isVO[string(m[1])] = true
+			selfValidating[string(m[1])] = true
+		}
+		enum := map[string]bool{}
+		for _, m := range voUnknownRe.FindAllSubmatch(b, -1) {
+			enum[string(m[1])] = true
 		}
 		by := ""
 		if bytes.Contains(b, []byte(generatedBanner)) {
@@ -360,11 +386,21 @@ func discoverVOs(root string) ([]string, map[string]string) {
 				continue
 			}
 			owner[name] = by
+			// A type that writes IsValid answers for itself whatever else it
+			// declares; only the one that does NOT is an enum, and a type that
+			// is neither is left unrecorded rather than guessed at — the caller
+			// that needs the distinction refuses on "unknown" and says why.
+			switch {
+			case selfValidating[name]:
+				kind[name] = "raw"
+			case enum[name]:
+				kind[name] = "enum"
+			}
 			out = append(out, name)
 		}
 	}
 	sort.Strings(out)
-	return out, owner
+	return out, owner, kind
 }
 
 var ordinalRe = regexp.MustCompile(`^(\d+)_.*\.(up|down)\.sql$`)

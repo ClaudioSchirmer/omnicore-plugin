@@ -106,7 +106,8 @@ func Check(w io.Writer, opt CheckOptions) (CheckResult, error) {
 	}
 	res.Entity = s.Entity
 
-	problems := spec.Validate(s, spec.Options{LangFallback: opt.LangFallback, ExistingVOs: proj.ExistingVOs, VOOwner: proj.VOOwner, Neighbours: neighboursOf(proj)})
+	problems := spec.Validate(s, spec.Options{LangFallback: opt.LangFallback, ExistingVOs: proj.ExistingVOs,
+		ExistingVOKinds: proj.VOKind, VOOwner: proj.VOOwner, Neighbours: neighboursOf(proj)})
 	appendFindings(&res, problems)
 
 	// Coverage runs only once the spec is otherwise sound: meeting "not in this

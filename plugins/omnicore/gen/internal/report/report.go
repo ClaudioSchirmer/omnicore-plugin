@@ -652,6 +652,35 @@ func renderCheck(b *strings.Builder, in Input) {
 			"to receive in one response.\n\n", strings.Join(barriers, ", "))
 	}
 
+	// The other half of the same reviewer's question. A barrier changes what a
+	// 422 leaves OUT; a value object validated early changes what it puts back
+	// IN — and the field the reader will look for in BuildRules is one the
+	// entity's documentation says is never checked there.
+	var pulled []string
+	for _, cl := range m.Clauses {
+		for _, r := range cl.Rules {
+			if r.Kind != "valueObject" {
+				continue
+			}
+			for _, f := range r.Fields {
+				pulled = append(pulled, fmt.Sprintf("`%s` (in `%s`)", f.Name, cl.Gate))
+			}
+		}
+	}
+	if len(pulled) > 0 {
+		b.WriteString("### Value objects validated with the rules, not after them\n\n")
+		fmt.Fprintf(b, "%s — declared `kind: valueObject`. The framework validates every "+
+			"value-object field on every write, but that pass runs AFTER `BuildRules`, so "+
+			"a value object cannot be the premise of the rules below it. Each field above "+
+			"is checked where it is declared instead — by the value object's own answer, "+
+			"never a second one — and excluded from the automatic pass in those verbs, so "+
+			"nothing is reported twice. Two consequences worth checking: the value is now "+
+			"validated BEFORE any barrier that follows, so a 422 that used to hide it "+
+			"behind another failure now carries both; and in the verbs this rule does not "+
+			"cover, the field is still validated at the end, exactly as before.\n\n",
+			strings.Join(pulled, ", "))
+	}
+
 	// A field that vanished from the API is the kind of thing a reader notices
 	// as a bug rather than as a decision, so the report says it was one.
 	if assigned := m.AssignedFields(); len(assigned) > 0 {

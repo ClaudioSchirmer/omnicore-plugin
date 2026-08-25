@@ -54,7 +54,7 @@ func Prune(w io.Writer, opt PruneOptions) error {
 		return err
 	}
 	problems := spec.Validate(s, spec.Options{
-		LangFallback: true, ExistingVOs: proj.ExistingVOs,
+		LangFallback: true, ExistingVOs: proj.ExistingVOs, ExistingVOKinds: proj.VOKind,
 		VOOwner: proj.VOOwner, Neighbours: neighboursOf(proj),
 	})
 	if problems.HasBlockers() {

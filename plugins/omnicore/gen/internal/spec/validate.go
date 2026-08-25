@@ -20,6 +20,13 @@ type Options struct {
 	// a rule is a rule that can disagree with itself, and reuse is what the spec
 	// is for.
 	ExistingVOs []string
+	// ExistingVOKinds says what each of those value objects IS — "raw" (it
+	// writes its own IsValid) or "enum" (membership). It answers the one
+	// question a name cannot: a field declared `vo.kind: reuse` names a type
+	// this spec never described, and a rule that validates it IN PLACE emits a
+	// different call for each kind. A type missing from the map is one the
+	// reader could not classify, and the rule is refused rather than guessed.
+	ExistingVOKinds map[string]string
 	// VOOwner says which entity's spec generated each one ("" = hand-written).
 	// It separates the two questions the inventory answers: REFERENCING a value
 	// object is open to everybody, REDECLARING one is refused to everybody
@@ -93,7 +100,7 @@ func Validate(s *Spec, opt Options) *Problems {
 	validateChildren(s, ps, opt)
 	validateSiblings(s, ps, opt)
 	validateLifecycle(s, ps)
-	validateRules(s, ps)
+	validateRules(s, ps, opt)
 	validateNotifications(s, ps, opt)
 	validateService(s, ps)
 	validateJoins(s, opt, ps)
@@ -1644,11 +1651,11 @@ var frameworkNotifications = map[string]bool{
 // is what stops a second copy from disagreeing with this one.
 func IsFrameworkNotification(name string) bool { return frameworkNotifications[name] }
 
-func validateRules(s *Spec, ps *Problems) {
-	validateRuleSet(s, s.Rules, ruleScopeOfRoot(s), "rules", ps)
+func validateRules(s *Spec, ps *Problems, opt Options) {
+	validateRuleSet(s, s.Rules, RuleScopeOfRoot(s), "rules", ps, opt)
 	for i, c := range s.Children {
 		where := fmt.Sprintf("children[%d].rules", i)
-		validateRuleSet(s, c.Rules, ruleScopeOfChild(s, c), where, ps)
+		validateRuleSet(s, c.Rules, RuleScopeOfChild(s, c), where, ps, opt)
 		validateAggregateWideKinds(c, where, ps)
 	}
 	validateCompositeRuleTargets(s, ps)
@@ -1729,13 +1736,18 @@ func validateRequiredOverValueObject(s *Spec, r Rule, scopeFields []Field, where
 					"already reports an empty value as RequiredFieldNotification — this rule "+
 					"makes the caller receive it TWICE for one empty field", name, vo.Name),
 				"drop this rule: the value object is validated automatically on every write, "+
-					"so presence is already enforced")
+					"so presence is already enforced. If what you need is that check EARLY — "+
+					"because the rules below it depend on the value — declare kind: "+
+					"valueObject over the field instead, with guard: true")
 		case vo.Kind == "enum":
 			ps.WarnFix(where+".fields",
 				fmt.Sprintf("%s is backed by the enum %s, and an empty value is already "+
 					"answered with %s — this rule adds a SECOND notification for the same "+
 					"empty field", name, vo.Name, orUnnamed(vo.UnknownNotification)),
-				"drop this rule: enum membership is validated automatically on every write")
+				"drop this rule: enum membership is validated automatically on every write. "+
+					"If what you need is that check EARLY — because the rules below it depend "+
+					"on the value — declare kind: valueObject over the field instead, with "+
+					"guard: true")
 		}
 	}
 }
@@ -1758,13 +1770,13 @@ func declaredVO(s *Spec, ref string) (ValueObject, bool) {
 	return ValueObject{}, false
 }
 
-// ruleScopeOfRoot is every field a rule on the entity can talk about.
+// RuleScopeOfRoot is every field a rule on the entity can talk about.
 //
 // A 1:1 facet is a STORAGE decision — the same Go struct, split across two
 // tables so the columns can be null in bulk. Its fields are fields of the
 // entity, reachable on the same receiver, and refusing a rule on one of them
 // pushed invariants the DSL can perfectly express into the hand-written escape.
-func ruleScopeOfRoot(s *Spec) []Field {
+func RuleScopeOfRoot(s *Spec) []Field {
 	out := append([]Field{}, s.Fields...)
 	for _, sib := range s.Siblings {
 		if !strings.HasPrefix(sib.AttachTo, "child:") {
@@ -1774,9 +1786,9 @@ func ruleScopeOfRoot(s *Spec) []Field {
 	return out
 }
 
-// ruleScopeOfChild is the same for a collection: its own fields plus the fields
+// RuleScopeOfChild is the same for a collection: its own fields plus the fields
 // of a facet declared inside it, which land on the child's type.
-func ruleScopeOfChild(s *Spec, c Child) []Field {
+func RuleScopeOfChild(s *Spec, c Child) []Field {
 	out := append([]Field{}, c.Fields...)
 	for _, sib := range s.Siblings {
 		if sib.AttachTo == "child:"+c.Name {
@@ -1786,7 +1798,7 @@ func ruleScopeOfChild(s *Spec, c Child) []Field {
 	return out
 }
 
-func validateRuleSet(s *Spec, rs Rules, scopeFields []Field, where string, ps *Problems) {
+func validateRuleSet(s *Spec, rs Rules, scopeFields []Field, where string, ps *Problems, opt Options) {
 	seenID := map[string]bool{}
 	for i, r := range rs.List {
 		w := fmt.Sprintf("%s.list[%d] (%s)", where, i, orUnnamed(r.ID))
@@ -1806,9 +1818,12 @@ func validateRuleSet(s *Spec, rs Rules, scopeFields []Field, where string, ps *P
 		validateRuleScope(r, w, ps)
 		validateRuleFields(r, scopeFields, w, ps)
 		validateRuleNotification(s, r, w, ps)
-		validateRuleShape(s, r, scopeFields, w, ps)
+		validateRuleShape(s, r, scopeFields, w, ps, opt)
 		validateRequiredOverValueObject(s, r, scopeFields, w, ps)
 	}
+	// Across the whole set, not per rule: two rules that each look right can
+	// still validate one value object twice in one pass.
+	validateValueObjectHoists(rs, where, ps)
 
 	for i, m := range rs.Manual {
 		w := fmt.Sprintf("%s.manual[%d] (%s)", where, i, orUnnamed(m.ID))
@@ -1980,8 +1995,10 @@ func validateNotificationRef(s *Spec, name, where string, ps *Problems) {
 			strings.Join(sortedKeys(frameworkNotifications), ", "))
 }
 
-func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Problems) {
+func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Problems, opt Options) {
 	switch r.Kind {
+	case "valueObject":
+		validateValueObjectRule(s, r, scopeFields, w, ps, opt)
 	case "factRange":
 		validateFactRange(s, r, scopeFields, w, ps)
 	case "requiredIf":

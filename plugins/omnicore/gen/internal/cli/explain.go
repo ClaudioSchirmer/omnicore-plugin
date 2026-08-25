@@ -119,6 +119,33 @@ a clause the framework dispatches by verb.
   childDuplicate  two entries of a collection share a business identity.
   ownerCheck      the caller must own the row. Reads a runtime-only field fed
                   from the request identity.
+  valueObject     validate a value-object field HERE — the one kind that adds no
+                  check of its own. Every such field is validated automatically,
+                  but that pass runs AFTER the rules, so a value object can never
+                  be the premise of what follows: a tenant a scope check compares
+                  against, a foreign key the next rule reads, an enum a
+                  transition moves. Naming it pulls the framework's own check
+                  forward (its IsValid, or membership for an enum, behind a nil
+                  guard when the field is optional) and excludes the field from
+                  the automatic pass, in this scope's verbs only, so the caller
+                  is not told twice. With guard: true it also ends the pass.
+                  It raises nothing: the value object owns that answer, so
+                  notification, attachTo, echoValue and skipWhen are refused —
+                  and a plain required rule beside it is the duplicate this kind
+                  exists to prevent. An id field counts as a value object here
+                  (domain.ID validates itself). Refused when two rules would
+                  validate one field on the same verb, and inside a composite
+                  value object's own rules, where there is no pass to move.
+
+Any rule may carry guard: true — the BARRIER. It ends the validation pass when
+something has ALREADY been rejected, so it can never skip a check: a clean write
+runs whole. It is positional — it lands after the rule that carries it, so every
+rule above has had its say and everything below stops: the remaining rules, the
+automatic value-object validation, and every collection of the aggregate. Four
+preconditions that must all be reported are four ordinary rules with the key on
+the LAST of them. Gates are emitted insert, insertOrUpdate, update, archive,
+unarchive, delete, so on an insert a guard under insertOrUpdate sits after
+everything under insert, whatever the yaml order.
 
 Anything else goes under rules.manual as a NAMED entry with a description. That
 description is what the generated report tells the implementer to write, and the

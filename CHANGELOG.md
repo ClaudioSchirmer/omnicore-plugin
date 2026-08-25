@@ -7,6 +7,73 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-08-24
+
+A value object could never be a precondition: the framework validates every one of them on
+every write, and that pass runs after the rules that depend on it. Now a rule can say where.
+
+### Added
+
+- **`rules.list[].kind: valueObject` — a value object validated WHERE THE RULE IS, so it can
+  be a premise.** The framework validates every value-object field on every write, and that
+  pass runs AFTER `BuildRules`. Which means a value object could never be the precondition of
+  the rules below it — and a tenant a row-scope check compares against, a foreign key the next
+  rule reads, a state a `transition` moves are exactly that. The language had no way to say
+  it: `kind: required` over a value-object field is warned about by name (it reports the same
+  empty value twice), so the author who needed the check EARLY was told to drop the rule and
+  offered nothing in its place. This is the something.
+
+  ```yaml
+  - id: tenant-required
+    kind: valueObject
+    scope: [insertOrUpdate, archive, unarchive, delete]
+    fields: [TenantID]
+    guard: true
+    description: the row-scope check below compares this value against the caller's.
+  ```
+
+  ```go
+  e.TenantID.IsValid("TenantID", r.Context())
+  r.IgnoreValueObject("TenantID")
+
+  // guard (tenant-required): the rules below depend on these having passed.
+  r.StopIfInvalid()
+  ```
+
+  **It adds no check — it moves one.** That is what makes it safe: the same validation the
+  framework would have run, run earlier, and the field then excluded from the automatic pass
+  so nothing is reported twice. The exclusion is scoped to the rule's own verbs, so every
+  other verb still gets the check for free.
+
+  **The call is bare, and the generated comments say why.** `IsValid` REPORTS and EMITS — the
+  value object owns its own notification — so there is nothing to raise beside it and no
+  result to test. The hand-written version of this rule, `if !e.TenantID.IsValid(...) {
+  r.AddNotification("TenantID", domain.RequiredFieldNotification{}) }`, is the failure the
+  kind exists to prevent: one wrong value, two complaints. `notification`, `attachTo`,
+  `echoValue`, `skipWhen` and a bound are therefore all refused on it — a key that decides
+  nothing reads, to the next author, like a key that does.
+
+  **The kinds are not interchangeable, and the generator does not guess.** A raw value
+  object, a composite and an `id` (`domain.ID` writes its own `IsValid`) are asked directly;
+  an enum declares no `IsValid` at all and is asked for membership, `domain.ValidateEnum`.
+  For a `vo.kind: reuse` field the type is one the spec never described, so its shape is read
+  out of `internal/domain/vos` — and when the file answers neither, the rule is refused with
+  the distinction spelled out instead of emitting a call that may not compile. An OPTIONAL
+  value object is called behind a nil guard: absence is not a violation there any more than
+  it is in the automatic pass.
+
+  **Refused:** two rules validating one field on the same verb (`insert` and
+  `insertOrUpdate` both run on an insert — a duplicate that is invisible in the yaml), one
+  rule naming a field twice, a field with no value object to pull forward, a part of a
+  composite (there is no such field on the aggregate), and the kind inside a composite value
+  object's own rules, where there is no pass to move anything into.
+
+  The `check` warning for `required` over a value object now names this kind as the way to
+  get the check early, `BuildRules`' own doc comment stops claiming no value object is
+  validated there, and the gen-report lists every field that moved — a 422 that now carries a
+  field it used to hide behind a barrier is the feature working, and reads like a regression
+  otherwise.
+
 ## [0.37.0] — 2026-08-24
 
 The one file no entity owns, stamped with the name of whichever entity ran last — and a

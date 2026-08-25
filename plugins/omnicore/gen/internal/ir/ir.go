@@ -179,6 +179,13 @@ type Rule struct {
 	// says who may attempt the verb at all, this says who may attempt it on a row
 	// that is not theirs.
 	AdminField *Field
+	// VOEnum says, per subject field of a `valueObject` rule, whether that value
+	// object is validated by MEMBERSHIP — domain.ValidateEnum — rather than by
+	// calling its own IsValid. The two are different calls and picking the wrong
+	// one does not compile, so the choice is resolved here, once, where the
+	// spec and the project's own vos package can both be read: a field declared
+	// `vo.kind: reuse` names a type this spec never described.
+	VOEnum map[string]bool
 	// Guard makes the rule a barrier: the emitters put r.StopIfInvalid() on the
 	// line after its block, so nothing below runs once anything above has
 	// rejected. It rides on the rule rather than being a clause of its own
@@ -523,6 +530,7 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	m.Clauses = resolveClauses(s, m)
 	m.Clauses = mergeClauses(m.Clauses, hoisted)
 	bindOnlyFields(m)
+	bindValueObjectRules(s, p, m)
 	bindFacts(m)
 	m.Clauses = appendUniqueClauses(m)
 	m.ManualRules = resolveManualRules(s.Rules)
@@ -2288,6 +2296,53 @@ func hoistToRoot(rs spec.Rules, c *Child) []Clause {
 		}
 	}
 	return clauses
+}
+
+// bindValueObjectRules answers, for every rule that validates a value object IN
+// PLACE, the one question the emitters cannot: which of the two calls to write.
+//
+// A raw value object (a composite and a hand-written one among them, and a plain
+// id too — domain.ID writes IsValid, which is how the automatic pass finds it)
+// answers for itself. An enum does not write IsValid at all; the framework
+// checks its membership, and the call is domain.ValidateEnum. A field declared
+// `vo.kind: reuse` says neither — the type lives in the project and this spec
+// never described it — so the answer comes from the inventory the discoverer
+// read out of internal/domain/vos.
+//
+// It runs as a pass over the resolved clauses rather than inside the clause
+// resolver because that resolver is shared with collections and knows nothing
+// about the project; here both halves are in hand, and the scope each rule was
+// VALIDATED against is asked for by the same helpers the validator used, so the
+// two can never drift into disagreeing about which field a rule names.
+func bindValueObjectRules(s *spec.Spec, p *discover.Project, m *Model) {
+	var kinds map[string]string
+	if p != nil {
+		kinds = p.VOKind
+	}
+	bind := func(clauses []Clause, scope []spec.Field) {
+		for i := range clauses {
+			for j := range clauses[i].Rules {
+				r := &clauses[i].Rules[j]
+				if r.Kind != "valueObject" {
+					continue
+				}
+				r.VOEnum = map[string]bool{}
+				for _, f := range r.Fields {
+					for _, sf := range scope {
+						if sf.Name != f.Name {
+							continue
+						}
+						r.VOEnum[f.Name] = spec.VOValidationKind(s, sf, kinds) == "enum"
+						break
+					}
+				}
+			}
+		}
+	}
+	bind(m.Clauses, spec.RuleScopeOfRoot(s))
+	for i := range m.Children {
+		bind(m.Children[i].Clauses, spec.RuleScopeOfChild(s, s.Children[i]))
+	}
 }
 
 // bindOnlyFields resolves a set-wide rule's restriction against the COLLECTION

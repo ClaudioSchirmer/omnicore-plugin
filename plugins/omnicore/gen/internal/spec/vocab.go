@@ -86,6 +86,7 @@ var (
 	RuleKinds = set(
 		"required", "immutable", "length", "range", "comparison", "transition",
 		"requiredIf", "groupCap", "childDuplicate", "ownerCheck", "factRange",
+		"valueObject",
 	)
 	RuleScopes    = set("insert", "update", "insertOrUpdate", "archive", "unarchive", "delete")
 	ComparisonOps = set("gte", "gt", "lte", "lt", "eq", "ne")
@@ -274,7 +275,8 @@ func Vocabularies() []Vocabulary {
 		{"delete.root", DeleteRoot,
 			"soft = archive, reversible; hard = a permanent purge, and the HTTP verb must say so."},
 		{"rules.list[].kind", RuleKinds,
-			"what the rule checks; anything outside this set goes to rules.manual."},
+			"what the rule checks — or, for valueObject, WHEN a value object is checked; " +
+				"anything outside this set goes to rules.manual."},
 		{"rules.list[].scope", RuleScopes,
 			"the verbs the rule fires on."},
 		{"rules.list[].operator", ComparisonOps,

@@ -174,13 +174,25 @@ func modeConstants(m *ir.Model) []string {
 }
 
 func emitBuildRules(s *src, m *ir.Model) {
+	vo := "Nothing here validates a value object: the framework discovers value-object " +
+		"fields by type and validates them on every write, so writing those checks " +
+		"again would only report the same problem twice."
+	if hasValueObjectRule(m.Clauses) {
+		// The general statement is still true of every field but the ones named
+		// below, and a reader who meets an IsValid call under a doc comment that
+		// says value objects are never validated here has been told the file is
+		// wrong. It is not — the call is there because that pass runs too late
+		// to be a precondition.
+		vo = "The framework discovers value-object fields by type and validates them on " +
+			"every write, AFTER these rules — so a value object the rules below depend " +
+			"on is validated here instead, and excluded from that pass to keep the " +
+			"caller from being told twice. Every other value-object field is left to it."
+	}
 	s.Doc(
 		"BuildRules declares the invariants. The framework dispatches each clause by "+
 			"the verb being executed.",
 		"",
-		"Nothing here validates a value object: the framework discovers value-object "+
-			"fields by type and validates them on every write, so writing those checks "+
-			"again would only report the same problem twice.",
+		vo,
 	)
 	s.L("func (e *%s) BuildRules(actionName string, service domain.Service, r *domain.Rules) {",
 		m.Entity.Pascal)
@@ -436,6 +448,104 @@ func emitGuardBarrier(s *src, rule ir.Rule, indent string, more bool) {
 	}
 }
 
+// emitValueObjectCheck validates a value object WHERE THE RULE IS, instead of
+// where the framework would get to it on its own.
+//
+// Every value-object field is validated automatically — but that pass runs
+// AFTER BuildRules, which means a value object can never be the premise of the
+// rules below it. A tenant a row-scope check compares against, a foreign key the
+// next rule dereferences, a state a transition reads: each is checked too late
+// to be a precondition, and the only way to make one is to ask the value object
+// here.
+//
+// Three lines with three different jobs come out of it, and the generated
+// comments say which is which because none of the three is obvious to a reader:
+//
+//   - the CALL is bare. IsValid reports AND emits — the value object owns its
+//     own notification — so there is no answer to raise beside it and no result
+//     to test. A hand-written version of this rule that wraps the call in an
+//     `if` and adds a required notification is the mistake this kind exists to
+//     stop: the caller then reads two complaints for one wrong value.
+//   - the IGNORE is not optional. Without it the automatic pass asks the same
+//     value object again at the end of the rules and reports it a second time,
+//     which is the same duplicate arriving by the other door. It is scoped to
+//     the mode this clause gates on, so the verbs that did NOT pull the check
+//     forward still get it automatically.
+//   - the NIL GUARD keeps an optional value object optional. The automatic pass
+//     skips a nil field because absence is not a violation, and a check pulled
+//     forward has to make the same statement — otherwise moving WHEN a value is
+//     validated would quietly change WHETHER it may be absent.
+//
+// The barrier itself is not written here: `guard: true` is positional and lands
+// after the whole rule, which is what lets several fields all have their say
+// before the pass stops.
+func emitValueObjectCheck(s *src, rule ir.Rule, recv string) {
+	if len(rule.Fields) == 0 {
+		return
+	}
+	head := "Pulled forward: the framework validates this value object on every " +
+		"write, but that pass runs AFTER these rules — and what follows depends on " +
+		"it having passed. It owns its own answer, so the call REPORTS and EMITS " +
+		"it: there is nothing to raise here and no result to test."
+	if len(rule.Fields) > 1 {
+		head = "Pulled forward: the framework validates these value objects on every " +
+			"write, but that pass runs AFTER these rules — and what follows depends on " +
+			"them having passed. Each owns its own answer, so the calls REPORT and EMIT " +
+			"them: there is nothing to raise here and no result to test."
+	}
+	for _, line := range wrap(head, 68) {
+		s.L("\t\t// %s", line)
+	}
+	for _, f := range rule.Fields {
+		call := fmt.Sprintf("%s.%s.IsValid(%s, r.Context())", recv, f.Name, quote(f.Name))
+		if rule.VOEnum[f.Name] {
+			// An enum writes no IsValid: it declares its members and the answer
+			// for a value outside them, and the framework checks membership.
+			deref := ""
+			if f.Nullable {
+				deref = "*"
+			}
+			call = fmt.Sprintf("domain.ValidateEnum(%s%s.%s, %s, r.Context())",
+				deref, recv, f.Name, quote(f.Name))
+		}
+		if f.Nullable {
+			for _, line := range wrap(fmt.Sprintf("An absent %s is not a violation: the "+
+				"automatic pass skips a nil field, and a check pulled forward says the "+
+				"same thing.", f.Name), 68) {
+				s.L("\t\t// %s", line)
+			}
+			s.L("\t\tif %s.%s != nil {", recv, f.Name)
+			s.L("\t\t\t%s", call)
+			s.L("\t\t}")
+			continue
+		}
+		s.L("\t\t%s", call)
+	}
+	for _, line := range wrap("Asked here means not asked again: without this the "+
+		"automatic pass would reach the same value at the end of the rules and "+
+		"report it a second time. The exclusion is scoped to this clause's verbs, "+
+		"so every other verb still gets the check for free.", 68) {
+		s.L("\t\t// %s", line)
+	}
+	for _, f := range rule.Fields {
+		s.L("\t\tr.IgnoreValueObject(%s)", quote(f.Name))
+	}
+}
+
+// hasValueObjectRule reports whether any clause pulls a value object's
+// validation forward, which is what decides one sentence of BuildRules' own
+// documentation.
+func hasValueObjectRule(clauses []ir.Clause) bool {
+	for _, c := range clauses {
+		for _, r := range c.Rules {
+			if r.Kind == "valueObject" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // emitRuleOn writes a rule against an arbitrary receiver, which is what lets a
 // child reuse the same emitters as the root.
 func emitRuleOn(s *src, gate string, rule ir.Rule, recv string) {
@@ -494,6 +604,8 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 		if m != nil {
 			emitGroupCap(s, m, rule)
 		}
+	case "valueObject":
+		emitValueObjectCheck(s, rule, recv)
 	case "ownerCheck":
 		emitOwnerCheck(s, rule, recv, m)
 	case "uniquePrecheck":
