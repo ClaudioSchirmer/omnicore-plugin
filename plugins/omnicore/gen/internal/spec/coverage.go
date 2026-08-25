@@ -293,6 +293,7 @@ var implementedRuleKinds = map[string]bool{
 	"range": true, "comparison": true, "ownerCheck": true,
 	"transition": true, "requiredIf": true,
 	"childDuplicate": true, "groupCap": true, "factRange": true,
+	"valueObject": true,
 }
 
 func refuseRuleKinds(rs Rules, where string, ps *Problems) {

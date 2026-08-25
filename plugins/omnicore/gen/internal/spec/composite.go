@@ -611,6 +611,17 @@ func validateCompositeRuleTargets(s *Spec, ps *Problems) {
 				// comparable fields by value. Naming a PART is still refused — half a
 				// value object frozen is not a rule anyone means — and so is a shape
 				// where == would compare addresses instead of values.
+				// Validating the value object IN PLACE is the other invariant a
+				// composite answers from the entity, and for the same reason: it
+				// asks about the VALUE, not about a part. The composite is a
+				// field of the aggregate like any other — the framework's
+				// automatic pass discovers it there and calls its IsValid — and
+				// this kind only moves WHEN that call happens. Naming a PART
+				// stays refused: there is no such field on the aggregate to call
+				// anything on, and nothing to exclude from the pass either.
+				if r.Kind == "valueObject" && f.Name == n {
+					continue
+				}
 				if r.Kind == "immutable" && f.Name == n {
 					if why := whyNotComparable(s, *f); why != "" {
 						ps.BlockerFix(w+".fields",
@@ -1082,7 +1093,11 @@ func validateCompositeRules(s *Spec, vo ValueObject, where string, ps *Problems)
 			}
 		}
 		validateRuleFields(r, scope, w, ps)
-		validateRuleShape(s, r, scope, w, ps)
+		// No Options: the only kind that reads them is `valueObject`, and
+		// CompositeRuleKinds refused it above — a value object's rules run
+		// inside its own IsValid, where there is no pass to pull anything
+		// forward into and no Rules to ignore a field on.
+		validateRuleShape(s, r, scope, w, ps, Options{})
 	}
 }
 

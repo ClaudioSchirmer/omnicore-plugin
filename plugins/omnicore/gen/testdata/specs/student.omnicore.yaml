@@ -276,6 +276,24 @@ rules:
         da coleção inteira, sem agrupamento e sem restrição.
       notification: TooManyGuardiansNotification
 
+    # valueObject — pull the framework's own value-object check forward, so a
+    # value object can be the premise of what follows. It emits a DIFFERENT call
+    # per kind, and picking the wrong one does not compile — which is why this
+    # fixture names one of each: an id (domain.ID writes its own IsValid), a raw
+    # value object (so does it), an enum (no IsValid at all — the framework
+    # checks membership) and an OPTIONAL composite (the same call, behind a nil
+    # guard, because absence is not a violation). It is declared last on
+    # purpose: after the barrier above, so the runtime lane that asserts what a
+    # guard hides keeps measuring exactly what it measured before, while the
+    # build lane still compiles all four shapes.
+    - id: references-valid
+      kind: valueObject
+      scope: [insertOrUpdate]
+      fields: [CampusID, Email, Status, Leave]
+      description: >-
+        As referências e os valores que o restante desta agregada lê precisam
+        estar válidos onde são lidos, não no fim das regras.
+
   manual:
     - id: enrollment-window
       description: >-
@@ -606,6 +624,18 @@ children:
           scope: [insertOrUpdate]
           fields: [Document]
           notification: RequiredFieldNotification
+        # O mesmo kind, na COLECAO: um entry carrega o proprio Rules, entao a
+        # antecipacao e a exclusao valem para ele e para mais ninguem. Esta
+        # aqui porque o codigo sai noutro pacote (aggregatevos) e sobre outro
+        # receptor, e um campo OPCIONAL — as duas coisas que o compilador so
+        # confere se alguem gerar.
+        - id: guardian-campus-valid
+          kind: valueObject
+          scope: [insertOrUpdate]
+          fields: [CampusID]
+          description: >-
+            A referencia de campus do responsavel precisa estar valida onde e
+            lida, nao no fim das regras da entrada.
 
 siblings:
   - name: Scholarship

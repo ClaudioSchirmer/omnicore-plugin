@@ -394,6 +394,34 @@ delete:
 
 rules:
   list:
+    # valueObject — the one kind that adds NO check. It pulls forward the
+    # validation the framework already runs over every value-object field, so
+    # that check happens HERE instead of after all the rules. Two reasons to
+    # want that, and this rule has both:
+    #
+    #   - a value object can then be a PREMISE. The rules below read this
+    #     campus; a value that is not even a uuid has nothing for them to read.
+    #   - a barrier below would otherwise HIDE it. The automatic pass runs after
+    #     the rules, and guard: true stops it too — so with an invalid campus AND
+    #     a missing enrollment number, the caller would be told only about the
+    #     enrollment number, fix it, resubmit, and meet the campus on the next
+    #     round trip. Pulled forward, both are in the first 422.
+    #
+    # It raises nothing of its own: the value object owns its answer (here
+    # domain.ID's own, since an id is a value object to the framework). So
+    # notification, attachTo, echoValue and skipWhen are all refused on it — and
+    # a `required` rule beside it is the duplicate this kind exists to prevent.
+    # The generated code calls the check, then excludes the field from the
+    # automatic pass so it is not asked twice, in this clause's verbs only.
+    #
+    # guard: true belongs here too when the barrier should fall immediately
+    # after; this one leans on the barrier below instead.
+    - id: campus-valid
+      kind: valueObject
+      scope: [insertOrUpdate]
+      fields: [CampusID]
+      description: the rules and the join below read this campus.
+
     - id: name-required
       kind: required
       scope: [insertOrUpdate]

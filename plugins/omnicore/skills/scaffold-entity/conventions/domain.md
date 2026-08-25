@@ -129,6 +129,31 @@ not a violation. To opt one out in a mode, `r.IgnoreValueObject("Field")` inside
 to force a VO that is not a plain field (computed, in a slice), `r.ValidateValueObject(name,
 vo)`. Both on `*Rules`, root and child alike.
 
+**The ONE exception: a value object that is a PREMISE of the rules below it.** The automatic
+pass runs AFTER `BuildRules`, so a VO field can never be the precondition of anything —
+a tenant a row-scope check compares against, a foreign key the next rule reads, a state a
+transition moves. Pull that one check forward, and only that one:
+
+```go
+r.IfInsertOrUpdate(func() {
+    e.TenantID.IsValid("TenantID", r.Context())   // reports AND emits — the VO owns the answer
+    r.IgnoreValueObject("TenantID")               // so the automatic pass does not say it again
+    r.StopIfInvalid()                             // only when it is a guard
+})
+```
+
+Three things it is easy to get wrong, and each one is a duplicate in the caller's 422:
+**no `if`** — `IsValid` returns the verdict AND emits the notification, so `if !e.TenantID.
+IsValid(...) { r.AddNotification("TenantID", domain.RequiredFieldNotification{}) }` reports the
+same wrong value twice; **the `IgnoreValueObject` is mandatory**, or the automatic pass reaches
+the field at the end and reports it a second time; and **an enum has no `IsValid`** — it is
+`domain.ValidateEnum(e.Status, "Status", r.Context())`, while a raw VO, a composite and a
+`domain.ID` are all asked directly (an OPTIONAL one behind a `!= nil` check, because absence is
+not a violation). `ValidateValueObject` does NOT do this: a forced VO runs in the automatic
+pass, at the end, like every other one. And note what a barrier does to the pass: `StopIfInvalid`
+stops the automatic validation too, so a VO left to it is not reported at all on a write that
+tripped an earlier guard — pulling it forward is also how it gets into that first 422.
+
 **Boundary + labels.** Turning a wire scalar into a VO field is a plain type CAST in the
 command mapper — not a constructor, not hand-validation (details + the PATCH exception are in
 application.md); an out-of-set enum value is caught by the automatic check, not by an `if`.

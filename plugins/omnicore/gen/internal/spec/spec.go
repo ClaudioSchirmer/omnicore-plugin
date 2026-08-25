@@ -810,7 +810,18 @@ type Rule struct {
 	ID string `yaml:"id"`
 	// Kind is what the rule checks: required | immutable | length | range |
 	// comparison | transition | requiredIf | groupCap | childDuplicate |
-	// ownerCheck. Anything outside this set goes to rules.manual.
+	// ownerCheck | valueObject. Anything outside this set goes to rules.manual.
+	//
+	// `valueObject` is the odd one and the only one that adds no check of its
+	// own: it PULLS FORWARD the validation the framework would run anyway. Every
+	// value-object field validates automatically, but that pass runs AFTER
+	// BuildRules — so a value object cannot be the premise of the rules below
+	// it, which is exactly what a scope field or a foreign key usually is.
+	// Declaring it here validates it in place (its own IsValid, or membership
+	// for an enum), excludes it from the automatic pass so the caller is not
+	// told twice, and — with guard: true — lets it end the pass. It raises no
+	// notification of its own: the value object owns that answer, which is why
+	// notification, attachTo, echoValue and skipWhen are all refused on it.
 	Kind string `yaml:"kind"`
 	// Scope is the verbs the rule fires on: insert | update | insertOrUpdate |
 	// archive | unarchive | delete.
@@ -818,7 +829,10 @@ type Rule struct {
 	// ActionName is refused by this build — gate the rule by verb scope instead.
 	ActionName string `yaml:"actionName"`
 	// Fields are the subject fields; for a collection rule (groupCap,
-	// childDuplicate) the single entry is the child's NAME.
+	// childDuplicate) the single entry is the child's NAME; for a valueObject
+	// rule they are the value-object-backed fields to validate in place, and
+	// naming several of them means all of them have their say before the
+	// barrier — which is the point of listing them together.
 	Fields []string `yaml:"fields"`
 	// Notification names the answer the rule raises when it refuses.
 	Notification string `yaml:"notification"`

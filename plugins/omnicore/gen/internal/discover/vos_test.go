@@ -70,9 +70,31 @@ func (n UnknownUFNotification) ValueOfField() string { return "" }
 type InvalidURLNotification struct{}
 `)
 
-	names, owner := discoverVOs(dir)
+	// The two kinds a caller has to tell apart to validate a value object IN
+	// PLACE: one answers for itself, the other is checked for membership by the
+	// framework, and the calls are not interchangeable.
+	write("email.go", `package vos
 
-	want := []string{"CPF", "UF", "URL"}
+type Email string
+
+func (v Email) Value() string { return string(v) }
+
+func (v Email) IsValid(fieldName string, ctx *domain.NotificationContext) bool { return true }
+`)
+	write("status.go", `package vos
+
+type Status string
+
+func (v Status) Value() string { return string(v) }
+
+func (v Status) Values() []Status { return []Status{"active"} }
+
+func (v Status) UnknownNotification() domain.Notification { return UnknownStatusNotification{} }
+`)
+
+	names, owner, kind := discoverVOs(dir)
+
+	want := []string{"CPF", "Email", "Status", "UF", "URL"}
 	if len(names) != len(want) {
 		t.Fatalf("inventory = %v, want %v", names, want)
 	}
@@ -87,5 +109,18 @@ type InvalidURLNotification struct{}
 	}
 	if by, ok := owner["CPF"]; !ok || by != "" {
 		t.Errorf("a hand-written value object reports owner %q, want \"\" (nobody's to rewrite)", by)
+	}
+	if kind["Email"] != "raw" {
+		t.Errorf("Email is %q, want raw — it writes its own IsValid", kind["Email"])
+	}
+	if kind["Status"] != "enum" {
+		t.Errorf("Status is %q, want enum — it declares members and an unknown answer, "+
+			"and writes no IsValid", kind["Status"])
+	}
+	// Not a guess: a type the reader cannot classify is left out, and the rule
+	// that needs the answer refuses rather than emitting a call that may not
+	// compile.
+	if k, ok := kind["CPF"]; ok {
+		t.Errorf("CPF was classified as %q from a Value() alone", k)
 	}
 }

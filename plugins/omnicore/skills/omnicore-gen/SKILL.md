@@ -616,6 +616,56 @@ Four things to get right, because they are the ones that cost a migration later:
   - **Refused on a composite value object's rule.** There is no validation pass to end: a
     value object checks itself inside `IsValid`, which is handed a `NotificationContext`
     and no `Rules`. Declare the barrier on the ENTITY's rule that reaches the value object.
+- **`kind: valueObject` — validate a value object WHERE THE RULE IS.** It is the only kind
+  that adds no check of its own: every value-object field is validated automatically, but
+  that pass runs **after** `BuildRules`, so a value object can never be the premise of the
+  rules below it — and a tenant a scope check compares against, a foreign key the next rule
+  reads, a state a `transition` moves all are exactly that. Naming the field pulls the
+  framework's own check forward and excludes the field from the automatic pass, in this
+  rule's verbs only:
+
+  ```yaml
+  - id: tenant-required
+    kind: valueObject
+    scope: [insertOrUpdate, archive, unarchive, delete]
+    fields: [TenantID]
+    guard: true
+    description: the row-scope check below compares this value against the caller's.
+  ```
+
+  ```go
+  e.TenantID.IsValid("TenantID", r.Context())
+  r.IgnoreValueObject("TenantID")
+
+  // guard (tenant-required): the rules below depend on these having passed.
+  r.StopIfInvalid()
+  ```
+
+  - **The call is bare, and that is the whole point.** `IsValid` REPORTS and EMITS — the
+    value object owns its own notification — so there is nothing to raise beside it and no
+    result to test. Writing this by hand as `if !e.TenantID.IsValid(...) { r.AddNotification(
+    "TenantID", domain.RequiredFieldNotification{}) }` hands the caller the same complaint
+    twice, which is why `notification`, `attachTo`, `echoValue` and `skipWhen` are all
+    refused on this kind, and why a `required` rule beside it is refused by name.
+  - **The exclusion is not optional.** Without `IgnoreValueObject` the automatic pass asks
+    again at the end of the rules and reports the value a second time — the same duplicate
+    by the other door. The generator writes both lines together; there is no way to declare
+    one without the other.
+  - **The kinds are not interchangeable.** A raw value object, a composite and an `id`
+    (`domain.ID` writes its own `IsValid`) are asked directly; an **enum** declares no
+    `IsValid` at all and is asked for membership — `domain.ValidateEnum`. The generator
+    picks; for a `vo.kind: reuse` field it reads the type out of `internal/domain/vos`, and
+    **refuses rather than guesses** when the file says neither. An OPTIONAL value object is
+    called behind a nil guard, because absence is not a violation there any more than it is
+    in the automatic pass.
+  - **Two rules may not validate one field on the same verb.** `insert` and
+    `insertOrUpdate` are different scopes that both run on an insert, so the collision is
+    invisible in the yaml — `check` refuses it by name, because two calls emit twice.
+  - **It composes with the barrier in both directions.** With `guard: true` the pass stops
+    right after it. WITHOUT it — declared above a barrier that belongs to another rule — it
+    is how a value object still gets reported at all: a barrier stops the automatic pass
+    too, so an invalid value object below one is never reached, and the caller meets it only
+    on the next round trip.
 - **Rules on a collection are declared on the collection.** `children[].rules` takes the
   same DSL the root does, including `transition` and `skipWhen`, plus `rules.manual` with
   a hook of its own (`aggregatevos/<child>_rules_manual.go`). Two kinds are refused there
