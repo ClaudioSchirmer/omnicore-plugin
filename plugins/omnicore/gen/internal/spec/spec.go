@@ -238,13 +238,36 @@ type Field struct {
 	// on a field read.fieldRestrict also names: a field nobody receives cannot be
 	// the one some callers may.
 	Hidden bool `yaml:"hidden"`
-	// Runtime marks the field as runtime-only: never persisted, fed from the
-	// caller's token (see claim), existing only for the rules to read.
+	// Runtime marks the field as runtime-only: it reaches the entity and the
+	// rules read it, and no column ever holds it. WHERE its value comes from is
+	// the separate question source answers.
 	Runtime bool `yaml:"runtime"`
+	// Source says where a runtime-only field is fed from: the caller's token
+	// (claim, the default and the only thing runtime used to mean) or the
+	// request body itself (body).
+	//
+	// `body` is the third state the field model had no spelling for: a value
+	// that crosses the request DTO, the command and the entity — so a rule can
+	// check it — and stops there. The canonical instance is a password
+	// confirmation, which exists to be compared against the password and whose
+	// storage would itself be the bug. Nothing about such a field reaches the
+	// TableSchema, the migration, the outbox payload, the audit event or any
+	// response: there is no column, so there is nothing to redact and nothing
+	// to leak.
+	Source string `yaml:"source"` // claim | body
 	// Claim names the JWT claim a runtime-only field is fed from. It is required
-	// for such a field: the framework deliberately does not opine on which custom
-	// claims a token carries, so any convention here would be a guess.
+	// for a source: claim field — the framework deliberately does not opine on
+	// which custom claims a token carries, so any convention here would be a
+	// guess — and refused on a source: body one, which never reads the token.
 	Claim string `yaml:"claim"`
+	// Modes are the write verbs whose BODY carries a source: body runtime field.
+	// Omitted means every write verb the entity has.
+	//
+	// The values are the two the DOMAIN can tell apart — insert and update —
+	// because that is the granularity of the rule gates: a PATCH is an update
+	// down there, dispatched into the same IfUpdate clause, so `update` covers
+	// both write shapes and there is no third value to write.
+	Modes []string `yaml:"modes"`
 	// AssignedFrom says the SERVER fills this persisted field, so the client
 	// never sends it: it is absent from every write request, every command and
 	// the OpenAPI request schema.
@@ -260,6 +283,31 @@ type Field struct {
 	//     stops being advertised as writable while the server silently
 	//     overwrites whatever a caller sent.
 	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | derived
+	// BypassMaySet lets the caller who crosses the ROW SCOPE state this value
+	// instead of having it read off their own identity.
+	//
+	// It closes the hole `assignedFrom` opens on its own. The server filling the
+	// tenant from the caller's claim is right for every ordinary caller and
+	// wrong for exactly one: the operator holding `authz.bypass`, who may read
+	// and repair another tenant's rows and — until this key — had no field in
+	// which to say which tenant a NEW row belongs to. The workaround both
+	// consumers who hit it reached for was to drop assignedFrom entirely and
+	// put the value in the body with a rule, which makes every ordinary caller
+	// send a value the server already knows.
+	//
+	// What it changes, and only on the INSERT: the field joins that one request
+	// body as an OPTIONAL value. Absent means "mine", which is what the identity
+	// already wrote. Present, it is written onto the entity whoever sent it —
+	// deliberately, because the row-scope guard is then the thing that answers a
+	// caller who may not state one, with the same notification a write into a
+	// foreign tenant already gets. Silently dropping the value instead would
+	// answer 201 and create the row somewhere else.
+	//
+	// Refused unless the field IS the row scope's subject (authz.ownerField or
+	// authz.tenantField) and authz.bypass says somebody crosses it: on any other
+	// field nothing compares what the caller sent, so the body value would be
+	// taken from everyone.
+	BypassMaySet bool `yaml:"bypassMaySet"`
 	// Redact keeps the real value in the column and in the hydrated entity while
 	// masking it in every copy the framework makes of the row — the outbox
 	// payload (and so the topic, the consumers, the failure ledgers and the

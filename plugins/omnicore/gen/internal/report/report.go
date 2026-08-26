@@ -496,6 +496,17 @@ func renderTodo(b *strings.Builder, in Input) {
 // redactorPhrase renders one axis in the report's own words rather than as the
 // spec's keyword: a reviewer checking a security decision should not have to
 // map `keep-last` onto what a consumer will actually see.
+// bodyRuntimeCheck says what a reviewer has to look for on ONE such field. The
+// two answers differ by whether the field carries a value object, because that
+// is what decides whether anything at all checks the value automatically.
+func bodyRuntimeCheck(f ir.Field) string {
+	if f.VOKind == "" {
+		return "nothing validates it — every check on this value is a rule you declared"
+	}
+	return fmt.Sprintf("`%s` judges the value's shape on the verbs above, and nothing else does",
+		f.BaseEntityType)
+}
+
 func redactorPhrase(r ir.Redactor) string {
 	switch r.Kind {
 	case "fixed":
@@ -723,6 +734,61 @@ func renderCheck(b *strings.Builder, in Input) {
 			"`read.fieldRestrict`, which returns the field to callers holding a permission; "+
 			"nobody receives these. Check that a client is not expected to read back what it "+
 			"just wrote.\n\n", strings.Join(hidden, ", "))
+	}
+
+	// A field the caller sends and the database never sees. It is the mirror of
+	// the case above and needs saying for the same reason: a reviewer reading
+	// the migration finds no column and concludes the field was forgotten, and
+	// one reading the entity finds it and concludes it is stored.
+	if body := m.BodyRuntimeFields(); len(body) > 0 {
+		b.WriteString("### Fields the caller sends and nothing stores\n\n")
+		b.WriteString("Declared `runtime: true` with `source: body`. Each one crosses the " +
+			"write request, the command and the aggregate — so the rules can read it — and " +
+			"stops there. There is no column, so it is in no migration, no `TableSchema`, " +
+			"no outbox payload, no audit event and no response.\n\n")
+		b.WriteString("| field | carried by | what to check |\n")
+		b.WriteString("|---|---|---|\n")
+		for _, f := range body {
+			fmt.Fprintf(b, "| `%s` | %s | %s |\n", f.Name,
+				strings.Join(f.Modes, ", "), bodyRuntimeCheck(f))
+		}
+		b.WriteString("\nTwo consequences worth reading twice. **Nothing compares it for " +
+			"you**: the value object on the field checks the value's SHAPE, and \"the " +
+			"confirmation matches the password\" is a rule — declare it (`kind: comparison`) " +
+			"or the field is collected and ignored. And **the verbs it does not name skip " +
+			"its value object entirely**, because a write that never carried the field has " +
+			"nothing to judge; if a verb must require it, name that verb under the field's " +
+			"`modes`.\n\n")
+	}
+
+	// The one field that is server-assigned and in a request body anyway. A
+	// reviewer reading the insert DTO sees a caller choosing their own scope and
+	// is right to stop; what makes it safe is a guard in another file, and this
+	// is where the two are put side by side.
+	if f := m.BypassSettableField(); f != nil {
+		what, guardName := "tenant", "refuseForeignTenant"
+		if m.Authz.DataAccess == "owner-only" {
+			what, guardName = "owner", "refuseForeignOwner"
+		}
+		who := "a caller holding `" + m.Authz.Bypass + "`"
+		if m.Authz.BypassWildcard {
+			who = "a super-admin (`" + m.Authz.Bypass + "`)"
+		}
+		b.WriteString("### The " + what + " is server-assigned, and the insert accepts one anyway\n\n")
+		fmt.Fprintf(b, "`%s` is declared `assignedFrom: %s` with `bypassMaySet: true`, so it is "+
+			"filled from the caller's identity on every insert and is in no update or patch "+
+			"body. The INSERT body carries it as an OPTIONAL value, for one reason: %s crosses "+
+			"the row scope, and without a field to name the %s in they could repair a "+
+			"customer's records and never create one.\n\n",
+			f.Name, f.AssignedFrom, who, what)
+		fmt.Fprintf(b, "**Check the guard, not the mapper.** The mapper applies whatever was "+
+			"sent, deliberately: what refuses a caller who may not state a %s is `%s` in "+
+			"`internal/domain/%s.go`, which compares `%s` against the caller's own and stands "+
+			"down only for the bypass. Two things follow. A caller who names someone else's "+
+			"%s gets the same refusal a write into that %s gets — not a silent 201 filed "+
+			"under their own. And if that guard is ever removed or narrowed, this field "+
+			"becomes a %s anyone can choose.\n\n",
+			what, guardName, m.Entity.Snake, f.Name, what, what, what)
 	}
 
 	// Same principle, for rules: one declared on a collection but enforced from

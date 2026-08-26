@@ -184,11 +184,12 @@ func emitTestHelpers(s *src, m *ir.Model) {
 // body without giving the test an identity would leave the new body unrun and
 // the coverage number saying so.
 func emitTestIdentity(s *src, m *ir.Model, indent string) {
-	if len(m.Runtime) == 0 {
+	runtime := m.ClaimRuntimeFields()
+	if len(runtime) == 0 {
 		return
 	}
 	claims := map[string]string{}
-	for _, f := range m.Runtime {
+	for _, f := range runtime {
 		switch f.IdentitySource {
 		case "tenant":
 			claims["tenant_id"] = testScopeValue(m)
@@ -439,7 +440,12 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 	)
 	s.L("func valid%s() *%s {", m.Entity.Pascal, m.Entity.Pascal)
 	s.L("\treturn &%s{", m.Entity.Pascal)
-	emitEntityLiteralFields(s, m.AllOwnerFields(), "\t\t")
+	// The body-sourced runtime fields belong in the fixture too, and they are not
+	// among the owner's: they are part of a valid WRITE without being part of a
+	// row. Left out, the value object on one of them is judged against a zero
+	// value on every negative case, and the "a valid aggregate is accepted"
+	// baseline fails first — which points at nothing.
+	emitEntityLiteralFields(s, append(m.AllOwnerFields(), m.BodyRuntimeFields()...), "\t\t")
 	emitScopeFixture(s, m, "\t\t")
 	s.L("\t}")
 	s.L("}")
@@ -781,10 +787,12 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\tctx := &configuration.AppContext{}")
 		emitTestIdentity(s, m, "\t")
 		s.L("\tc := &%s{", op.CommandType)
-		// The command carries what a CLIENT may send. A server-assigned field is
-		// not in the type at all, so naming it here would not compile.
-		for _, f := range m.WritableFields() {
-			s.L("\t\t%s: %s,", f.Name, wireSample(f))
+		// The command carries what a CLIENT may send on THIS verb. A
+		// server-assigned field is not in the type at all, and neither is a
+		// body-sourced runtime field the insert does not declare — naming
+		// either here would not compile.
+		for _, f := range m.CommandFields(op.Verb) {
+			s.L("\t\t%s: %s,", f.Name, commandSample(f))
 		}
 		for _, c := range m.Children {
 			s.L("\t\t%s: []dtos.%s{{", c.GoPlural, c.InputType)
@@ -809,7 +817,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 			s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
 			s.L("\t}")
 		}
-		for _, f := range m.WritableFields() {
+		for _, f := range m.CommandFields(op.Verb) {
 			if f.Nullable {
 				continue
 			}
@@ -828,7 +836,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 	// is not one, and the value object as a whole is not what the command carries.
 	// A spec whose every patchable field is a composite part simply skips it; the
 	// twin case below still covers the other half of the contract.
-	patchWitness := firstPlain(m.PatchableFields())
+	patchWitness := firstPlain(ir.DropBodyRuntime(m.CommandFields("patch")))
 	if op := m.Op("patch"); op != nil && patchWitness != nil {
 		s.Doc("A partial update must leave absent fields alone.",
 			"",
@@ -865,18 +873,15 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		emitTestIdentity(s, m, "\t")
 		s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 		s.L("\tc := &%s{", op.CommandType)
-		for _, f := range m.PatchableFields() {
-			if m.PatchExcludes[f.Name] {
-				continue
-			}
+		for _, f := range m.CommandFields("patch") {
 			s.L("\t\t%s: %s,", f.Name, patchSample(f))
 		}
 		s.L("\t}")
 		s.L("\tif err := c.ApplyPartiallyTo(ctx, e); err != nil {")
 		s.L("\t\tt.Fatalf(%s, err)", quote("ApplyPartiallyTo: %v"))
 		s.L("\t}")
-		for _, f := range m.PatchableFields() {
-			if m.PatchExcludes[f.Name] || f.Nullable {
+		for _, f := range m.CommandFields("patch") {
+			if f.Nullable {
 				continue
 			}
 			s.L("\tif %s != %s {", entityAsWire(f, "e"), literalFor(f))
@@ -908,11 +913,8 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\te.SetID(domain.NewID(%s))", quote("019ffd00-0000-7000-8000-000000000000"))
 		s.L("\tc := &%s{", op.CommandType)
 		if op.InputMethod == "ApplyTo" || op.InputMethod == "ApplyPartiallyTo" {
-			for _, f := range m.WritableFields() {
-				if m.PatchExcludes[f.Name] {
-					continue
-				}
-				s.L("\t\t%s: %s,", f.Name, wireSample(f))
+			for _, f := range m.CommandFields(op.Verb) {
+				s.L("\t\t%s: %s,", f.Name, commandSample(f))
 			}
 		}
 		s.L("\t}")
@@ -1296,8 +1298,16 @@ func goNumeric(f ir.Field) string {
 	return "float"
 }
 
+// violatingComparison drives the compared field to a value that certainly
+// breaks the relation.
+//
+// It has to answer PER TYPE, and getting that wrong does not produce a weak
+// test — it produces a generated file that does not compile: 999999 is not a
+// string, and the numeric fallback was reached by every non-numeric field that
+// was not a time. The case that exposed it is the one this whole spelling
+// exists for, a confirmation field compared for equality against the value it
+// confirms.
 func violatingComparison(f, other ir.Field, op string) string {
-	// Drive the compared field to a value that certainly breaks the relation.
 	if f.SpecType == "time" {
 		switch op {
 		case "gte", "gt":
@@ -1306,11 +1316,69 @@ func violatingComparison(f, other ir.Field, op string) string {
 			return "time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC)"
 		}
 	}
+	if f.SpecType == "string" || f.SpecType == "id" || f.SpecType == "bool" {
+		return violatingNonNumeric(f, other, op)
+	}
 	switch op {
 	case "gte", "gt":
 		return "-1"
 	default:
 		return "999999"
+	}
+}
+
+// violatingNonNumeric answers for the types with no "one past the bound".
+//
+// Where it can, it derives the value from the OTHER field rather than inventing
+// one: "the same value" and "anything but this value" are the only two answers
+// that hold whatever the valid sample happens to be, and a fixed literal that
+// collides with that sample turns a correct generator red. Deriving needs the
+// other side to be a plain value of a convertible type — a nullable one is a
+// pointer, and dereferencing it here would need a nil check a literal does not.
+func violatingNonNumeric(f, other ir.Field, op string) string {
+	ref, derivable := "e."+other.Name, !other.Nullable && f.BaseEntityType == other.BaseEntityType
+
+	if f.SpecType == "bool" {
+		if !derivable {
+			return map[bool]string{true: "true", false: "false"}[op != "ne"]
+		}
+		if op == "ne" {
+			return ref
+		}
+		return "!" + ref
+	}
+
+	if f.SpecType == "id" {
+		// An id is compared as its text. Only equality is meaningful over one,
+		// and both answers are exact: a fresh id is not the other, and the
+		// other is itself.
+		if op == "ne" && derivable {
+			return ref
+		}
+		return "domain.NewRandomID()"
+	}
+
+	switch op {
+	case "ne":
+		if derivable {
+			return ref
+		}
+		return quote(other.Example)
+	case "gte", "gt":
+		// The empty string sorts below every other, so it breaks "at least as
+		// large as" — and it is not larger than anything, which breaks "larger
+		// than" too, including against an empty other.
+		return quote("")
+	case "lte", "lt":
+		if derivable {
+			return ref + ` + "z"`
+		}
+		return quote("zzzzzzzzzz")
+	default: // eq
+		if derivable {
+			return ref + ` + "-x"`
+		}
+		return quote("!!never-equal!!")
 	}
 }
 
@@ -1730,10 +1798,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 				"and the value the caller sent is not in the row.")
 		s.L("func Test%s_CarriesEveryField(t *testing.T) {", op.RequestType)
 		s.L("\tr := %s{", op.RequestType)
-		for _, f := range m.WritableFields() {
-			if m.PatchExcludes[f.Name] && op.Verb == "patch" {
-				continue
-			}
+		for _, f := range m.CommandFields(op.Verb) {
 			s.L("\t\t%s: %s,", f.Name, requestSample(f, op))
 		}
 		s.L("\t}")
@@ -1761,11 +1826,8 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 			s.L("\t\tt.Errorf(\"the %s collection did not reach the command\")", c.Name)
 			s.L("\t}")
 		}
-		for _, f := range m.WritableFields() {
-			if m.PatchExcludes[f.Name] && op.Verb == "patch" {
-				continue
-			}
-			if f.Nullable || op.Verb == "patch" {
+		for _, f := range m.CommandFields(op.Verb) {
+			if f.Nullable || f.WireOptional || op.Verb == "patch" {
 				continue // a pointer compares by address; the value is asserted below
 			}
 			s.L("\tif cmd.%s != r.%s {", f.Name, f.Name)
@@ -1838,7 +1900,21 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 //
 // A patch body is all pointers — that is what lets it say "leave this alone" —
 // so the same field is a pointer there and a plain value everywhere else.
+// commandSample is wireSample for a field as the COMMAND carries it. The one
+// field that differs is the row scope's subject when the bypass may state it:
+// the command holds a POINTER there, because "absent" has to be distinguishable
+// from "empty" — absent is what every ordinary caller sends.
+func commandSample(f ir.Field) string {
+	if f.WireOptional {
+		return patchSample(f)
+	}
+	return wireSample(f)
+}
+
 func requestSample(f ir.Field, op ir.Operation) string {
+	if f.WireOptional {
+		return patchSample(f)
+	}
 	if op.Verb == "patch" && !f.Nullable {
 		return "func() *" + f.BaseGoType + " { v := " + f.BaseGoType + "(" + literalFor(f) + "); return &v }()"
 	}
@@ -2643,8 +2719,8 @@ func emitFromEntityTest(s *src, m *ir.Model, op *ir.Operation) {
 	s.L("func Test%sResultCarriesWhatWasWritten(t *testing.T) {", op.CommandType)
 	s.L("\tctx := &configuration.AppContext{}")
 	s.L("\tc := &%s{", op.CommandType)
-	for _, f := range m.WritableFields() {
-		s.L("\t\t%s: %s,", f.Name, wireSample(f))
+	for _, f := range m.CommandFields(op.Verb) {
+		s.L("\t\t%s: %s,", f.Name, commandSample(f))
 	}
 	for _, c := range m.Children {
 		s.L("\t\t%s: []dtos.%s{{", c.GoPlural, c.InputType)
@@ -2678,7 +2754,9 @@ func emitFromEntityTest(s *src, m *ir.Model, op *ir.Operation) {
 	s.L("\tif err != nil {")
 	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
 	s.L("\t}")
-	for _, f := range m.WritableFields() {
+	// The RESULT, not the command: a body-sourced runtime field is in the one
+	// and not the other, because there is no column behind it to project.
+	for _, f := range ir.DropBodyRuntime(m.CommandFields(op.Verb)) {
 		if f.Nullable {
 			continue
 		}
@@ -2789,10 +2867,7 @@ func emitPartialResultTest(s *src, m *ir.Model, op *ir.Operation) {
 	s.L("\tctx := &configuration.AppContext{}")
 	s.L("\te := &appdomain.%s{}", m.Entity.Pascal)
 	s.L("\tc := &%s{", op.CommandType)
-	for _, f := range m.PatchableFields() {
-		if m.PatchExcludes[f.Name] {
-			continue
-		}
+	for _, f := range m.CommandFields("patch") {
 		s.L("\t\t%s: %s,", f.Name, patchSample(f))
 	}
 	s.L("\t}")
@@ -2804,8 +2879,8 @@ func emitPartialResultTest(s *src, m *ir.Model, op *ir.Operation) {
 	s.L("\tif err != nil {")
 	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
 	s.L("\t}")
-	for _, f := range m.PatchableFields() {
-		if m.PatchExcludes[f.Name] || f.Nullable {
+	for _, f := range ir.DropBodyRuntime(m.CommandFields("patch")) {
+		if f.Nullable {
 			continue
 		}
 		s.L("\tif res.%s != %s {", f.Name, literalFor(f))

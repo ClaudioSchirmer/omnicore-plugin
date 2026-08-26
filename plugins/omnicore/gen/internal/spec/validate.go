@@ -358,6 +358,234 @@ var reservedFieldNames = map[string]string{
 // isFacet distinguishes the two things isChild lumps together: a COLLECTION
 // entry, whose uniqueness this build now generates, and a 1:1 FACET's field,
 // whose uniqueness it still does not.
+// ScopeSubjectName is the field the row scope narrows BY: the owner under
+// owner-only access, the tenant under tenant access, and nothing at all when
+// the rows are not scoped.
+func ScopeSubjectName(s *Spec) string {
+	switch s.Authz.DataAccess {
+	case "owner-only":
+		return s.Authz.OwnerField
+	case "tenant":
+		return s.Authz.TenantField
+	}
+	return ""
+}
+
+// validateBypassMaySet holds the "yields to the bypass" key to the ONE seat
+// where it is safe.
+//
+// The value it lets through is written onto the entity whoever sent it, and
+// what refuses a caller who may not state one is the row-scope guard — which
+// compares exactly one field, the scope's subject. On any other field there is
+// no comparison, so the body value would simply be taken, from everybody, on a
+// field the spec advertises as server-assigned. That is a privilege escalation
+// spelled as a convenience, and it is refused here rather than reviewed later.
+func validateBypassMaySet(s *Spec, f Field, where string, ps *Problems, isChild bool) {
+	if !f.BypassMaySet {
+		return
+	}
+	at := where + ".bypassMaySet"
+	if isChild {
+		ps.BlockerFix(at,
+			"an entry of a collection is not the subject of the row scope",
+			"the field the scope narrows by belongs to the root, and so does this key")
+		return
+	}
+	if f.AssignedFrom == "" {
+		ps.BlockerFix(at,
+			"this key says who may state a value the SERVER would otherwise assign, "+
+				"and nothing assigns this field",
+			"declare assignedFrom: identity-claim (with its claim) or identity-subject; "+
+				"a field the client already sends needs no exception")
+		return
+	}
+	if f.AssignedFrom == "derived" {
+		ps.BlockerFix(at,
+			"a derived field is computed from the entity's own fields, so there is no "+
+				"caller — not even a privileged one — with a value to state",
+			"drop bypassMaySet; if the value really comes from the request, it is not derived")
+		return
+	}
+	subject := ScopeSubjectName(s)
+	switch {
+	case !Scoped(s.Authz.DataAccess):
+		ps.BlockerFix(at,
+			"nothing scopes the rows of this entity, so no caller crosses a scope",
+			"this key belongs to authz.dataAccess: owner-only or tenant, where the "+
+				"server fills the scope from the caller's identity")
+	case s.Authz.Bypass == "":
+		ps.BlockerFix(at,
+			"no caller crosses the row scope, so the exception applies to nobody",
+			"declare authz.bypass — the permission (or the *:* wildcard) that lets an "+
+				"operator read and repair rows outside their own scope")
+	case subject != f.Name:
+		ps.BlockerFix(at,
+			fmt.Sprintf("%q is not the field the row scope narrows by, and what refuses a "+
+				"caller who may NOT state a value is that scope's own guard — over %q alone",
+				f.Name, orUnnamed(subject)),
+			fmt.Sprintf("declare it on %s, or leave this field server-assigned: on any "+
+				"other field the value would be accepted from every caller",
+				orUnnamed(subject)))
+	}
+	// The value rides on the INSERT body, so an entity that mounts no insert
+	// offers it nowhere.
+	if !contains(s.Modes, "insert") {
+		ps.BlockerFix(at,
+			"this entity has no insert verb, and the exception is on the insert alone — "+
+				"a row does not change scope by being updated",
+			"add insert to the entity's modes, or drop bypassMaySet")
+	}
+}
+
+// Scoped reports whether a dataAccess narrows the rows by something about the
+// caller, which is the precondition for anything crossing that scope.
+func Scoped(dataAccess string) bool {
+	return dataAccess == "owner-only" || dataAccess == "tenant"
+}
+
+// SourceOf answers where a runtime-only field is fed from, with the default
+// materialised: a spec written before `source` existed says `claim`, which is
+// the only thing runtime used to mean.
+//
+// Exported because the resolver needs the same answer, and a default decided
+// twice in two layers is the generator bug that compiles and is wrong.
+func SourceOf(f Field) string {
+	if !f.Runtime {
+		return ""
+	}
+	if f.Source == "" {
+		return "claim"
+	}
+	return f.Source
+}
+
+// FromBody reports whether a field crosses the request body, the command and
+// the entity without ever reaching a column.
+func FromBody(f Field) bool { return SourceOf(f) == "body" }
+
+// validateRuntimeField judges the field the table never sees.
+//
+// Both sources agree on what is refused for the same reason — there is no
+// column, so uniqueness, redaction and a column name are all answers to a
+// question nobody asked. They part on where the value comes from, and that
+// decides two keys: `claim` needs one named and refuses `modes`; `body` refuses
+// a claim and takes the write verbs its value rides on.
+func validateRuntimeField(s *Spec, f Field, where string, ps *Problems, isChild bool) {
+	// A collection entry (or a facet's row) has no write of its own to carry
+	// the value on, and no identity of its own to read one from; the lowering
+	// kept the field anyway and the migration emitted a column with an EMPTY
+	// name.
+	if isChild {
+		ps.BlockerFix(where,
+			"a runtime-only field belongs to the entity, not to a collection or facet",
+			"declare it at the root; an entry is validated in the entity's context "+
+				"and reads the entity's runtime fields from there")
+		return
+	}
+	if f.Source != "" && !FieldSources.Has(f.Source) {
+		ps.BlockerFix(where+".source",
+			fmt.Sprintf("%q is not somewhere a runtime-only field can be fed from", f.Source),
+			"one of: "+FieldSources.String())
+		return
+	}
+	if f.Column != "" {
+		ps.BlockerFix(where,
+			"a runtime-only field cannot have a column",
+			"a runtime field is never persisted — it is fed from the caller's token "+
+				"(source: claim) or from the request body (source: body), and stops at "+
+				"the entity")
+	}
+	if f.Unique != nil {
+		ps.Blockerf(where, "a runtime-only field cannot be unique — it is never stored")
+	}
+	// Redaction masks the copies the framework makes of a ROW. A runtime-only
+	// field is on no row: it is in no payload and no audit event to be masked in.
+	if f.Redact != nil {
+		ps.BlockerFix(where+".redact",
+			"a runtime-only field is never persisted, so no copy of it exists to redact",
+			"drop redact — the value lives for the length of one request and reaches "+
+				"neither the outbox payload nor the audit event")
+	}
+
+	if !FromBody(f) {
+		if f.Claim == "" {
+			ps.BlockerFix(where+".claim",
+				"a runtime-only field does not say where its value comes from",
+				"name the claim it is fed from, e.g. claim: email — the framework does "+
+					"not opine on custom claim names, so there is no convention to fall "+
+					"back on. If the value comes from the REQUEST instead, say so with "+
+					"source: body and drop claim (that is the password-confirmation shape)")
+		}
+		if f.Type != "string" && f.Type != "bool" {
+			ps.BlockerFix(where+".type",
+				"a runtime-only field read from a token claim is text or a flag",
+				"set type: string, or type: bool for a yes/no claim")
+		}
+		if len(f.Modes) > 0 {
+			ps.BlockerFix(where+".modes",
+				"modes names the write verbs whose BODY carries the field, and this one "+
+					"is fed from the caller's token",
+				"drop modes — a claim reaches every verb, including the bodyless ones; "+
+					"or set source: body if the caller is meant to send the value")
+		}
+		return
+	}
+
+	// ── source: body ─────────────────────────────────────────────────────────
+	if f.Claim != "" {
+		ps.BlockerFix(where+".claim",
+			"a source: body field is filled from the request, so naming a claim says "+
+				"two different things about where the value comes from",
+			"drop claim, or drop source: body to go back to reading the token")
+	}
+	if f.VO != nil && f.VO.Kind == "composite" {
+		ps.BlockerFix(where+".vo",
+			"a composite value object spells out which COLUMN each of its parts is "+
+				"stored in, and a source: body field is stored in none",
+			"use a raw or reuse value object, whose value is one scalar the request "+
+				"can carry")
+	}
+	// A write-less entity has no body for the value to ride on, so the field is
+	// declared and unreachable — which reads, in the generated code and in the
+	// report, exactly like a field that works.
+	if !contains(s.Modes, "insert") && !contains(s.Modes, "update") {
+		ps.BlockerFix(where+".source",
+			"this entity mounts no write verb, so no request body exists to carry the field",
+			"give the entity an insert or an update verb under modes, or drop the field")
+	}
+	validateBodyFieldModes(s, f, where, ps)
+}
+
+// validateBodyFieldModes holds the modes list to the verbs the entity actually
+// has. A field declared on a verb the spec never mounts is a field the caller
+// can never send — accepted silently, it reads as "declared and working".
+func validateBodyFieldModes(s *Spec, f Field, where string, ps *Problems) {
+	if len(f.Modes) == 0 {
+		return
+	}
+	seen := map[string]bool{}
+	for i, mode := range f.Modes {
+		at := fmt.Sprintf("%s.modes[%d]", where, i)
+		if !FieldModes.Has(mode) {
+			ps.BlockerFix(at,
+				fmt.Sprintf("%q is not a write verb whose body can carry a field", mode),
+				"one of: "+FieldModes.String()+" — a PATCH is dispatched into the same "+
+					"IfUpdate clause a PUT is, so `update` names both")
+			continue
+		}
+		if seen[mode] {
+			ps.Blockerf(at, "%q is listed twice", mode)
+			continue
+		}
+		seen[mode] = true
+		if !contains(s.Modes, mode) {
+			ps.BlockerFix(at,
+				fmt.Sprintf("this entity has no %s verb, so nothing would ever carry the field", mode),
+				"add "+mode+" to the entity's modes, or drop it from this field's")
+		}
+	}
+}
+
 func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isFacet bool, opt Options) {
 	if f.Name == "" {
 		ps.Blockerf(where, "the field name is required")
@@ -400,51 +628,33 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 
 	if f.Hidden && f.Runtime {
 		ps.BlockerFix(where+".hidden",
-			"a runtime-only field is in no response to begin with — it is fed from the "+
-				"caller's token and exists for the rules to read",
+			"a runtime-only field is in no response to begin with — it is never "+
+				"persisted, so no read has anything to render",
 			"drop hidden; it takes a PERSISTED field out of the responses while leaving "+
 				"the column, the filters and the writes alone")
 	}
 
+	// source and modes are the two keys that only mean anything on a runtime
+	// field. Read on a persisted one they would say "this is not stored", which
+	// is the opposite of what the column says — so they are refused by name
+	// rather than ignored.
+	if !f.Runtime {
+		if f.Source != "" {
+			ps.BlockerFix(where+".source",
+				"source says where a RUNTIME-only field is fed from, and this field has a column",
+				"add runtime: true if the value must not be stored, or drop source — a "+
+					"persisted field is filled from the request body like any other")
+		}
+		if len(f.Modes) > 0 {
+			ps.BlockerFix(where+".modes",
+				"modes says which write verbs carry a source: body field, and this field is persisted",
+				"a persisted field is on every write verb the entity has; to keep one out "+
+					"of the partial update, name it under update.patchExcludes")
+		}
+	}
+
 	if f.Runtime {
-		// A collection entry (or a facet's row) has no request identity of its
-		// own; the lowering kept the field anyway and the migration emitted a
-		// column with an EMPTY name.
-		if isChild {
-			ps.BlockerFix(where,
-				"a runtime-only field belongs to the entity, not to a collection or facet",
-				"declare it at the root; an entry is validated in the entity's context "+
-					"and reads the entity's runtime fields from there")
-			return
-		}
-		if f.Column != "" {
-			ps.BlockerFix(where,
-				"a runtime-only field cannot have a column",
-				"runtime fields are fed from the request identity and never persisted")
-		}
-		if f.Unique != nil {
-			ps.Blockerf(where, "a runtime-only field cannot be unique — it is never stored")
-		}
-		if f.Claim == "" {
-			ps.BlockerFix(where+".claim",
-				"a runtime-only field does not say which claim it comes from",
-				"name it, e.g. claim: email — the framework does not opine on custom "+
-					"claim names, so there is no convention to fall back on")
-		}
-		if f.Type != "string" && f.Type != "bool" {
-			ps.BlockerFix(where+".type",
-				"a runtime-only field is read from a token claim, so it is text or a flag",
-				"set type: string, or type: bool for a yes/no claim")
-		}
-		// Redaction masks the copies the framework makes of a ROW. A runtime-only
-		// field is on no row: it is fed from the caller's token, read by the
-		// rules, and is in no payload and no audit event to be masked in.
-		if f.Redact != nil {
-			ps.BlockerFix(where+".redact",
-				"a runtime-only field is never persisted, so no copy of it exists to redact",
-				"drop redact — the value lives for the length of one request and reaches "+
-					"neither the outbox payload nor the audit event")
-		}
+		validateRuntimeField(s, f, where, ps, isChild)
 		return
 	}
 
@@ -508,6 +718,8 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 					"declare it, or the column keeps its zero value and no error says so")
 		}
 	}
+
+	validateBypassMaySet(s, f, where, ps, isChild)
 
 	if f.Column == "" {
 		ps.Blockerf(where, "the column name is required")
@@ -2228,6 +2440,17 @@ func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 				ps.BlockerFix(w+".ownerField",
 					fmt.Sprintf("%q is a persisted field", r.OwnerField),
 					"the caller's identity is runtime-only — set runtime: true on it")
+			} else if FromBody(*f) {
+				// The whole point of the check is that the caller cannot choose
+				// who they are. A source: body field is exactly what the caller
+				// chooses, so this would have compared the row's owner against a
+				// string the attacker typed — and passed.
+				ps.BlockerFix(w+".ownerField",
+					fmt.Sprintf("%q is fed from the REQUEST BODY, so the caller decides what "+
+						"it holds and the check would compare the row against whatever they sent",
+						r.OwnerField),
+					"the caller's identity comes from the token — drop source: body and "+
+						"name the claim it is read from")
 			}
 		}
 		if r.AdminField != "" {
@@ -2240,6 +2463,13 @@ func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 					fmt.Sprintf("%q is a persisted field", r.AdminField),
 					"whether the caller is an administrator comes from the request, not from "+
 						"the row — set runtime: true on it")
+			case FromBody(*f):
+				// A privilege the caller sends is not a privilege.
+				ps.BlockerFix(w+".adminField",
+					fmt.Sprintf("%q is fed from the REQUEST BODY, so any caller could grant "+
+						"themselves the bypass by sending it", r.AdminField),
+					"the privilege comes from the token — drop source: body and name the "+
+						"claim it is read from")
 			case f.Type != "bool":
 				ps.BlockerFix(w+".adminField",
 					fmt.Sprintf("%q is %s, and the bypass is a yes/no", r.AdminField, f.Type),

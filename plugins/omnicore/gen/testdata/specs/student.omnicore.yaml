@@ -120,6 +120,21 @@ fields:
     claim: email
     description: E-mail do solicitante, vindo do token — nunca persistido.
 
+  # O outro tipo de campo runtime: o CHAMADOR envia, as regras leem, e nenhuma
+  # coluna guarda. Sem `modes`, todo verbo de escrita o carrega — que é o caso
+  # que este fixture compila e sobe: o INSERT valida o objeto de valor, e o
+  # UPDATE (PUT, PATCH, verbos por entrada da coleção, limpeza de faceta) o
+  # ignora quando a escrita não trouxe valor nenhum.
+  - name: EmailConfirmation
+    type: string
+    runtime: true
+    source: body
+    livesOn: root
+    vo: {kind: raw, ref: Email}
+    example: ana.ribeiro@escola.br
+    description: O e-mail digitado uma segunda vez — conferido, nunca armazenado.
+    labelKey: StudentEmailConfirmationField
+
   # A chave estrangeira para outra agregada e uma coluna comum desta entidade.
   # Nada nela e especial aqui — o que a torna alcancavel numa CONSULTA e o bloco
   # joins: la embaixo, que e uma declaracao separada de proposito.
@@ -261,6 +276,22 @@ rules:
       notification: GradeOutOfRangeNotification
       echoValue: true
 
+    # O que torna o campo `source: body` acima útil. O objeto de valor diz que a
+    # confirmação é um endereço bem formado; só esta regra diz que é o MESMO.
+    #
+    # Só no INSERT, embora o campo não declare `modes` e portanto viaje também
+    # no PUT e no PATCH: pedir a confirmação é uma decisão do cadastro, e uma
+    # atualização que não a traz não tem o que comparar. O objeto de valor
+    # continua julgando o valor quando ele VEM — é isso que a exclusão
+    # condicional na cláusula IfUpdate diz.
+    - id: email-confirmed
+      kind: comparison
+      scope: [insert]
+      fields: [EmailConfirmation]
+      other: Email
+      operator: eq
+      notification: EmailConfirmationMismatchNotification
+
     # A cap with NEITHER groupBy NOR only: the limit is on the size of the
     # collection itself. It is here because it is the one groupCap shape whose
     # emitted code has nothing to say about an individual entry, and a counting
@@ -362,6 +393,17 @@ notifications:
       deu: Die Einschreibenummer kann nicht geändert werden.
       ita: Il numero di iscrizione non può essere modificato.
       nld: Het inschrijvingsnummer kan niet worden gewijzigd.
+
+  - name: EmailConfirmationMismatchNotification
+    semantic: validation
+    text:
+      ptbr: A confirmação de e-mail não confere com o e-mail informado.
+      eng: The e-mail confirmation does not match the address given.
+      esp: La confirmación de correo no coincide con la dirección indicada.
+      fra: La confirmation d'e-mail ne correspond pas à l'adresse saisie.
+      deu: Die E-Mail-Bestätigung stimmt nicht mit der angegebenen Adresse überein.
+      ita: La conferma dell'e-mail non corrisponde all'indirizzo indicato.
+      nld: De e-mailbevestiging komt niet overeen met het opgegeven adres.
 
   - name: GradeOutOfRangeNotification
     semantic: validation

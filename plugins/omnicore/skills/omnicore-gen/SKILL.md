@@ -345,6 +345,59 @@ Four things to get right, because they are the ones that cost a migration later:
     `Value()`**: its absence is what tells the framework to decompose the value instead of
     storing a rendering in one column. For a value that occupies ONE column the answer stays
     `kind: manual`.
+- **A field has THREE states, not two — and the third is the one people work around.**
+  Persisted (it has a `column`) and runtime-from-the-token (`runtime: true` + `claim`) are
+  the two everyone finds. The third is a value the CALLER sends, that a rule reads, and
+  that no column holds: `runtime: true` with **`source: body`**. A password and its
+  confirmation are the case it exists for — the confirmation is there to be compared, and
+  storing it a second time is the bug — but so is any "type it twice", any one-time token
+  checked against a stored hash, any consent flag a rule needs and the row must not keep.
+  Without this spelling the only ways out were a column nobody wanted or hand-writing the
+  insert command and the aggregate, the two files a regeneration overwrites most.
+  - **What it reaches, exactly**: the write request DTO, the command and its mapper, and
+    the aggregate — where the framework's automatic pass validates its value object like
+    any other, because that pass walks the STRUCT and not the schema. What it reaches
+    NEVER: the `TableSchema`, the migration, the outbox payload, the audit event, any
+    Response, any filter or `sort:`. There is no column, so there is nothing to redact and
+    nothing to leak — and `redact:` on one is refused for saying otherwise.
+  - **`modes: [insert]` / `[update]` — which write verbs carry it.** Omitted means every
+    write verb the entity has. Name them when the value belongs to one moment: a
+    confirmation asked at sign-up and never again. The values are the two the DOMAIN can
+    tell apart; `patch` is refused because a PATCH is dispatched into the same `IfUpdate`
+    clause a PUT is, so `update` already names both.
+  - **Nothing compares it for you.** The value object says the confirmation is a
+    well-formed address or a strong-enough secret; only a `kind: comparison` rule says it
+    is the SAME one. Leave the rule out and the field is collected, validated for shape,
+    and ignored. Scope the rule to the verbs the field's `modes` name — the others never
+    carry a value to compare.
+  - **It is not an identity, and `check` says so.** A `source: body` field is refused as
+    an `ownerCheck`'s `ownerField` or `adminField`: the caller chooses what it holds, so
+    "the row is yours" would be checked against a string the caller typed. Who the caller
+    is comes from the token — that is what `source: claim` is for.
+  - **Storing the credential is still yours to design.** The generator keeps the plaintext
+    off the table; it does not hash it. The usual shape is a persisted `PasswordHash` with
+    `assignedFrom: derived` — absent from every write DTO — filled by a `rules.manual`
+    entry scoped to `insert`, which the gen-report lists as owed.
+- **A scoped entity's tenant/owner: `assignedFrom` alone is a trap, and the way out is
+  `bypassMaySet`.** `assignedFrom: identity-claim` on the field `authz.tenantField` names is
+  the right shape — the server fills it, so no caller can file a record under someone
+  else's scope. What it also does is remove the field from EVERY write body, and that is
+  the trap: the one caller `authz.bypass` lets cross the scope, the operator supporting a
+  customer, can then read and repair that customer's records and **never create one**.
+  There is nowhere to say which tenant a new record belongs to.
+  - The way people escape it without this key is to drop `assignedFrom` and put the value
+    in the body with a rule — which makes every ordinary caller send a value the server
+    already knows, and makes that rule the only thing between them and their neighbour's
+    data. If you find yourself writing that, write `bypassMaySet: true` instead.
+  - **What it does**: the field rejoins the INSERT body as an OPTIONAL value. Absent means
+    "mine", which the identity already wrote. It stays out of the update and the patch, on
+    purpose — a record does not change scope by being edited.
+  - **What it does NOT do is check anything in the mapper**, and that is the design. The
+    stated value is applied whoever sent it, so the row-scope guard the entity already
+    carries is what answers: a caller who may not cross the scope gets the same refusal a
+    write into a foreign record gets. That is also why `check` refuses the key anywhere but
+    on the scope's own subject — on another field nothing would compare it, and the value
+    would be accepted from everybody.
 - **Every generated DTO opts into the framework's generic mappers, and that is a claim,
   not a shortcut.** A Response embeds `fwresponses.Auto`, a Request embeds
   `fwrequests.Auto`, and the bodies become one call each. The generator can make that

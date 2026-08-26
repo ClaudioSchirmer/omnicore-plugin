@@ -84,7 +84,8 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	s.L("type %s struct {", op.RequestType)
 	s.L("\t%s", autoRequestEmbed)
 	s.Blank()
-	for _, f := range commandFields(m, partial) {
+	for _, f := range commandFields(m, op) {
+		emitBypassSettableNote(s, m, f)
 		s.L("\t%s %s `json:%s example:%s`", f.Name,
 			commandFieldType(f, partial), quote(jsonTag(f, partial)), quote(f.Example))
 	}
@@ -133,8 +134,33 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 // jsonTag builds the json tag value. The omitempty option belongs INSIDE the
 // quoted value: outside it, the tag silently stops parsing as a struct tag and
 // every option after it is lost.
+// emitBypassSettableNote explains, at the one field that needs it, why a
+// server-assigned value is in a request body at all.
+//
+// Without it the field reads as an ordinary optional input, and the next
+// reader's reasonable conclusion — "the caller picks the tenant" — is exactly
+// the misunderstanding that would get the pointer removed and the value taken
+// from everyone.
+func emitBypassSettableNote(s *src, m *ir.Model, f ir.Field) {
+	if !f.WireOptional || !f.BypassMaySet {
+		return
+	}
+	who := "a caller holding " + m.Authz.Bypass
+	if m.Authz.BypassWildcard {
+		who = "a super-admin (" + m.Authz.Bypass + ")"
+	}
+	for _, line := range wrap(fmt.Sprintf("Optional, and server-assigned for almost "+
+		"everyone: leave it out and the value is read from the caller's own identity. "+
+		"It is here for %s, who crosses the row scope and has to be able to say which "+
+		"one a NEW record belongs to. A value from anyone else is not ignored — it "+
+		"reaches the aggregate, where the row-scope guard refuses it exactly as it "+
+		"refuses a write into a record that is not the caller's.", who), 68) {
+		s.L("\t// %s", line)
+	}
+}
+
 func jsonTag(f ir.Field, optional bool) string {
-	if optional || f.Nullable {
+	if optional || f.Nullable || f.WireOptional {
 		return f.JSONName + ",omitempty"
 	}
 	return f.JSONName

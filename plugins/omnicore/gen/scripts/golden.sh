@@ -341,7 +341,7 @@ else
       2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
     NEW_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/students" \
       -H 'Content-Type: application/json' \
-      -d '{"name":"Ana Paula","enrollmentNumber":"2026-09999","email":"ana@escola.br","status":"active","grade":8.5,"enrolledAt":"2026-02-01T09:00:00Z","tuitionAmount":185000,"tuitionCurrency":"BRL","leaveFrom":"2026-06-01T00:00:00Z","leaveTo":"2026-08-01T00:00:00Z","scholarshipSponsor":"Fundacao Alfa","scholarshipPercentage":50,"campusId":"'"$CAMPUS_ID"'","guardians":[{"fullName":"Marcos","document":"123.456.789-00","phone":"11999999999"}]}' \
+      -d '{"name":"Ana Paula","enrollmentNumber":"2026-09999","email":"ana@escola.br","emailConfirmation":"ana@escola.br","status":"active","grade":8.5,"enrolledAt":"2026-02-01T09:00:00Z","tuitionAmount":185000,"tuitionCurrency":"BRL","leaveFrom":"2026-06-01T00:00:00Z","leaveTo":"2026-08-01T00:00:00Z","scholarshipSponsor":"Fundacao Alfa","scholarshipPercentage":50,"campusId":"'"$CAMPUS_ID"'","guardians":[{"fullName":"Marcos","document":"123.456.789-00","phone":"11999999999"}]}' \
       2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
     if [[ -n "$NEW_ID" ]]; then
       SHAPES=$(python3 - "$NEW_ID" <<'PYSHAPE'
@@ -581,12 +581,26 @@ PYID
     # not 201. That is exactly the pair that used to disagree — a per-tenant
     # pre-check behind a global index — and the disagreement was invisible until
     # a second tenant hit it.
-    ROLE_ID=$(curl -fsS -X POST "http://127.0.0.1:18099/roles" \
+    # Third, that a tenant STATED in the body reaches the column. The role's
+    # tenant is `assignedFrom: identity-claim` with `bypassMaySet: true`, so it
+    # is in this one body and in no other, and the mapper applies the claim
+    # first and the caller's word second. Reading the value back is the only
+    # check that tells "the body won" from "the body was ignored and the empty
+    # claim happened to match" — which is what a reversed ordering looks like
+    # from outside, and it answers 201 either way.
+    ROLE_BODY=$(curl -fsS -X POST "http://127.0.0.1:18099/roles" \
       -H 'Content-Type: application/json' \
       -d '{"tenantID":"9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3","key":"administrator","name":"Administrator","permissions":[{"permissionID":"3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31","note":"initial grant"}]}' \
-      2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)
+      2>/dev/null)
+    ROLE_ID=$(python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' <<<"$ROLE_BODY" 2>/dev/null)
+    ROLE_TENANT=$(python3 -c 'import sys,json;print(json.load(sys.stdin)["data"].get("tenantID",""))' <<<"$ROLE_BODY" 2>/dev/null)
     if [[ -n "$ROLE_ID" ]]; then
       ok "a tenant-scoped entity accepts a write on a bench with no identity (noIdentity: stand-down)"
+      if [[ "$ROLE_TENANT" == "9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3" ]]; then
+        ok "a server-assigned scope the bypass may state is taken from the body (bypassMaySet)"
+      else
+        bad "the stated tenant did not reach the record — got '${ROLE_TENANT:-nothing}'; the mapper applies the identity AFTER the body, or drops it"
+      fi
       DUP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:18099/roles" \
         -H 'Content-Type: application/json' \
         -d '{"tenantID":"9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3","key":"administrator","name":"Duplicate","permissions":[]}')
@@ -932,9 +946,17 @@ if [[ $prune_ok -eq 1 ]]; then
   # ordinary orphan path is exercised in the same run — and with it the read
   # join that hangs off that collection, which the generator would otherwise
   # (correctly) refuse as a join from a collection this spec no longer has.
+  #
+  # Dropping a field means dropping what NAMED it, which here is a second field
+  # and a rule: the body-sourced confirmation exists to be compared against
+  # Email, and a comparison whose `other` is gone is refused — correctly, and
+  # before this lane's own subject is reached.
   python3 - "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" <<'PYEOF'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
+s = re.sub(r'(?:  #.*\n)*  - name: EmailConfirmation\n(?:    .*\n)+?\n', '', s, count=1)
+s = re.sub(r'(?:    #.*\n)*    - id: email-confirmed\n(?:      .*\n)+?\n', '', s, count=1)
+s = re.sub(r'  - name: EmailConfirmationMismatchNotification\n(?:    .*\n)+?\n', '', s, count=1)
 s = re.sub(r'  - name: Email\n(?:    .*\n)+?\n', '', s, count=1)
 s = re.sub(r'  - name: Email\n    kind: raw\n(?:    .*\n)+?\n', '', s, count=1)
 s = re.sub(r'\nchildren:\n(?:.*\n)*?\nsiblings:', '\nsiblings:', s)

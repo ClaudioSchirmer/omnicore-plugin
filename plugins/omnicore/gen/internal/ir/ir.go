@@ -122,6 +122,20 @@ type Field struct {
 	// push it down.
 	Hidden bool
 	Claim  string
+	// Source is where a RUNTIME field's value comes from: "claim" (the caller's
+	// token) or "body" (the request itself). Empty for a persisted field.
+	//
+	// The two share everything below the entity — neither has a column, so
+	// neither reaches the TableSchema, the migration, the outbox payload, the
+	// audit event or any response — and differ above it: a claim field is absent
+	// from every write DTO and filled by the identity feed, a body field is a
+	// normal request field the mapper assigns like any other.
+	Source string
+	// Modes are the write verbs whose body carries a "body" field, at the
+	// granularity the rule gates have: "insert" and "update", where update means
+	// both the full replacement and the patch. Always populated for such a
+	// field, empty for every other.
+	Modes []string
 	// IdentitySource says WHICH part of the identity fills a runtime field, for
 	// the ones this resolver synthesises rather than the author declaring:
 	// "tenant" (the framework's configured tenant claim, via Identity.TenantID),
@@ -134,6 +148,20 @@ type Field struct {
 	// AssignedFrom names where the server reads this field's value when the
 	// client is not allowed to send it. Empty for an ordinary field.
 	AssignedFrom string
+	// BypassMaySet says the caller who crosses the row scope may state this
+	// value instead of having it read off their own identity. Set only on the
+	// scope's SUBJECT, which is the one field the row-scope guard compares — and
+	// so the one field where a value from a caller who may not state one is
+	// answered rather than taken.
+	BypassMaySet bool
+	// WireOptional makes the field a POINTER on the wire whatever its column
+	// says, so "did the caller send this?" is answerable.
+	//
+	// It is not `nullable` and must not be confused with it: nullable is about
+	// the COLUMN accepting NULL, this is about the REQUEST being allowed to omit
+	// a value the server would otherwise supply. It is set on the copy that goes
+	// into one verb's command, never on the field the table is built from.
+	WireOptional bool
 	LivesOn      string
 	// Facet names the 1:1 facet a field is stored in, when it is not stored on
 	// its owner's own table. The Go type carries it like any other field — the
@@ -510,6 +538,9 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 		}
 		rf := resolveField(m.Entity.Pascal, f)
 		if f.Runtime {
+			if rf.Source == "body" {
+				rf.Modes = bodyFieldModes(f.Modes, s.Modes)
+			}
 			m.Runtime = append(m.Runtime, rf)
 		} else {
 			m.Fields = append(m.Fields, rf)
@@ -756,8 +787,10 @@ func resolveField(entity string, f spec.Field) Field {
 		Nullable: f.Nullable, Length: f.Length,
 		JSONName: naming.Camel(f.Name), LabelKey: label, Text: f.Text.Map(),
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
+		Source:       spec.SourceOf(f),
 		Hidden:       f.Hidden,
 		AssignedFrom: f.AssignedFrom,
+		BypassMaySet: f.BypassMaySet,
 		LivesOn:      f.LivesOn,
 		Redaction:    resolveRedaction(f.Redact, entity, f.Name),
 	}
@@ -2419,7 +2452,7 @@ func resolveClausesFor(rs spec.Rules, scope []Field) []Clause {
 // for the emitters: whether the identity feed reads a claim the author named,
 // which is the only case where "the claim name comes from the spec" is true.
 func (m *Model) HasDeclaredRuntimeFields() bool {
-	for _, f := range m.Runtime {
+	for _, f := range m.ClaimRuntimeFields() {
 		if f.IdentitySource == "" {
 			return true
 		}
@@ -2703,6 +2736,173 @@ func (m *Model) WritableFields() []Field {
 			continue
 		}
 		out = append(out, f)
+	}
+	// A body-sourced runtime field is written by the client and stored by
+	// nobody. It belongs here — the write DTO, the command and the mapper are
+	// exactly the surfaces it crosses — and nowhere the word "owner" reaches:
+	// AllOwnerFields is what the table, the migration and every response are
+	// built from, and this field is in none of them.
+	return append(out, m.BodyRuntimeFields()...)
+}
+
+// BodyRuntimeFields are the runtime fields the CALLER supplies: they cross the
+// write DTO, the command and the entity so a rule can check them, and stop
+// there. A password confirmation is the case they exist for.
+func (m *Model) BodyRuntimeFields() []Field {
+	var out []Field
+	for _, f := range m.Runtime {
+		if f.Source == "body" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// ClaimRuntimeFields are the runtime fields the IDENTITY supplies — the ones the
+// command mapper's identity feed fills, whether the author declared them or the
+// row scope synthesised them.
+//
+// Every emitter that used to read m.Runtime for "what does this mapper read off
+// the token" reads this instead. The distinction is not cosmetic there: a feed
+// written for a field the token does not carry opens `if id := ctx.Identity()`
+// over an empty body, and an unused variable is a build failure, not a warning.
+func (m *Model) ClaimRuntimeFields() []Field {
+	var out []Field
+	for _, f := range m.Runtime {
+		if f.Source != "body" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// CommandFields are the fields one write verb's body carries, in spec order.
+//
+// It is the per-verb narrowing of WritableFields: a persisted field is on every
+// write, a body-sourced runtime field only on the verbs it declared. The patch
+// additionally drops what update.patchExcludes put off-limits.
+func (m *Model) CommandFields(verb string) []Field {
+	base := m.WritableFields()
+	if verb == "patch" {
+		base = m.PatchableFields()
+	}
+	out := make([]Field, 0, len(base))
+	for _, f := range base {
+		if f.CarriedBy(verb) {
+			out = append(out, f)
+		}
+	}
+	// The scope's subject joins the INSERT body when the bypass may state it,
+	// and only there: a row does not change tenant by being updated, and the
+	// update mappers deliberately leave every server-assigned field alone.
+	if verb == "insert" {
+		if f := m.BypassSettableField(); f != nil {
+			stated := *f
+			stated.WireOptional = true
+			out = append(out, stated)
+		}
+	}
+	return out
+}
+
+// BypassSettableField is the row scope's subject when the caller who crosses
+// that scope may state it, and nil otherwise.
+//
+// It is resolved from the AUTHZ side rather than by scanning the fields,
+// because the two have to agree: what makes the value safe to accept is the
+// row-scope guard comparing this exact field, and the guard is built from
+// Authz.ScopeSubject(). Reading the flag off some other field would produce a
+// request key nothing checks.
+func (m *Model) BypassSettableField() *Field {
+	subject := m.Authz.ScopeSubject()
+	if subject == nil || !subject.BypassMaySet || m.Authz.BypassField == nil {
+		return nil
+	}
+	return subject
+}
+
+// Mappable drops the fields a flat `e.X = c.X` must NOT be written for.
+//
+// A server-assigned field is in the command only when the row-scope bypass may
+// state it, and then its assignment is ordered — the identity first, the
+// caller's word second — which is a thing the mapper's own assigned-fields
+// block writes. An unconditional copy here would run BEFORE that block and
+// dereference a nil.
+func Mappable(fields []Field) []Field {
+	out := make([]Field, 0, len(fields))
+	for _, f := range fields {
+		if f.AssignedFrom != "" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// DropBodyRuntime removes the fields that reach the entity and stop there.
+//
+// It is what the RESULT half of a write is built from: the command carries a
+// password confirmation, the entity carries it, and the result type has no such
+// member — there is no column behind it, so there is nothing to project. A test
+// or a mapper that walked the command's fields into the result would name a
+// field that does not exist, which is a build failure rather than a wrong
+// answer, but only once someone writes the spec that produces it.
+func DropBodyRuntime(fields []Field) []Field {
+	out := make([]Field, 0, len(fields))
+	for _, f := range fields {
+		if f.Source == "body" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// CarriedBy reports whether a given write verb's BODY carries this field.
+//
+// Only a body-sourced runtime field ever answers no: everything else on the
+// write surface is on every write verb the entity mounts.
+func (f Field) CarriedBy(verb string) bool {
+	if f.Source != "body" {
+		return true
+	}
+	for _, mode := range f.Modes {
+		if mode == GateModeOf(verb) {
+			return true
+		}
+	}
+	return false
+}
+
+// GateModeOf folds a write verb onto the granularity the rule gates have. A
+// PATCH is dispatched into IfUpdate exactly as a PUT is, so the domain cannot
+// tell them apart and neither does the spec key that rides on it.
+func GateModeOf(verb string) string {
+	if verb == "patch" {
+		return "update"
+	}
+	return verb
+}
+
+// bodyFieldModes materialises the default: a field that names no verb is
+// carried by every write verb the entity has.
+//
+// The intersection is deliberate in BOTH branches. Declared, it has already
+// been validated against the entity's own modes, so it passes through. Omitted,
+// "every write verb" has to mean the ones that EXIST — an insert-only entity
+// must not grow an update DTO because a field defaulted into one.
+func bodyFieldModes(declared, entityModes []string) []string {
+	if len(declared) > 0 {
+		return append([]string{}, declared...)
+	}
+	var out []string
+	for _, want := range []string{"insert", "update"} {
+		for _, have := range entityModes {
+			if have == want {
+				out = append(out, want)
+				break
+			}
+		}
 	}
 	return out
 }

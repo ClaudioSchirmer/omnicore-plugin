@@ -24,6 +24,21 @@ var (
 	// promises to keep the field out of the write surface.
 	AssignedFrom = set("identity-subject", "identity-claim", "derived")
 
+	// FieldSources is where a RUNTIME-only field is fed from. Both answers keep
+	// the field off every table: the difference is who supplies the value.
+	// `claim` is the caller's token, which is what runtime meant before this key
+	// existed — so it is the default and every spec written without it still
+	// says the same thing. `body` is the request itself: the field crosses the
+	// write DTO, the command and the entity, a rule checks it, and it stops
+	// there.
+	FieldSources = set("claim", "body")
+	// FieldModes is which write verbs carry a source: body field. It is the two
+	// the domain can tell apart, because the rule gates are the granularity that
+	// matters: a PATCH is dispatched into IfUpdate exactly as a PUT is, so
+	// `update` names both shapes and a third value would promise a distinction
+	// BuildRules cannot make.
+	FieldModes = set("insert", "update")
+
 	// VOKinds is what a field's value object IS. The generated kinds split on
 	// two questions: who owns the rule (raw writes it, enum gets membership for
 	// free) and how many columns the value occupies — a composite declares no
@@ -243,6 +258,16 @@ func Vocabularies() []Vocabulary {
 		{"fields[].assignedFrom", AssignedFrom,
 			"the server fills it, so no write request carries it — from the identity, or " +
 				"(derived) from the entity's own fields, by a rule you write."},
+		{"fields[].source", FieldSources,
+			"where a RUNTIME-only field is fed from. claim = the caller's token (the " +
+				"default, and it needs claim: <name>); body = the request itself — the " +
+				"field crosses the write DTO, the command and the entity for a rule to " +
+				"check, and NO column, payload, audit event or response ever sees it. " +
+				"A password confirmation is the case this exists for."},
+		{"fields[].modes", FieldModes,
+			"which write verbs carry a source: body field. Omitted = every write verb " +
+				"the entity has. `update` covers both PUT and PATCH: the rule gates cannot " +
+				"tell them apart, so neither does this key."},
 		{"redact.inSync.kind", RedactKinds,
 			"how the field appears in the outbox payload — and so on the topic, in every " +
 				"consuming service, in both failure ledgers and in the projected document; " +
@@ -395,6 +420,12 @@ func RefusedKeys() map[string]string {
 			"own to be assigned from — the field that records who acted belongs to the root",
 		"siblings[].fields[].assignedFrom": "a facet's field is written with the facet — the " +
 			"field that records who acted belongs to the root",
+		"children[].fields[].bypassMaySet": "the row scope narrows by a field of the ROOT, " +
+			"and that field's guard is what makes a stated value safe to accept — an " +
+			"entry of a collection is not the subject of any scope",
+		"siblings[].fields[].bypassMaySet": "the row scope narrows by a field of the ROOT, " +
+			"and that field's guard is what makes a stated value safe to accept — a " +
+			"facet's field is not the subject of any scope",
 		"read.byParams.filters[].required": "a mandatory filter is not generated; the " +
 			"endpoint would serve the parameter as optional",
 		"delete.children": "nothing reads a blanket delete semantic for the collections — " +

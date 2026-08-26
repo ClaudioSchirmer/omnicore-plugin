@@ -93,7 +93,7 @@ func emitBodylessCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 	// This hook being a flat no-op is what let a caller archive another tenant's
 	// row with the ordinary archive permission — and not be able to read back
 	// what they had just archived.
-	if len(m.Runtime) > 0 {
+	if len(m.ClaimRuntimeFields()) > 0 {
 		s.Doc("ApplyTo carries the caller's identity onto the entity, so BuildRules can " +
 			"refuse a write to a row outside the caller's scope. The verb has no body: " +
 			"this is the only thing it applies.")
@@ -129,7 +129,7 @@ func emitBodyCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 	}
 	s.L("type %s struct {", op.CommandType)
 	s.L("\t%s", op.CommandBase)
-	for _, f := range commandFields(m, partial) {
+	for _, f := range commandFields(m, op) {
 		s.L("\t%s %s", f.Name, commandFieldType(f, partial))
 	}
 	if op.InputMethod == "ToEntity" || op.InputMethod == "ApplyTo" {
@@ -152,29 +152,27 @@ func emitBodyCommand(s *src, m *ir.Model, op ir.Operation, entity string) {
 	emitResult(s, m, op, entity)
 }
 
-// writableFields are the ones a client may set. The managed columns and the
-// runtime-only authz fields never appear in a command.
-func writableFields(m *ir.Model) []ir.Field {
-	// A sibling facet is not a separate input: its fields are more fields of the
-	// owner, and the row is materialised only when at least one carries a value.
-	return m.WritableFields()
-}
-
 // commandFields are the fields a given verb accepts.
 //
 // A partial update drops what the spec put off-limits, so the excluded field is
 // ABSENT from the type rather than merely ignored: a reader of the DTO sees the
 // truth, and a caller who sends it gets told, instead of having it quietly
-// dropped or quietly applied.
-func commandFields(m *ir.Model, partial bool) []ir.Field {
-	if partial {
-		return m.PatchableFields()
-	}
-	return m.WritableFields()
+// dropped or quietly applied. A body-sourced runtime field is narrowed the same
+// way and for the same reason — it is on the verbs its `modes` name and on no
+// others, so a caller reading the type sees where the value is accepted.
+//
+// A sibling facet is not a separate input: its fields are more fields of the
+// owner, and the row is materialised only when at least one carries a value.
+func commandFields(m *ir.Model, op ir.Operation) []ir.Field {
+	return m.CommandFields(op.Verb)
 }
 
 func commandFieldType(f ir.Field, partial bool) string {
-	if partial && !f.Nullable {
+	// WireOptional is the same POINTER for a different reason: not "the caller
+	// may leave it unchanged" but "the caller may leave it to the server". Both
+	// need the nil, so both take the pointer, and a nullable field already has
+	// one.
+	if (partial || f.WireOptional) && !f.Nullable {
 		return "*" + f.BaseGoType
 	}
 	return f.GoType
@@ -184,7 +182,7 @@ func emitToEntity(s *src, m *ir.Model, op ir.Operation, entity string) {
 	s.Doc("ToEntity builds the aggregate the framework will validate and persist.")
 	s.L("func (c *%s) ToEntity(ctx *configuration.AppContext) (*%s, error) {", op.CommandType, entity)
 	s.L("\te := &%s{}", entity)
-	emitFieldAssignments(s, writableFields(m), "\t", "e", "c")
+	emitFieldAssignments(s, ir.Mappable(commandFields(m, op)), "\t", "e", "c")
 	emitChildAdds(s, m)
 	emitAssignedFields(s, m)
 	emitIdentityFeed(s, m)
@@ -207,7 +205,7 @@ func emitApplyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 			"Every field is assigned unconditionally — that is what makes this a full replacement.")
 	}
 	s.L("func (c *%s) ApplyTo(ctx *configuration.AppContext, e *%s) error {", op.CommandType, entity)
-	emitFieldAssignments(s, writableFields(m), "\t", "e", "c")
+	emitFieldAssignments(s, ir.Mappable(commandFields(m, op)), "\t", "e", "c")
 	emitChildAdds(s, m)
 	// An insert through the identity path assigns too; an update must not —
 	// re-reading the caller would hand the row to whoever edited it last.
@@ -228,7 +226,7 @@ func emitApplyPartiallyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 			"Note the consequence: this verb can never set a value back to null, because "+
 			"an absent field and an explicit null are indistinguishable here.")
 	s.L("func (c *%s) ApplyPartiallyTo(ctx *configuration.AppContext, e *%s) error {", op.CommandType, entity)
-	plain, groups := ir.PlainAndComposites(m.PatchableFields())
+	plain, groups := ir.PlainAndComposites(commandFields(m, op))
 	for _, f := range plain {
 		s.L("\tif c.%s != nil {", f.Name)
 		if f.Nullable {
@@ -277,6 +275,49 @@ func emitAssignedFields(s *src, m *ir.Model) {
 		s.L("\t\t}")
 	}
 	s.L("\t}")
+	emitStatedScope(s, m)
+}
+
+// emitStatedScope lets the caller's OWN word override the line above, on the
+// one field the row-scope guard compares.
+//
+// Three things about this deserve to be read slowly, because each one looks
+// like a bug and is the point.
+//
+// It runs OUTSIDE the identity check: the value came from the request, not from
+// the token, so an absent identity is no reason to drop it — and on a bench with
+// authentication off it is the only value there is.
+//
+// It does not ask whether the caller MAY state it. Writing the value onto the
+// entity unconditionally is what hands the question to `refuseForeign…`, which
+// already compares this exact field against the caller's own scope and already
+// stands down for the bypass. Asking here instead would mean deciding, in a
+// mapper whose only failure channel is an error, something the domain answers
+// with a notification — and the caller would get a 500, or worse, a silent 201
+// with the record filed under the wrong scope.
+//
+// And it is emitted for the INSERT alone, because that is the only verb whose
+// mapper calls it: a record does not change scope by being updated.
+func emitStatedScope(s *src, m *ir.Model) {
+	f := m.BypassSettableField()
+	if f == nil {
+		return
+	}
+	what := "tenant"
+	if m.Authz.DataAccess == "owner-only" {
+		what = "owner"
+	}
+	s.Blank()
+	for _, line := range wrap(fmt.Sprintf("…unless the caller stated the %s themselves. "+
+		"Absent means \"mine\", which the line above already wrote. Present, it is applied "+
+		"HERE and judged in BuildRules: a caller who may not cross the row scope meets "+
+		"the same refusal a write into a foreign %s meets, instead of having the value "+
+		"quietly replaced by their own.", what, what), 70) {
+		s.L("\t// %s", line)
+	}
+	s.L("\tif c.%s != nil {", f.Name)
+	s.L("\t\te.%s = %s", f.Name, entityValue(*f, "*c."+f.Name))
+	s.L("\t}")
 }
 
 // superAdminTest is the expression that answers "is the caller a super-admin",
@@ -299,7 +340,10 @@ func superAdminTest(recv string) string {
 // update permission wrote into another tenant's aggregate one entry at a time,
 // with a green build and a green generated suite.
 func identityParam(m *ir.Model) string {
-	if len(m.Runtime) == 0 {
+	// The CLAIM-fed fields only: a body-sourced runtime field is read off the
+	// command, not off the context, so a mapper that carries nothing else still
+	// has no identity to name.
+	if len(m.ClaimRuntimeFields()) == 0 {
 		return "_"
 	}
 	return "ctx"
@@ -310,7 +354,8 @@ func identityParam(m *ir.Model) string {
 // This is the one place below the web layer that touches the request identity:
 // the command feeds it onto the entity, and BuildRules enforces with it.
 func emitIdentityFeed(s *src, m *ir.Model) {
-	if len(m.Runtime) == 0 {
+	runtime := m.ClaimRuntimeFields()
+	if len(runtime) == 0 {
 		return
 	}
 	s.Blank()
@@ -321,7 +366,7 @@ func emitIdentityFeed(s *src, m *ir.Model) {
 		s.L("\t// the claim name comes from the spec rather than from a convention.")
 	}
 	s.L("\tif id := ctx.Identity(); id != nil {")
-	for _, f := range m.Runtime {
+	for _, f := range runtime {
 		// The fields the ROW SCOPE synthesises do not come from a claim looked
 		// up by name: the tenant is whichever claim the framework is configured
 		// to read, the subject is the subject, and the bypass is a permission
