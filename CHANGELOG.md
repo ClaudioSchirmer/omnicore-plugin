@@ -7,6 +7,105 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-08-25
+
+Framework 0.60.0 gave a field a way to keep its real value in the column and wear a mask in
+every copy the framework makes of the row. The generator now speaks it — all four
+redactors, at every seat a field can occupy, including the one it has to hand back.
+
+### Added
+
+- **`fields[].redact` — the framework's `RedactedField`, declared in the spec.** The real
+  value stays in the relational column and in the hydrated entity; every copy the framework
+  makes of the row carries a mask instead — the outbox payload, and with it the topic, every
+  consuming service, both failure ledgers and the projected document, plus the audit event.
+  Two axes, both mandatory:
+
+  ```yaml
+  - name: Documento
+    type: string
+    column: documento
+    length: 14
+    hidden: true
+    redact:
+      inSync: {kind: keep-last, keep: 4}
+      inAudit: {kind: fixed, value: "***"}
+  ```
+
+  ```go
+  RedactedField("Documento", "documento",
+      core.InSync(core.RedactKeepLast(4)),
+      core.InAudit(core.RedactWith("***"))).
+  ```
+
+  **Nothing above the schema changes.** Not the aggregate, not the commands, not the DTOs,
+  not the migration, not the view — the column still holds the real value and the entity
+  still hydrates with it, so the rules read it, filters, `?search=` and the aggregate DSL
+  reach it, and a write may set it. The one line that moves is `Field(...)` becoming
+  `RedactedField(...)`, which is exactly why a redaction that fails to reach the schema is
+  invisible: the tree compiles, boots, passes every test, and the value travels in full.
+
+  The family is the framework's, closed and small: `plain` (the real value, said out loud —
+  with both axes mandatory it is the only way to write "masked in the payload, intact in the
+  trail"), `fixed` (a constant, written in the COLUMN's own Go type — `core.RedactWith(int64(0))`
+  on an int64 column, a `time.Date(…)` literal on a timestamp), `keep-last` and `hook`.
+
+  Declarable at every seat: the root, a shared base, a 1:1 facet, a collection entry, a facet
+  of an entry, and one PART of a composite value object — independently of its siblings
+  inside it, because the amount of a salary is sensitive and its currency is not.
+
+- **`kind: hook` — the mask the family cannot express, handed back like every other ELSE.**
+  The generator writes the call and creates
+  `internal/infra/schemas/<entity>_redactors_manual.go` — write-once, never regenerated, one
+  function per AXIS — with a stub that **panics** until it is written, so the first write
+  carrying the field is abandoned and rolled back.
+
+  That direction is deliberate. A stub returning `"***"` fails SAFE and is still the wrong
+  answer, and it is the one wrong answer that is expensive to undo: the framework cannot see
+  that a hook's body changed — a closure has no portable identity, so the view's rebuild hash
+  mixes in only the KIND — so documents already projected through a placeholder are repaired
+  by a `read.view.version` bump and a rebuild, by hand, months later. A panic costs one
+  failed write. The gen-report carries the signatures, and names any hook the file predates.
+
+- **`check` refuses what the framework would panic on at boot, and warns where the promise
+  is narrower than it looks.** A missing axis (naming what that axis governs, and teaching
+  `{kind: plain}` as the way to say "the real value belongs here"); a `value` or a `keep` on
+  a kind that ignores it, which the framework silently drops and the author believes is in
+  force; `keep-last` or `hook` on a column that is not text; a `fixed` value that is not of
+  the column's type; the shared identity's `naturalKey`, whose id is UUIDv5 over a fixed
+  public namespace and that value in the clear; a redaction on a base column from a role that
+  REUSES the base and therefore writes no schema for it; `type: id`; a runtime-only field;
+  and a composite redacted as a whole rather than per part.
+
+  Two warnings, for the two ways a declaration says less than it appears to. Both axes
+  `plain` masks nothing. And **a relational read model serves a redacted field IN THE CLEAR**
+  — it SELECTs the column, and redaction governs only the copies the framework makes — unless
+  the field is `hidden: true` or behind `read.fieldRestrict`; on a Mongo backing the document
+  IS the redacted payload, so the reads serve the mask.
+
+- **The gen-report carries the whole decision.** A table of every redacted field with what
+  each axis does in words rather than keywords, the read-side answer for THIS project's
+  backing, and the two things a reviewer cannot see from the generated files: that declaring
+  or changing a redaction is a shape change requiring a `read.view.version` bump and the
+  rebuild that replaces plaintext already projected, and that a `hook` is invisible to that
+  check.
+
+### Changed
+
+- **The generator now targets framework `v0.60.0`** (`explain compat`, and the pin `check`
+  compares a project against). Floor is ceiling, as always: an older pin is refused with the
+  upgrade as the fix, `--force-unsupported` overrides.
+
+### Fixed
+
+- **A collection with a `time` field emitted a test file that did not compile.** The
+  generated `internal/application/dtos/<entity>_dtos_test.go` imported `time` only when the
+  collection carried a VALUE OBJECT, which is the wrong question — a plain `type: time` entry
+  field samples as `time.Date(…)` just the same. A collection with a date and no value object
+  therefore produced an OWNED file naming `time` and importing nothing that provides it, from
+  a run that reported success. The import is now unconditional and pruned when unused, like
+  the `domain` one beside it.
+
 ## [0.38.0] — 2026-08-24
 
 A value object could never be a precondition: the framework validates every one of them on

@@ -455,6 +455,33 @@ Four things to get right, because they are the ones that cost a migration later:
   field may derive FROM it — which is the shape this exists for, "filter by these three and
   return a description plus a derived value". Declaring both on one field is refused: there
   would be a permission that unlocks nothing.
+- **"Nobody outside this service ever sees the real value" is `fields[].redact`, and it is
+  a THIRD question again.** `hidden` and `fieldRestrict` are both about this service's own
+  responses. `redact` is about the copies the FRAMEWORK makes of the row: the outbox
+  payload — and with it the topic, every consuming service, both failure ledgers and the
+  projected document — and the audit event. The column keeps the real value, the entity
+  hydrates with it, the rules read it, filters and `?search=` reach it. Two axes, `inSync`
+  and `inAudit`, and **both are mandatory**: write `{kind: plain}` to keep the real value
+  on one, out loud. The family is `plain`, `fixed` (a constant, in the column's own type),
+  `keep-last` (every rune but the last n — text only) and `hook` (a function you write —
+  text only). Three couplings decide whether it does what the dev thinks:
+  - **On a RELATIONAL read model the field is still served in the clear**, because that
+    read SELECTs the column and no copy is involved. Pair it with `hidden: true` or
+    `read.fieldRestrict` — `check` warns when neither is there. On a Mongo backing the
+    document IS the redacted payload, so the reads serve the mask with nothing to add.
+  - **Declaring or changing one is a SHAPE change**: the view's rebuild hash covers the
+    redaction policy, so `read.view.version` must be bumped, and that rebuild is what
+    replaces the plaintext already sitting in documents an earlier policy wrote. A `hook`
+    is the exception the dev must carry by hand — a closure has no portable identity, so
+    the hash sees only the KIND, and changing what the function RETURNS is a shape change
+    nothing detects.
+  - **The shared identity's `naturalKey` can never be redacted**, in either declaration
+    order. Its id is UUIDv5 over a fixed public namespace and that value in the clear, and
+    that id is the document's `_id` in every payload — masking the column would hide
+    nothing. If the value is sensitive it is not the identity.
+  A COMPOSITE is redacted per PART, never as a whole: the amount of a salary is sensitive
+  and its currency is not. `type: id` is refused, and so is a runtime-only field — there is
+  no stored row for a copy to be made of.
 - **A 1:1 facet (`siblings`) has one coupling worth knowing before you write it.** It is
   cleared by the ROOT's full update with its fields null — so `update.shape` cannot be
   `patch` alone, or a granted facet could never be revoked. And **with GraphQL on, the
@@ -775,6 +802,7 @@ hashed**. The same shape exists three times more:
 | the same, one per ENTRY of a collection | `children[].computed` | the same file — `Compute<Entity><Entry><Field>` |
 | a VALUE OBJECT whose rule is neither a shape nor a set | `valueObjects[].kind: manual` | `internal/domain/vos/<name>.go` — **you create the file** |
 | a COMPOSITE value object whose invariant no rule kind states | `valueObjects[].written: manual` | `internal/domain/vos/<name>.go` — **you create the file**, and the parts stay declared |
+| a MASK the closed redactor family cannot express | `fields[].redact.<axis>.kind: hook` | `internal/infra/schemas/<entity>_redactors_manual.go` |
 
 A `manual` fact is usually manual because the truth lives ELSEWHERE (another service, an
 external API, an upstream mirror). When it is local instead — a question this database can
@@ -782,10 +810,14 @@ answer that the DSL could not phrase — the primitive is still the hydration-fr
 `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` owns that choice, and the generated
 declarative facts next to it are what the right shape looks like.
 
-All five are the same bargain — the language declares the shape, a human writes the body —
+All six are the same bargain — the language declares the shape, a human writes the body —
 and they differ only in what an unwritten body does: a rule quietly enforces nothing, a
-fact panics on first use, a derivation renders an empty column, and a missing value object
-**does not compile**. The gen-report says which is which, and for the value object it
+fact panics on first use, a derivation renders an empty column, a redactor panics and
+rolls the write back, and a missing value object **does not compile**. The redactor panics
+on purpose, and it is worth knowing why: a stub returning `"***"` would fail in the SAFE
+direction and still be wrong, and it is the one wrong answer that is expensive to undo —
+the framework cannot see a hook's body change, so documents already projected through a
+placeholder are repaired by a version bump and a rebuild, not by fixing the function. The gen-report says which is which, and for the value object it
 prints the exact shape: `type X <backing>` with `Value()` and `IsValid` for a scalar — the
 backing is a contract, because the emitted mappers convert with `vos.X(v)` and read back
 with `.Value()` — and for a composite the struct itself, whose FIELD names and types are

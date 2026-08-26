@@ -2719,9 +2719,13 @@ func emitChildInputTests(m *ir.Model) (fsplan.File, error) {
 	// domain.NewID(...), so the package is needed here too. Unconditional, and
 	// pruned when unused.
 	s.L("\t%s", quote(fwImport("domain")))
-	if m.UsesVOsInChildren() {
-		s.L("\t%s", quote("time"))
-	}
+	// And `time`, on the same terms. It used to be gated on the collection
+	// carrying a VALUE OBJECT, which is the wrong question: a plain `type: time`
+	// entry field samples as time.Date(...) too, so a collection with a date and
+	// no value object emitted a test file that named time and imported nothing
+	// providing it — a package that does not compile, in an OWNED file, from a
+	// run that reported success.
+	s.L("\t%s", quote("time"))
 	s.L(")")
 	s.Blank()
 

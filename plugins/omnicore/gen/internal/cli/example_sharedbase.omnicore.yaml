@@ -16,6 +16,7 @@
 #   rules: requiredIf · skipWhen · transition · comparison · groupCap ·
 #          childDuplicate · ownerCheck with adminField
 #   read.indexes · search · ttlSeconds · fieldRestrict
+#   fields[].redact on a BASE column — and why the natural key cannot carry one
 #
 # It also shows something you do NOT declare: because it has a facet AND GraphQL,
 # the generator adds a `clearQualificationOfTeacher` mutation. On GraphQL an
@@ -75,6 +76,13 @@ storage:
 fields:
   # livesOn decides the TABLE: base fields are shared by every role over the
   # identity; role fields are private to this one.
+  # The natural key is the one column that can NEVER be redacted, and the build
+  # refuses it by name in both declaration orders. The identity's id is derived
+  # from this value IN THE CLEAR — UUIDv5 over a fixed, public namespace — and
+  # that id travels in every payload and is the projected document's _id, so
+  # masking the column would hide nothing while looking like it did. If the value
+  # is sensitive, it is not the identity: deduplicate on a non-sensitive column
+  # and declare the sensitive one as an ordinary redacted field beside it.
   - name: Document
     type: string
     column: document
@@ -89,6 +97,21 @@ fields:
     livesOn: base
     example: Helen Duarte
     description: The person's full name.
+  # Redaction on a BASE column: declared once, on the spec that writes the
+  # identity's schema, and every role over that identity carries it. A role with
+  # storage.base.reuse: true does not write that schema, so the build refuses the
+  # block there rather than generating it nowhere.
+  #
+  # `hook` because no length says "keep the domain, mask the local part" — the
+  # generator writes the call and hands you the body, in
+  # internal/infra/schemas/teacher_redactors_manual.go. `plain` on the audit axis
+  # is a decision said out loud: the trail is internal, it keeps the real
+  # address, and what leaves the service does not.
+  #
+  # This read model is mongo-backed, so the projected document IS the redacted
+  # payload — the masked address is what the reads serve, with nothing else to
+  # declare. On a relational read model it would be the opposite, and the build
+  # warns there.
   - name: Email
     type: string
     column: email
@@ -97,6 +120,9 @@ fields:
     vo: {kind: raw, ref: PersonEmail}
     example: helen@school.edu
     description: The person's e-mail address.
+    redact:
+      inSync: {kind: hook}
+      inAudit: {kind: plain}
   - name: CampusID
     type: id
     column: campus_id

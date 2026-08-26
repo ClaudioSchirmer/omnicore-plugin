@@ -57,12 +57,17 @@ type Input struct {
 	// run mentions the gap, and the package does not compile until it is
 	// closed.
 	UnimplementedFacts []string
-	MigrationsKept     []string
-	TargetTables       []emit.TargetTable
-	CompatLevel        string
-	CompatMessage      string
-	FrameworkPinned    string
-	Warnings           []string
+	// UnimplementedRedactors names the hand-written redactors the EXISTING hook
+	// file does not declare — the same shape as UnimplementedFacts, and the same
+	// consequence: the schema calls a function nothing defines, so the package
+	// does not compile.
+	UnimplementedRedactors []string
+	MigrationsKept         []string
+	TargetTables           []emit.TargetTable
+	CompatLevel            string
+	CompatMessage          string
+	FrameworkPinned        string
+	Warnings               []string
 }
 
 // Render produces the markdown.
@@ -316,6 +321,49 @@ func renderTodo(b *strings.Builder, in Input) {
 		}
 	}
 
+	if hooks := ir.RedactionHooks(m); len(hooks) > 0 {
+		empty = false
+		path := fmt.Sprintf("internal/infra/schemas/%s_redactors_manual.go", m.Entity.Snake)
+		fmt.Fprintf(b, "### `%s`\n\n", path)
+		b.WriteString("These fields declare `redact` with `kind: hook` — the mask the closed " +
+			"family does not reach. The generator wrote the CALL, inside the schema, and left " +
+			"the body to you. **They panic until you write them**, and the write that " +
+			"carried the field is rolled back.\n\n")
+		b.WriteString("That is the deliberate direction. A stub returning a placeholder would " +
+			"fail safe and still be the wrong answer, and this is the one place a wrong " +
+			"answer is expensive: the framework CANNOT see that a hook's body changed — a " +
+			"closure has no portable identity, so the view's rebuild hash mixes in only the " +
+			"KIND. Documents projected through a placeholder are not repaired by fixing the " +
+			"function; they are repaired by bumping `read.view.version` and rebuilding.\n\n")
+		owed := map[string]bool{}
+		for _, name := range in.UnimplementedRedactors {
+			owed[name] = true
+		}
+		for _, h := range hooks {
+			fmt.Fprintf(b, "**`func %s(v string) string`** — masks `%s` in %s\n\n",
+				h.HookFunc, h.Owner, redactAxisReach(h.Axis))
+		}
+		b.WriteString("Each one is handed the REAL value and returns what the copy carries. " +
+			"It must be PURE: it runs inside the write transaction AND in the composer, " +
+			"which is the rebuild path, possibly months later in another binary — a clock, " +
+			"randomness or mutable config there makes a rebuilt document disagree with the " +
+			"one the sync wrote, and nothing reports it. Returning `\"\"` for a non-empty " +
+			"value panics by design: an empty scalar reads as a REMOVED facet row in the " +
+			"payload contract.\n\n")
+		if len(in.UnimplementedRedactors) > 0 {
+			b.WriteString("⚠ **The file already existed, so no stub was written for the " +
+				"redactor(s) below.** The schema calls them and nothing declares them, which " +
+				"is a compile error rather than a panic-when-asked:\n\n")
+			for _, h := range hooks {
+				if owed[h.HookFunc] {
+					fmt.Fprintf(b, "- `func %s(v string) string`\n", h.HookFunc)
+				}
+			}
+			b.WriteString("\nAdd them to that file — it is yours, and the generator will " +
+				"not write into it again.\n\n")
+		}
+	}
+
 	if emit.HasDerivations(m) {
 		empty = false
 		path := fmt.Sprintf("internal/application/queries/%s_computed_manual.go", m.Entity.Snake)
@@ -445,6 +493,44 @@ func renderTodo(b *strings.Builder, in Input) {
 // single run is a warning they learn to skip, including on the run where it
 // matters. Three shapes, because there are three truths: every target stores it,
 // none does, or some do and the paragraph has to name which.
+// redactorPhrase renders one axis in the report's own words rather than as the
+// spec's keyword: a reviewer checking a security decision should not have to
+// map `keep-last` onto what a consumer will actually see.
+func redactorPhrase(r ir.Redactor) string {
+	switch r.Kind {
+	case "fixed":
+		return fmt.Sprintf("replaced by `%s`", r.Value)
+	case "keep-last":
+		return fmt.Sprintf("every character but the last %d masked (a value that short is masked whole)", r.Keep)
+	case "hook":
+		return fmt.Sprintf("masked by `%s`, which you write", r.HookFunc)
+	default:
+		return "**the real value**, declared plain"
+	}
+}
+
+// redactAxisReach spells out what one axis governs, for the hook list.
+func redactAxisReach(axis string) string {
+	if axis == "InAudit" {
+		return "the audit event"
+	}
+	return "the outbox payload, and with it the topic, the consumers and the document"
+}
+
+// backingClearNote is the half of the read-side answer that depends on the
+// backing, and it is opposite in the two cases — which is exactly why it is
+// written out instead of left as a general caution.
+func backingClearNote(m *ir.Model) string {
+	if m.Read.Backing == "mongo" {
+		return "This read model is mongo-backed, so the projected document IS the redacted " +
+			"payload: the reads serve the mask. Confirm no client depended on the full value."
+	}
+	return "This read model is RELATIONAL — it selects the columns, which hold the real " +
+		"value — so every redacted field it projects is served in the clear unless it is " +
+		"`hidden: true` or behind `read.fieldRestrict`. Check each row of the table above " +
+		"against that."
+}
+
 func writeDescriptionNote(b *strings.Builder, dialects []string) {
 	var stores, dont []string
 	for _, d := range dialects {
@@ -596,6 +682,39 @@ func renderCheck(b *strings.Builder, in Input) {
 			hidden = append(hidden, fmt.Sprintf("`%s`", f.Name))
 		}
 	}
+	// Redaction is the one decision in this report that is invisible in every
+	// generated file except the schema, and whose consequence lands OUTSIDE this
+	// service: the topic, the consumers, the audit trail. A reviewer reading the
+	// DTOs sees the field in full and concludes nothing was masked.
+	if red := ir.RedactedFields(m); len(red) > 0 {
+		b.WriteString("### Fields whose copies carry a mask\n\n")
+		b.WriteString("The real value stays in the COLUMN and in the hydrated entity — the " +
+			"rules read it, the writes store it. What is masked is every copy the framework " +
+			"makes of the row:\n\n")
+		b.WriteString("| field | in the sync (payload → topic → consumers → document) | in the audit event |\n")
+		b.WriteString("|---|---|---|\n")
+		for _, r := range red {
+			fmt.Fprintf(b, "| `%s.%s` | %s | %s |\n", r.Seat, r.Field.Name,
+				redactorPhrase(r.Field.Redaction.InSync), redactorPhrase(r.Field.Redaction.InAudit))
+		}
+		b.WriteString("\nThree things to check, in the order they bite.\n\n")
+		b.WriteString("1. **The read side is NOT covered by this.** Redaction governs what the " +
+			"framework copies; what this service's own API returns is yours. " +
+			backingClearNote(m) + "\n")
+		b.WriteString("2. **A rebuild is what fixes documents already written.** Declaring a " +
+			"redaction, or changing a redactor or its parameter, changes the projected shape: " +
+			"the framework's own drift check fires, `read.view.version` must be bumped, and " +
+			"the resulting rebuild is what replaces the values an earlier policy already " +
+			"projected. Without it, turning a field redacted protects future writes while " +
+			"every document already in the read model keeps its plaintext.\n")
+		b.WriteString("3. **A `hook` is invisible to that check.** A closure has no portable " +
+			"identity, so the hash mixes in only the KIND — changing what the function " +
+			"RETURNS is a shape change nobody detects for you. Bump the version yourself " +
+			"when you change one.\n\n")
+		b.WriteString("It is forward-only, and it does not protect the database: the column " +
+			"holds the real value, and anyone with SQL access reads it.\n\n")
+	}
+
 	if len(hidden) > 0 {
 		b.WriteString("### Fields nobody receives\n\n")
 		fmt.Fprintf(b, "%s — declared `hidden: true`, so stored, filterable and writable, "+

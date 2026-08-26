@@ -86,6 +86,25 @@ fields:
   # the permission do receive the field. Here nobody does. Everything else is
   # unchanged — the column exists, the filter reaches it, and a computed read
   # field may derive FROM it.
+  #
+  # redact: the real value stays in the COLUMN and in the hydrated entity, and
+  # every copy the framework makes of the row carries a mask instead — the
+  # outbox payload (and with it the topic, every consuming service, both failure
+  # ledgers and the projected document) and the audit event. The two axes are
+  # separate questions and BOTH are mandatory: nothing is defaulted, because the
+  # two answers a default could pick are "leak" and "guess".
+  #
+  # Here the sync keeps the last four digits, so a support screen downstream can
+  # still confirm a document over the phone, and the audit trail keeps only that
+  # the field changed — inAudit is applied AFTER the delta is computed, so the
+  # timeline still records the change without recording what to.
+  #
+  # It pairs with hidden rather than replacing it, and the pair is the whole
+  # point: redaction governs the copies the FRAMEWORK makes, and what this
+  # service's own API returns is yours to decide. This read model is relational —
+  # it SELECTs the column, so it would serve the real value — and `hidden: true`
+  # above is what keeps it out of every response. See TaxNumber below for the
+  # other way to say that.
   - name: NationalID
     type: string
     column: national_id
@@ -97,6 +116,9 @@ fields:
     description: The student's national identity document.
     labelKey: StudentNationalIDField
     text: {eng: National ID, ptbr: CPF}
+    redact:
+      inSync: {kind: keep-last, keep: 4}
+      inAudit: {kind: fixed, value: "***"}
 
   - name: Status
     type: string
@@ -131,13 +153,25 @@ fields:
   # because "Amount" belongs to Money rather than to a student. Everything
   # downstream (the filters below, the DTOs, the exports, the projection) sees
   # tuitionAmount and tuitionCurrency and never learns a composite exists.
+  #
+  # A part is redacted INDEPENDENTLY of its siblings inside the value object:
+  # what a student pays is a private figure, the currency it is paid in is not.
+  # `plain` on inSync is not a no-op — with both axes mandatory it is the only
+  # way to say "the real value belongs in the payload, and the audit trail is
+  # where it must not appear", out loud rather than by omission.
   - name: Tuition
     livesOn: root
     vo: {kind: composite, ref: Money}
     description: The tuition charged for this enrollment.
     labelKey: StudentTuitionField
     parts:
-      - {part: Amount,   column: tuition_amount,   as: TuitionAmount,   example: "185000"}
+      - part: Amount
+        column: tuition_amount
+        as: TuitionAmount
+        example: "185000"
+        redact:
+          inSync: {kind: plain}
+          inAudit: {kind: fixed, value: "0"}
       - {part: Currency, column: tuition_currency, as: TuitionCurrency, length: 3, example: USD}
 
   # The same, made OPTIONAL by nullable: the value object is absent as a whole.
@@ -158,6 +192,25 @@ fields:
   # declaration below). Nothing changes on this side: the parts are placed in
   # columns exactly as above, and every consumer downstream sees taxCountry and
   # taxNumber. What changed is who owns internal/domain/vos/tax_id.go.
+  #
+  # `kind: hook` is the mask the closed family does not reach — a formatted
+  # document number, the local half of an e-mail, anything whose shape is a rule
+  # rather than a length. The generator writes the CALL and hands you the body,
+  # in internal/infra/schemas/student_redactors_manual.go, created once and never
+  # rewritten. Until it is written the write FAILS, loudly: a stub returning a
+  # placeholder would project a mask you did not ask for, and the framework
+  # cannot see a hook's body change later — undoing that means a view version
+  # bump and a rebuild.
+  #
+  # The function must be PURE. It runs twice: assembling the payload inside the
+  # write transaction, and composing the document in the composer, which is also
+  # the rebuild path, possibly months from now in a different binary.
+  #
+  # And here is the OTHER way to keep a redacted field off this service's own
+  # API: read.fieldRestrict (below) puts TaxNumber behind a permission, where
+  # hidden takes NationalID away from everybody. Without one of the two, a
+  # relational read model still serves the column verbatim — and the build says
+  # so, as a warning, rather than letting you find out from a response body.
   - name: TaxID
     livesOn: root
     vo: {kind: composite, ref: TaxID}
@@ -165,7 +218,14 @@ fields:
     labelKey: StudentTaxIDField
     parts:
       - {part: Country, column: tax_country, as: TaxCountry, length: 2,  example: BR}
-      - {part: Number,  column: tax_number,  as: TaxNumber,  length: 14, example: "39053344705"}
+      - part: Number
+        column: tax_number
+        as: TaxNumber
+        length: 14
+        example: "39053344705"
+        redact:
+          inSync: {kind: hook}
+          inAudit: {kind: fixed, value: "***"}
 
   # assignedFrom: PERSISTED, but filled by the server from the caller's
   # identity. The field appears in no write DTO — the client has nothing to
@@ -836,6 +896,8 @@ read:
   fieldRestrict:
     - field: Grade
       permission: student:read-grade
+    - field: TaxNumber
+      permission: student:read-tax-id
   # A COMPUTED read field: one the reads return and no column holds. The
   # language declares the shape — the name, the type, the stored fields the
   # derivation reads — and the BODY is yours, in

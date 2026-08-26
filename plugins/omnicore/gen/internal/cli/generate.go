@@ -191,11 +191,12 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 		// behind it — and the package stops compiling on a run the summary calls
 		// successful. The report is the hand-off, so it is where that has to be
 		// said, by name.
-		UnimplementedFacts: unimplementedFacts(proj.Root, model, decisions),
-		CompatLevel:        string(verdict.Level),
-		CompatMessage:      verdict.Message,
-		FrameworkPinned:    verdict.Pinned,
-		Warnings:           warnings,
+		UnimplementedFacts:     unimplementedFacts(proj.Root, model, decisions),
+		UnimplementedRedactors: unimplementedRedactors(proj.Root, model, decisions),
+		CompatLevel:            string(verdict.Level),
+		CompatMessage:          verdict.Message,
+		FrameworkPinned:        verdict.Pinned,
+		Warnings:               warnings,
 	})
 	reportPath := filepath.Join(filepath.Dir(opt.SpecPath),
 		model.Entity.Snake+".gen-report.md")
@@ -414,6 +415,38 @@ func unimplementedFacts(root string, m *ir.Model, decisions []fsplan.Decision) [
 	for _, f := range m.Service.Facts {
 		if f.Manual && !strings.Contains(string(body), ") "+f.Name+"(") {
 			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
+// unimplementedRedactors is the same question for the redactor hook: a `hook`
+// axis added to the spec AFTER the file first existed gets no stub, because the
+// generator never writes into a hook file twice. The schema then calls a
+// function nothing declares, which is a compile error naming a symbol and no
+// decision — so the report names the decision.
+func unimplementedRedactors(root string, m *ir.Model, decisions []fsplan.Decision) []string {
+	hooks := ir.RedactionHooks(m)
+	if len(hooks) == 0 {
+		return nil
+	}
+	var hook string
+	for _, d := range decisions {
+		if d.Action == fsplan.KeptHook && strings.HasSuffix(d.File.Path, "_redactors_manual.go") {
+			hook = d.File.Path
+		}
+	}
+	if hook == "" {
+		return nil // freshly written, so it carries every stub this run planned
+	}
+	body, err := os.ReadFile(filepath.Join(root, hook))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, h := range hooks {
+		if !strings.Contains(string(body), "func "+h.HookFunc+"(") {
+			out = append(out, h.HookFunc)
 		}
 	}
 	return out

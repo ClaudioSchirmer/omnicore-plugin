@@ -1,0 +1,146 @@
+# Eixo: REDACT em TODA posicao que o framework aceita numa entidade flat — raiz,
+# sibling da raiz, parte de um value object composto, filho e sibling do filho —
+# com os QUATRO redatores da familia fechada, incluindo o hook.
+#
+# O que esta lane prova nao e que a mascara funciona (isso e do framework), e sim
+# que a declaracao CHEGA no schema: uma redacao que valida, resolve e e emitida
+# como Field comum compila, sobe, passa em tudo — e o valor viaja inteiro para o
+# topico, para cada servico consumidor e para o documento projetado.
+#
+# O hook nao traz .hand: o gerador escreve o arquivo de hook com um stub que
+# PANICA, entao a arvore compila sem ninguem completar nada. Panicar e a direcao
+# segura de proposito — um stub devolvendo "***" mascararia mais do que se pediu
+# e projetaria isso em silencio, e o framework nao enxerga o corpo de um hook
+# mudar depois (o hash da view leva so o KIND).
+#
+# Mongo de proposito: com backing relacional o read model faz SELECT na coluna,
+# entao um campo redigido e servido em claro pela API do proprio servico — o
+# build avisa, e o aviso nao e o que esta lane quer medir.
+specVersion: 1
+entity: Paciente
+plural: Pacientes
+language: pt-BR
+storage:
+  kind: flat
+  table: pacientes
+  description: Pacientes atendidos na clinica.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana Ribeiro, description: O nome do paciente.}
+  # keep-last no sync, fixed na auditoria: o suporte confirma os quatro ultimos
+  # digitos por telefone, e a trilha registra QUE mudou sem registrar para o que.
+  - name: Documento
+    type: string
+    column: documento
+    length: 14
+    livesOn: root
+    hidden: true
+    example: "529.982.247-25"
+    description: O documento do paciente.
+    redact:
+      inSync: {kind: keep-last, keep: 4}
+      inAudit: {kind: fixed, value: "***"}
+  # hook no sync, plain na auditoria: nenhum comprimento diz "guarda o dominio,
+  # mascara a parte local", e a trilha e interna e fica com o valor real.
+  - name: Email
+    type: string
+    column: email
+    length: 160
+    livesOn: root
+    example: ana@exemplo.com
+    description: O e-mail de contato.
+    redact:
+      inSync: {kind: hook}
+      inAudit: {kind: plain}
+  # Uma PARTE do composto, e so ela: a moeda de um valor nao e sensivel.
+  - name: Custo
+    livesOn: root
+    vo: {kind: composite, ref: Dinheiro}
+    description: O custo do atendimento.
+    parts:
+      - part: Valor
+        column: custo_valor
+        as: CustoValor
+        example: "185000"
+        redact:
+          inSync: {kind: fixed, value: "0"}
+          inAudit: {kind: fixed, value: "0"}
+      - {part: Moeda, column: custo_moeda, as: CustoMoeda, length: 3, example: BRL}
+valueObjects:
+  - name: Dinheiro
+    kind: composite
+    description: Um valor monetario com a moeda em que foi cobrado.
+    parts:
+      - {name: Valor, type: int64, description: O valor em centavos.}
+      - {name: Moeda, type: string, description: A moeda.}
+siblings:
+  - name: Contato
+    table: paciente_contatos
+    attachTo: root
+    description: Os dados de contato do paciente.
+    fields:
+      - name: Telefone
+        type: string
+        column: telefone
+        length: 20
+        nullable: true
+        example: "11999998888"
+        description: O telefone.
+        redact:
+          inSync: {kind: keep-last, keep: 2}
+          inAudit: {kind: fixed, value: "***"}
+children:
+  - name: Exame
+    plural: Exames
+    table: paciente_exames
+    parentColumn: paciente_id
+    ownedBy: root
+    editStrategy: atomic-replace
+    businessIdentity: [Codigo]
+    description: Os exames do paciente.
+    fields:
+      - {name: Codigo, type: string, column: codigo, length: 20, example: HEM, description: O codigo do exame.}
+      - name: Resultado
+        type: string
+        column: resultado
+        length: 200
+        example: normal
+        description: O resultado do exame.
+        redact:
+          inSync: {kind: hook}
+          inAudit: {kind: fixed, value: "***"}
+      # fixed sobre um instante: escrito como literal no schema, sem parse que
+      # possa falhar no boot.
+      - name: ColhidoEm
+        type: time
+        column: colhido_em
+        example: "2026-02-01T09:00:00Z"
+        description: Quando a amostra foi colhida.
+        redact:
+          inSync: {kind: fixed, value: "1970-01-01T00:00:00Z"}
+          inAudit: {kind: plain}
+      - name: Reservado
+        type: bool
+        column: reservado
+        example: "false"
+        description: Se o exame e reservado.
+        redact:
+          inSync: {kind: fixed, value: "false"}
+          inAudit: {kind: plain}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: put}
+delete: {root: soft}
+read:
+  backing: mongo
+  view: {name: pacientes, version: 1}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: paciente
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: "paciente:escrever"
+    update: "paciente:escrever"
+    archive: "paciente:arquivar"
+    unarchive: "paciente:arquivar"
+    read: "paciente:ler"
