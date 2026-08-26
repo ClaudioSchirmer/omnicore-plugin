@@ -84,6 +84,21 @@ siblings:
         redact:
           inSync: {kind: keep-last, keep: 2}
           inAudit: {kind: fixed, value: "***"}
+  - name: Laudo
+    table: exame_laudos
+    attachTo: child:Exame
+    description: O laudo do exame.
+    fields:
+      - name: Observacao
+        type: string
+        column: observacao
+        length: 200
+        nullable: true
+        example: sem alteracoes
+        description: A observacao do laudo.
+        redact:
+          inSync: {kind: hook}
+          inAudit: {kind: fixed, value: "***"}
 children:
   - name: Exame
     plural: Exames
@@ -304,5 +319,131 @@ func TestNoHookFileWithoutAHook(t *testing.T) {
 			t.Errorf("%s was written for a spec that declares no hook — a file of nothing "+
 				"but a header is one an author opens once and stops opening", f.Path)
 		}
+	}
+}
+
+// A shared-base role, for the seat the flat fixture cannot reach: a column of
+// the IDENTITY, whose schema is a separate file and a separate import block.
+// The timestamp mask is there on purpose — the base schema's imports are decided
+// by a different branch from the root's, and a `time` literal is the only thing
+// that reaches it.
+const redactBaseSpec = `
+specVersion: 1
+entity: Professor
+plural: Professores
+language: pt-BR
+storage:
+  kind: sharedbase-role
+  table: professores
+  description: Professores.
+  base:
+    table: pessoas
+    schemaFunc: PessoaBase
+    linkColumn: pessoa_id
+    description: A pessoa.
+    reuse: false
+    naturalKey: Documento
+    link: separate-fk
+    rowUniqueness: unique-fk
+    orphanPolicy: keep
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "PA-1", description: O documento.}
+  - name: Email
+    type: string
+    column: email
+    length: 160
+    livesOn: base
+    example: a@b.com
+    description: O e-mail.
+    redact:
+      inSync: {kind: hook}
+      inAudit: {kind: plain}
+  - name: NascidoEm
+    type: time
+    column: nascido_em
+    livesOn: base
+    example: "1990-02-01T09:00:00Z"
+    description: A data de nascimento.
+    redact:
+      inSync: {kind: fixed, value: "1970-01-01T00:00:00Z"}
+      inAudit: {kind: plain}
+  - name: Matricula
+    type: string
+    column: matricula
+    length: 20
+    livesOn: role
+    example: DOC-1
+    description: A matricula.
+    redact:
+      inSync: {kind: keep-last, keep: 3}
+      inAudit: {kind: fixed, value: "***"}
+modes: [display, insert, update]
+update: {shape: patch}
+read:
+  backing: mongo
+  view: {name: professores, version: 1}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: professor
+  dataAccess: anyone-with-permission
+  permissions: {insert: "professor:escrever", patch: "professor:escrever", read: "professor:ler"}
+`
+
+// TestRedactionReachesTheSharedIdentitySchema is the seat a flat entity cannot
+// have, and it is the one worth its own test: the base is a SEPARATE file with
+// its own import block, decided by its own branch, and it is declared once for
+// every role that will ever share the identity.
+func TestRedactionReachesTheSharedIdentitySchema(t *testing.T) {
+	s, err := spec.Parse([]byte(redactBaseSpec), "professor.omnicore.yaml")
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if ps := spec.Validate(s, spec.Options{}); ps.HasBlockers() {
+		t.Fatalf("the fixture does not validate:\n%v", ps.Error())
+	}
+	m, err := ir.Resolve(s, &discover.Project{
+		ModulePath: "example.test/svc", Dialects: []string{"sqlite"}, Root: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("resolving: %v", err)
+	}
+	src := goSources(emitAll(t, m))
+
+	base := src["internal/infra/schemas/pessoas_base_schema.go"]
+	if base == "" {
+		t.Fatal("the shared identity's schema was not emitted")
+	}
+	for _, want := range []string{
+		`RedactedField("Email", "email"`,
+		"core.RedactUsing(redactProfessorEmailInSync)",
+		`RedactedField("NascidoEm", "nascido_em"`,
+		"core.RedactWith(time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC))",
+	} {
+		if !strings.Contains(base, want) {
+			t.Errorf("the base schema is missing %q", want)
+		}
+	}
+	// The base's import block has its OWN branch — it is a single import when the
+	// identity needs neither a value object nor a timestamp — so a mask that
+	// names time must add it there and not only on the root.
+	if !strings.Contains(base, `"time"`) {
+		t.Error("the base schema masks a timestamp and does not import time: the base's " +
+			"import block is decided separately from the root's, and a missing import " +
+			"there is a package that does not compile")
+	}
+	// The natural key keeps its plain declaration — the validator refuses a
+	// redaction on it, and nothing here may add one by inference.
+	if !strings.Contains(base, `Field("Documento", "documento")`) {
+		t.Error("the identity's natural key lost its plain Field declaration")
+	}
+	// And the ROLE's own column is redacted in the role's file, not the base's.
+	role := src["internal/infra/schemas/professor_schema.go"]
+	if !strings.Contains(role, `RedactedField("Matricula", "matricula"`) {
+		t.Error("the role's own redacted column did not reach the role's schema")
+	}
+	if strings.Contains(base, "Matricula") {
+		t.Error("a role column landed in the shared identity's schema")
 	}
 }

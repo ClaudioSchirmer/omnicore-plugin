@@ -411,3 +411,82 @@ func TestAReusedBaseCannotDeclareARedaction(t *testing.T) {
 		block("    ", "redact:", "  inSync: {kind: keep-last, keep: 4}", "  inAudit: {kind: plain}"))
 	mustBlock(t, ps, "would be generated nowhere")
 }
+
+// One field, one type, one fixed value — the smallest spec that can ask "does
+// this replacement carry the column's own type".
+const redactFixedTemplate = `
+specVersion: 1
+entity: Medida
+plural: Medidas
+language: pt-BR
+storage:
+  kind: flat
+  table: medidas
+  description: Medidas.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: Rotulo, type: string, column: rotulo, length: 40, livesOn: root, example: x, description: O rotulo.}
+  - name: Valor
+    type: %s
+    column: valor
+    livesOn: root
+    hidden: true
+    example: "%s"
+    description: O valor medido.
+    redact:
+      inSync: {kind: fixed, value: "%s"}
+      inAudit: {kind: plain}
+modes: [display, insert, update]
+update: {shape: patch}
+read:
+  backing: relational
+  view: {name: medidas}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: medida
+  dataAccess: anyone-with-permission
+  permissions: {insert: "medida:escrever", patch: "medida:escrever", read: "medida:ler"}
+`
+
+// TestAFixedValueIsCheckedAgainstEveryPersistedType walks the whole closed set
+// rather than one member of it.
+//
+// int64 alone proves the wiring and nothing about the branch each other type
+// takes — and each takes a different one: `time` parses RFC 3339, `bool` accepts
+// exactly two words, and the numeric pair differ in whether a decimal point is
+// legal. A type whose check silently returns "fine" hands the mismatch to the
+// framework's own reflect guard, which panics at BOOT naming a builder call.
+func TestAFixedValueIsCheckedAgainstEveryPersistedType(t *testing.T) {
+	for _, c := range []struct {
+		specType, example, good, bad string
+	}{
+		{"string", "x", "***", ""}, // every string is a legal string mask
+		{"int", "10", "0", "0.5"},
+		{"int64", "10", "0", "meio"},
+		{"float64", "8.5", "0", "oito"},
+		{"bool", "false", "false", "talvez"},
+		{"time", "2026-02-01T09:00:00Z", "1970-01-01T00:00:00Z", "01/01/1970"},
+	} {
+		t.Run(c.specType, func(t *testing.T) {
+			parse := func(value string) *Problems {
+				raw := fmt.Sprintf(redactFixedTemplate, c.specType, c.example, value)
+				s, err := Parse([]byte(raw), "medida.omnicore.yaml")
+				if err != nil {
+					t.Fatalf("parsing: %v", err)
+				}
+				return Validate(s, Options{})
+			}
+			if ps := parse(c.good); says(ps, Blocker, "redact") {
+				t.Errorf("a legal %s mask (%q) was refused:\n%v", c.specType, c.good, ps.Blockers())
+			}
+			if c.bad == "" {
+				return
+			}
+			if ps := parse(c.bad); !says(ps, Blocker, "is not a "+c.specType) {
+				t.Errorf("%q passed as a %s mask — the mismatch is then a boot panic naming "+
+					"a builder call instead of this line; got:\n%v", c.bad, c.specType, ps.items)
+			}
+		})
+	}
+}
