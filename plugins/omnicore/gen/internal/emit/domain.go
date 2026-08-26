@@ -872,28 +872,88 @@ func comparisonGuard(f ir.Field, recv string) string {
 	ref := recv + "." + f.Name
 	switch {
 	case f.Nullable && f.SpecType == "time":
-		return fmt.Sprintf("(%s != nil && !%s.IsZero())", ref, ref)
+		return fmt.Sprintf("(%s != nil && !%s.IsZero())", ref, timeReceiver(f, recv))
 	case f.Nullable:
 		return fmt.Sprintf("%s != nil", ref)
 	case f.SpecType == "time":
-		return fmt.Sprintf("!%s.IsZero()", ref)
+		return fmt.Sprintf("!%s.IsZero()", timeReceiver(f, recv))
 	default:
 		return "true"
 	}
 }
 
+// comparisonOperand renders one side of a comparison AS ITS UNDERLYING SCALAR.
+//
+// A comparison is the one rule kind whose BOTH operands are entity fields, and
+// that is what makes it the only one a value object breaks. `range` and
+// `length` compare a field against a literal, and an untyped constant converts
+// to whatever named type the field has, so `e.Idade < 18` and `len(e.Nome)`
+// compile with or without a value object. Two TYPED operands get no such
+// leniency: `e.ConfirmacaoSenha != e.Senha` is string against vos.Senha, which
+// is a build failure in a tree the spec had already said yes to.
+//
+// So each side is reduced independently: a value object unwraps through
+// Value(), a pointer dereferences, and a plain field is already there. The
+// unwrap is unconditional rather than "only when the other side differs" —
+// two fields of the SAME value object compare identically either way, and a
+// rule that reads the same however it is declared is one fewer thing to reason
+// about.
+func comparisonOperand(f ir.Field, recv string) string {
+	ref := recv + "." + f.Name
+	if c := f.Composite; c != nil {
+		// A composite's part is a column to the store and a field to the spec,
+		// but the entity carries the value object WHOLE — the part is reached
+		// through its owner, never by the part's own name.
+		ref = recv + "." + c.Owner + "." + c.PartName
+		switch {
+		case f.VOKind != "":
+			return ref + ".Value()"
+		case c.PartNullable:
+			return "*" + ref
+		default:
+			return ref
+		}
+	}
+	if f.VOKind != "" {
+		// Nullable included: Value() has a value receiver, so calling it on the
+		// pointer dereferences — and the nil guard is already emitted above it.
+		return ref + ".Value()"
+	}
+	if f.Nullable {
+		return "*" + ref
+	}
+	return ref
+}
+
+// timeReceiver renders a time-typed field as something IsZero/Before/After can
+// be called on. A pointer is left whole — the method call dereferences it,
+// while dereferencing first parses as *(x.IsZero()) — and a value object is
+// unwrapped, because the instant is inside it and the methods are not on it.
+func timeReceiver(f ir.Field, recv string) string {
+	ref := recv + "." + f.Name
+	if f.VOKind != "" {
+		return ref + ".Value()"
+	}
+	return ref
+}
+
 // comparisonExpr renders the FAILING condition — the rule fires when the
 // declared relation does NOT hold.
 func comparisonExpr(left, right ir.Field, op, recv string) string {
-	l, r := deref(left, recv), deref(right, recv)
+	l, r := comparisonOperand(left, recv), comparisonOperand(right, recv)
 	if left.SpecType == "time" {
 		// A pointer receiver calls the method directly. Dereferencing first
 		// parses as *(x.Before(y)) — indirection binds looser than the call —
 		// which is a type error rather than the comparison that was meant.
-		l = recv + "." + left.Name
-		if right.Nullable {
+		// The ARGUMENT has no such leeway: it must be a time.Time, so a pointer
+		// there is dereferenced and a value object unwrapped.
+		l = timeReceiver(left, recv)
+		switch {
+		case right.VOKind != "":
+			r = recv + "." + right.Name + ".Value()"
+		case right.Nullable:
 			r = "*" + recv + "." + right.Name
-		} else {
+		default:
 			r = recv + "." + right.Name
 		}
 		switch op {
@@ -995,11 +1055,29 @@ var frameworkNotifications = map[string]bool{
 func echoArg(rule ir.Rule, f ir.Field) string { return echoArgOn(rule, f, "e") }
 
 func echoArgOn(rule ir.Rule, f ir.Field, recv string) string {
-	if !rule.EchoValue {
+	if !rule.EchoValue || neverEchoed(f) {
 		return ""
 	}
 	return ", " + recv + "." + f.Name
 }
+
+// neverEchoed reports whether a field's value must not travel back in a
+// refusal, whatever the rule asked for.
+//
+// A `source: body` runtime field is the one kind the generator can recognise on
+// its own. Such a field exists BECAUSE it must reach no copy of anything: no
+// column, so no payload, no topic, no audit event and no response — that is the
+// whole promise of the spelling, and the canonical instance is a password
+// confirmation. Echoing it in the 422 breaks the promise at the only seat left,
+// and does it by DEFAULT, since echoValue defaults to true: a mistyped
+// confirmation answers with the plaintext, which then reaches the response body
+// and every log that renders a notification.
+//
+// It is not left to echoValue: false because that key is the author remembering,
+// and this one the generator already knows. What echoValue still governs is
+// every field the generator cannot judge — a document number, a name — where
+// which values are sensitive is the spec author's call.
+func neverEchoed(f ir.Field) bool { return f.Source == "body" }
 
 func number(v float64, specType string) string {
 	switch specType {
@@ -1739,7 +1817,7 @@ func childEcho(f ir.Field, recv string) string {
 // It is not gated on echoValue, because this refusal has no rules.list entry to
 // carry the key — it comes from children[].duplicateNotification.
 func addedEcho(c ir.Child) string {
-	if len(c.Identity) != 1 {
+	if len(c.Identity) != 1 || neverEchoed(c.Identity[0]) {
 		return ""
 	}
 	return ", " + childEcho(c.Identity[0], "item")
@@ -1753,7 +1831,7 @@ func addedEcho(c ir.Child) string {
 // back a formatted struct nobody asked for. The message still says which
 // collection, and attachTo says which field.
 func duplicateEcho(rule ir.Rule, c ir.Child) string {
-	if len(c.Identity) != 1 {
+	if len(c.Identity) != 1 || neverEchoed(c.Identity[0]) {
 		return ""
 	}
 	return echoOf(rule, childEcho(c.Identity[0], "items[i]"))

@@ -1,0 +1,114 @@
+# Eixos: (a) uma comparação cujos DOIS lados são campos da entidade e apenas UM
+# deles é objeto de valor; (b) uma coleção cujo plural uma segunda entidade do
+# mesmo serviço também usa — provado no par com 35, que é gerado na MESMA árvore.
+#
+# O que este caso prova, e que nenhum outro do corpus provava:
+#
+#   - `kind: comparison` desembrulha o objeto de valor de cada lado por conta
+#     própria. O caso 32 já comparava uma confirmação com o campo confirmado,
+#     mas os dois lados carregavam o MESMO objeto de valor, então a comparação
+#     compilava sem desembrulhar nada. Aqui a confirmação é `string` pura e o
+#     campo confirmado é `vos.SenhaPR`: sem o desembrulho a árvore não compila;
+#   - um campo `source: body` NUNCA volta na recusa. `echoValue` vale true por
+#     omissão, e esta senha em texto claro voltaria no 422 — e daí para o corpo
+#     da resposta e para todo log que renderiza uma notificação.
+specVersion: 1
+entity: UsuarioPR
+plural: UsuariosPR
+language: pt-BR
+storage:
+  kind: flat
+  table: usuarios_pr
+  description: Usuários e os papéis que carregam.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana Ribeiro, description: Nome do usuário.}
+  # O lado EMBRULHADO da comparação.
+  - {name: Senha, type: string, column: senha, length: 200, livesOn: root, vo: {kind: raw, ref: SenhaPR}, example: s3nh4-b3m-f0rt3, description: A senha escolhida.}
+  # O lado NU: sem coluna, sem objeto de valor. A confirmação não precisa ser
+  # uma senha forte por si — precisa ser a MESMA — e é isso que faz os dois
+  # lados terem tipos diferentes.
+  - name: ConfirmacaoSenha
+    type: string
+    runtime: true
+    source: body
+    modes: [insert]
+    livesOn: root
+    example: s3nh4-b3m-f0rt3
+    description: A senha digitada uma segunda vez — conferida, nunca armazenada.
+children:
+  - name: UsuarioPRPapel
+    plural: Papeis
+    table: usuario_pr_papeis
+    parentColumn: usuario_pr_id
+    description: Papéis atribuídos ao usuário.
+    ownedBy: root
+    editStrategy: per-child
+    businessIdentity: [PapelID]
+    duplicateNotification: PapelJaNoUsuarioPRNotification
+    fields:
+      - {name: PapelID, type: id, column: papel_id, example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31, description: O papel atribuído.}
+      - {name: Observacao, type: string, column: observacao, length: 200, nullable: true, example: temporário, description: "Por que o papel foi dado, quando há motivo."}
+valueObjects:
+  - name: SenhaPR
+    kind: raw
+    backing: string
+    description: Senha com tamanho mínimo.
+    minLength: 8
+    maxLength: 200
+    notification: SenhaPRInvalidaNotification
+modes: [display, insert, update]
+update: {shape: patch}
+rules:
+  list:
+    - {id: nome-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Nome], notification: RequiredFieldNotification}
+    # A regra que este caso existe para emitir. `string` contra `vos.SenhaPR`.
+    - {id: senha-confirmada, kind: comparison, scope: [insert], fields: [ConfirmacaoSenha], other: Senha, operator: eq, notification: ConfirmacaoSenhaNaoConfereNotification}
+notifications:
+  - name: SenhaPRInvalidaNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: A senha é curta demais.
+      eng: The password is too short.
+      esp: La contraseña es demasiado corta.
+      fra: Le mot de passe est trop court.
+      deu: Das Passwort ist zu kurz.
+      ita: La password è troppo corta.
+      nld: Het wachtwoord is te kort.
+  - name: ConfirmacaoSenhaNaoConfereNotification
+    semantic: validation
+    text:
+      ptbr: A confirmação não confere com a senha informada.
+      eng: The confirmation does not match the password given.
+      esp: La confirmación no coincide con la contraseña indicada.
+      fra: La confirmation ne correspond pas au mot de passe saisi.
+      deu: Die Bestätigung stimmt nicht mit dem Passwort überein.
+      ita: La conferma non corrisponde alla password indicata.
+      nld: De bevestiging komt niet overeen met het opgegeven wachtwoord.
+  - name: PapelJaNoUsuarioPRNotification
+    semantic: conflict
+    text:
+      ptbr: Esse papel já está no usuário.
+      eng: That role is already on the user.
+      esp: Ese rol ya está en el usuario.
+      fra: Ce rôle est déjà sur l'utilisateur.
+      deu: Diese Rolle hat der Benutzer bereits.
+      ita: Quel ruolo è già sull'utente.
+      nld: Die rol staat al bij de gebruiker.
+read:
+  backing: relational
+  view: {name: usuarios_pr}
+  byId: true
+  byParams:
+    filters:
+      - {field: Nome, ops: [eq, contains]}
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: usuariopr
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: "usuariopr:escrever"
+    patch: "usuariopr:escrever"
+    read: "usuariopr:ler"

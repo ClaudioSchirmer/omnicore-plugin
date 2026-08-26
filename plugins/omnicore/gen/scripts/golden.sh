@@ -1101,6 +1101,7 @@ for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   case "$name" in
     16-*) continue ;;  # paired with 06 below: it REUSES that base
     20-*) continue ;;  # paired with 12 below: it MOUNTS that identity's collection
+    35-*) continue ;;  # paired with 34 below: it REUSES that collection's plural
   esac
   work="$MATRIX_WORK/$name"
   stage_host "$work"
@@ -1189,6 +1190,45 @@ else
     bad "a second role mounts the identity's collection: the collection is not on its surface"
   else
     ok "a second role mounts the identity's collection (one table, both surfaces)"
+  fi
+fi
+
+# Two INDEPENDENT entities whose collections share a plural. Its own lane
+# because the collision it exists for is cross-entity and structurally
+# invisible to every other lane: the matrix generates one spec per tree, so a
+# name two entities both claim compiles in each of them and fails only where
+# they meet — which, for the commands, is a single Go package. `projectPapeis`
+# was that name, and Grupo → Papéis beside Usuario → Papéis is what an RBAC
+# service IS rather than a naming accident.
+work="$MATRIX_WORK/plural"
+stage_host "$work"; mkdir -p "$work/specs/omnicore-gen"
+cp "$MATRIX_DIR/34-plural-repetido.yaml" "$MATRIX_DIR/35-plural-repetido-vizinho.yaml" "$work/specs/omnicore-gen/"
+plural_ok=1
+for f in "$work"/specs/omnicore-gen/*.yaml; do
+  (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate -spec "$f" -project "$work" \
+     >>"$work/gen.log" 2>&1) || plural_ok=0
+done
+if [[ $plural_ok -ne 1 ]]; then
+  bad "two entities share a collection plural — $(tail -3 "$work/gen.log" 2>/dev/null | tr '\n' ' ')"
+elif ! (cd "$work" && GOWORK=off go build -tags "$ENGINE_TAGS" ./... >"$work/build.log" 2>&1); then
+  bad "two entities share a collection plural — $(tail -5 "$work/build.log" 2>/dev/null | tr '\n' ' ')"
+elif ! (cd "$work" && GOWORK=off go vet -tags "$ENGINE_TAGS" ./... >"$work/vet.log" 2>&1); then
+  bad "two entities share a collection plural: vet — $(tail -3 "$work/vet.log" 2>/dev/null | tr '\n' ' ')"
+elif ! (cd "$work" && GOWORK=off go test -tags "$ENGINE_TAGS" ./internal/... >"$work/test.log" 2>&1); then
+  bad "two entities share a collection plural: the generated tests — $(tail -3 "$work/test.log" | tr '\n' ' ')"
+else
+  # The build passing is the whole proof, but it is a proof that reads as
+  # "nothing happened". Naming the two functions says WHICH names made it pass,
+  # so a future emitter that de-qualifies one of them fails with the reason.
+  UNQUALIFIED=$(grep -rl 'func projectPapeis(' "$work/internal" 2>/dev/null)
+  QUALIFIED=$(grep -rh 'func projectUsuarioPRPapeis(\|func projectGrupoPRPapeis(' \
+    "$work/internal" 2>/dev/null | wc -l | tr -d ' ')
+  if [[ -n "$UNQUALIFIED" ]]; then
+    bad "two entities share a collection plural: the unqualified projector is still emitted in $UNQUALIFIED"
+  elif [[ "$QUALIFIED" != "2" ]]; then
+    bad "two entities share a collection plural: $QUALIFIED of 2 entity-qualified projectors were emitted"
+  else
+    ok "two entities share a collection plural (the projectors do not collide)"
   fi
 fi
 

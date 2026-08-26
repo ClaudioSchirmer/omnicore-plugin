@@ -2228,10 +2228,17 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			Segment:    naming.Camel(c.Plural),
 			DocSegment: c.Plural,
 		}
-		ch.Projector = "project" + ch.GoPlural
+		// Qualified by the ENTITY, always. Every entity's commands land in one
+		// Go package, so a projector named from the plural alone is a name two
+		// entities can both claim — and in an RBAC service they do: Group has
+		// Roles and User has Roles, which is the domain rather than a naming
+		// accident, and the second one generated is `projectRoles redeclared in
+		// this block`. The per-entry projector beside it was already qualified
+		// (projectOneUserRole), so the collision was the collection projector
+		// alone, and only until a second entity reused a plural.
+		ch.Projector = "project" + m.Entity.Pascal + ch.GoPlural
 		if ch.Mounted {
 			ch.OpBase = m.Entity.Pascal + c.Name
-			ch.Projector = "project" + m.Entity.Pascal + ch.GoPlural
 		}
 		for _, f := range c.Fields {
 			if spec.IsComposite(f) {

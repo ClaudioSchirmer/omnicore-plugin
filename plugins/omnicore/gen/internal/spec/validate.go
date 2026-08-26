@@ -2049,6 +2049,7 @@ func validateRuleSet(s *Spec, rs Rules, scopeFields []Field, where string, ps *P
 		validateRuleNotification(s, r, w, ps)
 		validateRuleShape(s, r, scopeFields, w, ps, opt)
 		validateRequiredOverValueObject(s, r, scopeFields, w, ps)
+		validateEchoValue(r, scopeFields, w, ps)
 	}
 	// Across the whole set, not per rule: two rules that each look right can
 	// still validate one value object twice in one pass.
@@ -2075,6 +2076,35 @@ func validateRuleSet(s *Spec, rs Rules, scopeFields []Field, where string, ps *P
 		if m.Notification != "" {
 			validateRuleNotification(s, Rule{Notification: m.Notification}, w, ps)
 		}
+	}
+}
+
+// validateEchoValue refuses an echo the emitter will not write.
+//
+// A `source: body` runtime field never travels back in a refusal, whatever the
+// rule asked for — the emitter drops the echo on its own, because a field that
+// exists to reach no copy of anything cannot be the one the 422 hands back. The
+// DEFAULT needs no message: nothing was said, and nothing is lost. What is said
+// out loud does, or `echoValue: true` becomes a key an author believes is in
+// force while the build ignores it.
+func validateEchoValue(r Rule, scopeFields []Field, w string, ps *Problems) {
+	if r.EchoValue == nil || !*r.EchoValue {
+		return
+	}
+	for _, fn := range r.Fields {
+		f := findField(scopeFields, fn)
+		if f == nil || !FromBody(*f) {
+			continue
+		}
+		ps.BlockerFix(w+".echoValue",
+			fmt.Sprintf("%q is fed from the REQUEST BODY, and such a value is never echoed "+
+				"back in a refusal", fn),
+			"drop echoValue — the rule still reports, attached to the same field, and "+
+				"only the value is left out. A source: body field reaches no column, so no "+
+				"payload, no audit event and no response; the canonical one is a password "+
+				"confirmation, and a 422 carrying it would put the plaintext in the "+
+				"response body and in every log that renders a notification")
+		return
 	}
 }
 

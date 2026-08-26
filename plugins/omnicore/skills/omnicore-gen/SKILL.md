@@ -360,6 +360,13 @@ Four things to get right, because they are the ones that cost a migration later:
     NEVER: the `TableSchema`, the migration, the outbox payload, the audit event, any
     Response, any filter or `sort:`. There is no column, so there is nothing to redact and
     nothing to leak — and `redact:` on one is refused for saying otherwise.
+  - **Nor the REFUSAL.** `echoValue` defaults to true, so an ordinary rule sends the
+    rejected value back with its notification — right for "you sent 6, the cap is 4",
+    catastrophic for a plaintext password, which would land in the 422 body and in every
+    log that renders a notification. A `source: body` field is never echoed, on any rule,
+    whatever `echoValue` says: it is the one sensitive field the generator can recognise
+    without being told. Writing `echoValue: true` on a rule over one is refused rather
+    than ignored; leaving the key out is silently correct.
   - **`modes: [insert]` / `[update]` — which write verbs carry it.** Omitted means every
     write verb the entity has. Name them when the value belongs to one moment: a
     confirmation asked at sign-up and never again. The values are the two the DOMAIN can
@@ -508,6 +515,16 @@ Four things to get right, because they are the ones that cost a migration later:
   field may derive FROM it — which is the shape this exists for, "filter by these three and
   return a description plus a derived value". Declaring both on one field is refused: there
   would be a permission that unlocks nothing.
+  - **It is not a way to stop FETCHING the column, and on a relational read model that
+    gap is wide.** Such a read builds no SELECT of the projected fields: it loads the
+    whole aggregate through the write side's loader, turns the hydrated entity into a
+    document, and prunes that document in memory — so a hidden column is still selected
+    on every row of every page, and `?fields=` does not narrow the query either. The one
+    thing `hidden` does add on that axis is the `?fields=` vocabulary: naming a hidden
+    field there is a typed 400, not a 200 with an empty object. Where "never loaded"
+    is the actual requirement — a credential hash — `hidden` is the wrong key and there
+    is no right one over a relational read: the read IS the table. Project through Mongo,
+    where the document is the redacted payload, or accept that the value is in memory.
 - **"Nobody outside this service ever sees the real value" is `fields[].redact`, and it is
   a THIRD question again.** `hidden` and `fieldRestrict` are both about this service's own
   responses. `redact` is about the copies the FRAMEWORK makes of the row: the outbox
