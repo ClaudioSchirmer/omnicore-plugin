@@ -184,61 +184,153 @@ func emitTestHelpers(s *src, m *ir.Model) {
 // body without giving the test an identity would leave the new body unrun and
 // the coverage number saying so.
 func emitTestIdentity(s *src, m *ir.Model, indent string) {
-	runtime := m.ClaimRuntimeFields()
-	if len(runtime) == 0 {
+	if len(m.ClaimRuntimeFields()) == 0 {
 		return
 	}
-	claims := map[string]string{}
-	for _, f := range runtime {
-		switch f.IdentitySource {
-		case "tenant":
-			claims["tenant_id"] = testScopeValue(m)
-		case "subject", "permission", "super-admin", "present":
-			// None of these is a custom claim. Subject is a field of the
-			// Identity; both permission questions — the concrete one and the
-			// super-admin one — are answered from the permissions claim; and
-			// PRESENCE is the nil check itself, so it has no claim name at all.
-			// Falling through would put an entry keyed on the empty string into
-			// the map, which reads as though the framework looked something up
-			// by that name.
-		default:
-			if f.BaseGoType == "bool" {
-				claims[f.Claim] = "true"
-			} else {
-				claims[f.Claim] = "someone@example.test"
-			}
-		}
-	}
+	fx := testIdentity(m)
 	s.L("%s// A request has a caller. With no identity the mappers' identity feed is", indent)
 	s.L("%s// skipped entirely, and what a scoped write is checked against is exactly", indent)
 	s.L("%s// what the feed carries.", indent)
 	s.L("%sctx.SetIdentity(&configuration.Identity{", indent)
-	if m.Authz.ScopeField != nil && m.Authz.DataAccess == "owner-only" {
-		s.L("%s\tSubject: %s,", indent, quote(testScopeValue(m)))
+	if fx.Subject != "" {
+		s.L("%s\tSubject: %s,", indent, quote(fx.Subject))
 	}
-	if len(claims) > 0 {
+	if len(fx.Claims) > 0 {
 		s.L("%s\tClaims: map[string]any{", indent)
-		for _, k := range sortedClaimNames(claims) {
-			s.L("%s\t\t%s: %s,", indent, quote(k), quote(claims[k]))
+		for _, k := range sortedClaimNames(fx.Claims) {
+			s.L("%s\t\t%s: %s,", indent, quote(k), quote(fx.Claims[k]))
 		}
 		s.L("%s\t},", indent)
 	}
 	s.L("%s})", indent)
 }
 
+// tenantClaimName and permissionsClaimName are the two claims the framework
+// resolves BY CONFIGURATION (authorization.tenant.claim and
+// authorization.permissionsClaim), under the defaults it ships with.
+//
+// A generated UNIT test runs against no yaml at all, so the default is the only
+// name it can honestly write into a fixture. That is a property of the fixture
+// and not of the generated service, whose feed never names either claim — it
+// calls the accessor and lets the framework resolve the name. The gen-report
+// says so where it lists what an entity asks about the caller.
+const (
+	tenantClaimName      = "tenant_id"
+	permissionsClaimName = "permissions"
+)
+
+// identityFixture is the caller the generated command tests run as.
+//
+// It exists so emitTestIdentity and emitIdentityArrived read the SAME values.
+// Computed twice, in two functions, they are two constants that agree until one
+// of them is edited — and the failure that follows is an assertion comparing
+// against a value the fixture stopped setting, which reads as a broken feed.
+type identityFixture struct {
+	// Subject is Identity.Subject. Empty when no field reads it.
+	Subject string
+	// Claims are the custom claims by name, rendered as a map literal. The
+	// permissions claim is in here too, assembled from Grants — several fields
+	// can contribute to one claim, which is not true of any other.
+	Claims map[string]string
+	// Grants are the entries of the permissions claim, for the DECLARED
+	// permission questions only. See ir.Field.Synthesised for why the row
+	// scope's own bypass is left out.
+	Grants []string
+}
+
+func testIdentity(m *ir.Model) identityFixture {
+	fx := identityFixture{Claims: map[string]string{}}
+	for _, f := range m.ClaimRuntimeFields() {
+		switch f.IdentitySource {
+		case "tenant":
+			fx.Claims[tenantClaimName] = testScopeValue(m)
+		case "subject":
+			fx.Subject = testScopeValue(m)
+		case "permission":
+			if !f.Synthesised {
+				fx.Grants = append(fx.Grants, f.Permission)
+			}
+		case "super-admin":
+			if !f.Synthesised {
+				fx.Grants = append(fx.Grants, ir.SuperAdminGrant)
+			}
+		case "present":
+			// The nil check itself, so there is nothing to put on the Identity:
+			// building one AT ALL is the fixture for this question.
+		default:
+			// A custom claim, read by the name the spec gave. Falling through to
+			// here with an empty Claim would key the map on "", which reads as
+			// though the framework looked something up by that name.
+			if f.BaseGoType == "bool" {
+				fx.Claims[f.Claim] = "true"
+			} else {
+				fx.Claims[f.Claim] = "someone@example.test"
+			}
+		}
+	}
+	if len(fx.Grants) > 0 {
+		// The framework parses this claim from a whitespace-separated string as
+		// readily as from a list, and a string keeps the fixture one flat
+		// map[string]any that every other claim already fits.
+		sort.Strings(fx.Grants)
+		fx.Claims[permissionsClaimName] = strings.Join(fx.Grants, " ")
+	}
+	return fx
+}
+
 // emitIdentityArrived asserts the feed actually ran. Coverage alone would be
 // satisfied by calling the mapper; what matters is that the value landed, since
-// a feed that assigns nothing leaves a scoped write comparing against "".
+// a feed that assigns nothing leaves a scoped write comparing against "" and a
+// rule about the caller judging a caller who is not there.
+//
+// It covers the row scope's synthesised field and every DECLARED one, because
+// they fail the same way and only the first used to be proven: a declared
+// permission field whose feed was never written reads `false` in every rule
+// that consults it, which is the safe-looking answer and the wrong one.
 func emitIdentityArrived(s *src, m *ir.Model, indent string) {
-	caller := m.Authz.ScopeField
-	if caller == nil {
-		return
+	fx := testIdentity(m)
+	if caller := m.Authz.ScopeField; caller != nil {
+		s.L("%sif e.%s != %s {", indent, caller.Name, quote(testScopeValue(m)))
+		s.L("%s\tt.Errorf(%s, e.%s)", indent,
+			quote("the caller's scope did not reach the entity (%q) — a write outside it could not be refused"),
+			caller.Name)
+		s.L("%s}", indent)
 	}
-	s.L("%sif e.%s != %s {", indent, caller.Name, quote(testScopeValue(m)))
-	s.L("%s\tt.Errorf(%s, e.%s)", indent,
-		quote("the caller's scope did not reach the entity (%q) — a write outside it could not be refused"),
-		caller.Name)
-	s.L("%s}", indent)
+	for _, f := range m.ClaimRuntimeFields() {
+		if f.Synthesised {
+			continue
+		}
+		switch f.IdentitySource {
+		case "subject", "tenant":
+			want := fx.Subject
+			if f.IdentitySource == "tenant" {
+				want = fx.Claims[tenantClaimName]
+			}
+			s.L("%sif e.%s != %s {", indent, f.Name, quote(want))
+			s.L("%s\tt.Errorf(%s, e.%s)", indent,
+				quote("the caller's "+f.IdentitySource+" did not reach the entity (%q) — every rule reading it judges the wrong caller"),
+				f.Name)
+			s.L("%s}", indent)
+		case "permission", "super-admin", "present":
+			s.L("%sif !e.%s {", indent, f.Name)
+			s.L("%s\tt.Error(%s)", indent,
+				quote("the caller's "+identityQuestion(f)+" did not reach the entity — a rule reading it sees false, which is the safe-looking answer and the wrong one"))
+			s.L("%s}", indent)
+		}
+	}
+}
+
+// identityQuestion names what a bool identity field asked, for a message a
+// reader meets without the spec in front of them.
+func identityQuestion(f ir.Field) string {
+	switch f.IdentitySource {
+	case "permission":
+		return "grant for " + f.Permission
+	case "super-admin":
+		return ir.SuperAdminGrant + " grant"
+	default:
+		return "presence"
+	}
 }
 
 // testScopeValue is the caller's own scope in the generated tests. It matches
@@ -477,14 +569,17 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 // end-to-end question (it needs a request, an identity and a route), and it
 // belongs to the contract suite, not here.
 func emitScopeFixture(s *src, m *ir.Model, indent string) {
-	if m.Authz.PresenceField == nil {
-		return
+	// Every "was there a caller" flag the aggregate carries: the one the row
+	// scope synthesises, and any the author declared with source: present. They
+	// answer the same question and a rule reading either fails the same way when
+	// the fixture leaves it false.
+	for _, f := range presenceFields(m) {
+		s.L("%s// A REQUEST made this, by a caller entitled to make it. Every rule that", indent)
+		s.L("%s// stands down for an absent principal reads the flag below, so a fixture", indent)
+		s.L("%s// that left it false would test those rules standing down rather than", indent)
+		s.L("%s// running — which is how a negative case passes while proving nothing.", indent)
+		s.L("%s%s: true,", indent, f.Name)
 	}
-	s.L("%s// A REQUEST made this, by a caller entitled to make it. Every rule that", indent)
-	s.L("%s// stands down for an absent principal reads the flag below, so a fixture", indent)
-	s.L("%s// that left it false would test those rules standing down rather than", indent)
-	s.L("%s// running — which is how a negative case passes while proving nothing.", indent)
-	s.L("%s%s: true,", indent, m.Authz.PresenceField.Name)
 
 	if subject, caller := m.Authz.ScopeSubject(), m.Authz.ScopeField; subject != nil && caller != nil {
 		s.L("%s// The row is in the caller's own %s.", indent, subject.Name)
@@ -499,6 +594,67 @@ func emitScopeFixture(s *src, m *ir.Model, indent string) {
 			indent, owned.runtime.Name, owned.column.Name)
 		s.L("%s%s: %s,", indent, owned.runtime.Name, scopeFixtureValue(owned.column))
 	}
+	// The same agreement, one rule kind over: an equality between a column and a
+	// fact about the caller — "the row is in your own department" — is an
+	// ownerCheck written by hand out of the pieces the language already has, and
+	// it breaks the fixture the same way. Nothing else about a comparison needs
+	// solving here: a fixture that satisfies an ordering between two columns is a
+	// different problem, and this one is only tractable because one side is a
+	// value the caller BRINGS rather than a value the row holds.
+	for _, matched := range identityEqualityPairs(m) {
+		s.L("%s// The caller's %s is the row's: %s matches %s.",
+			indent, matched.runtime.IdentitySource, matched.runtime.Name, matched.column.Name)
+		s.L("%s%s: %s,", indent, matched.runtime.Name, scopeFixtureValue(matched.column))
+	}
+}
+
+// presenceFields are every "was there a caller at all" flag on the aggregate.
+func presenceFields(m *ir.Model) []ir.Field {
+	var out []ir.Field
+	if m.Authz.PresenceField != nil {
+		out = append(out, *m.Authz.PresenceField)
+	}
+	for _, f := range m.DeclaredIdentityFields() {
+		if f.IdentitySource == "present" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// identityEqualityPairs lists the (runtime identity field, column) pairs an
+// `eq` comparison holds together, so the fixture can make them agree.
+//
+// Only `eq`, and only where exactly ONE side is fed from the identity: an
+// inequality says nothing about which value to pick, and two identity fields
+// compared to each other are two facts about the same caller, which the fixture
+// has no business reconciling.
+func identityEqualityPairs(m *ir.Model) []struct{ runtime, column ir.Field } {
+	var out []struct{ runtime, column ir.Field }
+	seen := map[string]bool{}
+	for _, c := range m.Clauses {
+		for _, r := range c.Rules {
+			if r.Kind != "comparison" || r.Operator != "eq" || r.Other == nil || len(r.Fields) == 0 {
+				continue
+			}
+			left, right := r.Fields[0], *r.Other
+			var runtime, column ir.Field
+			switch {
+			case left.IdentitySource != "" && right.IdentitySource == "":
+				runtime, column = left, right
+			case right.IdentitySource != "" && left.IdentitySource == "":
+				runtime, column = right, left
+			default:
+				continue
+			}
+			if seen[runtime.Name] {
+				continue
+			}
+			seen[runtime.Name] = true
+			out = append(out, struct{ runtime, column ir.Field }{runtime, column})
+		}
+	}
+	return out
 }
 
 // ownerCheckPairs lists the (runtime principal, row's owner column) pairs an

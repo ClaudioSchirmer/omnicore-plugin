@@ -744,9 +744,18 @@ func validateCompositeField(s *Spec, f Field, where string, ps *Problems, isChil
 	// conflict notification — is checked by the ordinary per-field pass, which
 	// sees a composite field like any other.
 	if f.Runtime {
+		// The wording is about the FIELD and not about one source, because there
+		// are several and they all fail here identically: a claim, a request body,
+		// a hand-written assignment, or one of the framework's answers about the
+		// caller — each delivers ONE value, and a composite is several. The
+		// original said "fed from one token claim", which stopped being the whole
+		// truth the moment a second source existed.
 		ps.BlockerFix(where+".runtime",
-			"a runtime-only field is fed from one token claim, and a composite has several parts",
-			"declare the parts as separate runtime fields")
+			"a runtime-only field carries ONE value, whatever feeds it, and a "+
+				"composite has several parts",
+			"declare the parts as separate runtime fields — a composite's parts are "+
+				"what the SCHEMA decomposes, and a runtime field has no columns to "+
+				"decompose into")
 	}
 	if f.AssignedFrom != "" {
 		ps.BlockerFix(where+".assignedFrom",

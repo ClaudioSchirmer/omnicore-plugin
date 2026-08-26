@@ -345,10 +345,13 @@ Four things to get right, because they are the ones that cost a migration later:
     `Value()`**: its absence is what tells the framework to decompose the value instead of
     storing a rendering in one column. For a value that occupies ONE column the answer stays
     `kind: manual`.
-- **A field has THREE states, not two — and the third is the one people work around.**
-  Persisted (it has a `column`) and runtime-from-the-token (`runtime: true` + `claim`) are
-  the two everyone finds. The third is a value the CALLER sends, that a rule reads, and
-  that no column holds: `runtime: true` with **`source: body`**. A password and its
+- **A field is not just "stored or sent" — `source` is where its value comes from, and
+  most of the answers are ones people work around.** Persisted (it has a `column`) and
+  runtime-from-a-named-claim (`runtime: true`, which defaults to `source: claim` + `claim:`)
+  are the two everyone finds. `source: body` and the five identity sources are the rest, and
+  both blocks below are there because the workaround for each one is a hand-written file.
+- **`source: body`** — a value the CALLER sends, that a rule reads, and that no column
+  holds: `runtime: true` with **`source: body`**. A password and its
   confirmation are the case it exists for — the confirmation is there to be compared, and
   storing it a second time is the bug — but so is any "type it twice", any one-time token
   checked against a stored hash, any consent flag a rule needs and the row must not keep.
@@ -360,6 +363,15 @@ Four things to get right, because they are the ones that cost a migration later:
     NEVER: the `TableSchema`, the migration, the outbox payload, the audit event, any
     Response, any filter or `sort:`. There is no column, so there is nothing to redact and
     nothing to leak — and `redact:` on one is refused for saying otherwise.
+  - **It is the ONLY runtime field a `vo:` belongs on.** A value object is the domain
+    judging a value somebody SENT, and this is the one runtime source whose value the
+    caller sent. On a `claim` field it is refused — the claim is asserted by the issuer and
+    already verified by the token's signature, so judging it would answer 422 for a value
+    the caller never sent and cannot fix — and on the identity sources it is refused too,
+    since what the framework answers goes through no constructor of yours. (The claim case
+    used to be accepted and silently dropped: the value-object type was generated, the
+    aggregate declared the field as the plain scalar anyway, and the rule inside that type
+    ran over nothing.)
   - **Nor the REFUSAL.** `echoValue` defaults to true, so an ordinary rule sends the
     rejected value back with its notification — right for "you sent 6, the cap is 4",
     catastrophic for a plaintext password, which would land in the 422 body and in every
@@ -380,11 +392,111 @@ Four things to get right, because they are the ones that cost a migration later:
   - **It is not an identity, and `check` says so.** A `source: body` field is refused as
     an `ownerCheck`'s `ownerField` or `adminField`: the caller chooses what it holds, so
     "the row is yours" would be checked against a string the caller typed. Who the caller
-    is comes from the token — that is what `source: claim` is for.
+    is comes from the request identity — that is the block below.
   - **Storing the credential is still yours to design.** The generator keeps the plaintext
     off the table; it does not hash it. The usual shape is a persisted `PasswordHash` with
     `assignedFrom: derived` — absent from every write DTO — filled by a `rules.manual`
     entry scoped to `insert`, which the gen-report lists as owed.
+- **`source: manual` — a field the aggregate carries and NOTHING generated fills.** It is
+  the same ELSE the language uses everywhere else (`vo.kind: manual`, `facts[].kind:
+  manual`, `rules.manual`, `written: manual`), applied to a field: the generator declares
+  the shape, your code puts the value there. It is on the aggregate so hand-written rules
+  can read it, and on nothing else — no write request DTO, no command, no mapper, no
+  OpenAPI schema, and no column either.
+  - **The case it exists for**: a hand-written operation that dispatches the SAME mode a
+    generated verb does and is told apart by its action name. A change-password endpoint
+    dispatches `ModeUpdate` exactly as the generated PATCH does; its `currentPassword` has
+    to reach the aggregate for a rule to prove possession, and must not appear in the body
+    of `PATCH /users/:id`. Without this the choices were a column nobody wanted, or moving
+    the proof of possession out of the aggregate and into the handler — which is where the
+    rest of the service deliberately does not keep its rules.
+  - **It is NOT `source: body` with `modes: []`.** That reads as a contradiction (`body`
+    means the request carries it), and until this release it was a silent no-op: an empty
+    list decoded into the same branch as an absent key and put the field on EVERY write
+    verb, with `check` answering that the spec could be generated. `modes: []` is now a
+    blocker pointing here.
+  - **A `vo:` belongs on one and works.** The automatic pass walks the STRUCT, so the value
+    object would be judged on every generated write — where nothing filled the field, so
+    every insert and patch would be answered "the password is too short". The generator
+    writes the exclusion under EVERY gate, unconditionally, because no generated verb
+    carries the field at all. What checks the value is the rule you write.
+  - **`echoValue` is yours, with the ordinary default.** Unlike `source: body` — the one
+    field the generator can recognise as sensitive without being told — it knows nothing
+    about this one, so it does not decide for you: the default sends the rejected value
+    back, and `echoValue: false` on the rule turns it off. For a credential, turn it off.
+  - **What it costs, and the gen-report says it under *What still needs implementing*:**
+    nothing generated puts a value there. An unfilled field is not an error anywhere — it
+    reads `""` (or `false`, or `0`) and every rule over it judges that, which for a
+    possession check is the answer that looks like a pass. Write the assignment in the
+    hand-written command whose mapper holds both the request and the entity.
+  - **Refused**: `claim:`, `permission:`, `modes:` (each says the generator brings the
+    value, and the declaration says it does not), and a composite `vo:` (its parts are what
+    the schema decomposes, and there are no columns to decompose into).
+- **The domain has no `ctx`, and the five identity `source`s are how a fact about the
+  CALLER reaches a rule anyway.** An entity is handed itself and nothing else — no request,
+  no `AppContext`, no `Identity`. So anything a rule needs to know about whoever is asking
+  has to ride onto the aggregate on the way in, which is what these do: the command mapper
+  writes them inside `if id := ctx.Identity(); id != nil { … }`, and `BuildRules` reads them
+  from the entity. None of them is stored — no column, no migration, no `TableSchema`, no
+  outbox payload, no audit event, no response.
+
+  | `source:` | asks | answered by | type |
+  |---|---|---|---|
+  | `subject` | who the caller is | `Identity().Subject` | `string` |
+  | `tenant` | which tenant they belong to | `Identity().TenantID()` | `string` |
+  | `permission` | whether they hold `permission:` | `Identity().HasPermission(…)` | `bool` |
+  | `super-admin` | whether they hold `*:*` | `Identity().IsSuperAdmin()` | `bool` |
+  | `present` | whether there was a caller at all | the nil check itself | `bool` |
+
+  ```yaml
+  - {name: SolicitanteId, type: string, runtime: true, source: subject, livesOn: root, example: usr-1, description: Quem chamou.}
+  - name: SolicitantePodeAdministrar
+    type: bool
+    runtime: true
+    source: permission
+    permission: "chamado:administrar"     # concreta; um curinga é recusado
+    livesOn: root
+    example: "false"
+    description: Se quem chamou administra chamados.
+  ```
+  - **`source: permission` is NOT `claim: is_admin`, and this is the whole point.** A
+    boolean claim is a flag the token happens to carry: it resolves no resource wildcard,
+    honours no `*:*` grant, and is blind to `authorization.permissionsClaim`. `source:
+    permission` asks the same authorization model the ROUTES are gated by. Reach for the
+    named claim only when the fact genuinely is a custom claim (an email, a department
+    code), never for "is this caller allowed to".
+  - **A wildcard is refused, and the refusal is load-time on purpose.** `HasPermission`
+    PANICS on a wildcard argument — the claim wildcards, the question does not — so a spec
+    that accepted `permission: "chamado:*"` would generate, compile and take the service
+    down on the first request that carried an identity. `*:*` is not written here either:
+    it is `source: super-admin`, which the framework answers with a different method.
+  - **`present` is not "the subject is empty".** Those are two different facts arriving as
+    one value: no identity at all (only reachable with `auth.mode: disabled`, which the
+    framework refuses outside `APP_PROFILE=dev`) versus a real, signed token that simply
+    carries no such claim — an ordinary production request. A rule that stands down for the
+    first stands down for the second too unless it can ask this.
+  - **What NOT to build now that these exist.** Two workarounds were the only way to answer
+    these questions before, and both are worse than the field. A hand-written command mapper
+    (the file a regeneration overwrites most). And a `service.facts` entry with `kind:
+    manual`, which puts a question about the SESSION on a port whose every other
+    implementation talks to the database — the infrastructure round-tripping for something
+    the application layer already had in hand. If you find yourself proposing either, the
+    answer is a `source:` here.
+  - **Grants are the deployment's half, and nothing fails loudly without them.** A
+    permission nobody issues is not an error anywhere: the field is simply `false`, every
+    rule reading it takes the deny branch, and the service refuses work it was meant to
+    allow. The gen-report lists exactly what to grant, under *What this entity asks about
+    the caller* — hand that list over with the change.
+  - **They are `ownerCheck`'s two arguments, done right.** `ownerField:` wants a
+    `source: subject` field, `adminField:` a `source: permission` one. That pair is the
+    canonical shape — the same one hand-written services reach for — and it is what
+    `evolve-entity` should migrate a `claim: is_admin` bypass towards.
+  - **Refused, and why**: `claim:` alongside any of them (the accessor owns which claim it
+    reads); `permission:` on any other source or on a persisted field; `modes:` (an identity
+    rides every verb, the bodyless ones included, which is exactly where an archive guard
+    reads it); a `vo:` (the value comes from the framework, through no constructor of
+    yours); a field named `RequestingTenant`, `RequestingSubject`, `RequestingMayCrossScope`
+    or `RequestingIdentityPresent` (the row scope synthesises those names itself).
 - **A scoped entity's tenant/owner: `assignedFrom` alone is a trap, and the way out is
   `bypassMaySet`.** `assignedFrom: identity-claim` on the field `authz.tenantField` names is
   the right shape — the server fills it, so no caller can file a record under someone

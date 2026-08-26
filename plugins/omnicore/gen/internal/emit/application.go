@@ -360,18 +360,23 @@ func emitIdentityFeed(s *src, m *ir.Model) {
 	}
 	s.Blank()
 	s.L("\t// Identity-derived state the rules read. It is never persisted.")
-	if m.HasDeclaredRuntimeFields() {
+	if m.HasNamedClaimFields() {
 		s.L("\t//")
 		s.L("\t// The framework does not opine on which custom claims a token carries, so")
 		s.L("\t// the claim name comes from the spec rather than from a convention.")
 	}
 	s.L("\tif id := ctx.Identity(); id != nil {")
 	for _, f := range runtime {
-		// The fields the ROW SCOPE synthesises do not come from a claim looked
-		// up by name: the tenant is whichever claim the framework is configured
-		// to read, the subject is the subject, and the bypass is a permission
-		// question. Reading them through Claims[...] would hardcode a claim name
-		// the deployment is free to change.
+		// The identity SOURCES do not come from a claim looked up by name — the
+		// tenant is whichever claim the framework is configured to read, the
+		// subject is the subject, and a permission is a question the permission
+		// model answers. Reading any of them through Claims[...] would hardcode a
+		// name the deployment is free to change, and for a permission it would
+		// answer a narrower question than the service is gated by: a raw claim
+		// resolves no resource wildcard and honours no *:* grant.
+		//
+		// Whether the field was declared in the spec or synthesised for the row
+		// scope makes no difference here, and deliberately so.
 		switch f.IdentitySource {
 		case "tenant":
 			s.L("\t\te.%s = id.TenantID()", f.Name)
@@ -380,12 +385,13 @@ func emitIdentityFeed(s *src, m *ir.Model) {
 			s.L("\t\te.%s = id.Subject", f.Name)
 			continue
 		case "permission":
-			s.L("\t\te.%s = id.HasPermission(%s)", f.Name, quote(f.Claim))
+			s.L("\t\te.%s = id.HasPermission(%s)", f.Name, quote(f.Permission))
 			continue
 		case "super-admin":
-			s.L("\t\t// A super-admin crosses the scope. Not asked through")
-			s.L("\t\t// HasPermission, which panics on the %s the claim carries —", f.Claim)
-			s.L("\t\t// the wildcard has its own question, and this is it.")
+			s.L("\t\t// The super-admin grant, not asked through HasPermission: that")
+			s.L("\t\t// method panics on a wildcard, since the CLAIM wildcards and the")
+			s.L("\t\t// question does not. The framework gives the wildcard its own")
+			s.L("\t\t// question, and this is it.")
 			s.L("\t\te.%s = %s", f.Name, superAdminTest("id"))
 			continue
 		case "present":

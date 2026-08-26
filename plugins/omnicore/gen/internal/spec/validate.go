@@ -346,13 +346,37 @@ func validateFields(s *Spec, ps *Problems, opt Options) {
 	}
 }
 
-// reservedFieldNames are owned by the framework's managed carrier. Declaring one
-// as a mapped field is a boot panic; the ParentID case additionally silently
+// reservedFieldNames are the names an author cannot use, because something else
+// already owns them on the generated aggregate.
+//
+// The first three belong to the FRAMEWORK's managed carrier. Declaring one as a
+// mapped field is a boot panic; the ParentID case additionally silently
 // overwrites the framework's own value.
+//
+// The rest belong to the ROW SCOPE, which synthesises them onto the aggregate
+// from authz.dataAccess / authz.bypass — an author who declared one would get
+// two Go struct fields with one name, which is a build failure with no line
+// number pointing at the spec. They are refused UNCONDITIONALLY rather than only
+// on the specs that synthesise them: the conditions live in the resolver, and a
+// copy of them here would be a copy that drifts, quietly re-opening the
+// collision on whichever spec shape moved.
 var reservedFieldNames = map[string]string{
 	"ID":       "the aggregate id comes from the framework's managed carrier",
 	"ParentID": "the parent link is projected automatically as the read-only twin of ID",
 	"Revision": "the revision column is declared under storage.managed, not as a field",
+
+	"RequestingTenant": "the row scope synthesises this name for the caller's own tenant; " +
+		"to carry the tenant into a rule of your own, declare a runtime field with " +
+		"source: tenant under a different name",
+	"RequestingSubject": "the row scope synthesises this name for the caller's own subject; " +
+		"to carry the subject into a rule of your own, declare a runtime field with " +
+		"source: subject under a different name",
+	"RequestingMayCrossScope": "the row scope synthesises this name for authz.bypass; " +
+		"to ask about a permission of your own, declare a runtime field with " +
+		"source: permission under a different name",
+	"RequestingIdentityPresent": "the row scope synthesises this name for \"was there a " +
+		"caller at all\"; to ask the same question in a rule of your own, declare a " +
+		"runtime field with source: present under a different name",
 }
 
 // isFacet distinguishes the two things isChild lumps together: a COLLECTION
@@ -463,6 +487,56 @@ func SourceOf(f Field) string {
 // the entity without ever reaching a column.
 func FromBody(f Field) bool { return SourceOf(f) == "body" }
 
+// FromManual reports whether a field is on the aggregate and filled by nobody
+// this generator writes. It is the field-level ELSE: the shape is declared here,
+// the value is put there by hand-written code.
+func FromManual(f Field) bool { return SourceOf(f) == "manual" }
+
+// IdentitySourceOf names WHICH question about the caller feeds a runtime field,
+// for the sources that ask the framework rather than reading a claim by name.
+//
+// Empty for a persisted field and for the two sources that are not a question
+// about the identity: `claim` is a lookup by name, `body` is a value the caller
+// sent. The resolver lowers this string straight onto the IR field, which is why
+// it lives here and is exported — the row scope's SYNTHESISED fields already
+// carry the same vocabulary, so a declared field and a synthesised one reach the
+// command mapper's identity feed through one branch instead of two.
+func IdentitySourceOf(f Field) string {
+	switch src := SourceOf(f); src {
+	case "", "claim", "body", "manual":
+		return ""
+	default:
+		return src
+	}
+}
+
+// validateConcretePermission holds a permission string to what the generated
+// code will do with it: hand it to Identity.HasPermission, which accepts a
+// concrete "resource:action" and NOTHING else.
+//
+// It is one function rather than two copies because two seats ask the same
+// question — authz.bypass and a source: permission field — and the failure they
+// exist to prevent is identical and expensive: HasPermission PANICS on a
+// wildcard, so a spec that loads, generates and builds cleanly takes the service
+// down on the first request that reaches the check. `*:*` is the one grant a
+// caller can be tested for and it is asked with a different method entirely, so
+// each caller decides whether that spelling belongs in ITS seat before calling
+// here, and says so through wildcardFix.
+func validateConcretePermission(permission, at, wildcardFix string, ps *Problems) {
+	switch {
+	case strings.Contains(permission, "*"):
+		ps.BlockerFix(at,
+			fmt.Sprintf("%q cannot be asked about — the framework's HasPermission "+
+				"panics on a wildcard, since the CLAIM wildcards and the question "+
+				"does not", permission),
+			wildcardFix)
+	case !strings.Contains(permission, ":"):
+		ps.BlockerFix(at,
+			fmt.Sprintf("%q is not a permission", permission),
+			"spell it resource:action")
+	}
+}
+
 // validateRuntimeField judges the field the table never sees.
 //
 // Both sources agree on what is refused for the same reason — there is no
@@ -507,31 +581,23 @@ func validateRuntimeField(s *Spec, f Field, where string, ps *Problems, isChild 
 				"neither the outbox payload nor the audit event")
 	}
 
+	if FromManual(f) {
+		validateManualRuntimeField(f, where, ps)
+		return
+	}
 	if !FromBody(f) {
-		if f.Claim == "" {
-			ps.BlockerFix(where+".claim",
-				"a runtime-only field does not say where its value comes from",
-				"name the claim it is fed from, e.g. claim: email — the framework does "+
-					"not opine on custom claim names, so there is no convention to fall "+
-					"back on. If the value comes from the REQUEST instead, say so with "+
-					"source: body and drop claim (that is the password-confirmation shape)")
-		}
-		if f.Type != "string" && f.Type != "bool" {
-			ps.BlockerFix(where+".type",
-				"a runtime-only field read from a token claim is text or a flag",
-				"set type: string, or type: bool for a yes/no claim")
-		}
-		if len(f.Modes) > 0 {
-			ps.BlockerFix(where+".modes",
-				"modes names the write verbs whose BODY carries the field, and this one "+
-					"is fed from the caller's token",
-				"drop modes — a claim reaches every verb, including the bodyless ones; "+
-					"or set source: body if the caller is meant to send the value")
-		}
+		validateIdentityRuntimeField(f, where, ps)
 		return
 	}
 
 	// ── source: body ─────────────────────────────────────────────────────────
+	if f.Permission != "" {
+		ps.BlockerFix(where+".permission",
+			"a source: body field is filled from the request, and a permission is a "+
+				"question about the CALLER — a value the caller sends is not the answer to it",
+			"drop permission, or set source: permission to ask the framework whether the "+
+				"caller holds it")
+	}
 	if f.Claim != "" {
 		ps.BlockerFix(where+".claim",
 			"a source: body field is filled from the request, so naming a claim says "+
@@ -556,10 +622,194 @@ func validateRuntimeField(s *Spec, f Field, where string, ps *Problems, isChild 
 	validateBodyFieldModes(s, f, where, ps)
 }
 
+// validateManualRuntimeField judges the field the generator declares and fills
+// from nowhere.
+//
+// Almost everything it refuses, it refuses for the reason every runtime field
+// does — there is no column — and those checks already ran. What is left is the
+// set of keys that describe a value ARRIVING, and no generated verb brings this
+// one: not a claim, not a permission, not a set of write verbs.
+func validateManualRuntimeField(f Field, where string, ps *Problems) {
+	if f.Claim != "" {
+		ps.BlockerFix(where+".claim",
+			"a source: manual field is filled by your code, so naming a claim says "+
+				"two different things about where the value comes from",
+			"drop claim, or use source: claim to have the generator read the token")
+	}
+	if f.Permission != "" {
+		ps.BlockerFix(where+".permission",
+			"permission is what a source: permission field asks about, and this one "+
+				"is source: manual",
+			"drop permission, or set source: permission to ask whether the caller holds it")
+	}
+	if len(f.Modes) > 0 {
+		ps.BlockerFix(where+".modes",
+			"modes names the write verbs whose BODY carries the field, and no generated "+
+				"verb carries a source: manual one",
+			"drop modes. If a generated write is meant to carry the value after all, that "+
+				"is source: body, and modes names which verbs")
+	}
+	// A composite is NOT refused here, and the omission is deliberate: every
+	// composite runtime field is already refused before this runs, by the
+	// composite pass, because validateOneField returns early for one. A second
+	// refusal would be a message nobody can reach — the shape that rots, since
+	// nothing fails when it stops being true.
+	//
+	// Deliberately NOT refused here: an entity with no write verb. A source: body
+	// field on one is declared and unreachable — no request body exists to carry
+	// it — but this field never rode a request body to begin with, and the
+	// aggregate and its BuildRules exist either way.
+}
+
+// validateIdentityRuntimeField judges a runtime-only field fed from the CALLER,
+// which is every source but `body`.
+//
+// They split on what each one has to NAME. `claim` needs a claim name and
+// nothing else; `permission` needs the permission and nothing else; the
+// remaining three need neither, because the question they ask takes no argument.
+// Each refuses the other's key BY NAME rather than ignoring it: a field that says
+// `source: subject` and `claim: sub` is saying two different things about where
+// its value comes from, and the one it does not mean would win silently.
+func validateIdentityRuntimeField(f Field, where string, ps *Problems) {
+	src := SourceOf(f)
+
+	// modes is a body key: it names the write verbs whose BODY carries a value.
+	// A fact about the caller rides every verb the entity has — the BODYLESS ones
+	// included, which is exactly where an archive guard reads it.
+	if len(f.Modes) > 0 {
+		ps.BlockerFix(where+".modes",
+			"modes names the write verbs whose BODY carries the field, and this one "+
+				"is fed from the caller's identity",
+			"drop modes — an identity reaches every verb, including the bodyless ones; "+
+				"or set source: body if the caller is meant to send the value")
+	}
+	if src != "claim" && f.Claim != "" {
+		ps.BlockerFix(where+".claim",
+			fmt.Sprintf("source: %s asks the framework its own question about the caller, "+
+				"so it looks no claim up by name", src),
+			"drop claim — the accessor behind this source owns which claim it reads, and "+
+				"for permission and super-admin that name is a deployment setting "+
+				"(authorization.permissionsClaim). To read a claim by name instead, that "+
+				"is source: claim")
+	}
+	if src != "permission" && f.Permission != "" {
+		ps.BlockerFix(where+".permission",
+			fmt.Sprintf("permission is what a source: permission field asks about, and "+
+				"this one is source: %s", src),
+			"drop permission, or set source: permission to ask whether the caller holds it")
+	}
+	// A value object is the DOMAIN validating a value somebody SENT. Nothing fed
+	// from the identity is that, and the two sources fail the promise
+	// differently — so they are refused separately and for their own reason.
+	//
+	// It was silently accepted on a claim field until this refusal, which is the
+	// worse half of the bug: the value-object type was generated, and the
+	// aggregate declared the field as the plain scalar anyway, so the rule the
+	// author wrote in that type ran over nothing. A key that does nothing reads
+	// exactly like a key that works.
+	if f.VO != nil && f.VO.Kind != "" && f.VO.Kind != "none" {
+		if src == "claim" {
+			ps.BlockerFix(where+".vo",
+				"a claim is asserted by the ISSUER and already verified by the token's "+
+					"signature, so it is not a value this aggregate judges",
+				"drop vo. Validating it here would answer 422 for a value the CALLER "+
+					"never sent and cannot fix — a misconfigured issuer reported as the "+
+					"caller's mistake. Where a value object DOES belong on a runtime "+
+					"field is source: body, whose value is the caller's own")
+		} else {
+			ps.BlockerFix(where+".vo",
+				fmt.Sprintf("source: %s is answered by the framework, so its value goes "+
+					"through no constructor of yours", src),
+				"drop vo — the field carries what the accessor returned (a subject, a "+
+					"tenant, a yes/no), and a rule reads it directly")
+		}
+	}
+
+	switch src {
+	case "claim":
+		if f.Claim == "" {
+			ps.BlockerFix(where+".claim",
+				"a runtime-only field does not say where its value comes from",
+				"name the claim it is fed from, e.g. claim: email — the framework does "+
+					"not opine on custom claim names, so there is no convention to fall "+
+					"back on. If the value is the caller's identity ITSELF, the framework "+
+					"answers that: source: subject | tenant | permission | super-admin | "+
+					"present. If it comes from the REQUEST, say so with source: body and "+
+					"drop claim (that is the password-confirmation shape)")
+		}
+		if f.Type != "string" && f.Type != "bool" {
+			ps.BlockerFix(where+".type",
+				"a runtime-only field read from a token claim is text or a flag",
+				"set type: string, or type: bool for a yes/no claim")
+		}
+
+	case "subject", "tenant":
+		whose := "subject"
+		if src == "tenant" {
+			whose = "tenant"
+		}
+		if f.Type != "string" {
+			ps.BlockerFix(where+".type",
+				fmt.Sprintf("the caller's %s arrives as text, and %q is not", whose, f.Type),
+				"set type: string — a runtime field backs no column, so there is no "+
+					"foreign key to be worth carrying the value as an id for")
+		}
+
+	case "permission":
+		if f.Type != "bool" {
+			ps.BlockerFix(where+".type",
+				fmt.Sprintf("holding a permission is a yes/no, and %q is not", f.Type),
+				"set type: bool")
+		}
+		if f.Permission == "" {
+			ps.BlockerFix(where+".permission",
+				"a source: permission field does not say WHICH permission it asks about",
+				`name it, e.g. permission: "users:admin" — the same string the deployment `+
+					"grants and the same one authz.permissions names")
+			break
+		}
+		validateConcretePermission(f.Permission, where+".permission",
+			`for the *:* grant itself use source: super-admin, which the framework `+
+				`answers with Identity.IsSuperAdmin rather than with HasPermission. `+
+				`Anything narrower has to be a concrete permission: grant something `+
+				`like users:admin and name it here`, ps)
+
+	case "super-admin", "present":
+		if f.Type != "bool" {
+			asks := "whether the caller holds the " + SuperAdminClaim + " grant"
+			if src == "present" {
+				asks = "whether the request carried an identity at all"
+			}
+			ps.BlockerFix(where+".type",
+				fmt.Sprintf("source: %s asks %s, which is a yes/no, and %q is not",
+					src, asks, f.Type),
+				"set type: bool")
+		}
+	}
+}
+
 // validateBodyFieldModes holds the modes list to the verbs the entity actually
 // has. A field declared on a verb the spec never mounts is a field the caller
 // can never send — accepted silently, it reads as "declared and working".
 func validateBodyFieldModes(s *Spec, f Field, where string, ps *Problems) {
+	// An EMPTY list is not an absent one, and until this refusal the two were the
+	// same answer: `modes: []` decoded to a list with nothing declared in it, fell
+	// into the "omitted" branch of the resolver, and put the field on EVERY write
+	// verb — the exact opposite of what it says. `check` answered that the spec
+	// could be generated, and the output was byte-for-byte the output of writing
+	// no modes at all.
+	//
+	// nil is the absent key; a non-nil empty slice is an author who wrote the
+	// brackets.
+	if f.Modes != nil && len(f.Modes) == 0 {
+		ps.BlockerFix(where+".modes",
+			"an empty modes list says no write verb carries the field, and this generator "+
+				"reads it as every one of them",
+			"for a field NO generated verb carries — one a hand-written operation fills, "+
+				"so it must stay out of the ordinary write bodies — that is source: manual. "+
+				"To have a generated write carry it, name the verbs: modes: [insert]")
+		return
+	}
 	if len(f.Modes) == 0 {
 		return
 	}
@@ -650,6 +900,14 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 				"modes says which write verbs carry a source: body field, and this field is persisted",
 				"a persisted field is on every write verb the entity has; to keep one out "+
 					"of the partial update, name it under update.patchExcludes")
+		}
+		if f.Permission != "" {
+			ps.BlockerFix(where+".permission",
+				"permission is what a runtime field with source: permission asks about, "+
+					"and this field has a column",
+				"a column holds a value, not an answer about whoever is asking — carry the "+
+					"grant into the rules with runtime: true and source: permission, or drop "+
+					"permission")
 		}
 	}
 
@@ -2510,8 +2768,10 @@ func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 					fmt.Sprintf("%q is fed from the REQUEST BODY, so the caller decides what "+
 						"it holds and the check would compare the row against whatever they sent",
 						r.OwnerField),
-					"the caller's identity comes from the token — drop source: body and "+
-						"name the claim it is read from")
+					"the caller's identity comes from the request identity — the direct "+
+						"spelling is source: subject, which the framework answers with "+
+						"Identity.Subject; source: claim with the claim's name reads a "+
+						"different identifier off the same token")
 			}
 		}
 		if r.AdminField != "" {
@@ -2529,8 +2789,11 @@ func validateRuleShape(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 				ps.BlockerFix(w+".adminField",
 					fmt.Sprintf("%q is fed from the REQUEST BODY, so any caller could grant "+
 						"themselves the bypass by sending it", r.AdminField),
-					"the privilege comes from the token — drop source: body and name the "+
-						"claim it is read from")
+					"the privilege comes from the caller — the direct spelling is "+
+						"source: permission with the permission it takes, which asks the "+
+						"same authorization model the routes are gated by; a boolean claim "+
+						"(source: claim) answers a narrower question, resolving no resource "+
+						"wildcard and no *:* grant")
 			case f.Type != "bool":
 				ps.BlockerFix(w+".adminField",
 					fmt.Sprintf("%q is %s, and the bypass is a yes/no", r.AdminField, f.Type),
@@ -3635,21 +3898,17 @@ func validateRowScopePolicy(a Authz, ps *Problems) {
 			// refusal below must not swallow it. Which framework question the
 			// guard asks instead of HasPermission is Authz.Bypass's own
 			// documentation.
-		case strings.Contains(a.Bypass, "*"):
-			// The mistake this exists to catch, because it is the natural way to
-			// write the intent and it does not fail until a request arrives.
-			ps.BlockerFix("authz.bypass",
-				fmt.Sprintf("%q cannot be asked about — the framework's HasPermission "+
-					"panics on a wildcard, since the CLAIM wildcards and the question "+
-					"does not", a.Bypass),
+		default:
+			// The mistake the wildcard branch exists to catch is the natural way
+			// to write the intent, and it does not fail until a request arrives.
+			// It is the same mistake a source: permission field can make, so the
+			// judgement is shared and only the way OUT differs: there the escape
+			// from `*:*` is a source of its own, here it is this very key.
+			validateConcretePermission(a.Bypass, "authz.bypass",
 				`"*:*" is the one exception, because the framework answers that question `+
 					`with its own method (Identity.IsSuperAdmin) rather than with `+
 					`HasPermission. Anything narrower has to be a concrete permission: `+
-					`grant something like platform:cross-tenant and name it here`)
-		case !strings.Contains(a.Bypass, ":"):
-			ps.BlockerFix("authz.bypass",
-				fmt.Sprintf("%q is not a permission", a.Bypass),
-				"spell it resource:action")
+					`grant something like platform:cross-tenant and name it here`, ps)
 		}
 	}
 

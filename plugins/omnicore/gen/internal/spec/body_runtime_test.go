@@ -102,9 +102,10 @@ func TestSourceIsRefusedOnAPersistedField(t *testing.T) {
 	mustBlock(t, ps, "this field has a column")
 }
 
-// TestModesIsRefusedOnAClaimField: a claim reaches every verb, including the
+// TestModesIsRefusedOnAClaimField: an identity reaches every verb, including the
 // bodyless ones, so naming write verbs for it promises a narrowing that nothing
-// implements.
+// implements. The refusal covers every source that reads the caller, not the
+// claim one alone — modes is a key about a request BODY.
 func TestModesIsRefusedOnAClaimField(t *testing.T) {
 	ps := bodyRuntimeProblems(t, `  - name: Solicitante
     type: string
@@ -114,7 +115,7 @@ func TestModesIsRefusedOnAClaimField(t *testing.T) {
     livesOn: root
     example: ana@x.com
     description: Quem pediu.`)
-	mustBlock(t, ps, "fed from the caller's token")
+	mustBlock(t, ps, "fed from the caller's identity")
 }
 
 // TestModesMustNameVerbsTheEntityHas catches the field declared on a verb the
