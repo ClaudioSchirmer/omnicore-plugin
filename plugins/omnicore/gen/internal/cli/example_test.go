@@ -97,6 +97,11 @@ var notShownOnPurpose = map[string]string{
 	"authz.noIdentity": "modifies a SCOPED dataAccess, which neither example uses — same " +
 		"reason as authz.tenantField; `explain vocabulary` carries both answers and " +
 		"what each one decides",
+	"fields[].bypassMaySet": "needs BOTH a scoped dataAccess and an authz.bypass, and " +
+		"neither example has either — it is the same third example the two keys above " +
+		"are exempt for. `explain keys` lists it under assignedFrom, where an author " +
+		"reading about server-assigned fields meets it, and the golden gate's " +
+		"tenant-scoped fixtures are the worked example",
 }
 
 // TestExamplesAreGoldenMatrixCases keeps the printed example and the gated one

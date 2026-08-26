@@ -42,6 +42,22 @@ fields:
     type: id
     column: tenant_id
     livesOn: root
+    # The SERVER fills it, from the claim the token carries — so no ordinary
+    # caller sends a tenant, and none can send someone else's.
+    assignedFrom: identity-claim
+    claim: tenant_id
+    # …except the one caller who crosses the row scope. `authz.bypass` below
+    # says who that is, and without this key they had nowhere to say which
+    # tenant a NEW role belongs to: the field is absent from every write DTO by
+    # definition, so an operator supporting a customer could read and repair
+    # that customer's roles and never create one.
+    #
+    # It puts the field back in the INSERT body, optional. Absent means "mine".
+    # Present, it is written onto the aggregate whoever sent it — which is what
+    # hands the question to the row-scope guard, so an ordinary caller naming
+    # another tenant meets the same refusal a write into that tenant meets,
+    # rather than having their value silently swapped for their own.
+    bypassMaySet: true
     example: 9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3
     description: The tenant this role belongs to.
     labelKey: RoleTenantIDField

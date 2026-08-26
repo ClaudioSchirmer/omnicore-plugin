@@ -1,0 +1,108 @@
+# Eixo: campo que o CHAMADOR envia e ninguém armazena — runtime: true com
+# source: body.
+#
+# O par canônico é uma senha e sua confirmação; aqui é um e-mail digitado duas
+# vezes, que tem a mesma forma sem nada secreto dentro. O que este caso prova,
+# e que nenhum outro do corpus prova:
+#
+#   - o campo atravessa o request de INSERT, o comando e a entidade, e nenhuma
+#     coluna: nem TableSchema, nem migração, nem payload, nem resposta;
+#   - `modes: [insert]` o mantém FORA do PUT e do PATCH — e o gerador exclui o
+#     objeto de valor da passagem automática nos verbos que não o carregam,
+#     senão um PATCH de um campo qualquer seria respondido com "a confirmação é
+#     obrigatória";
+#   - um campo body sem objeto de valor não gera exclusão nenhuma: não há nada
+#     que a passagem automática alcance.
+specVersion: 1
+entity: Cadastro
+plural: Cadastros
+language: pt-BR
+storage:
+  kind: flat
+  table: cadastros
+  description: Cadastros de contato.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana Ribeiro, description: Nome de quem se cadastrou.}
+  - {name: Email, type: string, column: email, length: 160, livesOn: root, example: ana.ribeiro@escola.br, description: E-mail de contato., vo: {kind: raw, ref: Email}}
+  # O campo que este caso existe para provar. Sem coluna, e por isso sem
+  # `column:` — declarar uma é recusado.
+  - name: ConfirmacaoEmail
+    type: string
+    runtime: true
+    source: body
+    modes: [insert]
+    livesOn: root
+    vo: {kind: raw, ref: Email}
+    example: ana.ribeiro@escola.br
+    description: O e-mail digitado uma segunda vez — conferido, nunca armazenado.
+    labelKey: CadastroConfirmacaoEmailField
+  # O mesmo tipo de campo SEM objeto de valor: nada na passagem automática o
+  # alcança, então nenhuma exclusão é emitida por ele.
+  - name: OrigemDoFormulario
+    type: string
+    runtime: true
+    source: body
+    modes: [insert]
+    livesOn: root
+    example: landing-2026
+    description: De qual formulário veio o cadastro — lido por uma regra, nunca guardado.
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+delete: {root: soft}
+valueObjects:
+  - name: Email
+    kind: raw
+    backing: string
+    description: Endereço de e-mail válido.
+    regex: '^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+    maxLength: 160
+    notification: EmailInvalidoNotification
+rules:
+  list:
+    - {id: nome-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Nome], notification: RequiredFieldNotification}
+    # A regra que dá sentido ao campo acima. O objeto de valor diz que a
+    # confirmação é um endereço bem formado; só isto diz que é o MESMO.
+    - {id: email-confirmado, kind: comparison, scope: [insert], fields: [ConfirmacaoEmail], other: Email, operator: eq, notification: ConfirmacaoEmailNaoConfereNotification}
+notifications:
+  - name: EmailInvalidoNotification
+    package: vos
+    semantic: validation
+    text:
+      ptbr: E-mail inválido.
+      eng: Invalid e-mail address.
+      esp: Correo electrónico inválido.
+      fra: Adresse e-mail invalide.
+      deu: Ungültige E-Mail-Adresse.
+      ita: Indirizzo e-mail non valido.
+      nld: Ongeldig e-mailadres.
+  - name: ConfirmacaoEmailNaoConfereNotification
+    semantic: validation
+    text:
+      ptbr: A confirmação de e-mail não confere com o e-mail informado.
+      eng: The e-mail confirmation does not match the address given.
+      esp: La confirmación de correo no coincide con la dirección indicada.
+      fra: La confirmation d'e-mail ne correspond pas à l'adresse saisie.
+      deu: Die E-Mail-Bestätigung stimmt nicht mit der angegebenen Adresse überein.
+      ita: La conferma dell'e-mail non corrisponde all'indirizzo indicato.
+      nld: De e-mailbevestiging komt niet overeen met het opgegeven adres.
+read:
+  backing: relational
+  view: {name: cadastros}
+  byId: true
+  byParams:
+    filters:
+      - {field: Nome, ops: [eq, contains]}
+    sort: [Nome]
+    controls: {pagination: true, orderBy: true}
+surfaces: {rest: true}
+authz:
+  resource: cadastro
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: "cadastro:escrever"
+    update: "cadastro:escrever"
+    patch: "cadastro:escrever"
+    archive: "cadastro:arquivar"
+    unarchive: "cadastro:arquivar"
+    read: "cadastro:ler"

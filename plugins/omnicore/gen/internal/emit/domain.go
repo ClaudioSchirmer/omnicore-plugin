@@ -88,13 +88,25 @@ func emitAggregate(m *ir.Model) (fsplan.File, error) {
 		s.L("\t// be ignored on every write.")
 	}
 	emitJoinStructFields(s, m.RootJoins(), "this entity")
-	if len(m.Runtime) > 0 {
+	if claims := m.ClaimRuntimeFields(); len(claims) > 0 {
 		s.Blank()
 		s.L("\t// Fed from the caller's identity by the command mapper and read by the")
 		s.L("\t// rules below. Never persisted, so it carries no labelKey and no column.")
-		for _, f := range m.Runtime {
+		for _, f := range claims {
 			s.L("\t%s %s%s", f.Name, f.GoType, fieldComment(f))
 		}
+	}
+	if body := m.BodyRuntimeFields(); len(body) > 0 {
+		s.Blank()
+		s.L("\t// Sent by the caller and read by the rules below, and stored by nobody:")
+		s.L("\t// there is no column, so the value reaches neither the outbox payload nor")
+		s.L("\t// the audit event nor any response. It carries a labelKey like any other")
+		s.L("\t// field the caller can get wrong — a validation payload names it.")
+		s.L("\t//")
+		s.L("\t// The framework's automatic pass still validates it: that pass walks the")
+		s.L("\t// STRUCT, not the schema, so a value object here is checked on every write")
+		s.L("\t// that carries one — and excluded, below, from the verbs that do not.")
+		emitStructFields(s, body)
 	}
 	s.L("}")
 	s.Blank()
@@ -202,7 +214,12 @@ func emitBuildRules(s *src, m *ir.Model) {
 	// checked on a write that is already established as the caller's to make.
 	scoped := emitRowScopeGuard(s, m)
 
-	if len(m.Clauses) == 0 && !m.HasHookFile && m.ArchiveWhen == nil && !scoped {
+	// Then the exclusions for the fields the caller sends and nobody stores:
+	// they say what the automatic pass must NOT ask on this verb, so they belong
+	// above every rule that could depend on the answer.
+	ignored := emitBodyRuntimeIgnores(s, m)
+
+	if len(m.Clauses) == 0 && !m.HasHookFile && m.ArchiveWhen == nil && !scoped && !ignored {
 		s.L("\t// The spec declares no rule for this aggregate. The method still exists")
 		s.L("\t// because the framework's entity contract requires it.")
 		s.L("}")
@@ -530,6 +547,129 @@ func emitValueObjectCheck(s *src, rule ir.Rule, recv string) {
 	for _, f := range rule.Fields {
 		s.L("\t\tr.IgnoreValueObject(%s)", quote(f.Name))
 	}
+}
+
+// writeGateOf maps a mounted write verb onto the clause the framework
+// dispatches it into. A PATCH and a PUT share IfUpdate — the domain is told
+// what kind of write it is, not which HTTP shape asked for it.
+func writeGateOf(verb string) string {
+	switch verb {
+	case "insert":
+		return "IfInsert"
+	case "update", "patch":
+		return "IfUpdate"
+	case "archive":
+		return "IfArchive"
+	case "unarchive":
+		return "IfUnarchive"
+	case "delete":
+		return "IfDelete"
+	}
+	return ""
+}
+
+// gateSequence keeps the emitted exclusion clauses in the order a reader
+// expects, rather than in whatever order the operations happen to be built in.
+var gateSequence = []string{"IfInsert", "IfUpdate", "IfArchive", "IfUnarchive", "IfDelete"}
+
+// emitBodyRuntimeIgnores excludes the value objects of body-sourced runtime
+// fields from the writes that do not carry one. It reports whether it wrote
+// anything.
+//
+// This is the half of the feature that has nothing to do with the wire. The
+// framework's automatic pass discovers value-object fields by walking the
+// STRUCT — that is precisely what makes a columnless field validated for free —
+// and it does not know that a password confirmation is only sent on some verbs.
+// Without these exclusions an archive, a delete, a per-entry child write and a
+// patch that never mentions the field would each be answered with "password
+// confirmation is required", for a field the request had no business carrying.
+//
+// Where the field IS carried, the exclusion is conditional on emptiness rather
+// than dropped: a PATCH is dispatched into the same IfUpdate clause a PUT is,
+// and so are the per-entry child verbs and the facet-clearing mutation, none of
+// which carry a body for this field. "Validate it when a value arrived" is the
+// only reading of that clause that is true for every write reaching it. The
+// INSERT clause is deliberately not conditional: an insert carries the whole
+// body or it is not an insert, so an empty value there is a caller who left the
+// field out, and being told so is the point.
+func emitBodyRuntimeIgnores(s *src, m *ir.Model) bool {
+	fields := m.BodyRuntimeFields()
+	if len(fields) == 0 {
+		return false
+	}
+	verbsIn := map[string][]string{}
+	for _, op := range m.WriteOps() {
+		if gate := writeGateOf(op.Verb); gate != "" {
+			verbsIn[gate] = append(verbsIn[gate], op.Verb)
+		}
+	}
+
+	wrote := false
+	for _, gate := range gateSequence {
+		verbs := verbsIn[gate]
+		if len(verbs) == 0 {
+			continue
+		}
+		var always, whenEmpty []ir.Field
+		for _, f := range fields {
+			if !needsIgnore(f) {
+				continue
+			}
+			carried := false
+			for _, v := range verbs {
+				if f.CarriedBy(v) {
+					carried = true
+					break
+				}
+			}
+			switch {
+			case !carried:
+				always = append(always, f)
+			case gate != "IfInsert":
+				whenEmpty = append(whenEmpty, f)
+			}
+		}
+		if len(always) == 0 && len(whenEmpty) == 0 {
+			continue
+		}
+		wrote = true
+		s.L("\tr.%s(func() {", gate)
+		for _, f := range always {
+			for _, line := range wrap(fmt.Sprintf("%s is not part of this verb's body, so "+
+				"the value object it carries has nothing to judge here — and the automatic "+
+				"pass, which walks the struct rather than the schema, would judge it "+
+				"anyway.", f.Name), 68) {
+				s.L("\t\t// %s", line)
+			}
+			s.L("\t\tr.IgnoreValueObject(%s)", quote(f.Name))
+		}
+		for _, f := range whenEmpty {
+			for _, line := range wrap(fmt.Sprintf("This verb MAY carry %s, and several "+
+				"writes dispatched here do not: a patch that never mentions it, a per-entry "+
+				"child write, a facet being cleared. Validate the value when one arrived; "+
+				"stay silent when none did.", f.Name), 68) {
+				s.L("\t\t// %s", line)
+			}
+			s.L("\t\tif %s {", zeroCheck(f, "e"))
+			s.L("\t\t\tr.IgnoreValueObject(%s)", quote(f.Name))
+			s.L("\t\t}")
+		}
+		s.L("\t})")
+		s.Blank()
+	}
+	return wrote
+}
+
+// needsIgnore reports whether a body-sourced field is one the automatic pass
+// would reach at all.
+//
+// Only a value object is discovered by that pass, so a plain scalar needs no
+// exclusion. A NULLABLE one needs none either: the pass skips a nil field, which
+// already says "absent is not a violation" — adding an exclusion there would be
+// noise that reads like a rule. A bool has no emptiness to test and no
+// value-object backing to be validated by.
+func needsIgnore(f ir.Field) bool {
+	return f.VOKind != "" && !f.Nullable && f.SpecType != "bool"
 }
 
 // hasValueObjectRule reports whether any clause pulls a value object's

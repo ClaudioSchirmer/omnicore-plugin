@@ -7,6 +7,112 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-08-26
+
+Two holes in the same wall. The field model had exactly two states — persisted, or fed from
+the caller's token — and the spec language could not say where a value comes from when the
+answer is neither. One case is a value the caller sends that nothing stores: a password and
+its confirmation. The other is a value the SERVER fills, except for the one caller allowed
+to say otherwise: the operator crossing a row scope. Both were being worked around by hand,
+in the two files a regeneration overwrites most.
+
+### Added
+
+- **`fields[].source: body` — a field the caller sends that nothing stores.** Declared on a
+  `runtime: true` field, it says the value comes from the REQUEST rather than from a claim:
+
+  ```yaml
+  - name: PasswordConfirmation
+    type: string
+    runtime: true
+    source: body
+    modes: [insert]
+    vo: {kind: reuse, ref: Password}
+    description: The password typed a second time — checked, never stored.
+  ```
+
+  It reaches the write request DTO, the command and its mapper, and the aggregate — where
+  the framework validates its value object on every write that carries one, because that
+  pass walks the STRUCT and not the `TableSchema`. It reaches no `TableSchema`, no
+  migration, no outbox payload, no audit event, no Response, and no filter or `sort:`.
+  There is no column, so there is nothing to redact and nothing to leak; `redact:` on such
+  a field is refused for saying otherwise.
+
+- **`fields[].modes` — which write verbs carry it.** Omitted means every write verb the
+  entity has. The values are the two the DOMAIN can tell apart, `insert` and `update`: a
+  PATCH is dispatched into the same `IfUpdate` clause a PUT is, so `update` names both
+  shapes and `patch` is refused rather than promising a distinction `BuildRules` cannot
+  make. The generator emits `r.IgnoreValueObject(...)` in every gate the field does not
+  name — without it an archive, a delete or a patch of any other field would be answered
+  with "the confirmation is required" for a value the request had no business sending — and
+  a value-guarded exclusion in the update gate the field DOES name, because per-entry child
+  writes and facet clears are dispatched there too and carry no body for it.
+
+- **`source: claim` — the same key, spelling what `runtime: true` already meant.** It is
+  the default, so every existing spec still says what it said. The blocker for a runtime
+  field with no claim now names BOTH answers: the one it printed sent two consumers away
+  believing runtime meant "from the token, full stop".
+
+- **`fields[].bypassMaySet` — a server-assigned scope that yields to the bypass.**
+  `assignedFrom: identity-claim` on a tenant is the right shape and, on its own, a trap: it
+  removes the field from every write body, so the operator `authz.bypass` lets cross the row
+  scope could read and repair a customer's records and never create one. Declared on the
+  field `authz.tenantField`/`authz.ownerField` names, this puts it back in the INSERT body
+  as an OPTIONAL value:
+
+  ```yaml
+  - name: TenantID
+    type: id
+    column: tenant_id
+    assignedFrom: identity-claim
+    claim: tenant_id
+    bypassMaySet: true
+  ```
+
+  Absent means "mine", which the identity already wrote. It stays out of the update and the
+  patch: a record does not change scope by being edited.
+
+  **The mapper does not check who sent it, and that is the design.** The stated value is
+  applied whoever sent it, so the row-scope guard the entity already carries is what
+  answers — a caller who may not cross the scope meets the same notification a write into a
+  foreign record meets, instead of having their value silently swapped for their own. That
+  is also why `check` refuses the key anywhere but on the scope's own subject: on any other
+  field nothing would compare it, and the value would be accepted from everybody. It is
+  refused, too, without a scoped `dataAccess`, without `authz.bypass`, on `derived`, on a
+  field nothing assigns, on a collection entry or facet, and on an entity with no insert.
+
+  What this replaces is the workaround two consumers reached for: dropping `assignedFrom`
+  and putting the tenant in the body with a rule, which makes every ordinary caller send a
+  value the server already knows and leaves that rule as the only thing between them and
+  their neighbour's data.
+
+### Changed
+
+- **`check` refuses a `source: body` field as an `ownerCheck`'s `ownerField` or
+  `adminField`.** The caller chooses what such a field holds, so "the row is yours" would
+  have been compared against a string the caller typed — and passed. Who the caller is
+  comes from the token.
+
+- **The gen-report gained "Fields the caller sends and nothing stores".** A reviewer
+  reading the migration finds no column and concludes the field was forgotten; one reading
+  the aggregate finds it and concludes it is stored. The section says which verbs carry it,
+  what validates it, and that the comparison against the value it confirms is a rule the
+  author owes.
+
+- **And "The tenant is server-assigned, and the insert accepts one anyway".** A reviewer
+  reading that insert DTO sees a caller choosing their own scope and is right to stop; what
+  makes it safe is a guard in another file, and the section puts the two side by side —
+  naming the guard, and saying what breaks if it is ever narrowed.
+
+### Fixed
+
+- **A `comparison` rule over a non-numeric field emitted a generated test that did not
+  compile.** `violatingComparison` fell through to `999999` for everything that was not a
+  time, so a string, an id or a bool compared against another field produced
+  `e.Field = 999999`. It now answers per type, and derives the violating value from the
+  OTHER field where it can — "the same value" and "anything but this value" are the only
+  two answers that hold whatever the valid sample happens to be.
+
 ## [0.39.0] — 2026-08-25
 
 Framework 0.60.0 gave a field a way to keep its real value in the column and wear a mask in

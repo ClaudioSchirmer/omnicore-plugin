@@ -53,6 +53,8 @@ const (
 	CapGuardRule        Capability = "guard rules (a barrier that ends the validation pass once something has been rejected)"
 	CapRedactedField    Capability = "redacted fields (the real value stays in the column; every copy the framework makes of the row carries a mask)"
 	CapReadJoin         Capability = "read joins (reaching another aggregate across a foreign key: on the entity for the rules, and on a relational read model for filter/sort/projection)"
+	CapBodyRuntime      Capability = "body-sourced runtime fields (a value the caller sends that reaches the entity for a rule to check and never a column — a password confirmation)"
+	CapBypassMaySet     Capability = "a server-assigned scope that yields to the bypass (the operator crossing the row scope states which tenant a new row belongs to)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -94,6 +96,8 @@ var implemented = map[Capability]bool{
 	CapReadJoin:         true,
 	CapGuardRule:        true,
 	CapRedactedField:    true,
+	CapBodyRuntime:      true,
+	CapBypassMaySet:     true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -116,7 +120,7 @@ func AllCapabilities() []Capability {
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
-		CapRedactedField,
+		CapRedactedField, CapBodyRuntime, CapBypassMaySet,
 	}
 }
 
@@ -153,6 +157,20 @@ func CheckCoverage(s *Spec) *Problems {
 	for i, vo := range s.ValueObjects {
 		if vo.Kind == "composite" {
 			uses(CapCompositeVO, fmt.Sprintf("valueObjects[%d]", i), "composite value objects")
+			break
+		}
+	}
+	for i, f := range s.Fields {
+		if FromBody(f) {
+			uses(CapBodyRuntime, fmt.Sprintf("fields[%d].source", i),
+				"a field fed from the request body that is never persisted")
+			break
+		}
+	}
+	for i, f := range s.Fields {
+		if f.BypassMaySet {
+			uses(CapBypassMaySet, fmt.Sprintf("fields[%d].bypassMaySet", i),
+				"a server-assigned field the row-scope bypass may state")
 			break
 		}
 	}

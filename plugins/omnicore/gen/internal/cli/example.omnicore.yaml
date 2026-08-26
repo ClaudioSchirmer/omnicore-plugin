@@ -252,7 +252,8 @@ fields:
     description: The campus this enrollment belongs to.
 
   # runtime: the opposite — NEVER persisted. It exists only for the rules to
-  # read, and it comes from a named claim, because the framework holds no
+  # read, and `source` says where its value comes from. The default is `claim`:
+  # a named claim of the caller's token, named because the framework holds no
   # opinion about custom claims.
   - name: RequestingPrincipalEmail
     type: string
@@ -261,6 +262,35 @@ fields:
     example: registrar@school.edu
     claim: email
     description: The requester's e-mail, taken from the token — never persisted.
+
+  # source: body — the other kind of runtime field, and the one there was no
+  # spelling for until now. The CALLER sends it, the rules read it, and no
+  # column holds it: it is in no migration, no TableSchema, no outbox payload,
+  # no audit event and no response. A password and its confirmation are the
+  # canonical pair; typing the e-mail twice is the same shape with nothing
+  # secret in it.
+  #
+  # `modes` says which write verbs carry it — omit it and every write verb does.
+  # Here only the enrollment asks for the confirmation, so an update never
+  # carries it, and the generator excludes the value object from that verb's
+  # automatic pass: a PATCH that changes an address must not be answered with
+  # "the confirmation is required" for a field it had no business sending.
+  #
+  # Nothing compares the two for you. That is the rule below, and without it the
+  # field would be collected and ignored.
+  - name: EmailConfirmation
+    type: string
+    runtime: true
+    source: body
+    modes: [insert]
+    livesOn: root
+    vo: {kind: raw, ref: Email}
+    example: alice.reid@school.edu
+    description: The e-mail typed a second time at enrollment — checked, never stored.
+    labelKey: StudentEmailConfirmationField
+    text:
+      eng: E-mail confirmation
+      ptbr: Confirmação de e-mail
 
 valueObjects:
   - name: Email
@@ -524,6 +554,18 @@ rules:
       max: 10
       notification: GradeOutOfRangeNotification
 
+    # What makes the source: body field above worth declaring. The value object
+    # says the confirmation is a well-formed address; only this says it is the
+    # SAME one. The scope matches the field's modes — a verb that does not carry
+    # the confirmation has nothing to compare.
+    - id: email-confirmed
+      kind: comparison
+      scope: [insert]
+      fields: [EmailConfirmation]
+      other: Email
+      operator: eq
+      notification: EmailConfirmationMismatchNotification
+
   manual:
     - id: enrollment-window
       description: >-
@@ -556,6 +598,17 @@ notifications:
       deu: Die Einschreibenummer kann nicht geändert werden.
       ita: Il numero di iscrizione non può essere modificato.
       nld: Het inschrijvingsnummer kan niet worden gewijzigd.
+
+  - name: EmailConfirmationMismatchNotification
+    semantic: validation
+    text:
+      ptbr: A confirmação de e-mail não confere com o e-mail informado.
+      eng: The e-mail confirmation does not match the address given.
+      esp: La confirmación de correo no coincide con la dirección indicada.
+      fra: La confirmation d'e-mail ne correspond pas à l'adresse saisie.
+      deu: Die E-Mail-Bestätigung stimmt nicht mit der angegebenen Adresse überein.
+      ita: La conferma dell'e-mail non corrisponde all'indirizzo indicato.
+      nld: De e-mailbevestiging komt niet overeen met het opgegeven adres.
 
   - name: GradeOutOfRangeNotification
     semantic: validation

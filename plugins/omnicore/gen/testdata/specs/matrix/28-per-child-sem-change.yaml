@@ -31,7 +31,12 @@ storage:
 fields:
   - {name: Chave, type: string, column: chave, length: 64, livesOn: root, example: administrador, description: Chave do perfil dentro do tenant.}
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Administrador, description: Nome exibido do perfil.}
-  - {name: TenantID, type: string, column: tenant_id, length: 60, livesOn: root, example: escola-alfa, description: Tenant dono da linha.}
+  # bypassMaySet com o CURINGA: o servidor preenche o tenant pela claim, e só
+  # quem atravessa o escopo (aqui, o super-admin) pode dizer outro — no INSERT,
+  # e opcionalmente. Quem não atravessa e mandar um tenant alheio não tem o
+  # valor descartado em silêncio: ele chega na agregada e o guarda de escopo
+  # recusa, com a mesma notificação de uma escrita em linha de outro tenant.
+  - {name: TenantID, type: string, column: tenant_id, length: 60, livesOn: root, assignedFrom: identity-claim, claim: tenant_id, bypassMaySet: true, example: escola-alfa, description: Tenant dono da linha.}
 children:
   - name: PerfilPermissao
     plural: Permissoes
