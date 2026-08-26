@@ -753,6 +753,16 @@ func validateCompositeField(s *Spec, f Field, where string, ps *Problems, isChil
 			"the server assigns ONE value from the caller's identity, and a composite has several parts",
 			"declare the field that records who acted as a plain string field")
 	}
+	// Redaction is declared per PART and never over the value object as a whole.
+	// The framework has no whole-composite redactor, and inventing one here would
+	// mean deciding that a salary's CURRENCY is as sensitive as its amount — a
+	// value object is one concept, not one secret.
+	if f.Redact != nil {
+		ps.BlockerFix(where+".redact",
+			"a composite value object is redacted per PART, not as a whole",
+			"move the block under the parts[] entry that holds the sensitive value; "+
+				"each part is redacted independently of its siblings inside the value object")
+	}
 
 	if len(f.Parts) == 0 {
 		ps.BlockerFix(where+".parts",
@@ -846,6 +856,17 @@ func validateCompositeField(s *Spec, f Field, where string, ps *Problems, isChil
 			ps.WarnFix(pw, "no example value",
 				"it is what Swagger's \"try it out\" shows for this part's flat wire field")
 		}
+
+		exposed := p.As
+		if exposed == "" {
+			exposed = p.Part
+		}
+		validateRedact(s, p.Redact, pw, redactSeat{
+			Scalar:    typ,
+			Hidden:    f.Hidden,
+			FieldName: exposed,
+			LivesOn:   f.LivesOn,
+		}, ps)
 	}
 
 	// Every declared part must be placed. The framework maps partially by design

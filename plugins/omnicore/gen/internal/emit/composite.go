@@ -34,6 +34,10 @@ func schemaFieldCalls(fields []ir.Field, indent string) []string {
 	var out []string
 	for _, f := range fields {
 		if f.Composite == nil {
+			if f.Redaction != nil {
+				out = append(out, redactedFieldCall(f, indent))
+				continue
+			}
 			out = append(out, fmt.Sprintf("Field(%s, %s)", quote(f.Name), quote(f.Column)))
 			continue
 		}
@@ -70,7 +74,17 @@ func compositeCall(parts []ir.Field, indent string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Composite(core.NewCompositeValueObject[%s]().", c.VOType)
 	for i, p := range parts {
-		fmt.Fprintf(&b, "\n%s\tField(%s, %s)", indent, quote(p.Composite.PartName), quote(p.Column))
+		if p.Redaction != nil {
+			// A part is redacted INDEPENDENTLY of its siblings inside the value
+			// object, which is why this is per part and not on the Composite call:
+			// the currency of a salary is not sensitive, the amount is.
+			fmt.Fprintf(&b, "\n%s\tRedactedField(%s, %s,", indent,
+				quote(p.Composite.PartName), quote(p.Column))
+			fmt.Fprintf(&b, "\n%s\t\tcore.InSync(%s),", indent, redactorExpr(p.Redaction.InSync, p))
+			fmt.Fprintf(&b, "\n%s\t\tcore.InAudit(%s))", indent, redactorExpr(p.Redaction.InAudit, p))
+		} else {
+			fmt.Fprintf(&b, "\n%s\tField(%s, %s)", indent, quote(p.Composite.PartName), quote(p.Column))
+		}
 		// The alias is written only when it says something: the default exposed
 		// name is the part's own, and repeating it would read as a decision.
 		if p.Composite.Exposed != p.Composite.PartName {

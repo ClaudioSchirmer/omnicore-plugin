@@ -173,7 +173,17 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("    # The LABEL is a different thing: the field's short human name, what a\n")
 	b.WriteString("    # 422 payload puts in fieldLabel and an export puts in a column header.\n")
 	b.WriteString("    # Optional and per catalog; one left out falls back to the field name.\n")
-	b.WriteString("    # text: {eng: Name, ptbr: Nome}\n\n")
+	b.WriteString("    # text: {eng: Name, ptbr: Nome}\n")
+	// Redaction gets a line here for the reason `explain keys` exists: a
+	// capability nobody is told about is one people work around. This one is
+	// worked around by not protecting the value at all.
+	b.WriteString("    # A field whose real value must not leave this service is a redacted\n")
+	b.WriteString("    # one: the column keeps it, every copy the framework makes of the row\n")
+	b.WriteString("    # (the outbox payload, so the topic, the consumers and the projected\n")
+	b.WriteString("    # document — and the audit event) carries a mask. Both axes required.\n")
+	b.WriteString("    # redact:\n")
+	b.WriteString("    #   inSync: {kind: keep-last, keep: 4}\n")
+	b.WriteString("    #   inAudit: {kind: fixed, value: \"***\"}\n\n")
 
 	b.WriteString("modes: [display, insert, update, archive, unarchive]\n\n")
 	b.WriteString("update:\n")

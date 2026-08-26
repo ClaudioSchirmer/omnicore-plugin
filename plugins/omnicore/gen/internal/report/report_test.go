@@ -257,3 +257,106 @@ func lineWith(report, prefix string) string {
 	}
 	return "(the line is missing entirely)"
 }
+
+// redactedModel is one entity carrying every axis shape the table has to render
+// in words: a partial mask, a constant, a hook, and one axis deliberately plain.
+func redactedModel(backing string) *ir.Model {
+	return &ir.Model{
+		Entity: ir.Names{Pascal: "Paciente", Snake: "paciente"},
+		Table:  "pacientes",
+		Read:   ir.ReadModel{Backing: backing},
+		Fields: []ir.Field{
+			{Name: "Nome", Column: "nome", SpecType: "string"},
+			{Name: "Documento", Column: "documento", SpecType: "string", Redaction: &ir.Redaction{
+				InSync:  ir.Redactor{Kind: "keep-last", Keep: 4},
+				InAudit: ir.Redactor{Kind: "fixed", Value: "***"},
+			}},
+			{Name: "Email", Column: "email", SpecType: "string", Redaction: &ir.Redaction{
+				InSync: ir.Redactor{Kind: "hook", HookFunc: "redactPacienteEmailInSync",
+					Owner: "Paciente.Email", Axis: "InSync"},
+				InAudit: ir.Redactor{Kind: "plain"},
+			}},
+		},
+	}
+}
+
+// TestTheRedactionTableSaysWhatEachAxisDOES, not which keyword was written.
+//
+// This is the one decision in the report a reviewer cannot check by reading the
+// generated files: every DTO shows the field in full, because the column really
+// does hold the real value. A row saying `keep-last` sends them to the spec
+// language to find out what a consumer will actually receive; a row saying what
+// is masked does not.
+func TestTheRedactionTableSaysWhatEachAxisDoes(t *testing.T) {
+	out := Render(Input{Model: redactedModel("mongo"), SpecPath: "omnicore-gen/paciente.omnicore.yaml"})
+
+	if !strings.Contains(out, "Fields whose copies carry a mask") {
+		t.Fatalf("a model with redacted fields gets no section about them:\n%s", out)
+	}
+	for _, want := range []string{
+		"`Paciente.Documento`",
+		"every character but the last 4 masked",
+		"replaced by `***`",
+		"masked by `redactPacienteEmailInSync`, which you write",
+		"**the real value**, declared plain",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the redaction table is missing %q", want)
+		}
+	}
+	// A field with no redaction is not in the table.
+	if strings.Contains(out, "`Paciente.Nome`") {
+		t.Error("a field that declared no redaction was listed as redacted")
+	}
+	// The two things nothing else in the run says.
+	for _, want := range []string{"read.view.version", "closure has no portable identity"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report omits %q — the rebuild is what replaces plaintext already "+
+				"projected, and a hook is invisible to the check that forces it", want)
+		}
+	}
+}
+
+// TestTheReadSideAnswerFollowsTheBacking pins the half that is OPPOSITE in the
+// two cases. A general caution ("check your read side") would be true for both
+// and useful for neither.
+func TestTheReadSideAnswerFollowsTheBacking(t *testing.T) {
+	mongo := Render(Input{Model: redactedModel("mongo"), SpecPath: "x.yaml"})
+	if !strings.Contains(mongo, "document IS the redacted") {
+		t.Errorf("a mongo backing is not told that the reads serve the mask:\n%s", mongo)
+	}
+	if strings.Contains(mongo, "served in the clear") {
+		t.Error("a mongo backing was warned about a relational read model's behaviour")
+	}
+
+	rel := Render(Input{Model: redactedModel("relational"), SpecPath: "x.yaml"})
+	if !strings.Contains(rel, "served in the clear") {
+		t.Errorf("a relational read model is not told it SELECTs the real column:\n%s", rel)
+	}
+}
+
+// TestAHookAddedAfterTheFileExistsIsNamed is the state nothing else in a run
+// reports.
+//
+// The hook file is written once, so a `kind: hook` added to a spec that already
+// generated gets no stub — the schema calls a function nothing declares. The
+// file is listed under "left untouched (yours, by design)", which is true and
+// reads like reassurance, and the package does not compile.
+func TestAHookAddedAfterTheFileExistsIsNamed(t *testing.T) {
+	m := redactedModel("mongo")
+
+	quiet := Render(Input{Model: m, SpecPath: "x.yaml"})
+	if strings.Contains(quiet, "no stub was written") {
+		t.Error("a freshly written hook file was reported as missing its stubs")
+	}
+
+	loud := Render(Input{Model: m, SpecPath: "x.yaml",
+		UnimplementedRedactors: []string{"redactPacienteEmailInSync"}})
+	if !strings.Contains(loud, "no stub was written") {
+		t.Errorf("a hook the existing file does not declare is not named:\n%s", loud)
+	}
+	if !strings.Contains(loud, "compile error rather than a panic-when-asked") {
+		t.Error("the report does not distinguish the two failure modes: the rest of this " +
+			"section says these panic when asked, and this one does not get that far")
+	}
+}

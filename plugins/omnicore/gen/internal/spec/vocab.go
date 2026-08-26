@@ -61,6 +61,14 @@ var (
 	// service, no collection. Anything outside it belongs to the entity's rules,
 	// and a composite that reached for them would not be a value object.
 	CompositeRuleKinds = set("required", "length", "range", "comparison", "requiredIf")
+	// RedactKinds is the closed family of masks a redaction axis may declare —
+	// one per constructor the framework offers, and no more. `plain` is not a
+	// no-op declaration: with both axes mandatory it is the only way to say
+	// "masked in the payload, intact in the audit trail" (or the reverse).
+	// `hook` is the ELSE — the mask the family does not cover, written by you in
+	// a file this generator creates once and never rewrites.
+	RedactKinds = set("plain", "fixed", "keep-last", "hook")
+
 	UniqueEnforcements = set("service-precheck+constraint", "constraint-only")
 	UniqueScopes       = set("all", "active-only")
 
@@ -235,6 +243,16 @@ func Vocabularies() []Vocabulary {
 		{"fields[].assignedFrom", AssignedFrom,
 			"the server fills it, so no write request carries it — from the identity, or " +
 				"(derived) from the entity's own fields, by a rule you write."},
+		{"redact.inSync.kind", RedactKinds,
+			"how the field appears in the outbox payload — and so on the topic, in every " +
+				"consuming service, in both failure ledgers and in the projected document; " +
+				"`redact.inAudit.kind` is the same set over the audit event, and both are " +
+				"mandatory. plain = the real value, said out loud; fixed = a constant; " +
+				"keep-last = every rune but the last n; hook = a function you write."},
+		{"redact.inAudit.kind", RedactKinds,
+			"how the field appears in the audit event — the audit_events row, the slog " +
+				"echo and the /audit endpoint. Applied AFTER the delta is computed, so the " +
+				"trail still records THAT the field changed without recording what to."},
 		{"fields[].unique.enforce", UniqueEnforcements,
 			"whether a Service pre-check answers before the database constraint does."},
 		{"fields[].unique.scope", UniqueScopes,

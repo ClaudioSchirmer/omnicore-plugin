@@ -17,7 +17,7 @@ import (
 // Supported is the framework version this build targets and is proven against
 // by the golden gate. Moving it is a deliberate act paired with reviewing the
 // emitters — never a silent bump.
-const Supported = "v0.59.0"
+const Supported = "v0.60.0"
 
 // Level is the verdict.
 type Level string

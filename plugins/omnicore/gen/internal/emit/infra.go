@@ -35,6 +35,16 @@ func emitInfra(m *ir.Model) ([]fsplan.File, error) {
 		}
 		out = append(out, f)
 	}
+	// The hand-written redactors, beside the schemas that call them. Written
+	// only when a `hook` axis exists: a file of nothing but a header is a file
+	// an author opens once, learns nothing from, and stops opening.
+	if len(ir.RedactionHooks(m)) > 0 {
+		f, err := emitRedactHook(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
 	return out, nil
 }
 
@@ -53,6 +63,9 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 		// A composite is decomposed by TYPE, so the schema names the value object
 		// itself — the one place outside the domain that mentions one.
 		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+	}
+	if schemaNeedsTime(roleColumns(m), facetFields(m, "")) {
+		s.L("\t%s", quote("time"))
 	}
 	s.L(")")
 	s.Blank()
@@ -406,13 +419,19 @@ func emitBaseSchema(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package schemas")
 	s.Blank()
-	if ir.HasComposites(m.BaseFields()) {
+	needsVOs, needsTime := ir.HasComposites(m.BaseFields()), schemaNeedsTime(m.BaseFields())
+	if needsVOs || needsTime {
 		// The shared identity is TYPE-LESS, but a composite it decomposes is not:
 		// the value object is named here and resolved against each role's struct
 		// at SharedBase(...) time.
 		s.L("import (")
 		s.L("\t%s", quote(fwImport("infra/db/core")))
-		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+		if needsVOs {
+			s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+		}
+		if needsTime {
+			s.L("\t%s", quote("time"))
+		}
 		s.L(")")
 	} else {
 		s.L("import %s", quote(fwImport("infra/db/core")))

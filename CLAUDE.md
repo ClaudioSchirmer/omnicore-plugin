@@ -73,7 +73,7 @@ against the generator's OWN bench (`gen/devops/docker-compose.yml`, containers
 tables, and borrowing someone's engines means a gate that passes here by breaking
 work over there. It has happened; do not repeat it.
 
-Green means green: `83 passed · 0 failed · 0 skipped`. A skipped lane is a lane
+Green means green: `84 passed · 0 failed · 0 skipped`. A skipped lane is a lane
 that proved nothing.
 
 While the framework version the generator targets is UNPUBLISHED there is no tag for

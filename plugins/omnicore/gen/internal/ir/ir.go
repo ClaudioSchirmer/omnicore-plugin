@@ -139,6 +139,12 @@ type Field struct {
 	// its owner's own table. The Go type carries it like any other field — the
 	// split is physical — so only the two emitters that write TABLES care.
 	Facet string
+	// Redaction is set when the field is declared with a redact block: the real
+	// value stays in the column and in the hydrated entity, and every copy the
+	// framework makes of the row carries a mask instead. Nil for every other
+	// field, and the schema emitter is the only place it changes what is
+	// written — Field(...) becomes RedactedField(...).
+	Redaction *Redaction
 	// Composite is set when this field is one PART of a composite value object.
 	// Everything above the schema treats it as an ordinary field under its
 	// exposed name; this is the back-reference the four domain-facing emitters
@@ -753,6 +759,7 @@ func resolveField(entity string, f spec.Field) Field {
 		Hidden:       f.Hidden,
 		AssignedFrom: f.AssignedFrom,
 		LivesOn:      f.LivesOn,
+		Redaction:    resolveRedaction(f.Redact, entity, f.Name),
 	}
 	if f.Unique != nil {
 		scope := f.Unique.Scope

@@ -436,6 +436,15 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 				"a runtime-only field is read from a token claim, so it is text or a flag",
 				"set type: string, or type: bool for a yes/no claim")
 		}
+		// Redaction masks the copies the framework makes of a ROW. A runtime-only
+		// field is on no row: it is fed from the caller's token, read by the
+		// rules, and is in no payload and no audit event to be masked in.
+		if f.Redact != nil {
+			ps.BlockerFix(where+".redact",
+				"a runtime-only field is never persisted, so no copy of it exists to redact",
+				"drop redact — the value lives for the length of one request and reaches "+
+					"neither the outbox payload nor the audit event")
+		}
 		return
 	}
 
@@ -668,6 +677,14 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 				"most engines allow many NULLs past a unique index; confirm that is intended")
 		}
 	}
+
+	validateRedact(s, f.Redact, where, redactSeat{
+		Root:      !isChild && !isFacet,
+		Scalar:    f.Type,
+		Hidden:    f.Hidden,
+		FieldName: f.Name,
+		LivesOn:   f.LivesOn,
+	}, ps)
 
 	if f.Example == "" {
 		ps.WarnFix(where,

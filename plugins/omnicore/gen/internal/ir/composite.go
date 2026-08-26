@@ -215,6 +215,13 @@ func expandComposite(s *spec.Spec, entity string, f spec.Field) []Field {
 			// once per column. A value object is unique as a tuple: a constraint
 			// on one part would refuse rows the domain accepts.
 			Unique: uniqueOfOwner(f, i == 0),
+			// Redaction, unlike hidden and unique, is the PART's own answer: the
+			// currency of a salary is not sensitive and the amount is, and the
+			// framework redacts each part independently inside the value object.
+			// It is qualified by the EXPOSED name, which is what the emitted call
+			// and the hook file both use — the part's own name belongs to the
+			// value object and repeats across every entity that reuses it.
+			Redaction: resolveRedaction(fp.Redact, entity, lf.Name),
 			Composite: &CompositePart{
 				VOName: voName, VOType: "vos." + voName,
 				Owner: f.Name, OwnerNullable: f.Nullable,

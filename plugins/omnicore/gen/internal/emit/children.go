@@ -262,6 +262,9 @@ func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		// lives in vos even though the entry itself lives in aggregatevos.
 		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
 	}
+	if schemaNeedsTime(ownColumnsOf(c), facetFields(m, c.Name)) {
+		s.L("\t%s", quote("time"))
+	}
 	s.L(")")
 	s.Blank()
 
