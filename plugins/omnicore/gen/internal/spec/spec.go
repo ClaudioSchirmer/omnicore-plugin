@@ -260,6 +260,11 @@ type Field struct {
 	//     stops being advertised as writable while the server silently
 	//     overwrites whatever a caller sent.
 	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | derived
+	// Redact keeps the real value in the column and in the hydrated entity while
+	// masking it in every copy the framework makes of the row — the outbox
+	// payload (and so the topic, the consumers, the failure ledgers and the
+	// projected document) and the audit event. Both of its axes are mandatory.
+	Redact *Redact `yaml:"redact"`
 }
 
 type FieldVO struct {
@@ -311,6 +316,65 @@ type FieldPart struct {
 	// Example is a plausible sample value in the part's wire format; it is what
 	// the generated OpenAPI examples ("try it out") show.
 	Example string `yaml:"example"`
+	// Redact masks THIS PART in the copies the framework makes of the row,
+	// independently of its siblings inside the value object: the currency of a
+	// salary is not sensitive, the amount is.
+	Redact *Redact `yaml:"redact"`
+}
+
+// Redact declares that a field's real value stays in its column and in the
+// hydrated entity, and appears MASKED in every copy the framework makes of the
+// row. It is the spec's form of the framework's RedactedField, and it REPLACES
+// the plain field declaration rather than decorating it — the column is still
+// declared once, here, with a redaction policy attached.
+//
+// The line it draws is WHO MAKES THE COPY. The framework copies a row by itself
+// into the outbox payload (and from there the topic, every consuming service,
+// both failure ledgers and the projected document) and into the audit event.
+// Those copies are what a redactor governs. Exposure on a READ surface is
+// yours: `hidden: true` takes the field out of every response body, and
+// read.fieldRestrict decides who receives it. Nothing here refuses a read —
+// filters, orderBy, ?search= and the exports keep working exactly as before.
+//
+// BOTH axes are mandatory. A missing one is refused rather than defaulted,
+// because the two answers a default could pick are "leak" and "guess", and
+// neither is a decision this generator gets to make on your behalf. Write
+// `{kind: plain}` to keep the real value on an axis, out loud.
+type Redact struct {
+	// InSync is how the field appears in the copies the SYNC pipeline carries:
+	// the outbox payload, and with it the topic, every consuming service, the
+	// two failure ledgers and the projected document. The composer applies the
+	// same redactor, so a rebuild cannot reintroduce what the sync excluded.
+	InSync *Redactor `yaml:"inSync"`
+	// InAudit is how the field appears in the AUDIT EVENT — the audit_events
+	// row, the slog echo and the /audit endpoint. It is applied after the delta
+	// is computed, so the trail still records THAT the field changed without
+	// recording what to.
+	InAudit *Redactor `yaml:"inAudit"`
+}
+
+// Redactor is one axis of a redaction: which mask, and its parameter. The
+// family is closed and small on purpose — there is no "omit", because an absent
+// key already means "the 1:1 facet row was removed" in the payload contract and
+// an absent audit entry is the very information the delta exists to carry.
+type Redactor struct {
+	// Kind is the mask: plain (the real value, said out loud), fixed (a constant
+	// replacement), keep-last (every rune but the last n), hook (a function you
+	// write).
+	Kind string `yaml:"kind"`
+	// Value is the replacement a `fixed` redactor writes, in the field's own
+	// wire format — "***" for a string, "0" for a number, "false" for a bool,
+	// an RFC 3339 instant for a time. It must carry the column's own type, or
+	// the payload breaks the type map the read side decodes through and the
+	// view's $jsonSchema stops validating. Required for `fixed`, refused for
+	// every other kind.
+	Value string `yaml:"value"`
+	// Keep is how many trailing runes a `keep-last` redactor leaves visible —
+	// the partial mask for a document number, a card or a phone. A value with
+	// that many runes or fewer is masked ENTIRELY, because keeping it verbatim
+	// would disclose the whole value precisely for the shortest inputs.
+	// Required for `keep-last`, refused for every other kind.
+	Keep int `yaml:"keep"`
 }
 
 type Unique struct {
