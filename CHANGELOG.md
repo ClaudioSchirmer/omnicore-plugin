@@ -7,6 +7,122 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-08-26
+
+The domain gets what the request layer already had. A generated aggregate is handed
+itself and nothing else — no `ctx`, no `Identity` — so every fact about WHO IS ASKING
+had to be smuggled in by hand-writing the file a regeneration overwrites most, or by
+declaring a service port and asking the infrastructure something the application layer
+was already holding. Five sources now say it in the spec. A sixth says the other thing
+the field model could not: on the aggregate, and out of every generated write.
+
+Two of these were reported from a consumer's spec running 0.42.0, with the file and line
+of each symptom.
+
+### Added
+
+- **`source: manual` — a field the aggregate carries and nothing generated fills.** The
+  field model could say "stored", "sent by the caller" and "read off the token", and had no
+  way to say the fourth thing: on the aggregate for a rule to read, and out of every
+  generated write. That shape has one owner — a hand-written operation that dispatches the
+  SAME mode a generated verb does and is told apart by its action name. A change-password
+  endpoint dispatches `ModeUpdate` exactly as the generated PATCH does; its
+  `currentPassword` must reach the aggregate for a rule to prove possession, and must not
+  join the body of `PATCH /users/:id`. It is the same ELSE the language already uses for
+  `vo.kind`, `facts[].kind`, `rules.manual` and `written`: the generator declares the
+  shape, a human writes the value in. Nothing else about a runtime field moved — no column,
+  no migration, no `TableSchema`, no outbox payload, no audit event, no response.
+  - **A `vo:` on one works, and the half that makes it work is the exclusion.** The
+    framework's automatic pass discovers value objects by walking the STRUCT, so it would
+    judge this field on every generated write — where nothing put a value — and answer each
+    ordinary insert and patch with the value object's own refusal. The per-verb exclusions
+    a `source: body` field already gets are written for this one under EVERY gate, since no
+    generated verb carries it at all.
+  - **`echoValue` stays the author's.** The hard override belongs to `source: body`, the
+    one field the generator can recognise as sensitive without being told; it knows nothing
+    about a manual one, so the ordinary default applies and `echoValue: false` turns it off.
+  - **The gen-report carries the cost**, under *What still needs implementing*: no
+    generated code puts a value there, an unfilled field reads as the zero value, and every
+    rule over it judges that — which for a possession check is the answer that looks like a
+    pass.
+- **The session reaches the domain by declaration: five identity `source`s on a runtime
+  field.** A generated aggregate is handed itself and nothing else — no request, no
+  `AppContext`, no `Identity` — so a rule about WHO IS ASKING could only be written by
+  pushing the answer onto the entity in the command mapper. The generator already did that
+  for its own row scope, and the spec language had no way for an author to ask for the
+  same thing: `runtime: true` meant one thing, `Claims[<name>]` read as a string or a bool.
+  `source:` now takes `subject`, `tenant`, `permission` (with a new `permission:` key),
+  `super-admin` and `present` alongside `claim` and `body`, each answered by the framework
+  accessor that owns it — `Identity.Subject`, `Identity.TenantID`, `Identity.HasPermission`,
+  `Identity.IsSuperAdmin`, and the nil check itself. Nothing about the runtime field's
+  contract moved: no column, no migration, no `TableSchema`, no outbox payload, no audit
+  event, no response.
+  - **`source: permission` is not `claim: is_admin`, and that gap was the reason to ship
+    this.** A boolean claim resolves no resource wildcard, honours no `*:*` grant and is
+    blind to `authorization.permissionsClaim`; the permission source asks the same model
+    the routes are gated by, so the domain's answer and the gate's answer agree. Specs were
+    reaching for the claim because it was the only spelling available, which made every
+    generated authorization rule quietly narrower than the hand-written equivalent.
+  - **A wildcard is refused at load time.** `HasPermission` panics on one — the claim
+    wildcards, the question does not — so an accepted `permission: "users:*"` would
+    generate, compile and take the service down on the first authenticated request. `*:*`
+    has its own source. The check is now shared with `authz.bypass`, which asked the same
+    question in its own copy of the code.
+  - **Two workarounds retire with it.** Hand-writing the command mapper — the file a
+    regeneration overwrites most — and declaring a `kind: manual` service fact, which puts
+    a question about the SESSION on a port whose every other implementation talks to the
+    database. `scaffold-entity`'s domain conventions and the `omnicore-gen` skill both say
+    so now.
+  - **The gen-report names what to grant.** A new section lists each question the entity
+    asks about the caller and the accessor that answers it, and calls out the concrete
+    permissions the deployment has to issue — a grant nobody issues is not an error
+    anywhere: the field is `false`, every rule reading it takes the deny branch, and the
+    service refuses work it was meant to allow.
+  - **The generated tests prove the feed.** The fixture `Identity` now holds the grants the
+    entity asks about, and the command test asserts every declared identity field ARRIVED —
+    a feed that assigns nothing leaves a permission reading `false`, which is the
+    safe-looking answer and the wrong one. The row scope's own bypass is deliberately not
+    granted to that caller. The domain fixture also satisfies an `eq` comparison between a
+    column and an identity field, which is an `ownerCheck` written out of the pieces the
+    language already had.
+  - **Refused, so the failure is a message and not a build error**: `claim:` next to any of
+    them; `permission:` on any other source or on a persisted field; `modes:` (an identity
+    rides every verb, the bodyless ones included); a `vo:` (the value comes from the
+    framework through no constructor of yours); and the four names the row scope
+    synthesises for itself — `RequestingTenant`, `RequestingSubject`,
+    `RequestingMayCrossScope`, `RequestingIdentityPresent` — which used to collide as two
+    Go struct fields with one name.
+
+### Fixed
+
+- **`modes: []` is refused instead of meaning its own opposite.** An empty list says no
+  write verb carries the field. It decoded to a list with nothing declared in it, fell into
+  the same resolver branch as an absent key, and put the field on EVERY write verb —
+  `check` answered `✓ this spec can be generated` and the output was byte-for-byte the
+  output of writing no `modes` at all. Reported from a consumer's spec, where the field was
+  a `currentPassword` and the two verbs it silently joined were the public insert and patch
+  bodies. Now a blocker, whose fix names the spelling that does mean "no generated verb":
+  `source: manual`. An ABSENT `modes` is untouched and still means every write verb the
+  entity has — nil is the absent key, a non-nil empty slice is an author who wrote the
+  brackets.
+- **The composite-on-a-runtime-field refusal no longer names one source.** It read "a
+  runtime-only field is fed from one token claim, and a composite has several parts", which
+  stopped being the whole truth the moment a second source existed. The rule never was
+  about the claim: a runtime field carries ONE value whatever feeds it, and a composite's
+  parts are what the SCHEMA decomposes — there are no columns here to decompose into.
+- **`vo:` on a claim-fed runtime field is refused instead of silently dropped.** The
+  declaration was accepted, the value-object type was generated with the rule the author
+  wrote in it, and the aggregate declared the field as the plain scalar anyway — so nothing
+  ever validated the value. A key that does nothing reads exactly like a key that works,
+  and the only way to notice was to go and read the emitted struct. It is refused rather
+  than made to work, for a reason that outlives the bug: a claim is asserted by the ISSUER
+  and already verified by the token's signature, so judging it in the aggregate would
+  answer 422 for a value the CALLER never sent and cannot fix — a misconfigured issuer
+  reported as the caller's mistake. `source: body` is where a value object on a runtime
+  field does belong, and that half is unchanged: the value is the caller's own, and the
+  framework's automatic pass validates it because that pass walks the struct, not the
+  schema.
+
 ## [0.42.0] — 2026-08-26
 
 One defect, reported from a consumer's spec: a field the server owns and a field

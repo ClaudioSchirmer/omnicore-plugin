@@ -96,6 +96,22 @@ func emitAggregate(m *ir.Model) (fsplan.File, error) {
 			s.L("\t%s %s%s", f.Name, f.GoType, fieldComment(f))
 		}
 	}
+	if manual := m.ManualRuntimeFields(); len(manual) > 0 {
+		s.Blank()
+		s.L("\t// Declared here and filled by NOTHING this generator writes. No write DTO,")
+		s.L("\t// command, mapper or OpenAPI schema carries it, because no generated verb")
+		s.L("\t// has anything to put here — your own operation does, and the rules below")
+		s.L("\t// read it from the aggregate like any other field.")
+		s.L("\t//")
+		s.L("\t// It is for the operation this spec cannot declare: one that dispatches the")
+		s.L("\t// same mode a generated verb does and is told apart by its action name. A")
+		s.L("\t// value it needs must reach the aggregate WITHOUT joining the ordinary")
+		s.L("\t// write bodies, and that is the whole of what this field is.")
+		s.L("\t//")
+		s.L("\t// Nothing reports it staying empty. A field your code does not fill reads")
+		s.L("\t// as the zero value, and every rule over it judges that.")
+		emitStructFields(s, manual)
+	}
 	if body := m.BodyRuntimeFields(); len(body) > 0 {
 		s.Blank()
 		s.L("\t// Sent by the caller and read by the rules below, and stored by nobody:")
@@ -593,7 +609,13 @@ var gateSequence = []string{"IfInsert", "IfUpdate", "IfArchive", "IfUnarchive", 
 // body or it is not an insert, so an empty value there is a caller who left the
 // field out, and being told so is the point.
 func emitBodyRuntimeIgnores(s *src, m *ir.Model) bool {
-	fields := m.BodyRuntimeFields()
+	// Both COLUMNLESS sources, and for one reason: the automatic pass discovers
+	// value objects by walking the STRUCT, which is exactly what makes such a
+	// field validated for free and exactly what makes it validated where no
+	// value arrived. A manual field takes the unconditional branch on every gate
+	// without a special case — CarriedBy answers false for every verb, which is
+	// the literal content of its declaration.
+	fields := append(m.BodyRuntimeFields(), m.ManualRuntimeFields()...)
 	if len(fields) == 0 {
 		return false
 	}

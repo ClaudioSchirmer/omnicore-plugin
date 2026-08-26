@@ -55,6 +55,8 @@ const (
 	CapReadJoin         Capability = "read joins (reaching another aggregate across a foreign key: on the entity for the rules, and on a relational read model for filter/sort/projection)"
 	CapBodyRuntime      Capability = "body-sourced runtime fields (a value the caller sends that reaches the entity for a rule to check and never a column — a password confirmation)"
 	CapBypassMaySet     Capability = "a server-assigned scope that yields to the bypass (the operator crossing the row scope states which tenant a new row belongs to)"
+	CapManualRuntime    Capability = "manual runtime fields (the aggregate carries it, this generator fills it from nowhere, and no write DTO, command or OpenAPI schema mentions it — for a hand-written operation sharing a mode with a generated verb)"
+	CapIdentityRuntime  Capability = "identity-sourced runtime fields (the caller's subject, tenant, a permission they hold, the super-admin grant or their mere presence, carried onto the entity so a rule can read it without a ctx the domain does not have)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
@@ -98,6 +100,8 @@ var implemented = map[Capability]bool{
 	CapRedactedField:    true,
 	CapBodyRuntime:      true,
 	CapBypassMaySet:     true,
+	CapIdentityRuntime:  true,
+	CapManualRuntime:    true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -120,7 +124,8 @@ func AllCapabilities() []Capability {
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
-		CapRedactedField, CapBodyRuntime, CapBypassMaySet,
+		CapRedactedField, CapBodyRuntime, CapBypassMaySet, CapIdentityRuntime,
+		CapManualRuntime,
 	}
 }
 
@@ -164,6 +169,20 @@ func CheckCoverage(s *Spec) *Problems {
 		if FromBody(f) {
 			uses(CapBodyRuntime, fmt.Sprintf("fields[%d].source", i),
 				"a field fed from the request body that is never persisted")
+			break
+		}
+	}
+	for i, f := range s.Fields {
+		if FromManual(f) {
+			uses(CapManualRuntime, fmt.Sprintf("fields[%d].source", i),
+				"a field the aggregate carries and no generated write fills")
+			break
+		}
+	}
+	for i, f := range s.Fields {
+		if IdentitySourceOf(f) != "" {
+			uses(CapIdentityRuntime, fmt.Sprintf("fields[%d].source", i),
+				"a field fed from the framework's own question about the caller")
 			break
 		}
 	}

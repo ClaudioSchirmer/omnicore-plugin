@@ -294,3 +294,19 @@ Runtime-only fields on the entity (not persisted — no labelKey, no schema entr
 the Command mapper from `ctx.Identity()`, read in `BuildRules` under the verb's
 `actionName` for owner-checks (403 via a forbidden-semantic notification). Only when a
 verb carries an authorization rule — see `authz-seams.html`.
+
+**This field IS the seam — do not build a second one.** The domain has no `ctx` by design,
+and the recurring wrong turn is to answer that with a domain-service port implemented in
+the infrastructure, so the entity can ask the infrastructure something the application
+layer already had in hand. Anything the request identity can answer — who the caller is,
+their tenant, whether they hold a permission or the super-admin grant, whether there was a
+caller at all — belongs on a runtime-only field the mapper writes. A service port is for
+questions about OTHER DATA (a count, an existence check, a third-party call), never about
+the session.
+
+Ask a permission through the framework's own permission model rather than reading a
+boolean claim off the token: the model resolves the resource wildcard and the `*:*` grant
+and honours the configured claim name, which is what makes the domain's answer agree with
+the gate on the route. (Never hand a wildcard to that question — it panics by design; the
+`*:*` grant has a method of its own.) The generator says the same thing declaratively with
+`runtime: true` + `source: subject | tenant | permission | super-admin | present`.

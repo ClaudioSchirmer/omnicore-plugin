@@ -267,28 +267,111 @@ type Field struct {
 	// rules read it, and no column ever holds it. WHERE its value comes from is
 	// the separate question source answers.
 	Runtime bool `yaml:"runtime"`
-	// Source says where a runtime-only field is fed from: the caller's token
-	// (claim, the default and the only thing runtime used to mean) or the
-	// request body itself (body).
+	// Source says where a runtime-only field is fed from. It is the whole answer
+	// to "how does a fact about the CALLER reach a rule", and the domain has no
+	// other one: an entity is handed itself and nothing else — no ctx, no
+	// Identity, no request — so a session fact reaches BuildRules only by riding
+	// a field the command mapper wrote on the way in.
 	//
-	// `body` is the third state the field model had no spelling for: a value
-	// that crosses the request DTO, the command and the entity — so a rule can
-	// check it — and stops there. The canonical instance is a password
-	// confirmation, which exists to be compared against the password and whose
-	// storage would itself be the bug. Nothing about such a field reaches the
-	// TableSchema, the migration, the outbox payload, the audit event or any
-	// response: there is no column, so there is nothing to redact and nothing
-	// to leak — including the one seat that is not a copy of the row, the
-	// refusal itself, where the rule's echoValue is overridden and the value
-	// is left out.
-	Source string `yaml:"source"` // claim | body
+	// `claim` (the default, and the only thing runtime used to mean) reads the
+	// token BY NAME: Claims["email"], as a string, or as a bool for a yes/no.
+	//
+	// `body` is the state the field model had no spelling for: a value that
+	// crosses the request DTO, the command and the entity — so a rule can check
+	// it — and stops there. The canonical instance is a password confirmation,
+	// which exists to be compared against the password and whose storage would
+	// itself be the bug. Nothing about such a field reaches the TableSchema, the
+	// migration, the outbox payload, the audit event or any response: there is no
+	// column, so there is nothing to redact and nothing to leak — including the
+	// one seat that is not a copy of the row, the refusal itself, where the
+	// rule's echoValue is overridden and the value is left out.
+	//
+	// `manual` is the ELSE this language reaches for everywhere else — vo.kind,
+	// facts[].kind, rules.manual, written — applied to a field: the generator
+	// declares it on the AGGREGATE and fills it from nowhere. No write request
+	// DTO, no command, no mapper and no OpenAPI schema mentions it, because no
+	// generated verb has anything to put there. Your code does.
+	//
+	// It is for the operation this language cannot declare. A hand-written
+	// change-password endpoint dispatches the same mode a generated PATCH does
+	// and is told apart by its action name; its `currentPassword` has to reach
+	// the aggregate for a rule to prove possession, and must not appear in the
+	// body of the ordinary PATCH. Neither existing answer could say that:
+	// `source: body` puts the field on every verb `modes` names, and naming none
+	// of them read as naming all of them — `modes: []` fell into the "omitted"
+	// branch and generated the field onto every write verb, silently. Without the
+	// spelling the two ways out were a column nobody wanted, or moving the proof
+	// of possession out of the aggregate and into the handler, which is where the
+	// rest of the service deliberately does not keep its rules.
+	//
+	// A `vo:` belongs on one, and works: the automatic pass walks the STRUCT, so
+	// the value object would be judged on every generated write — where nothing
+	// filled the field — and the same per-verb exclusions a `source: body` field
+	// already gets are written for it, unconditionally, since no generated verb
+	// carries it at all.
+	//
+	// What it costs, and the report says so: nothing the generator writes puts a
+	// value there. A field left unfilled is not an error anywhere — it reads ""
+	// (or false, or zero) and every rule over it judges that.
+	//
+	// The remaining five are the framework's OWN questions about the caller,
+	// each asked through the accessor that answers it, and each of them was
+	// previously reachable only when the generator synthesised the field for a
+	// row scope — never when an author wanted the same fact for a rule of their
+	// own:
+	//
+	//   - subject      → Identity.Subject, the authenticated principal (string).
+	//   - tenant       → Identity.TenantID, the configured tenant claim (string).
+	//   - permission   → Identity.HasPermission(permission), the caller's grant
+	//                    for one concrete resource:action (bool).
+	//   - super-admin  → Identity.IsSuperAdmin, the `*:*` grant (bool). It is a
+	//                    separate source because HasPermission PANICS on a
+	//                    wildcard: the claim wildcards, the question does not.
+	//   - present      → whether the request carried an identity AT ALL (bool),
+	//                    which is a fact no value can carry: an empty subject
+	//                    means "nobody" and "a real token without that claim",
+	//                    and a rule that stands down for the first stands down
+	//                    for the second too unless it can ask this.
+	//
+	// `permission` is the one worth reading twice, because `claim` LOOKS like
+	// it. A `claim: is_admin` field reads a boolean the token happens to carry:
+	// no resource wildcard, no `*:*`, and blind to authorization.permissionsClaim.
+	// `source: permission` asks the model the rest of the service is gated by.
+	// Every workaround this key replaces was worse than the field: a hand-written
+	// command mapper (the file a regeneration overwrites most), or a manual
+	// service fact, which puts a question about the SESSION on a port whose
+	// implementations talk to the database.
+	Source string `yaml:"source"` // claim | body | manual | subject | tenant | permission | super-admin | present
 	// Claim names the JWT claim a runtime-only field is fed from. It is required
 	// for a source: claim field — the framework deliberately does not opine on
 	// which custom claims a token carries, so any convention here would be a
-	// guess — and refused on a source: body one, which never reads the token.
+	// guess — and refused on every other source, none of which looks a claim up
+	// by name: `body` never reads the token at all, and the identity sources ask
+	// the framework's own accessors, which own the claim names they consult.
 	Claim string `yaml:"claim"`
+	// Permission is the concrete resource:action a source: permission field asks
+	// about. Required there and refused everywhere else.
+	//
+	// It is its OWN key rather than a second meaning for `claim`, which already
+	// means "the name of a claim" — and a key that means two things is the one
+	// nobody reads correctly. The language refuses `claim` outside its source for
+	// exactly that reason; this side of the pair is held to the same rule.
+	//
+	// A wildcard is refused, with one exception that is not written here at all:
+	// `*:*` is `source: super-admin`, because the framework answers that question
+	// with a different method. Anything narrower — `users:*` — has no question of
+	// its own and would panic at the first request, which is the failure this
+	// refusal exists to move to load time.
+	Permission string `yaml:"permission"`
 	// Modes are the write verbs whose BODY carries a source: body runtime field.
 	// Omitted means every write verb the entity has.
+	//
+	// An EMPTY list is refused rather than read as "no verb". It used to be
+	// neither: `modes: []` decodes to a list nobody declared anything in, fell
+	// into the same branch as an absent key, and generated the field onto every
+	// write verb — the exact opposite of what it says, with `check` answering
+	// that the spec could be generated. "On no verb" is a real thing to want and
+	// it has its own spelling: source: manual.
 	//
 	// The values are the two the DOMAIN can tell apart — insert and update —
 	// because that is the granularity of the rule gates: a PATCH is an update

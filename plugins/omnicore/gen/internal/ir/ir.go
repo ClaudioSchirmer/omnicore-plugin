@@ -121,7 +121,28 @@ type Field struct {
 	// read field can still derive FROM a hidden source and `?fields=` can still
 	// push it down.
 	Hidden bool
-	Claim  string
+	// Claim is the JWT claim name a `source: claim` runtime field is read by.
+	// Empty for every other source: the identity ones ask the framework's own
+	// accessors, which own the claim names they consult.
+	Claim string
+	// Permission is the concrete resource:action a `source: permission` runtime
+	// field asks Identity.HasPermission about.
+	//
+	// It is a field of its own and not a second meaning for Claim, matching the
+	// spec language it is lowered from — the emitter reads one of the two
+	// depending on IdentitySource, and a single field carrying either would make
+	// that read correct by coincidence.
+	Permission string
+	// Synthesised marks a runtime field this resolver invented for the ROW SCOPE
+	// rather than one the author declared.
+	//
+	// The identity feed does not care, and that is the whole design. Exactly one
+	// emitter does: the generated command test, which grants the caller what the
+	// DECLARED permission fields ask about so their value arrives true — and must
+	// not grant the row scope's bypass, because the mapper test's caller is the
+	// ordinary one, and handing it the operator's permission would make every
+	// generated scope assertion pass for the wrong reason.
+	Synthesised bool
 	// Source is where a RUNTIME field's value comes from: "claim" (the caller's
 	// token) or "body" (the request itself). Empty for a persisted field.
 	//
@@ -136,14 +157,23 @@ type Field struct {
 	// both the full replacement and the patch. Always populated for such a
 	// field, empty for every other.
 	Modes []string
-	// IdentitySource says WHICH part of the identity fills a runtime field, for
-	// the ones this resolver synthesises rather than the author declaring:
-	// "tenant" (the framework's configured tenant claim, via Identity.TenantID),
-	// "subject", "permission" (whether the caller holds Claim), or "super-admin"
-	// (whether the caller holds `*:*`, via Identity.IsSuperAdmin). Empty for an
-	// author-declared runtime field, which is read from Claims by name — the
-	// framework does not opine on custom claim names, so there is no convention
-	// to fall back on there.
+	// IdentitySource says WHICH question about the caller fills a runtime field,
+	// naming the framework accessor that answers it: "subject" (Identity.Subject),
+	// "tenant" (the configured tenant claim, via Identity.TenantID), "permission"
+	// (whether the caller holds Permission, via Identity.HasPermission),
+	// "super-admin" (whether they hold `*:*`, via Identity.IsSuperAdmin) or
+	// "present" (whether there was an identity at all, which is the nil check
+	// itself and no accessor).
+	//
+	// Empty means the field is fed some other way: read from Claims BY NAME
+	// (source: claim, where the framework does not opine on custom claim names so
+	// there is no convention to fall back on), or sent by the caller
+	// (source: body), or not a runtime field at all.
+	//
+	// Both the fields this resolver SYNTHESISES for the row scope and the ones an
+	// author DECLARES land in this same vocabulary, which is the point: the
+	// command mapper's identity feed writes one branch per question, and where the
+	// question came from is not its business.
 	IdentitySource string
 	// AssignedFrom names where the server reads this field's value when the
 	// client is not allowed to send it. Empty for an ordinary field.
@@ -468,6 +498,11 @@ type Authz struct {
 // find out what it is, and the answer must not be two answers.
 const SuperAdminMethod = "IsSuperAdmin"
 
+// SuperAdminGrant is the permissions-claim entry SuperAdminMethod reports on.
+// The emitters need it as a VALUE (a generated test hands it to a fixture
+// Identity), which the method name is not.
+const SuperAdminGrant = spec.SuperAdminClaim
+
 // Scoped reports whether the rows are narrowed by who is asking.
 func (a Authz) Scoped() bool {
 	return a.DataAccess == "owner-only" || a.DataAccess == "tenant"
@@ -687,7 +722,7 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 	if standsDown(m) {
 		m.Authz.PresenceField = &Field{
 			Name: "RequestingIdentityPresent", GoType: "bool", BaseGoType: "bool",
-			SpecType: "bool", Runtime: true, IdentitySource: "present",
+			SpecType: "bool", Runtime: true, IdentitySource: "present", Synthesised: true,
 			Description: "Whether the request carried an identity at all",
 		}
 		m.Runtime = append(m.Runtime, *m.Authz.PresenceField)
@@ -701,7 +736,7 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 	}
 	m.Authz.ScopeField = &Field{
 		Name: "Requesting" + naming.Pascal(source), GoType: "string", BaseGoType: "string",
-		SpecType: "string", Runtime: true, IdentitySource: source,
+		SpecType: "string", Runtime: true, IdentitySource: source, Synthesised: true,
 		Description: "The caller's own " + what + ", from the request identity",
 	}
 	m.Runtime = append(m.Runtime, *m.Authz.ScopeField)
@@ -717,8 +752,8 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 	}
 	m.Authz.BypassField = &Field{
 		Name: "RequestingMayCrossScope", GoType: "bool", BaseGoType: "bool",
-		SpecType: "bool", Runtime: true, IdentitySource: asked,
-		Claim:       m.Authz.Bypass,
+		SpecType: "bool", Runtime: true, IdentitySource: asked, Synthesised: true,
+		Permission:  m.Authz.Bypass,
 		Description: "Whether the caller " + held + ", which crosses the row scope",
 	}
 	m.Runtime = append(m.Runtime, *m.Authz.BypassField)
@@ -787,12 +822,14 @@ func resolveField(entity string, f spec.Field) Field {
 		Nullable: f.Nullable, Length: f.Length,
 		JSONName: naming.Camel(f.Name), LabelKey: label, Text: f.Text.Map(),
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
-		Source:       spec.SourceOf(f),
-		Hidden:       f.Hidden,
-		AssignedFrom: f.AssignedFrom,
-		BypassMaySet: f.BypassMaySet,
-		LivesOn:      f.LivesOn,
-		Redaction:    resolveRedaction(f.Redact, entity, f.Name),
+		Source:         spec.SourceOf(f),
+		IdentitySource: spec.IdentitySourceOf(f),
+		Permission:     f.Permission,
+		Hidden:         f.Hidden,
+		AssignedFrom:   f.AssignedFrom,
+		BypassMaySet:   f.BypassMaySet,
+		LivesOn:        f.LivesOn,
+		Redaction:      resolveRedaction(f.Redact, entity, f.Name),
 	}
 	if f.Unique != nil {
 		scope := f.Unique.Scope
@@ -2454,11 +2491,14 @@ func resolveClausesFor(rs spec.Rules, scope []Field) []Clause {
 	})
 }
 
-// HasDeclaredRuntimeFields reports whether any runtime field came from the
-// SPEC, rather than being synthesised by the row scope. It answers one question
-// for the emitters: whether the identity feed reads a claim the author named,
-// which is the only case where "the claim name comes from the spec" is true.
-func (m *Model) HasDeclaredRuntimeFields() bool {
+// HasNamedClaimFields reports whether the identity feed reads a claim the AUTHOR
+// named — a `source: claim` field, and only that. It is the one case where "the
+// claim name comes from the spec" is true, and the emitted comment says so.
+//
+// Every other identity source asks a framework accessor that owns the claim name
+// it consults, whether the field was declared or synthesised for the row scope,
+// so none of them is this question.
+func (m *Model) HasNamedClaimFields() bool {
 	for _, f := range m.ClaimRuntimeFields() {
 		if f.IdentitySource == "" {
 			return true
@@ -2765,6 +2805,37 @@ func (m *Model) BodyRuntimeFields() []Field {
 	return out
 }
 
+// DeclaredIdentityFields are the runtime fields an AUTHOR declared with one of
+// the framework's own questions about the caller — subject, tenant, a permission,
+// the super-admin grant, presence.
+//
+// The row scope's synthesised fields are excluded: they are reported where the
+// row scope itself is, next to the guard they feed, and listing them twice would
+// read as two policies.
+func (m *Model) DeclaredIdentityFields() []Field {
+	var out []Field
+	for _, f := range m.Runtime {
+		if f.IdentitySource != "" && !f.Synthesised {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// ManualRuntimeFields are the runtime fields the generator declares on the
+// aggregate and fills from nowhere: no write DTO, no command, no mapper and no
+// OpenAPI schema mentions them, because no generated verb has anything to put
+// there. Hand-written code does.
+func (m *Model) ManualRuntimeFields() []Field {
+	var out []Field
+	for _, f := range m.Runtime {
+		if f.Source == "manual" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // ClaimRuntimeFields are the runtime fields the IDENTITY supplies — the ones the
 // command mapper's identity feed fills, whether the author declared them or the
 // row scope synthesised them.
@@ -2776,7 +2847,12 @@ func (m *Model) BodyRuntimeFields() []Field {
 func (m *Model) ClaimRuntimeFields() []Field {
 	var out []Field
 	for _, f := range m.Runtime {
-		if f.Source != "body" {
+		// Selected by exclusion, and the exclusions are BOTH of the sources the
+		// identity feed must not touch: a body field is read off the command, and
+		// a manual one is written by code this generator does not emit. Naming
+		// only `body` here was exhaustive until a third source existed, and a feed
+		// written for a field the token does not carry assigns nothing.
+		if f.Source != "body" && f.Source != "manual" {
 			out = append(out, f)
 		}
 	}
@@ -2870,15 +2946,23 @@ func DropBodyRuntime(fields []Field) []Field {
 // Only a body-sourced runtime field ever answers no: everything else on the
 // write surface is on every write verb the entity mounts.
 func (f Field) CarriedBy(verb string) bool {
-	if f.Source != "body" {
+	switch f.Source {
+	case "manual":
+		// No generated verb carries it — that is the whole declaration. It is what
+		// keeps the field off every write DTO and command, and what makes the
+		// automatic pass exclude its value object under EVERY gate rather than
+		// under the ones a body field happens to skip.
+		return false
+	case "body":
+		for _, mode := range f.Modes {
+			if mode == GateModeOf(verb) {
+				return true
+			}
+		}
+		return false
+	default:
 		return true
 	}
-	for _, mode := range f.Modes {
-		if mode == GateModeOf(verb) {
-			return true
-		}
-	}
-	return false
 }
 
 // GateModeOf folds a write verb onto the granularity the rule gates have. A

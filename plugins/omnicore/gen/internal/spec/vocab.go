@@ -24,14 +24,48 @@ var (
 	// promises to keep the field out of the write surface.
 	AssignedFrom = set("identity-subject", "identity-claim", "derived")
 
-	// FieldSources is where a RUNTIME-only field is fed from. Both answers keep
+	// FieldSources is where a RUNTIME-only field is fed from. Every answer keeps
 	// the field off every table: the difference is who supplies the value.
-	// `claim` is the caller's token, which is what runtime meant before this key
-	// existed — so it is the default and every spec written without it still
-	// says the same thing. `body` is the request itself: the field crosses the
-	// write DTO, the command and the entity, a rule checks it, and it stops
-	// there.
-	FieldSources = set("claim", "body")
+	//
+	// `claim` is the caller's token read BY NAME, which is what runtime meant
+	// before this key existed — so it is the default and every spec written
+	// without it still says the same thing. `body` is the request itself: the
+	// field crosses the write DTO, the command and the entity, a rule checks it,
+	// and it stops there.
+	//
+	// `manual` is the ELSE, and it is the same ELSE the rest of this language
+	// uses (vo.kind, facts[].kind, rules.manual, written): the generator declares
+	// the FIELD and hands the filling to a human. The aggregate carries it so
+	// hand-written rules can read it; no generated write DTO, command, mapper or
+	// OpenAPI schema mentions it, because no generated verb puts anything there.
+	//
+	// It exists for the operation the spec cannot declare — a change-password
+	// endpoint written by hand that dispatches the same mode a generated PATCH
+	// does, and is told apart by its action name. Its `currentPassword` has to
+	// reach the aggregate for a rule to prove possession, and must not appear in
+	// the body of the ordinary PATCH. Before this there was no way to say that:
+	// `source: body` puts the field on every verb it names, and naming none of
+	// them (`modes: []`) was read as naming all of them.
+	//
+	// The other four are the framework's OWN questions about the caller, asked
+	// through the accessors that answer them: Identity.Subject, Identity.TenantID,
+	// Identity.HasPermission, Identity.IsSuperAdmin — plus `present`, the nil
+	// check itself, which is a fact no VALUE can carry.
+	//
+	// They exist because `claim` answers a DIFFERENT question and looks like the
+	// same one. `claim: is_admin` reads a boolean the token happens to carry;
+	// `source: permission` asks the permission model, which resolves the
+	// resource wildcard (`users:*`), honours the `*:*` grant and reads whichever
+	// claim the deployment configured. The generated spec and the hand-written
+	// service used to disagree on exactly that, and the generated half was the
+	// weaker one.
+	//
+	// The domain has no ctx by design, so a fact about the session reaches a rule
+	// only by riding a field on the entity. These name which fact, once, instead
+	// of pushing the author into a hand-written command mapper or a manual
+	// service fact that goes to the infrastructure to ask something the
+	// application layer already had in hand.
+	FieldSources = set("claim", "body", "manual", "subject", "tenant", "permission", "super-admin", "present")
 	// FieldModes is which write verbs carry a source: body field. It is the two
 	// the domain can tell apart, because the rule gates are the granularity that
 	// matters: a PATCH is dispatched into IfUpdate exactly as a PUT is, so
@@ -261,11 +295,19 @@ func Vocabularies() []Vocabulary {
 				"`derived` combines with nullable: your rule may leave the value unset, " +
 				"while an identity is written on every insert."},
 		{"fields[].source", FieldSources,
-			"where a RUNTIME-only field is fed from. claim = the caller's token (the " +
-				"default, and it needs claim: <name>); body = the request itself — the " +
+			"where a RUNTIME-only field is fed from. claim = the caller's token by NAME " +
+				"(the default, and it needs claim: <name>); body = the request itself — the " +
 				"field crosses the write DTO, the command and the entity for a rule to " +
-				"check, and NO column, payload, audit event or response ever sees it. " +
-				"A password confirmation is the case this exists for."},
+				"check, and NO column, payload, audit event or response ever sees it " +
+				"(a password confirmation is the case that exists for); manual = the " +
+				"aggregate carries it and this generator fills it from nowhere — no write " +
+				"DTO, command or OpenAPI schema mentions it, and YOUR code puts the value " +
+				"there (a hand-written operation sharing a mode with a generated verb). " +
+				"The rest are the " +
+				"framework's own questions about the caller, so the domain can read them " +
+				"without a ctx it does not have: subject and tenant (text), permission " +
+				"(bool, and it needs permission: <resource:action>), super-admin (bool, " +
+				"the *:* grant) and present (bool, whether there was a caller at all)."},
 		{"fields[].modes", FieldModes,
 			"which write verbs carry a source: body field. Omitted = every write verb " +
 				"the entity has. `update` covers both PUT and PATCH: the rule gates cannot " +

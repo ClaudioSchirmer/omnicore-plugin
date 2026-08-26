@@ -1,0 +1,97 @@
+# Eixo: campo que o AGREGADO carrega e que nenhum verbo gerado preenche —
+# runtime: true com source: manual.
+#
+# É o ELSE da linguagem (vo.kind, facts[].kind, rules.manual, written) aplicado
+# a um campo: declara-se a FORMA aqui e o valor é escrito por código à mão.
+#
+# O caso que ele existe para resolver: uma operação escrita à mão que despacha o
+# MESMO mode que um verbo gerado e é distinguida pelo action name — a troca de
+# senha, que despacha ModeUpdate igual ao PATCH comum. A senha atual precisa
+# chegar ao agregado para a regra provar posse, e não pode aparecer no corpo do
+# PATCH. Nenhuma das outras respostas dizia isso: `source: body` põe o campo em
+# todo verbo que `modes` nomeia, e não nomear nenhum (`modes: []`) era lido como
+# nomear todos.
+#
+# O que este caso prova, e nenhum outro do corpus prova:
+#   - o campo está na struct do agregado, com labelKey, e em MAIS NADA — nenhum
+#     request DTO, comando, mapper ou schema OpenAPI o menciona;
+#   - o value object dele é excluído do passe automático em TODOS os gates (e
+#     não só nos verbos que um campo de corpo por acaso pula), porque verbo
+#     gerado nenhum o carrega — sem isso todo insert e todo patch seriam
+#     recusados por um valor que ninguém pôs lá;
+#   - a árvore compila, passa no vet e nos testes gerados com o campo vazio, que
+#     é exatamente o estado em que o gerador o deixa.
+specVersion: 1
+entity: Conta
+plural: Contas
+language: pt-BR
+storage:
+  kind: flat
+  table: contas
+  description: Contas de acesso.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+valueObjects:
+  - name: Senha
+    kind: raw
+    backing: string
+    minLength: 8
+    maxLength: 72
+    description: Uma senha.
+    notification: SenhaFracaNotification
+fields:
+  - {name: Login, type: string, column: login, length: 120, livesOn: root, example: ana, description: O login.}
+  - name: SenhaHash
+    type: string
+    column: senha_hash
+    length: 200
+    livesOn: root
+    assignedFrom: derived
+    example: "$2a$10$abcdefghijklmnopqrstuv"
+    description: O hash da senha. Calculado por regra manual, nunca enviado.
+  - name: SenhaAtual
+    type: string
+    runtime: true
+    source: manual
+    vo: {kind: raw, ref: Senha}
+    livesOn: root
+    example: s3nh4antiga
+    description: A senha atual, provada pelo endpoint de troca escrito à mão.
+  - name: SolicitanteId
+    type: string
+    runtime: true
+    source: subject
+    livesOn: root
+    example: usr-1
+    description: Quem está chamando, do jwt.
+notifications:
+  - name: SenhaFracaNotification
+    package: vos
+    semantic: validation
+    text: {ptbr: A senha e curta demais., eng: The password is too short., esp: La contrasena es demasiado corta., fra: Le mot de passe est trop court., deu: Das Passwort ist zu kurz., ita: La password e troppo corta., nld: Het wachtwoord is te kort.}
+modes: [display, insert, update]
+update: {shape: patch}
+rules:
+  manual:
+    - id: hash-da-senha-no-insert
+      description: >-
+        Calcular SenhaHash no insert. Sem esta regra a coluna fica com o valor
+        zero e nada acusa.
+      scope: [insert]
+    - id: provar-a-senha-atual-na-troca
+      description: >-
+        Conferir SenhaAtual contra SenhaHash. Só a operação de troca, escrita à
+        mão, preenche SenhaAtual; nos writes gerados o campo chega vazio e esta
+        regra tem de se abster — comparar contra "" aprova qualquer um.
+      scope: [update]
+read:
+  backing: relational
+  view: {name: contas}
+  byId: true
+  byParams:
+    filters: [{field: Login, ops: [eq, istartswith]}]
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: conta
+  dataAccess: anyone-with-permission
+  permissions: {insert: "conta:escrever", patch: "conta:escrever", read: "conta:ler"}

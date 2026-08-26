@@ -1,0 +1,118 @@
+# Eixo: o ctx da sessão chegando ao DOMÍNIO por declaração.
+#
+# O domínio não recebe ctx — recebe a si mesmo e mais nada. Cada campo abaixo é
+# uma pergunta que o FRAMEWORK responde sobre quem chamou, escrita na entidade
+# pelo mapper do command e lida pelas regras a partir dali. Nenhuma delas é um
+# claim lido por nome: `permission` pergunta ao modelo de autorização (resolve
+# `chamado:*`, honra `*:*`, e o nome do claim é da configuração), e é por isso
+# que ela não é a mesma coisa que `claim: is_admin`.
+#
+# dataAccess é anyone-with-permission de propósito: sem escopo de linha, nada é
+# sintetizado, então o que este caso prova é o caminho DECLARADO e só ele.
+specVersion: 1
+entity: Chamado
+plural: Chamados
+language: pt-BR
+storage:
+  kind: flat
+  table: chamados
+  description: Chamados de suporte.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Titulo, type: string, column: titulo, length: 120, livesOn: root, example: Impressora do 2o andar, description: Título do chamado.}
+  - name: DonoId
+    type: string
+    column: dono_id
+    length: 64
+    livesOn: root
+    assignedFrom: identity-subject
+    example: usr-1
+    description: Quem abriu o chamado. O servidor preenche no insert.
+  - {name: Setor, type: string, column: setor, length: 60, livesOn: root, example: escola-alfa, description: Setor dono do chamado.}
+
+  # ── o que o framework responde sobre quem chamou ────────────────────────────
+  - name: SolicitanteId
+    type: string
+    runtime: true
+    source: subject
+    livesOn: root
+    example: usr-1
+    description: Quem está chamando (Identity.Subject).
+  - name: SolicitanteSetor
+    type: string
+    runtime: true
+    source: tenant
+    livesOn: root
+    example: escola-alfa
+    description: Setor de quem está chamando (Identity.TenantID).
+  - name: SolicitantePodeAdministrar
+    type: bool
+    runtime: true
+    source: permission
+    permission: "chamado:administrar"
+    livesOn: root
+    example: "false"
+    description: Se quem chamou administra chamados.
+  - name: SolicitanteSuperUsuario
+    type: bool
+    runtime: true
+    source: super-admin
+    livesOn: root
+    example: "false"
+    description: Se quem chamou carrega a concessão curinga.
+  - name: SolicitanteAutenticado
+    type: bool
+    runtime: true
+    source: present
+    livesOn: root
+    example: "false"
+    description: Se a requisição trouxe alguma identidade.
+modes: [display, insert, update, archive, unarchive, delete]
+update: {shape: put}
+delete: {root: hard}
+rules:
+  list:
+    - id: chamado-e-do-proprio-setor
+      kind: comparison
+      scope: [insertOrUpdate]
+      fields: [Setor]
+      other: SolicitanteSetor
+      operator: eq
+      notification: SetorAlheioNotification
+      description: Um chamado só pode ser aberto no setor de quem abre.
+    - id: so-o-dono-ou-o-admin-arquiva
+      kind: ownerCheck
+      scope: [archive]
+      fields: [DonoId]
+      ownerField: SolicitanteId
+      adminField: SolicitantePodeAdministrar
+      notification: ArquivarNaoPermitidoNotification
+    - id: so-o-dono-ou-o-superusuario-apaga
+      kind: ownerCheck
+      scope: [delete]
+      fields: [DonoId]
+      ownerField: SolicitanteId
+      adminField: SolicitanteSuperUsuario
+      notification: ApagarNaoPermitidoNotification
+notifications:
+  - name: SetorAlheioNotification
+    semantic: forbidden
+    text: {ptbr: O chamado não pertence ao seu setor., eng: The ticket does not belong to your department., esp: El ticket no pertenece a su sector., fra: Le ticket n'appartient pas à votre service., deu: Das Ticket gehört nicht zu Ihrer Abteilung., ita: Il ticket non appartiene al tuo reparto., nld: Het ticket hoort niet bij uw afdeling.}
+  - name: ArquivarNaoPermitidoNotification
+    semantic: forbidden
+    text: {ptbr: Só o dono do chamado ou um administrador pode arquivá-lo., eng: Only the ticket owner or an administrator may archive it., esp: Solo el dueño del ticket o un administrador puede archivarlo., fra: Seul le propriétaire du ticket ou un administrateur peut l'archiver., deu: Nur der Eigentümer des Tickets oder ein Administrator darf es archivieren., ita: Solo il proprietario del ticket o un amministratore può archiviarlo., nld: Alleen de eigenaar van het ticket of een beheerder mag het archiveren.}
+  - name: ApagarNaoPermitidoNotification
+    semantic: forbidden
+    text: {ptbr: Só o dono do chamado ou um superusuário pode apagá-lo., eng: Only the ticket owner or a super-admin may delete it., esp: Solo el dueño del ticket o un superusuario puede borrarlo., fra: Seul le propriétaire du ticket ou un super-administrateur peut le supprimer., deu: Nur der Eigentümer des Tickets oder ein Super-Admin darf es löschen., ita: Solo il proprietario del ticket o un super-amministratore può eliminarlo., nld: Alleen de eigenaar van het ticket of een supergebruiker mag het verwijderen.}
+read:
+  backing: relational
+  view: {name: chamados}
+  byId: true
+  byParams:
+    filters: [{field: Titulo, ops: [eq, contains, icontains]}, {field: Setor, ops: [eq]}]
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: chamado
+  dataAccess: anyone-with-permission
+  permissions: {insert: "chamado:escrever", update: "chamado:escrever", read: "chamado:ler", archive: "chamado:arquivar", unarchive: "chamado:arquivar", delete: "chamado:apagar"}

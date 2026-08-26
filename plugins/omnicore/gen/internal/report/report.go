@@ -438,6 +438,44 @@ func renderTodo(b *strings.Builder, in Input) {
 			"under its label.\n\n")
 	}
 
+	// A field the generator declares and nobody it wrote fills. It belongs in the
+	// OWED section and not in "what to check", because there is no generated code
+	// to check: the obligation is entirely the author's, and nothing anywhere
+	// reports it going unmet. An unfilled field reads as the zero value, and every
+	// rule over it judges that — quietly, and as though it had been told something.
+	if manual := m.ManualRuntimeFields(); len(manual) > 0 {
+		empty = false
+		b.WriteString("### Fields nothing generated fills\n\n")
+		b.WriteString("Declared `runtime: true` with `source: manual`. Each one is on the " +
+			"aggregate so your rules can read it, and on nothing else: no write request " +
+			"DTO, no command, no mapper, no OpenAPI schema — and no column, so no " +
+			"migration, `TableSchema`, outbox payload, audit event or response either. " +
+			"**No generated code puts a value there.** That is the declaration, not an " +
+			"omission.\n\n")
+		b.WriteString("| field | type | what it is for |\n")
+		b.WriteString("|---|---|---|\n")
+		for _, f := range manual {
+			what := f.Description
+			if what == "" {
+				what = "—"
+			}
+			fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", f.Name, f.EntityType,
+				strings.ReplaceAll(what, "\n", " "))
+		}
+		b.WriteString("\nWrite the assignment in the operation that owns it — the " +
+			"hand-written command whose mapper has both the request and the entity. The " +
+			"shape this exists for is an operation that dispatches the same mode a " +
+			"generated verb does and is told apart by its action name: it needs the value " +
+			"on the aggregate, and the ordinary write bodies must not grow a field for it.\n\n")
+		b.WriteString("**Until something assigns it, the field is the zero value on every " +
+			"write, and nothing says so.** A rule reading it does not fail — it judges `\"\"` " +
+			"(or `false`, or `0`) and answers accordingly, which for a possession check is " +
+			"the answer that looks like a pass. Value objects are the one part already " +
+			"handled: the automatic pass would judge this field on every generated write, " +
+			"so its validation is excluded under every gate, and what checks the value is " +
+			"the rule you write.\n\n")
+	}
+
 	if len(in.MigrationsKept) > 0 {
 		empty = false
 		renderMigrationHandoff(b, in)
@@ -510,6 +548,74 @@ func renderTodo(b *strings.Builder, in Input) {
 // redactorPhrase renders one axis in the report's own words rather than as the
 // spec's keyword: a reviewer checking a security decision should not have to
 // map `keep-last` onto what a consumer will actually see.
+// identityQuestion and identityAnswer are the two halves of one row: WHAT the
+// field asks about the caller, and WHICH framework accessor answers it. They are
+// separate because a reviewer chasing a value in the generated code searches for
+// the accessor, and a reviewer chasing a policy reads the question.
+func identityQuestion(f ir.Field) string {
+	switch f.IdentitySource {
+	case "subject":
+		return "who the caller is"
+	case "tenant":
+		return "which tenant the caller belongs to"
+	case "permission":
+		return "whether the caller holds `" + f.Permission + "`"
+	case "super-admin":
+		return "whether the caller holds the `" + ir.SuperAdminGrant + "` grant"
+	default:
+		return "whether the request carried an identity at all"
+	}
+}
+
+func identityAnswer(f ir.Field) string {
+	switch f.IdentitySource {
+	case "subject":
+		return "`Identity().Subject`"
+	case "tenant":
+		return "`Identity().TenantID()`"
+	case "permission":
+		return "`Identity().HasPermission(\"" + f.Permission + "\")`"
+	case "super-admin":
+		return "`Identity()." + ir.SuperAdminMethod + "()` — `HasPermission` panics on a " +
+			"wildcard, so the grant has a question of its own"
+	default:
+		return "`ctx.Identity() != nil` — a fact no VALUE can carry, since an empty one " +
+			"means both \"nobody\" and \"a real token without that claim\""
+	}
+}
+
+// identityGrants are the concrete permissions the entity asks about, which is
+// what a deployment has to issue. The super-admin grant is deliberately not one
+// of them: nothing becomes grantable by asking that question.
+func identityGrants(fields []ir.Field) []string {
+	var out []string
+	for _, f := range fields {
+		if f.IdentitySource == "permission" {
+			out = append(out, f.Permission)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func backticked(vs []string) []string {
+	out := make([]string, len(vs))
+	for i, v := range vs {
+		out[i] = "`" + v + "`"
+	}
+	return out
+}
+
+// wildcardOf is the resource wildcard that satisfies a concrete permission —
+// what "wider than being granted it" means, spelled for the reader instead of
+// left as a claim about the framework.
+func wildcardOf(permission string) string {
+	if i := strings.Index(permission, ":"); i >= 0 {
+		return permission[:i+1] + "*"
+	}
+	return permission
+}
+
 // bodyRuntimeCheck says what a reviewer has to look for on ONE such field. The
 // two answers differ by whether the field carries a value object, because that
 // is what decides whether anything at all checks the value automatically.
@@ -773,6 +879,42 @@ func renderCheck(b *strings.Builder, in Input) {
 			"its value object entirely**, because a write that never carried the field has " +
 			"nothing to judge; if a verb must require it, name that verb under the field's " +
 			"`modes`.\n\n")
+	}
+
+	// What the aggregate knows about whoever is asking. It is reported for two
+	// readers at once. A REVIEWER meets a field on the entity that no column
+	// backs and no caller sends, and has to be able to find out where its value
+	// came from. And whoever runs the DEPLOYMENT has to know which permissions
+	// the domain now asks about — a grant nobody issues is not an error anywhere:
+	// the field is simply false, every rule reading it takes the deny branch, and
+	// the service refuses work it was supposed to allow.
+	if identity := m.DeclaredIdentityFields(); len(identity) > 0 {
+		b.WriteString("### What this entity asks about the caller\n\n")
+		b.WriteString("Declared `runtime: true` with an identity `source`. The domain is " +
+			"handed no request and no `ctx`, so each of these rides onto the aggregate in " +
+			"the command mapper — `if id := ctx.Identity(); id != nil { … }` — and the " +
+			"rules read it from there. None of them is stored: no column, no migration, no " +
+			"`TableSchema`, no outbox payload, no audit event, no response.\n\n")
+		b.WriteString("| field | asks | answered by |\n")
+		b.WriteString("|---|---|---|\n")
+		for _, f := range identity {
+			fmt.Fprintf(b, "| `%s` | %s | %s |\n", f.Name,
+				identityQuestion(f), identityAnswer(f))
+		}
+		if grants := identityGrants(identity); len(grants) > 0 {
+			fmt.Fprintf(b, "\n**Grant these, or the answer is always no.** This entity now "+
+				"asks about %s. HOLDING one is wider than being granted it: `HasPermission` "+
+				"resolves the resource wildcard (`%s`) and the `*:*` grant, which is the "+
+				"point of asking the permission model instead of reading a boolean claim off "+
+				"the token.\n",
+				strings.Join(backticked(grants), ", "), wildcardOf(grants[0]))
+		}
+		b.WriteString("\nThe claim NAMES behind these are the framework's to resolve, not " +
+			"this code's: the tenant claim is `authorization.tenant.claim` and the " +
+			"permissions claim is `authorization.permissionsClaim`. The generated feed " +
+			"calls the accessor and never spells either name — the generated unit tests " +
+			"build their fixture Identity under the framework's DEFAULTS, which is the " +
+			"only name a test with no yaml can honestly use.\n\n")
 	}
 
 	// The one field that is server-assigned and in a request body anyway. A

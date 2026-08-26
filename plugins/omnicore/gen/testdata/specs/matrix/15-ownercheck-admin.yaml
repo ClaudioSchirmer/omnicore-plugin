@@ -1,4 +1,10 @@
-# Eixo: o menor spec possível — flat, só leitura + insert, sem VO, sem regra.
+# Eixo: ownerCheck com bypass de administrador lido de um claim BOOLEANO cru.
+#
+# É o eixo de cobertura de `source: claim` sobre um bool, e não o formato
+# recomendado: `claim: is_admin` lê um booleano que o token por acaso carrega —
+# não resolve `sala:*`, não honra `*:*` e ignora authorization.permissionsClaim.
+# Para perguntar ao MODELO de autorização, que é o que fecha as rotas, o
+# formato é `source: permission` com a permissão (veja 36-fontes-de-identidade).
 specVersion: 1
 entity: Sala
 plural: Salas
