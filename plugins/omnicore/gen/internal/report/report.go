@@ -226,10 +226,24 @@ func renderTodo(b *strings.Builder, in Input) {
 		for _, f := range derived {
 			fmt.Fprintf(b, "- **`%s`** — `assignedFrom: derived` took it out of every write "+
 				"request, command and OpenAPI request schema, so a client cannot set it. "+
-				"WRITING it is yours: a `rules.manual` entry scoped to insert, assigning it "+
-				"from the fields it derives from. Idempotent by construction when it is a "+
-				"pure function of an immutable field, which is the case this exists for.\n",
-				f.Name)
+				"WRITING it is yours: ", f.Name)
+			// A NULLABLE derived field is a different piece of work, and saying
+			// "scoped to insert" over it sends the reviewer to look for code
+			// that should not exist. Null is the value the row starts with, on
+			// purpose — a verification timestamp is written by whatever verifies
+			// — so what has to be checked is that SOMETHING eventually writes
+			// it, not that the insert does.
+			if f.Nullable {
+				b.WriteString("the column starts NULL and stays null until something " +
+					"writes it — a `rules.manual` entry on the verb that produces the " +
+					"value, or hand-written code beyond this spec. Null is a state the " +
+					"response shows honestly (the field is simply absent), so check that " +
+					"the write exists rather than that the insert fills it.\n")
+				continue
+			}
+			b.WriteString("a `rules.manual` entry scoped to insert, assigning it " +
+				"from the fields it derives from. Idempotent by construction when it is a " +
+				"pure function of an immutable field, which is the case this exists for.\n")
 		}
 		b.WriteString("\n")
 	}

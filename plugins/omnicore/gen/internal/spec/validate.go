@@ -700,9 +700,25 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 				"set type: string, or type: id when the claim names one and the column "+
 					"should be the engine's own id type")
 		}
-		if f.Nullable {
+		// "No caller may set this" and "this may have no value" are independent
+		// statements, and only the identity ones imply each other: the server
+		// always has a subject and always has the claim it required, so a column
+		// filled from either is written on every insert and nullable would be
+		// describing a state that cannot happen.
+		//
+		// `derived` makes no such promise. The generator writes no assignment
+		// for it — a rule the author writes does — and that rule may legitimately
+		// leave the value unset: a verification timestamp is null until the thing
+		// is verified. Refusing it here forced the two workarounds this key
+		// exists to remove: drop assignedFrom and let anyone holding the insert
+		// permission claim the address is verified, or drop the field. The third
+		// outcome, keeping both and taking the non-nullable column, is the one
+		// consumers actually shipped — and it renders the zero time
+		// ("0000-12-31T18:42:28-05:17") in every response the row appears in.
+		if fromIdentity && f.Nullable {
 			ps.BlockerFix(where+".nullable",
-				"a server-assigned field is always written, so it is never null",
+				"a field filled from the caller's identity is written on every insert, "+
+					"so it is never null",
 				"drop nullable — a caller who cannot supply it is a matter for the "+
 					"permission, not for the column")
 		}
@@ -711,11 +727,26 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 		// somewhere claims to compute it. With no manual rule the field is
 		// simply never written, and the column holds the zero value forever —
 		// silently, which is the failure shape this generator refuses to ship.
-		if f.AssignedFrom == "derived" && !isChild && !hasInsertManualRule(s) {
+		//
+		// A NULLABLE derived field is not that shape. Null says "no value yet"
+		// out loud, in the column and in every response, and what fills it is
+		// often not an insert at all — a verification timestamp is written by
+		// the verb that verifies. So the question narrows to whether ANY rule
+		// claims the field, and a spec that computes it nowhere gets told what
+		// it has actually declared: a column that stays null.
+		switch {
+		case f.AssignedFrom != "derived" || isChild:
+		case !f.Nullable && !hasInsertManualRule(s):
 			ps.WarnFix(where+".assignedFrom",
 				"nothing in this spec computes this field",
 				"a derived field is filled by a rules.manual entry scoped to insert — "+
 					"declare it, or the column keeps its zero value and no error says so")
+		case f.Nullable && len(s.Rules.Manual) == 0:
+			ps.WarnFix(where+".assignedFrom",
+				"nothing in this spec computes this field, and it is nullable",
+				"that is a column which stays null until hand-written code writes it — "+
+					"intended for a value some rows never have; if this one is computed on "+
+					"insert, declare the rules.manual entry that computes it")
 		}
 	}
 

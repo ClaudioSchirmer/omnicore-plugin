@@ -7,6 +7,42 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-08-26
+
+One defect, reported from a consumer's spec: a field the server owns and a field
+that may have no value were the same statement to the build, and only one of them
+could be declared.
+
+### Fixed
+
+- **`nullable: true` is accepted on `assignedFrom: derived`.** The build refused the
+  combination on every source, with the reason "a server-assigned field is always written,
+  so it is never null". That is true of `identity-subject` and `identity-claim` — the
+  server always has a subject, and a claim it did not have would have failed the request
+  before any column was written — and false of `derived`, whose value comes from a
+  `rules.manual` entry the author writes and which may legitimately leave it unset. "No
+  caller may set this" and "this may have no value" are independent statements, and
+  declaring the first forbade the second. The consequence was user-visible: a time field
+  forced non-nullable renders `"emailVerifiedAt": "0000-12-31T18:42:28-05:17"` in every
+  response for a row that has no value, and both ways out were worse — drop `assignedFrom`
+  and any holder of `<entity>:insert` can claim an address is verified, or drop the field.
+  The refusal now applies to the two `identity-*` sources only, where it holds. Nothing
+  else about `derived` moved: the field is still absent from every write request, command
+  and OpenAPI request schema, and the generator still writes no assignment for it.
+- **The "nothing computes this field" warning reads the nullable case in its own terms.**
+  Over a non-nullable derived field it is a defect report — the column keeps its zero value
+  on every insert and no error says so — and it points at a `rules.manual` entry scoped to
+  `insert`. Over a nullable one that sentence sends the author to write code that should
+  not exist: null is the state the row starts in, and what fills the column is whatever
+  verb produces the value. The warning now fires only when NO manual rule claims the field
+  at all, and says what has actually been declared: a column that stays null until
+  something writes it. The gen-report's derived-fields section makes the same distinction,
+  so a reviewer checks that the write exists rather than that the insert fills it.
+  `explain keys`, `explain vocabulary` and the flat `explain example` all carry the pairing
+  now — the flat example gained a nullable derived `GraduatedAt` and the rule that writes
+  it, and the coverage matrix gained the same shape (case 23, generated, built, vetted and
+  tested like every other lane).
+
 ## [0.41.0] — 2026-08-26
 
 Three emitter defects reported from one generation — a User aggregate with two child

@@ -241,6 +241,30 @@ fields:
     example: registrar@school.edu
     description: Who registered the enrollment, read from the authenticated identity.
 
+  # assignedFrom: derived + nullable — the pairing worth reading twice, because
+  # the two keys answer different questions. `derived` says NO CALLER may set
+  # this: the field leaves every write DTO and the OpenAPI request schema,
+  # exactly like the identity-filled one above. `nullable` says the value MAY
+  # NOT EXIST: a student who has not graduated has no graduation date. Neither
+  # implies the other, and the combination is refused only on the identity
+  # sources — there the server always has the value it writes.
+  #
+  # Without the pair the choice is between a column that renders the zero time
+  # ("0000-12-31T18:42:28-05:17") in every response and dropping assignedFrom,
+  # which lets anyone holding the insert permission declare a student graduated.
+  # With it: absent from every write, absent from the response until it is set.
+  # The generator writes no assignment — the rules.manual entry further down is
+  # what fills it, on the verb that graduates.
+  - name: GraduatedAt
+    type: time
+    column: graduated_at
+    livesOn: root
+    nullable: true
+    assignedFrom: derived
+    example: "2030-06-15T00:00:00Z"
+    description: When the student graduated; absent while they have not.
+    labelKey: StudentGraduatedAtField
+
   # A FOREIGN KEY to another aggregate is an ordinary column of this entity.
   # Nothing about it is special here — what makes it reachable in a QUERY is the
   # joins: block further down, which is a separate statement on purpose.
@@ -575,6 +599,14 @@ rules:
       scope: [insert]
       notification: OutsideEnrollmentWindowNotification
       attachTo: EnrolledAt
+    - id: graduation-date
+      description: >-
+        Set GraduatedAt when the update carries the state that ends the
+        enrollment, and leave it null otherwise. It is the write behind the
+        derived field above: the generator takes that field out of every
+        request and writes no assignment for it, so this rule is the only thing
+        that ever fills the column.
+      scope: [update]
 
 notifications:
   - name: EnrollmentNumberAlreadyExistsNotification

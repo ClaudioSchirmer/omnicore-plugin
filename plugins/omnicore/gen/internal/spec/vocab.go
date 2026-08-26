@@ -257,7 +257,9 @@ func Vocabularies() []Vocabulary {
 				"type the project ALREADY has, manual for one it does not and you will write."},
 		{"fields[].assignedFrom", AssignedFrom,
 			"the server fills it, so no write request carries it — from the identity, or " +
-				"(derived) from the entity's own fields, by a rule you write."},
+				"(derived) from the entity's own fields, by a rule you write. Only " +
+				"`derived` combines with nullable: your rule may leave the value unset, " +
+				"while an identity is written on every insert."},
 		{"fields[].source", FieldSources,
 			"where a RUNTIME-only field is fed from. claim = the caller's token (the " +
 				"default, and it needs claim: <name>); body = the request itself — the " +
