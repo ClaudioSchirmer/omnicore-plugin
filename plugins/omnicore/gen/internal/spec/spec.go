@@ -182,6 +182,13 @@ type Field struct {
 	Length int `yaml:"length"`
 	// Nullable says the column may hold NULL, making the field optional by
 	// shape rather than required.
+	//
+	// It is about the VALUE, not about who supplies it, and the two questions
+	// are independent: a field the server assigns may still have no value. It
+	// combines with assignedFrom: derived for exactly that — a verification
+	// timestamp no caller may set and no row has until it is verified. The one
+	// pairing refused is with the identity sources, where the server always has
+	// the value it writes.
 	Nullable bool `yaml:"nullable"`
 	// LivesOn is the table the field is stored in: root for a flat entity;
 	// base (shared by every role) or role (private to this one) under
@@ -301,7 +308,13 @@ type Field struct {
 	//     assignment for it: what computes it is a rules.manual entry scoped to
 	//     insert, and the report lists that as owed. Declared here so the field
 	//     stops being advertised as writable while the server silently
-	//     overwrites whatever a caller sent.
+	//     overwrites whatever a caller sent. This is the one source that
+	//     combines with nullable: what fills it is code the author writes, and
+	//     that code may legitimately leave the value unset — a verification
+	//     timestamp is null until the thing is verified, and the alternative was
+	//     a non-nullable column rendering the zero time in every response.
+	//     The identity sources refuse nullable, because the server always has a
+	//     subject and always has the claim it required.
 	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | derived
 	// BypassMaySet lets the caller who crosses the ROW SCOPE state this value
 	// instead of having it read off their own identity.

@@ -1,7 +1,9 @@
 # Eixo: nullable em TODA posição que o emit trata diferente — campo raiz imutável,
 # primeiro campo patchável, identidade de negócio de coleção, campo de filho imutável,
-# restrição `only` em campo opcional, VO int cujo intervalo admite 0, e um campo id
-# gravável com regra required. Cada um já saiu quebrado de um jeito próprio.
+# restrição `only` em campo opcional, VO int cujo intervalo admite 0, um campo id
+# gravável com regra required, e um campo NULLABLE que o servidor deriva — que o
+# build recusava por confundir "nenhum cliente escreve isto" com "isto sempre tem
+# valor". Cada um já saiu quebrado de um jeito próprio.
 specVersion: 1
 entity: Reserva
 plural: Reservas
@@ -20,6 +22,14 @@ fields:
      example: "algas", description: Apelido curto — opcional e imutável depois de criado.}
   - {name: SalaRef, type: id, column: sala_ref, livesOn: root,
      example: "6f1e8bfa-6a30-4e39-9d54-000000000001", description: Referência da sala reservada.}
+  # Nullable num campo que o SERVIDOR preenche: `derived` diz que nenhum cliente
+  # manda o valor, e `nullable` diz que a linha pode não ter valor nenhum. São
+  # duas frases independentes — a reserva só tem data de confirmação depois de
+  # confirmada, e sem nullable a resposta traz o tempo zero em toda linha ainda
+  # não confirmada. Quem grava é a regra manual abaixo, no verbo que confirma.
+  - {name: ConfirmadaEm, type: time, column: confirmada_em, livesOn: root, nullable: true,
+     assignedFrom: derived, example: "2026-03-01T13:00:00Z",
+     description: "Quando a reserva foi confirmada — nula enquanto não for."}
   - {name: Prioridade, type: int, column: prioridade, livesOn: root,
      vo: {kind: raw, ref: Prioridade}, example: "0",
      description: Prioridade da reserva — 0 é um valor legítimo.}
@@ -57,6 +67,13 @@ modes: [display, insert, update]
 update:
   shape: both
 rules:
+  manual:
+    - id: confirmada-em-no-confirmar
+      description: >-
+        Gravar ConfirmadaEm quando a reserva passa a confirmada — o campo é
+        derivado do próprio estado da reserva, não vem do corpo, e fica nulo
+        enquanto ela não for confirmada.
+      scope: [update]
   list:
     - {id: titulo-obrigatorio, kind: required, scope: [insert, update], fields: [Titulo],
        notification: RequiredFieldNotification}

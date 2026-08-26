@@ -787,6 +787,19 @@ Four things to get right, because they are the ones that cost a migration later:
   until you do. Declaring the field ordinarily instead is the failure this exists to kill —
   it lands in the write DTO, the OpenAPI documents it as writable, and the caller's value
   is accepted and silently ignored.
+  - **It is the one source that takes `nullable: true`, and a timestamp usually needs it.**
+    "No caller may set this" and "this may have no value" are independent statements. An
+    `emailVerifiedAt` is both: nobody sends it, and no row has it until the address is
+    verified. Written non-nullable, every response for an unverified row carries the zero
+    time — `"emailVerifiedAt": "0000-12-31T18:42:28-05:17"` — and the two ways authors
+    escaped that were both worse: drop `assignedFrom`, and anyone holding `<entity>:insert`
+    can declare an address verified; or drop the field. With `nullable: true` the column is
+    `NULL`, the response omits the key, and the write is whatever verb produces the value —
+    a `rules.manual` entry scoped to that verb, not necessarily to `insert`.
+    `identity-subject` and `identity-claim` still refuse `nullable`: the server always has
+    a subject and always has the claim it required, so the column is written on every
+    insert. (Earlier builds refused `nullable` on every source, which is what produced the
+    workarounds above; `explain keys` on the pinned build is the authority.)
 - **The field's LABEL is `text:`, not `description:`.** The description is a sentence about
   what the field means and becomes the column comment; the label is its short human name —
   what a 422 payload puts in `fieldLabel` and what a CSV/XLSX export puts in a column
