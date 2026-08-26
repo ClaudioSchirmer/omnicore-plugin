@@ -222,11 +222,29 @@ type Field struct {
 	// left out falls back to the field's own name, spaced out (Workspace,
 	// TenantID → "Tenant ID"), which is a placeholder a translator can find.
 	Text Texts `yaml:"text"`
-	// Hidden keeps a PERSISTED field out of every response body: the by-id read,
-	// each row of the listing, the write results, and the CSV/XLSX exports that
-	// render the listing. Everything else is unchanged — the column exists, the
-	// filters, sort and indexes reach it, a write may set it, the rules read it,
-	// and a computed read field may derive FROM it.
+	// Hidden keeps a PERSISTED field out of every response body — the by-id read,
+	// each row of the listing, the write results, the CSV/XLSX exports that render
+	// the listing, and the `?fields=` vocabulary, where naming it is a typed 400
+	// rather than an empty object; it governs what a caller RECEIVES, and never
+	// what the database is asked for.
+	//
+	// Everything else is unchanged — the column exists, the filters, sort and
+	// indexes reach it, a write may set it, the rules read it, and a computed read
+	// field may derive FROM it.
+	//
+	// On a relational read model that last clause is stronger than it reads. Such
+	// a read builds no SELECT of the projected fields at all: it loads the WHOLE
+	// aggregate through the write side's loader — one implementation of the
+	// criteria→SQL translation, shared with the repository — turns the hydrated
+	// entity into a document, and prunes that document in memory. So a hidden
+	// column is still selected from the table and still sits in memory on every
+	// row of every page, and `?fields=` does not narrow the query either. Hiding a
+	// value is not a way to stop fetching it.
+	//
+	// Where that distinction matters — a credential hash — the lever is not this
+	// key. It is `redact` over a MONGO-backed read, whose document IS the redacted
+	// payload, so the masked value never reaches the read side at all. Over a
+	// relational read there is nothing to reach for: the read is the table.
 	//
 	// It is the answer to "callers query by this, and receive something else":
 	// three columns narrow the search, and what comes back is a description and
@@ -253,7 +271,9 @@ type Field struct {
 	// storage would itself be the bug. Nothing about such a field reaches the
 	// TableSchema, the migration, the outbox payload, the audit event or any
 	// response: there is no column, so there is nothing to redact and nothing
-	// to leak.
+	// to leak — including the one seat that is not a copy of the row, the
+	// refusal itself, where the rule's echoValue is overridden and the value
+	// is left out.
 	Source string `yaml:"source"` // claim | body
 	// Claim names the JWT claim a runtime-only field is fed from. It is required
 	// for a source: claim field — the framework deliberately does not opine on
@@ -951,11 +971,18 @@ type Rule struct {
 	// AttachTo names the field the refusal is reported against; defaults to the
 	// rule's first field.
 	AttachTo string `yaml:"attachTo"`
-	// EchoValue passes the rejected value back in the notification, so the
-	// caller sees what was refused.
+	// EchoValue passes the rejected value back in the notification, so the caller
+	// sees what was refused — ON BY DEFAULT, turned off with `echoValue: false`,
+	// and never applied to a `runtime: true, source: body` field.
 	//
-	// It DEFAULTS TO TRUE, and is a pointer so that `echoValue: false` can say
-	// otherwise. The framework carries the value as NotificationMessage.
+	// The default and the exception are in the OPENING SENTENCE deliberately:
+	// `explain keys` prints one sentence per key, and that is the whole reference
+	// most authors read. An author who read "passes the rejected value back" and
+	// nothing after it concluded the key was opt-in, wrote no spec that declared
+	// it, and shipped one that echoed a plaintext password.
+	//
+	// It is a pointer so that `echoValue: false` can say otherwise rather than
+	// reading as an unset bool. The framework carries the value as NotificationMessage.
 	// FieldValue and has since the beginning; leaving it out was the generator's
 	// omission, not the framework's limit, and it costs the caller the only half
 	// of the message they can act on — "at most 4 guardians" tells them the rule,
@@ -965,6 +992,15 @@ type Rule struct {
 	// document number, anything the response is not already allowed to carry.
 	// The generator cannot tell — nothing in the language marks a field as
 	// sensitive — so that judgement is the spec author's.
+	//
+	// With ONE exception, which the generator can tell and therefore does not
+	// leave to the author: a `runtime: true, source: body` field is never
+	// echoed, on any rule, whatever this key says. Such a field exists to reach
+	// no copy of anything — no column, so no payload, no topic, no audit event
+	// and no response — and the canonical one is a password confirmation, whose
+	// echo would put the plaintext in the 422 body and in every log that renders
+	// a notification. Writing `echoValue: true` on a rule over such a field is
+	// refused rather than ignored; leaving the key out is silently correct.
 	EchoValue *bool `yaml:"echoValue"`
 	// Description is one optional line on why the rule exists.
 	Description string `yaml:"description"`

@@ -7,6 +7,84 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-26
+
+Three emitter defects reported from one generation — a User aggregate with two child
+collections, in a project that already had Tenant, Permission, Role and Group. All three
+were the emitter's, not the spec's: `check` was green on the spec that produced each one.
+Two of them stop the tree from compiling, which is the good failure. The third compiles,
+passes `gofmt`, passes `vet`, passes the generated suite, and hands a plaintext password
+back to the caller.
+
+### Fixed
+
+- **A `source: body` runtime field is never echoed in a refusal.** `echoValue` defaults to
+  true, and that default is right almost everywhere — "the cap is 4" without "you sent 6"
+  is half an answer. It was wrong for exactly one kind of field, and it was wrong by
+  default: a `runtime: true, source: body` value exists to reach no copy of anything, and
+  the canonical one is a password confirmation. A mistyped confirmation answered 422 with
+  the plaintext, into the response body and from there into every log that renders a
+  notification. The emitter now drops the echo for such a field on every rule kind,
+  whatever the rule declared, and `check` refuses `echoValue: true` written over one
+  rather than ignoring it. Nothing else about echoing changed: which persisted values are
+  sensitive is still the spec author's call, and `echoValue: false` still says it.
+  **`explain keys` was half the reason this shipped**: it prints one sentence per key, and
+  `echoValue`'s opening sentence said what the key does and not that it is on by default —
+  so an author read it as opt-in, declared it nowhere, and got the echo anyway. The default
+  and the exception are now in that first sentence, where the reference can show them.
+- **`kind: comparison` unwraps a value object on either side.** It is the only rule kind
+  whose both operands are entity fields, and so the only one a value object breaks:
+  `range` and `length` compare against a literal, and an untyped constant converts to
+  whatever named type the field carries. Two typed operands get no such leniency —
+  `e.PasswordConfirmation != e.Password` is `string` against `vos.Password`, a build
+  failure in a tree the spec had already accepted. Each side is now reduced to its
+  underlying scalar independently, including a composite's part (reached through its
+  owner) and a value object over `time` (whose `Before`/`After`/`IsZero` are on the
+  instant, not on the wrapper).
+- **The collection projector is qualified by its entity.** It was named from the plural
+  alone — `projectRoles` — while the per-entry projector beside it already carried the
+  entry type (`projectOneUserRole`). Every entity's commands land in one Go package, so
+  two entities that legitimately share a plural collided: `Group → Roles` and
+  `User → Roles` is what an RBAC service IS, and the second one generated failed with
+  `projectRoles redeclared in this block`. It is now `projectUserRoles` /
+  `projectGroupRoles`, which is what the base-mounted case already emitted. **Regenerating
+  an existing project renames these functions**; they are generator-owned and nothing
+  hand-written calls them, but a `doctor` run will report the drift until you do.
+- **The generated "rejects an invalid value" test picks a sample the rule actually
+  rejects.** For a string-backed value object it was the fixed `"!!not-valid!!"` — thirteen
+  characters of punctuation, which any regex worth declaring rejects and which a value
+  object whose only rule is a length band containing 13 accepts, correctly. The generated
+  suite then failed against a correct generator, on a spec that was never wrong. The sample
+  now comes from the bounds when there is no regex to violate, exactly as the numeric
+  branch beside it already did. Found while building the fixture for the three defects
+  above: no string value object in the corpus had ever been declared without a regex.
+
+### Changed
+
+- **`hidden` says what it does NOT do.** Its documentation listed everything the key still
+  leaves reachable — the column, the filters, the sort, a computed field deriving from it —
+  and a reader could finish that list still believing the column is not fetched. On a
+  relational read model it is: such a read builds no SELECT of the projected fields at all,
+  it loads the whole aggregate through the write side's loader and prunes the document in
+  memory, so a hidden column is selected on every row of every page and `?fields=` does not
+  narrow the query either. The key reference and the skill now say so, and name the one
+  lever that does answer "never loaded" — `redact` over a Mongo-backed read, whose document
+  IS the redacted payload. Asked by an agent looking at a `PasswordHash` that was
+  `hidden` + `redact` + in no filter and no sort, and reasoning that it therefore had no
+  reader; it has none, and it is fetched anyway. Also documented, because it was a promise
+  nobody had written down: a hidden field is not in the `?fields=` vocabulary, so naming
+  one is a typed 400 rather than a 200 with an empty object.
+
+### Added
+
+- **Two golden-gate lanes** (`88 passed`, was 86). `34-plural-repetido` is a comparison
+  whose two sides are an unwrapped value object and a plain `source: body` string;
+  `35-plural-repetido-vizinho` is an independent entity whose collection reuses the plural,
+  and it is generated into the SAME tree. That pairing is the whole point: the projector
+  collision is cross-entity, every other lane generates one spec per tree, and a name two
+  entities both claim compiles in each of them and fails only where they meet. The corpus
+  could not have seen it, which is why it shipped.
+
 ## [0.40.0] — 2026-08-26
 
 Two holes in the same wall. The field model had exactly two states — persisted, or fed from

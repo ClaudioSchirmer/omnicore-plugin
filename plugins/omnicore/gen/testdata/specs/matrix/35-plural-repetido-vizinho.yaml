@@ -1,0 +1,67 @@
+# A segunda metade do caso 34, e a única razão de existir: uma entidade
+# INDEPENDENTE cuja coleção tem o MESMO plural — `Papeis` — que a do vizinho.
+#
+# Não é acidente de nomeação: num serviço de RBAC, Grupo → Papéis e Usuário →
+# Papéis é o domínio. Os comandos de todas as entidades caem em um único pacote
+# Go, então um projetor nomeado só pelo plural é um nome que as duas reivindicam,
+# e a segunda a ser gerada falhava com `projectPapeis redeclared in this block`.
+# O projetor por ENTRADA ao lado dele já vinha qualificado pelo tipo da entrada,
+# o que é o que tornava a colisão unilateral.
+#
+# Roda no par com 34, na mesma árvore — sozinho não prova nada, e por isso o
+# laço da matriz o pula.
+specVersion: 1
+entity: GrupoPR
+plural: GruposPR
+language: pt-BR
+storage:
+  kind: flat
+  table: grupos_pr
+  description: Grupos e os papéis que carregam.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Coordenação, description: Nome do grupo.}
+children:
+  - name: GrupoPRPapel
+    plural: Papeis
+    table: grupo_pr_papeis
+    parentColumn: grupo_pr_id
+    description: Papéis atribuídos ao grupo.
+    ownedBy: root
+    editStrategy: per-child
+    businessIdentity: [PapelID]
+    duplicateNotification: PapelJaNoGrupoPRNotification
+    fields:
+      - {name: PapelID, type: id, column: papel_id, example: 6f2a0b31-8c1d-4d17-9e55-3b7c1a442f90, description: O papel atribuído.}
+modes: [display, insert, update]
+update: {shape: patch}
+rules:
+  list:
+    - {id: nome-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Nome], notification: RequiredFieldNotification}
+notifications:
+  - name: PapelJaNoGrupoPRNotification
+    semantic: conflict
+    text:
+      ptbr: Esse papel já está no grupo.
+      eng: That role is already on the group.
+      esp: Ese rol ya está en el grupo.
+      fra: Ce rôle est déjà sur le groupe.
+      deu: Diese Rolle hat die Gruppe bereits.
+      ita: Quel ruolo è già sul gruppo.
+      nld: Die rol staat al bij de groep.
+read:
+  backing: relational
+  view: {name: grupos_pr}
+  byId: true
+  byParams:
+    filters:
+      - {field: Nome, ops: [eq, contains]}
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: grupopr
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: "grupopr:escrever"
+    patch: "grupopr:escrever"
+    read: "grupopr:ler"

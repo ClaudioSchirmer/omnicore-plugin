@@ -1386,6 +1386,12 @@ func violatingNonNumeric(f, other ir.Field, op string) string {
 // numeric backing that means one step past a declared bound — the old fixed -1
 // was a legitimate value for any rule whose range starts below zero, and the
 // generated test failed against a correct generator.
+//
+// The string branch had the identical defect for longer: "!!not-valid!!" is
+// thirteen characters of punctuation, which any regex worth declaring rejects —
+// and which a value object whose ONLY rule is a length band containing 13
+// accepts, correctly. The corpus never noticed because every string value
+// object in it carried a regex.
 func invalidSample(vo ir.ValueObject) string {
 	if vo.GoBacking == "int" {
 		if vo.Min != nil {
@@ -1396,6 +1402,23 @@ func invalidSample(vo ir.ValueObject) string {
 		}
 		return "-1"
 	}
+	// A regex is the strongest rule to violate, and punctuation violates it.
+	if vo.Regex != "" {
+		return quote("!!not-valid!!")
+	}
+	// Otherwise the bounds are the only rule there is — validation refuses a raw
+	// value object that declares none — so the sample comes from them. Over-long
+	// first, because it is the length check itself that rejects it; a too-short
+	// one under a minimum of 1 is the empty string, which the required check
+	// rejects instead, a weaker statement about the rule under test but a true
+	// one, and the alternative is a sample the value object accepts.
+	if vo.MaxLength > 0 {
+		return fmt.Sprintf("strings.Repeat(%q, %d)", "a", vo.MaxLength+1)
+	}
+	if vo.MinLength > 0 {
+		return fmt.Sprintf("strings.Repeat(%q, %d)", "a", vo.MinLength-1)
+	}
+	// An enum, whose members are the rule: no declared member is punctuation.
 	return quote("!!not-valid!!")
 }
 
