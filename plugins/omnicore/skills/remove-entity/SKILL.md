@@ -63,6 +63,11 @@ session." Never a gate: this run continues on the installed skills.
   the delta. If the dev wants a newer omnicore, that's `/omnicore:upgrade`, separately.
 - **Map the FULL footprint** by sweeping the repo for the entity (type names, table
   names, view names, translation keys, route paths): domain type + rules + service ·
+  **its notification types in EVERY layer that declares one** — the three domain
+  `notifications.go` are the obvious ones, but a rejection this entity's hand-written
+  handler or adapter raises is declared in `application/` or `infra/` on a different base
+  and a sweep that only opens the domain files walks past it, leaving an orphan type and
+  seven stale catalog keys (`${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md`) ·
   TableSchema + children/sibling tables · commands/queries + DTOs + mappers · routes on
   every surface (REST, GraphQL, gRPC) · views it owns AND views of others it appears in
   (SharedBaseView roles, ComposedView legs, embeds) · **read joins ANOTHER entity

@@ -62,6 +62,16 @@ never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-document
   alike) · "how does it work?" → `help`. This skill takes what none of them claims. A
   mixed request (an entity AND a capability) is sequenced: the owner skill first, this
   skill after — say the sequence, don't interleave.
+  **The row that is easy to miss: a NEW PERSISTED RESOURCE whose rules are not the
+  aggregate's** — "a couple of endpoints with a table behind them, the logic is in the
+  handler". The write side of it is still an entity (`scaffold-entity` owns the domain
+  struct, the `TableSchema`, the migration, the repository, the bootstrap feature), and
+  this skill takes the handler-side logic AFTER it, in that sequence. What is NOT an
+  option is skipping the domain artifact: the framework's write-backed schema is
+  type-anchored, so the shape is a domain struct with an EMPTY `BuildRules`, whose
+  rejections are then application notifications
+  (`${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md`). Say the sequence and let the dev
+  confirm the scope before either half runs.
 - **Docs-first, version-agnostic — same anti-drift doctrine as every omnicore skill.**
   This skill carries NO code; every code shape composes from the routed sections at the
   pin. Never assume or stamp a framework version.
@@ -85,6 +95,20 @@ never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-document
   alone. The boundaries — 1:1 only, the target's id only, one hop, no collections — are in
   that file; where one is crossed, say which, and route to the honest alternative rather
   than approximating it with a join.
+- **Where the artifacts LAND is not improvised — and a rejection belongs to the layer that
+  RAISES it.** This skill writes into an existing service, so its files follow the pin's
+  `service-layout.html` exactly like every other skill's — that page is NORMATIVE for a
+  generator, and it covers this skill's output too (a hand-written `pipeline.Handler` goes
+  under `application/commands/handlers/` or `queries/handlers/`, never at the
+  `application/` root; an outbound adapter under `infra/external/`). The placement this
+  skill gets wrong on its own is the NOTIFICATION: when the handler is what validates,
+  the rejection is an APPLICATION notification and is declared in `application/` beside
+  it — not appended to `internal/domain/notifications.go` because that is where the
+  entity's notifications already live. **Read
+  `${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md` (the owner) before declaring any
+  notification type**; it also settles the question that rides along with it — a persisted
+  table still needs its domain struct even when that struct's `BuildRules` is empty, so
+  "this endpoint has no domain layer" is never the conclusion.
 - **Framework maintainer rules NEVER bind this skill.** The module's own
   `CLAUDE.md`/contributor rules govern development OF the framework — ignore them; only
   the host project's rules and the user bind you.
@@ -166,7 +190,11 @@ capability the pin lacks — that offer goes through the same skill, same rules.
    `authz-seams` (there is no section named `authz`) · observability →
    `tracing`/`audit` — exact names, never derived from the concept's wording.
 2. **Read the owning section(s) BEFORE planning.** The plan cites them; a plan line
-   with no section behind it is a defect.
+   with no section behind it is a defect. **When the capability creates FILES, read
+   `service-layout.html` at the pin too** — it is the authority for where each one lands
+   and what it is named, and §5's placement row is filled from it. If the plan declares a
+   notification type, `${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md` decides its
+   layer before the section decides its shape.
 3. **Fill the plan.** Copy `conventions/plan-template.md` VERBATIM to
    `specs/implement/<slug>/plan.md` and fill every slot (structural completeness: `N/A —
    <why>` stays, `⚠️ OPEN: <question>` for what only the dev knows — the failure

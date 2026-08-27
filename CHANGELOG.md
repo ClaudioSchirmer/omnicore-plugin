@@ -7,6 +7,53 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-08-26
+
+Two endpoints came out of `implement` with their notifications in the domain layer, and
+no skill could have said otherwise: two of the framework's three notification bases
+appeared nowhere in this plugin. The layer that RAISES a rejection is the layer that
+declares it — that decision now has an owner, and the one skill that wrote files without
+ever reading the layout page now reads it.
+
+Reported from a consumer service, with the endpoints that came out wrong.
+
+### Added
+
+- **`shared/notification-bases.md` — which LAYER declares a rejection, one owner.** The
+  three bases (`Domain`/`Application`/`Infrastructure`NotificationBase), the rule that the
+  base names the layer that RAISES the notification and that the type is declared in that
+  same layer, and the placement per layer. It also settles the question that rides along
+  with it: a persisted table keeps its domain struct — the write-backed schema is
+  type-anchored — even when that struct's `BuildRules` is empty, so "this endpoint has no
+  domain layer" is never the conclusion. Routed from `implement`, `scaffold-entity`,
+  `evolve-entity` and `remove-entity`.
+
+### Fixed
+
+- **Every skill assumed a notification is a domain notification.** `ApplicationNotification
+  Base` and `InfrastructureNotificationBase` appeared in none of the 16 skills, none of the
+  `shared/` files and none of the conventions — the only place the three-base rule was
+  written down is the framework's own contributor file, which `implement` is explicitly
+  told to ignore. An endpoint validated by its handler therefore had its notification type
+  appended to `internal/domain/notifications.go`, where the aggregate that never raises it
+  now names a concern only the handler has. Reported from a service whose two
+  handler-validated endpoints came out that way.
+- **`implement` carried no placement rule and was the only skill that never cited
+  `service-layout.html`** — the page that is NORMATIVE for a generator. It now reads it in
+  Phase 1 whenever the capability creates files, carries a core principle for where
+  artifacts land (including that a hand-written `pipeline.Handler` goes under
+  `commands/handlers/` or `queries/handlers/`, not at the `application/` root), and its
+  plan template grows a notification + seven-catalogs row in §5 plus the requirement that
+  every impact-map row name the file PATH it touches.
+- **`implement`'s fallback router had no row for a new PERSISTED resource whose rules are
+  not the aggregate's** — "a couple of endpoints with a table behind them, the logic is in
+  the handler" matched no owner skill and stayed in the one skill with no layer
+  conventions. The router now sequences it: `scaffold-entity` for the write side, this
+  skill after for the handler-side logic.
+- **`remove-entity`'s footprint sweep opened only the domain `notifications.go`** — an
+  application- or infrastructure-layer notification belonging to the removed entity
+  survived as an orphan type with seven stale catalog keys.
+
 ## [0.43.0] — 2026-08-26
 
 The domain gets what the request layer already had. A generated aggregate is handed
