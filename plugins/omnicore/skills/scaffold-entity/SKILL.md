@@ -676,6 +676,23 @@ Four DISTINCT levels — do not conflate them:
      field carries `labelKey` and nothing else. A stray `json:` tag is the #1 reflex slip
      (a domain aggregate is not a wire DTO); a `json:"-"` also corrupts the `Old()`
      snapshot. Strip every hit — wire names live on the web-layer DTOs.
+   - **Domain membership — what is in `internal/domain/` that is not domain**
+     (`${CLAUDE_PLUGIN_ROOT}/shared/domain-membership.md` is the owner; the two questions
+     and the destination table are there). Four greps, each hit INVESTIGATED, never
+     auto-deleted:
+     `grep -rn '"' internal/domain/ | grep -E '^\S+:\s*(_\s+|[a-zA-Z0-9_]+\s+)?"'` over the
+     import blocks → every path is stdlib, the framework's `domain` package, or this
+     service's own `vos`/`aggregatevos`; a third-party library, an `internal/infra` path or
+     a `crypto`/`net`/`os`/`io` import is the mechanism arriving with the type (the pin's
+     dependency table: domain is stdlib-only and zero-IO). ·
+     `grep -rn 'interface {' internal/domain/*.go` → each is either an `<Entity>Service` for
+     an entity whose `RequiresService()` is true or a repository port composing
+     `domain.Repository` over this service's aggregate; a third kind is a finding. ·
+     `grep -rnE '^\s*(const|var)?\s*[A-Za-z0-9_]+\s+(string\s+)?=\s*"' internal/domain/*.go`
+     → a string constant at the domain root is protocol vocabulary or an enum value object
+     that was not modelled. · the file inventory: at the domain root every `.go` is an
+     entity, that entity's port, or `notifications.go` — a `secret_hasher.go`,
+     `claims.go`, `constants.go`, `types.go` or `shared.go` is a finding by its name alone.
    - **VO smell (investigate, do NOT auto-fail):** `grep -rnE 'regexp|MatchString' internal/domain/*.go internal/domain/aggregatevos/`
      → a format/regex/length/range check inline in a root's or an AVO's `BuildRules` is
      usually a value object that wasn't extracted (its rule belongs in a `vos/` `IsValid`,

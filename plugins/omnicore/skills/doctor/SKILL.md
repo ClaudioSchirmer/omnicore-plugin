@@ -99,6 +99,15 @@ a cause.
 
 Bench-proven cause patterns to CHECK, not to assume:
 
+- **`import cycle not allowed` through `internal/domain`, or a build error from the domain
+  package naming an infra/third-party symbol** → something that is not domain was placed in
+  the domain package, and the cycle is the architecture reporting it. The fix is never a
+  new shared package to break the cycle: identify what does not belong (a mechanism
+  contract, protocol constants, a helper parked there for import convenience), and move it
+  to its consumer — `${CLAUDE_PLUGIN_ROOT}/shared/domain-membership.md` owns the decision
+  and carries the destination table. Prescribe the move; the dev applies it. Worth stating
+  in the report even when the build is green and the misplacement was merely noticed:
+  nothing fails at compile time in the common case, which is exactly why it accumulates.
 - **Boot abort with a migration version/dirty error after a bench "reset"** → the
   compose down kept the named volumes and the old DB is still there. Prescribe the full
   reset (volumes included) with a loud data-loss warning — the dev runs it.

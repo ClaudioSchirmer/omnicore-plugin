@@ -1162,14 +1162,23 @@ func renderCheck(b *strings.Builder, in Input) {
 		if !c.PerChild {
 			continue
 		}
-		fmt.Fprintf(b, "| Collection `%s` | %s | These routes hang off `/%s/:id/%s`. %s |\n",
+		fmt.Fprintf(b, "| Collection `%s` | %s | These routes hang off `/%s/:id/%s`. %s%s |\n",
 			c.Plural, childPermissionCells(c), m.Entity.PluralSnake, c.Segment,
-			childPermissionAdvice(c))
+			childPermissionAdvice(c), childRemovalNote(c))
 	}
 
 	if m.Managed.Archiving {
-		fmt.Fprintf(b, "| Removal | archive (reversible) | `DELETE` is a permanent purge and is "+
-			"%s. |\n", presence(m.Op("delete") != nil, "also mounted", "not mounted"))
+		// "(reversible)" names ANOTHER endpoint, so it may only be claimed when
+		// that endpoint exists — the same rule the archive SUMMARY already
+		// follows. Archiving without unarchive is a legitimate model: the row
+		// survives as history and nothing brings it back, and a reviewer told
+		// otherwise signs off on an undo the service does not have.
+		kind, note := "archive (one-way: no unarchive is mounted)", ""
+		if m.Op("unarchive") != nil {
+			kind, note = "archive (reversible)", " The unarchive endpoint is what reverses it."
+		}
+		fmt.Fprintf(b, "| Removal | %s | `DELETE` is a permanent purge and is "+
+			"%s.%s |\n", kind, presence(m.Op("delete") != nil, "also mounted", "not mounted"), note)
 	} else {
 		b.WriteString("| Removal | no archive column | Rows are removed permanently or not at all. |\n")
 	}
@@ -1620,6 +1629,23 @@ func childPermissionCells(c ir.Child) string {
 // what it is for. When the spec HAS separated them, the note flips to what that
 // costs at deployment — a permission nobody has been granted refuses a route
 // that used to answer.
+// childRemovalNote says what taking ONE entry out actually does, and it is here
+// because a reviewer reading "archive" reasonably assumes an undo exists. None
+// does at this level: there is no per-entry unarchive to mount, and an archived
+// entry is not loaded into the aggregate, so nothing can address it afterwards.
+// On an authorization model that is the difference between "revoked, recoverable"
+// and "revoked, and the way back mints a different grant".
+func childRemovalNote(c ir.Child) string {
+	if !c.MountsRemove {
+		return ""
+	}
+	if c.ArchivedAt == "" {
+		return " Removing ONE entry is a real `DELETE` — the row is gone."
+	}
+	return " Removing ONE entry ARCHIVES it (204, no body) and is one-way: there is no " +
+		"per-entry unarchive, so the only way back is a fresh add, with a NEW entry id."
+}
+
 func childPermissionAdvice(c ir.Child) string {
 	for _, v := range mountedPerChildOps(c) {
 		if c.Declared[v] {

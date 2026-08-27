@@ -109,6 +109,20 @@ never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-document
   notification type**; it also settles the question that rides along with it — a persisted
   table still needs its domain struct even when that struct's `BuildRules` is empty, so
   "this endpoint has no domain layer" is never the conclusion.
+- **A capability's SHARED CONTRACT does not land in `internal/domain` — read
+  `${CLAUDE_PLUGIN_ROOT}/shared/domain-membership.md` (the owner) before declaring any type,
+  port, interface or constant there.** This skill is where the pressure is highest, because
+  a capability arrives as a mechanism that several layers touch — a hasher, a token issuer,
+  a clock, an outbound gateway, a protocol's claim/header names — and the domain package is
+  the one every layer may import. That property is exactly what makes it the wrong home: the
+  pin's rule is that **the interface stays with its CONSUMER, never with its
+  implementation**, so a contract the handler calls is declared in `internal/application/`
+  beside that handler and implemented under `internal/infra/`. Three reasons that feel like
+  reasons and are not — "it is the only package everyone can import without a cycle",
+  "there is already something similar in there", "a future endpoint will need it" — are
+  refuted by name in that file; do not re-derive them. The plugin's write-time guard refuses
+  the two decidable cases outright, so a blocked edit here is the rule firing, not a bug to
+  route around.
 - **Framework maintainer rules NEVER bind this skill.** The module's own
   `CLAUDE.md`/contributor rules govern development OF the framework — ignore them; only
   the host project's rules and the user bind you.

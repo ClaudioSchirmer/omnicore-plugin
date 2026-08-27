@@ -847,9 +847,16 @@ type Child struct {
 	Computed []Computed `yaml:"computed"`
 	// Rules are the invariants checked on each entry of the collection.
 	Rules Rules `yaml:"rules"`
-	// SoftRemove makes removal reversible: the entry is archived (see
-	// archivedAt) instead of deleted, and per-child removal mounts as an
-	// archive rather than a DELETE.
+	// SoftRemove keeps the row: the entry is archived (see archivedAt) instead
+	// of deleted, and per-child removal mounts as an archive rather than a
+	// DELETE — the verb has to say which of the two it performs.
+	//
+	// It does NOT make removal reversible. There is no per-entry unarchive:
+	// children[].operations is closed at add|change|remove, unarchive is a ROOT
+	// mode, and an archived entry is not loaded into the aggregate, so no
+	// command can address it. What the archive buys is history and a row that
+	// whatever references it still finds — not a way back. A collection whose
+	// entries genuinely need archive⇄unarchive is an entity of its own.
 	SoftRemove bool `yaml:"softRemove"`
 	// ArchivedAt is the column marking an archived entry; required when
 	// softRemove is on, refused when it is off.

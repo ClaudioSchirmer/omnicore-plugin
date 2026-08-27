@@ -418,6 +418,9 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("\t%s", quote(fwImport("application/configuration")))
 	s.L("\t%s", quote(fwImport("application/pipeline")))
 	s.L("\t%s", quote(fwImport("domain")))
+	// The removal verb projects fwresults.None. Pruned when the collection does
+	// not mount it, like every other import this file offers.
+	s.L("\tfwresults %s", quote(fwImport("application/results")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
 	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
@@ -554,9 +557,15 @@ func emitChangeChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) 
 	s.Blank()
 }
 
-// emitRemoveChildCommand writes the verb that takes ONE entry out. Nothing
-// about the entry is projected back — the model is here for the identity feed
-// alone, which a REVOKE needs as much as a grant: taking an entry out of
+// emitRemoveChildCommand writes the verb that takes ONE entry out. Nothing is
+// projected back AT ALL — the endpoint answers 204, like the root's own archive
+// and delete — so the command declares fwresults.None and the wire pair has no
+// Response half.
+//
+// The owner id was the one thing an earlier shape put in that body, and it is
+// the :id segment the caller itself sent: a 200 carrying it invited callers to
+// look for content that was never news. The model is still built here for the
+// identity feed, which a REVOKE needs as much as a grant: taking an entry out of
 // another tenant's aggregate is the same write, in the other direction.
 func emitRemoveChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	s.Doc(
@@ -576,13 +585,11 @@ func emitRemoveChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) 
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
-	s.L("// Remove%sResult carries only the owner: the entry it names is gone.", op)
-	s.L("type Remove%sResult struct {", op)
-	s.L("\t%sID domain.ID", entity)
-	s.L("}")
-	s.Blank()
-	s.L("func (cmd *Remove%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Remove%sResult, error) {", op, entity, op)
-	s.L("\treturn Remove%sResult{%sID: *e.GetID()}, nil", op, entity)
+	s.Doc(fmt.Sprintf("FromEntity projects nothing: the entry Remove%sCommand named is", op),
+		"gone, so the endpoint answers 204 — and the framework's NoBody projection",
+		"is paired with a None on this side.")
+	s.L("func (cmd *Remove%sCommand) FromEntity(_ *configuration.AppContext, _ *appdomain.%s) (fwresults.None, error) {", op, entity)
+	s.L("\treturn fwresults.None{}, nil")
 	s.L("}")
 	s.Blank()
 }
@@ -626,7 +633,7 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		emitChangeChildRequest(s, m, c, op, idParam)
 	}
 	if c.MountsRemove {
-		emitRemoveChildRequest(s, m, c, entity, op, idParam)
+		emitRemoveChildRequest(s, c, op, idParam)
 	}
 
 	return goFile("internal/web/requests/"+naming.Snake(op)+"_requests.go",
@@ -670,13 +677,21 @@ func emitChangeChildRequest(s *src, m *ir.Model, c ir.Child, op, idParam string)
 	emitPerChildResponse(s, m, c, "Change")
 }
 
-// emitRemoveChildRequest writes the wire pair of the verb that takes one entry
-// out. The response carries the owner alone: the entry it named is gone.
-func emitRemoveChildRequest(s *src, m *ir.Model, c ir.Child, entity, op, idParam string) {
+// emitRemoveChildRequest writes the REQUEST of the verb that takes one entry
+// out — and only the request.
+//
+// There is no Response type because there is no response: the verb answers 204,
+// so the route is mounted with the framework's NoBody projection over
+// fwresults.None. The half that existed before carried the owner id, which is
+// the :id segment the caller put in the path — a body that could tell a caller
+// nothing it did not already know, on a 200 the root's own archive and delete
+// never answer.
+func emitRemoveChildRequest(s *src, c ir.Child, op, idParam string) {
 	s.Doc(
 		fmt.Sprintf("Remove%sRequest names the entry to take out.", op),
 		"",
-		"There is no body: everything the verb needs is in the path.")
+		"There is no body: everything the verb needs is in the path. Nothing comes "+
+			"back either — the endpoint answers 204.")
 	s.L("type Remove%sRequest struct {", op)
 	s.L("\t%s", autoRequestEmbed)
 	s.Blank()
@@ -684,15 +699,6 @@ func emitRemoveChildRequest(s *src, m *ir.Model, c ir.Child, entity, op, idParam
 	s.L("}")
 	s.Blank()
 	emitAutoToCommand(s, "Remove"+op+"Request", "Remove"+op+"Command")
-	s.Blank()
-	s.Doc(fmt.Sprintf("Remove%sResponse answers with the owner alone.", op))
-	s.L("type Remove%sResponse struct {", op)
-	s.L("\t%s", autoResponseEmbed)
-	s.Blank()
-	s.L("\t%sID domain.ID `json:%s`", entity, quote(m.Entity.Camel+"Id"))
-	s.L("}")
-	s.Blank()
-	emitAutoFromResult(s, "Remove"+op+"Response", "commands.Remove"+op+"Result")
 }
 
 func emitPerChildResponse(s *src, m *ir.Model, c ir.Child, verb string) {

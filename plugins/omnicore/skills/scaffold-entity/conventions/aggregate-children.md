@@ -105,10 +105,18 @@ web.md.
 
 ## The verb tells the truth (soft removal)
 
-Removing a child with an archive (deleted-at) column ARCHIVES it (the row lingers, hidden) — so the
-route is **`PATCH …/archive`, never `DELETE`** (a lying contract). A role child is ALWAYS
-soft-removable (no archive column errors at the remove); only a base-child explicitly
-opting out of the archive column is hard-deleted (then `DELETE` is honest).
+**The child's own column is the whole rule, exactly like the root's is.** A child that
+declares an archive (deleted-at) column is ARCHIVED on removal (the row lingers, hidden) —
+so the route is **`PATCH …/archive`, never `DELETE`** (a lying contract). A child that
+declares none has its row deleted, and there `DELETE` is the honest spelling. Where the
+child lives does not change the answer: a root's own child and a shared base's native child
+behave identically, and a hard-removed child takes its sibling rows with it in the same
+transaction.
+
+> Since **v0.61.1**. Before it, only a base-child could be hard-deleted — a root's own child
+> without the column reached the archive path with no column to stamp and failed with an
+> infrastructure error on the first removal, at runtime, with no boot guard to catch it.
+> On an older pin, a removable root child MUST declare the column.
 
 > **⚠️ NO per-child unarchive** — the edit-path load hides archived children and the
 > update never clears the archive stamp, so a soft-removed child cannot be revived alone;
@@ -125,7 +133,14 @@ travels beside it on the command, bound from the path). The insert command
 carries the slice; per-child ADD/UPDATE carry one input; archive carries just the id.
 The child id arrives via an extra path segment (`path:"childId"` — never `path:"id"`).
 Write responses mirror the post-write aggregate WITH the minted child ids
-(application.md).
+(application.md) — for **ADD and UPDATE**, where the minted id is exactly what the caller
+needs back. **ARCHIVE/DELETE of one child answers `204` with no body**, like the root's own
+archive and delete: the entry is gone, and the only other thing in scope is the owner id
+the caller already put in the path. A `200` echoing it invites callers to look for content
+that is never there, and leaves one service answering `204` at `DELETE …/:id` and `200` at
+`DELETE …/:id/<children>/:childId` — same verb, same semantics, two contracts. Result and
+Response types for that verb are `results.None` / `responses.NoBody`, so don't declare a
+pair at all.
 
 ## Base-children (SharedBase) — the hazard + the routing sub-question
 

@@ -68,6 +68,12 @@ session." Never a gate: this run continues on the installed skills.
   handler or adapter raises is declared in `application/` or `infra/` on a different base
   and a sweep that only opens the domain files walks past it, leaving an orphan type and
   seven stale catalog keys (`${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md`) ·
+  **anything in `internal/domain/` that belongs to this entity but is not domain** — a
+  mechanism port, protocol constants, a helper parked there for import convenience
+  (`${CLAUDE_PLUGIN_ROOT}/shared/domain-membership.md`): it goes in the inventory like any
+  other file of the entity, and one that belongs to an entity that STAYS is reported to the
+  dev as a finding, not carried over silently and not fixed inside a removal run — leaving
+  it is how the next scaffold reads it as precedent ·
   TableSchema + children/sibling tables · commands/queries + DTOs + mappers · routes on
   every surface (REST, GraphQL, gRPC) · views it owns AND views of others it appears in
   (SharedBaseView roles, ComposedView legs, embeds) · **read joins ANOTHER entity
