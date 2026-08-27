@@ -67,7 +67,17 @@ external system` otherwise.
 | build/run commands | <tag set after this change — e.g. a first consumer adds the transport tag; `N/A — unchanged`> | `shared/boot-contract.md` (Build tags) |
 | bootstrap/wiring | <…> | <section> |
 | <handlers/middleware/proto/views/…> | <…> | <section> |
+| notification type(s) + the seven translation catalogs | <each type, the BASE it embeds and the layer it is declared in, its `Semantic()` — or `N/A — this capability raises no typed rejection`> | `status-mapping` · `shared/notification-bases.md` |
 | tests | <new branches covered> | — |
+
+**Every row names the file PATH it touches**, taken from `service-layout.html` at the pin —
+a row that names only an artifact kind ("the handler", "the notification") has not decided
+where it lands, and the default an agent reaches for is the wrong layer. A notification
+raised by a HANDLER is an application notification declared under `internal/application/`;
+it does not join the aggregate's `internal/domain/notifications.go`
+(`shared/notification-bases.md` is the owner of that decision, and of the question that
+rides along with it — a persisted table keeps its domain struct even with an empty
+`BuildRules`).
 
 Phase 2 edits ONLY these rows, in dependency order (config → wiring → artifacts →
 tests).

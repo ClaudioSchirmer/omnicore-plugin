@@ -789,6 +789,7 @@ only a genuinely missing docs file does.
 | When generating… | Read section(s) |
 |---|---|
 | rules / notifications / Old / actionName | rules-dsl · old-state · status-mapping |
+| WHICH LAYER declares a notification — an entity whose rules are not the aggregate's, a rejection authored by a handler or an adapter | `${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md` (owner) · status-mapping · service-layout |
 | value objects: raw vs enum vs **composite** (a value spanning several columns), auto-validation, EnumByValue, Ignore/Validate | value-objects |
 | decomposing a composite value object (`Composite`/`As`, the once rule, absence semantics) | table-schema · value-objects |
 | domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner — WHICH primitive answers the question) · custom-command-handler · service-to-service |

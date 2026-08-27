@@ -31,6 +31,16 @@ package owns the notifications ITS types emit. All three `notifications.go` and 
 translation catalogs are **registration sites** — existing files you APPEND to (like
 `wire.go`), never per-entity copies, never regenerated.
 
+**Three, and they hold only what the DOMAIN raises.** These files are not the service's
+notification drawer: a rejection authored by a hand-written handler or by an adapter is an
+application / infrastructure notification, embeds a different base and is declared in that
+layer — `${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md` is the owner of that decision.
+It also covers the entity this rule most often surfaces on: one whose rules are NOT the
+aggregate's (a persisted table with the logic in the handler). That entity is still a
+domain struct with a `TableSchema` — the write-backed schema is type-anchored — but its
+`BuildRules` is legitimately **empty**, so it contributes NOTHING to any of the three
+`notifications.go`. An empty `BuildRules` is a shape, not an omission to fill.
+
 ## The aggregate struct — decisions
 
 - Nullable ⇒ pointer; money = `int64` minor units, never float.
