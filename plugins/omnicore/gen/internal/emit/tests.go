@@ -925,6 +925,10 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
 	if len(m.Children) > 0 {
 		s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
+		// The removal test reads the collection back to prove the entry left it,
+		// and that reads it as the aggregate's own type. Pruned when no
+		// collection is edited one entry at a time.
+		s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
 	}
 	// entitySample renders a value object as vos.T("…"), so the package is needed
 	// the moment any field of the entity has one.
@@ -2779,9 +2783,14 @@ func emitChangeChildOpTest(s *src, m *ir.Model, c ir.Child) {
 }
 
 func emitRemoveChildOpTest(s *src, m *ir.Model, c ir.Child) {
-	s.Doc(fmt.Sprintf("Remove%sCommand takes the entry out and answers with the owner "+
-		"alone — the entry it names is gone, so there is nothing to project.", c.OpBase))
-	s.L("func TestRemove%sCommand_AppliesAndProjects(t *testing.T) {", c.OpBase)
+	s.Doc(
+		fmt.Sprintf("Remove%sCommand takes the named entry out of the collection.", c.OpBase),
+		"",
+		"It projects NOTHING — the endpoint answers 204 — so the only thing worth "+
+			"asserting is the effect: the entry the caller addressed is no longer "+
+			"among the current items. A command that silently matched nothing would "+
+			"still answer 204, and this is what tells the two apart.")
+	s.L("func TestRemove%sCommand_TakesTheEntryOut(t *testing.T) {", c.OpBase)
 	s.L("\tctx := &configuration.AppContext{}")
 	emitTestIdentity(s, m, "\t")
 	ownerFixture(s, m)
@@ -2796,12 +2805,13 @@ func emitRemoveChildOpTest(s *src, m *ir.Model, c ir.Child) {
 	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
 	s.L("\t}")
 	emitIdentityArrived(s, m, "\t")
-	s.L("\tout, err := cmd.FromEntity(ctx, e)")
-	s.L("\tif err != nil {")
-	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\tfor _, item := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+	s.L("\t\tif item.GetID().Value() == %s {", quote(seededEntryID))
+	s.L("\t\t\tt.Error(%s)", quote("the entry the command named is still in the collection"))
+	s.L("\t\t}")
 	s.L("\t}")
-	s.L("\tif out.%sID.Value() != %s {", m.Entity.Pascal, quote(fixtureOwnerID))
-	s.L("\t\tt.Error(%s)", quote("the result does not carry the owner id"))
+	s.L("\tif _, err := cmd.FromEntity(ctx, e); err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
 	s.L("\t}")
 	s.L("}")
 	s.Blank()
@@ -3104,7 +3114,7 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 			emitChangeChildResponseTest(s, m, c, op, fields)
 		}
 		if c.MountsRemove {
-			emitRemoveChildWireTest(s, m, c, op)
+			emitRemoveChildWireTest(s, c, op)
 		}
 	}
 }
@@ -3241,23 +3251,18 @@ func emitChangeChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fie
 	s.Blank()
 }
 
-// emitRemoveChildWireTest covers the pair of the verb that answers with the
-// owner alone.
-func emitRemoveChildWireTest(s *src, m *ir.Model, c ir.Child, op string) {
-	s.Doc(fmt.Sprintf("Remove%s answers with the owner, which is all it has to carry.", op))
-	s.L("func TestRemove%sRequestAndResponse(t *testing.T) {", op)
+// emitRemoveChildWireTest covers the REQUEST of the verb that takes one entry
+// out. There is no response half: the endpoint answers 204, so the only mapper
+// it has is the one that carries the addressed entry into the command — and
+// that one decides WHICH entry is taken away.
+func emitRemoveChildWireTest(s *src, c ir.Child, op string) {
+	s.Doc(fmt.Sprintf("Remove%sRequest carries the addressed entry into its command.", op))
+	s.L("func TestRemove%sRequest_NamesTheEntry(t *testing.T) {", op)
 	s.L("	r := Remove%sRequest{%sID: %s}", op, c.Name,
 		quote("01890000-0000-7000-8000-000000000000"))
 	s.L("	if r.ToCommand().%sID != %s {", c.Name,
 		quote("01890000-0000-7000-8000-000000000000"))
 	s.L("		t.Error(\"the entry id did not reach the command, so the wrong entry would be removed\")")
-	s.L("	}")
-	s.L("	ownerID := domain.NewRandomID()")
-	// The composite literal is PARENTHESISED: at the head of an `if`, Go reads
-	// the opening brace of `T{}` as the start of the block and refuses the file.
-	s.L("	if (Remove%sResponse{}).FromResult(commands.Remove%sResult{%sID: ownerID}).%sID != ownerID {",
-		op, op, m.Entity.Pascal, m.Entity.Pascal)
-	s.L("		t.Error(\"the owner id did not reach the response\")")
 	s.L("	}")
 	s.L("}")
 	s.Blank()

@@ -7,6 +7,106 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-08-26
+
+`0.44.0` gave the notification half of this question an owner. The same run had put a
+hashing port and two JWT claim names in `internal/domain` as well, and nothing in the
+plugin covered that half: no file said what the domain package may hold, so an agent
+filled the vacuum with three arguments — least resistance in the import graph, a
+similar-looking file already there, a consumer that did not exist yet. All three are now
+refuted by name, and the two cases decidable from the text are refused at write time
+instead of being left to discipline.
+
+Reported from a consumer service, with the agent's own account of why it kept happening.
+
+### Changed
+
+- **`omnicore-gen` now targets framework `v0.61.1`** (`compat.Supported`, and the vendored
+  host the golden gate builds). The bump is required, not cosmetic: `v0.61.1` is where
+  removing an aggregate child started following the child's OWN `DeletedAt` column, exactly
+  like the root's does. Before it, only a base-child could be hard-deleted — a root's own
+  collection declaring no archive column generated a `DELETE` route that answered **500 on
+  every call**, because the write reached the archive path with no column to stamp, and no
+  boot guard caught it. The generator emitted that route and `check` called the spec
+  generatable. Nothing in the emitters changed for it; the framework's rule is now the one
+  the generator was already documenting. A project on `v0.61.0` or older reads as **behind**
+  and is refused by default (`--force-unsupported` still overrides), which is the intended
+  answer: the removal path it would generate against is the broken one.
+  `scaffold-entity`'s `aggregate-children.md` carried the old rule as fact and is corrected,
+  with the pre-`v0.61.1` behaviour kept as a note for anyone on an older pin.
+
+### Added
+
+- **`shared/domain-membership.md` — what may live in `internal/domain/`, one owner.** The
+  CLOSED list of what the three domain packages hold; the two questions that settle any
+  case (is it expressed in THIS service's domain vocabulary? is the consumer domain code?);
+  the table of positive destinations for everything else — a mechanism contract goes beside
+  the handler that consumes it under `internal/application/` with its implementation in
+  `internal/infra/`, protocol vocabulary goes to the layer that speaks the protocol, a
+  closed set of domain values is an `EnumValueObject` under `vos/`; and the three
+  non-arguments, each refuted where an agent will read it. Routed from `implement`,
+  `scaffold-entity` (SKILL + `conventions/domain.md`), `evolve-entity`, `remove-entity`,
+  `doctor` and `omnicore-gen`.
+- **`hooks/` — the plugin's first hook, `guard-domain-membership.sh`.** A `PreToolUse`
+  guard on `Write|Edit|MultiEdit` that fires only for `internal/domain/**.go` in a module
+  that CONSUMES omnicore (never the framework's own repository, never a project without the
+  dependency, silent without `jq`). It refuses an import the domain layer may not have and
+  an interface at the domain root that is neither an `<Entity>Service` nor a repository port
+  over the aggregate — both are layer violations whatever the intent — and it ASKS the
+  developer about a string constant at the domain root, which can be flat domain vocabulary
+  the author meant. The refusal carries the destination table and the three non-arguments,
+  so a blocked write hands back the answer instead of a rule. It is a floor, not the rule:
+  it sees one file at a time and cannot answer the consumer question.
+- **A domain-membership sweep in `scaffold-entity`'s Level 1 pre-boot gate** — imports,
+  interfaces, string constants and the file inventory at the domain root, each hit
+  investigated against the two questions rather than auto-deleted.
+
+### Fixed
+
+- **Nothing said what `internal/domain` is FOR, so it became the shared package.** The
+  pin's `service-layout` describes what lives there but never closes the list, and no skill
+  carried the "and everything else goes here instead" half — so a type needed by two layers
+  landed in the one package both may import, which is the property the domain layer exists
+  to have. `implement` is where the pressure is highest (a capability arrives as a mechanism
+  several layers touch) and now routes every shared contract through the owner file before
+  declaring it.
+- **`remove-entity` preserved misplacements instead of reporting them.** A non-domain file
+  in the domain package was invisible to a sweep organised per layer; it is now inventoried
+  with the entity it belongs to, and one belonging to an entity that STAYS is surfaced to
+  the dev as a finding — leaving it is how the next scaffold reads it as precedent.
+- **`doctor` had no reading for an import cycle through `internal/domain`.** That cycle is
+  the architecture reporting a misplacement, and the reflex fix — a new shared package to
+  break it — entrenches the cause. It is now a Phase 2 signature that prescribes the move.
+- **`omnicore-gen` let a manual rule body drag a mechanism into the domain package.** The
+  generated stub lives in `internal/domain/`, so a hasher or client interface the body needs
+  was declared beside it; Step 4 now names that leak and points at `service.facts[]`, whose
+  port is the entity's `domain.Service` and whose body already lands in `internal/infra/`.
+- **`omnicore-gen`: a per-entry removal answered `200` with a body that carried nothing.**
+  The root's bodyless verbs answer `204` — the generator says why, in `byIDWriteOp` — and
+  the per-entry `remove` inherited `add`/`change`'s 200-plus-Result shape without inheriting
+  their reason. Its body held only the OWNER's id, which is the `:id` segment the caller had
+  just put in the path, so one generated service answered `204` at `DELETE /roles/:id` and
+  `200` at `DELETE /roles/:id/permissions/:pid`: same verb, same semantics, two contracts.
+  Both branches (the soft `PATCH …/archive` and the hard `DELETE`) now mount
+  `fwresults.None` + `fwresponses.NoBody` + `fiber.StatusNoContent`, and
+  `Remove<X>Result`/`Remove<X>Response` are no longer emitted at all — leaving them would be
+  what a hand-written route reaches for to mount the 200 again. `add` and `change` do not
+  move: their body IS how the caller learns the id the server minted. Nothing anchored the
+  old `200`, which is how it survived; `internal/emit/per_entry_remove_test.go` anchors the
+  `204` now. Reported from a generated service (`authcore`).
+- **`omnicore-gen` documented an unarchive it never mounts.** The per-entry archive's
+  OpenAPI text called the entry "reversible, which is why this is not a DELETE" — but
+  `children[].operations` is closed at `add | change | remove`, `unarchive` is a ROOT mode,
+  and an archived entry is not loaded into the aggregate, so nothing can address it
+  afterwards. The plugin's own `aggregate-children.md` had said "⚠️ NO per-child unarchive"
+  all along; the generator contradicted it, and the root already applies the rule that
+  "(reversible)" is a claim about ANOTHER endpoint and may only be made when that endpoint
+  exists. The description now states the row is kept, that removal is one-way, and that the
+  way back is a fresh `add` with a NEW entry id. The gen-report carried the same slip in two
+  places and is fixed with it: the root's Removal row said "archive (reversible)" whenever
+  an archive column existed rather than when `unarchive` is mounted, and the per-collection
+  row said nothing at all about what taking one entry out does.
+
 ## [0.44.0] — 2026-08-26
 
 Two endpoints came out of `implement` with their notifications in the domain layer, and

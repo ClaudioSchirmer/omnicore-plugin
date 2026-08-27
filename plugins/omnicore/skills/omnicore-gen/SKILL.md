@@ -595,10 +595,11 @@ Four things to get right, because they are the ones that cost a migration later:
   - Naming a ROOT field under `from:` is refused: the store would be asked for
     `<collection>.<rootField>`, which is not a path any document has. If the derivation is
     really about the record as a whole, it belongs in `read.computed`.
-  - **Read only, and one step more so than the root's.** The per-entry write verbs return
-    the entry through its own `<Entry>Response`, which carries what was STORED — a derived
-    value there would come from the entity the caller just sent, not from the document the
-    store answered with.
+  - **Read only, and one step more so than the root's.** The per-entry `add` and `change`
+    return the entry through its own `<Entry>Response`, which carries what was STORED — a
+    derived value there would come from the entity the caller just sent, not from the
+    document the store answered with. (`remove` answers 204 with no body at all, so a
+    derivation has nowhere to appear on that verb.)
   - A collection belonging to a shared identity (`ownedBy: base` under `reuse: true`)
     declares its derivations on the spec that OWNS the identity: the entry's read shape is
     written once, and both roles then serve the same derived field.
@@ -689,6 +690,22 @@ Four things to get right, because they are the ones that cost a migration later:
     about the swap verb when the key is absent, and stops warning once you have answered
     it. A verb you leave out leaves no trace: no route, no command, no wire type, no
     domain method, no generated test.
+  - **What each of the three ANSWERS, and why they differ.** `add` → **201** with the entry
+    as stored, `change` → **200** with the entry as stored: the body pays for itself,
+    because it is how the caller learns the id the server minted and what the store
+    actually holds. `remove` → **204, no body**, exactly like the root's own `archive` and
+    `delete`. It carries nothing because it has nothing to carry: the entry it named is
+    gone, and the only other thing in scope is the owner id the caller itself put in the
+    path. A generated service must not answer `204` at `DELETE /<entity>/:id` and `200` at
+    `DELETE /<entity>/:id/<collection>/:entryId` — same verb, same semantics, one contract.
+  - **A per-entry removal is ONE-WAY, whichever verb it mounts.** With `softRemove` the
+    route is `PATCH …/:entryId/archive` (the row lingers, stamped, and stops being
+    returned); without it, a real `DELETE`. Neither has an undo: `operations` is closed at
+    `add | change | remove`, `unarchive` is a ROOT mode, and an archived entry is not
+    loaded into the aggregate, so no command can address it afterwards. The generated
+    OpenAPI says so, and it must keep saying so — the way "back" is a fresh `add`, which
+    mints a **new** entry id. A collection whose entries genuinely need
+    archive⇄unarchive of their own is an entity, not a child.
   - **`children[].permissions` gates those verbs APART from the root's update.** By
     default a per-entry route requires whatever the root's update requires — editing one
     entry is editing the aggregate — and that default does not change: a collection that
@@ -1004,6 +1021,17 @@ external API, an upstream mirror). When it is local instead — a question this 
 answer that the DSL could not phrase — the primitive is still the hydration-free one:
 `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` owns that choice, and the generated
 declarative facts next to it are what the right shape looks like.
+
+**A manual body may need a MECHANISM — and that contract does not join the domain package.**
+This is where a hand-written item most often leaks: the rule stub needs something hashed,
+signed, fetched or timestamped, so a `…Hasher`/`…Client`/`Clock` interface gets declared
+next to it in `internal/domain/` because that is where the stub lives. The stub's location
+is not an argument — the file the generator emitted holds a rule, and the type you are
+adding holds a mechanism. `${CLAUDE_PLUGIN_ROOT}/shared/domain-membership.md` owns that
+decision (two questions, the destination table, the three non-arguments); if the rule
+genuinely needs a fact the aggregate cannot compute, the generator already has the shape for
+it — `service.facts[]`, whose port is the entity's `domain.Service` and whose body lands in
+`internal/infra/`.
 
 All six are the same bargain — the language declares the shape, a human writes the body —
 and they differ only in what an unwritten body does: a rule quietly enforces nothing, a

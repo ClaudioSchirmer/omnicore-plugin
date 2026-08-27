@@ -143,6 +143,7 @@ omnicore-plugin/                     # repo root = marketplace
         ├── bin/
         │   └── omnicore-gen         # on the session PATH — builds gen/ and execs it
         ├── gen/                     # omnicore-gen: the generator, as Go source
+        ├── hooks/                   # write-time guards (hooks.json + the scripts)
         ├── shared/
         └── skills/
             ├── scaffold-service/

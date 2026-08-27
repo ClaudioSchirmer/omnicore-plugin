@@ -41,6 +41,20 @@ domain struct with a `TableSchema` — the write-backed schema is type-anchored 
 `BuildRules` is legitimately **empty**, so it contributes NOTHING to any of the three
 `notifications.go`. An empty `BuildRules` is a shape, not an omission to fill.
 
+## And that list is CLOSED — what does not live here
+
+Those three packages hold aggregate roots, value objects, aggregate value objects, the
+notifications those raise, and the aggregate's own ports (its `domain.Service`, a repository
+port typed in the aggregate). **Nothing else**, however domain-shaped its name reads.
+`${CLAUDE_PLUGIN_ROOT}/shared/domain-membership.md` is the owner of that decision: it
+carries the two questions that settle any case (is it in THIS service's domain vocabulary?
+is the consumer domain code?), the table of where everything else goes, and the three
+arguments that keep producing the mistake and are not arguments — import-graph convenience,
+a similar-looking file already there, a consumer that does not exist yet. Read it before
+adding any type, port, interface or constant to `internal/domain/` that is not one of the
+five kinds above; the Level 1 gate greps for the residue and the plugin's write-time guard
+refuses the decidable cases outright.
+
 ## The aggregate struct — decisions
 
 - Nullable ⇒ pointer; money = `int64` minor units, never float.

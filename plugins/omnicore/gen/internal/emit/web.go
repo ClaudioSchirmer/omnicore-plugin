@@ -725,7 +725,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			ops = append(ops, perChildOp{
 				verb: "Add", method: "fiber.MethodPost", path: "/:id/" + seg,
 				request: "Add" + opName + "Request", response: "Add" + opName + "Response",
-				result: "Add" + opName + "Result", status: "fiber.StatusCreated",
+				result: "commands.Add" + opName + "Result", status: "fiber.StatusCreated",
 				summary: fmt.Sprintf("Add one %s to %s %s", c.Name, articleFor(human), human),
 				doc: fmt.Sprintf("Adds ONE entry to the %s collection of an existing %s, "+
 					"in the owner's transaction. 404 when the owner is not there. The "+
@@ -738,7 +738,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			ops = append(ops, perChildOp{
 				verb: "Change", method: "fiber.MethodPut", path: "/:id/" + seg + "/:" + idParam,
 				request: "Change" + opName + "Request", response: "Change" + opName + "Response",
-				result: "Change" + opName + "Result", status: "fiber.StatusOK",
+				result: "commands.Change" + opName + "Result", status: "fiber.StatusOK",
 				summary: fmt.Sprintf("Replace one %s of %s %s", c.Name, articleFor(human), human),
 				doc: fmt.Sprintf("Full replacement of ONE entry, keeping its id — the row " +
 					"is updated rather than removed and re-added, so the audit trail reads " +
@@ -755,8 +755,15 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			sv := "s" + op.verb + opName
 			s.L("\t%s, %s := fwweb.CommandWithBodyIDSpec(d.Pipeline,", hv, sv)
 			s.L("\t\trequests.%s{},", op.request)
-			s.L("\t\trequests.%s{}.FromResult,", op.response)
-			s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.%s, commands.%s]{",
+			// A bodyless verb has no Response type to project through: it answers
+			// 204, and the framework's own NoBody is what renders the envelope
+			// without a "data" field. Naming a projection here would emit one.
+			if op.bodyless {
+				s.L("\t\tfwresponses.NoBody,")
+			} else {
+				s.L("\t\trequests.%s{}.FromResult,", op.response)
+			}
+			s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.%s, %s]{",
 				entity, op.verb+opName+"Command", op.result)
 			s.L("\t\t\tRepo: repo,%s", serviceField(m))
 			s.L("\t\t}, %s)", op.status)
@@ -792,42 +799,68 @@ func lowerFirst(s string) string {
 
 // removeOp picks the VERB that tells the truth about what removal does here.
 //
-// A child that declares softRemove keeps its row and its archive stamp: taking
-// an entry out is reversible, and the framework performs it as an archive of
-// that item. Mounting it as DELETE would promise an irreversible purge the
-// endpoint does not perform — and DELETE is the one verb a caller is entitled
-// to read as permanent. A child WITHOUT an archive column really is deleted, so
-// there DELETE is the honest spelling.
+// A child that declares softRemove keeps its row and its archive stamp, so the
+// entry stops being returned instead of being purged. Mounting that as DELETE
+// would promise an irreversible purge the endpoint does not perform — and
+// DELETE is the one verb a caller is entitled to read as permanent. A child
+// WITHOUT an archive column really is deleted, so there DELETE is the honest
+// spelling.
 //
-// The two also differ in what the caller can do next: an archived entry can be
-// brought back, and nothing about a purged one can.
+// What the two do NOT differ in is what the caller can do next. There is no
+// per-entry unarchive: children[].operations is closed at add|change|remove,
+// unarchive is a ROOT mode, and the loader gates archived rows out of the
+// aggregate, so no command can address an archived entry to bring it back. The
+// archive branch therefore says the row is kept, and says plainly that the way
+// back is a fresh add with a NEW id — the same discipline the root applies at
+// ir.byIDWriteOp's caller, where "(reversible)" is only claimed when the
+// unarchive endpoint is actually mounted.
+//
+// Both branches are BODYLESS. The entry is named by the path, it is gone when
+// the verb answers, and the only thing left to put in a body is the owner id
+// the caller itself sent — so they answer 204, exactly like the root's own
+// archive/delete. add and change are the opposite case and keep their 200/201:
+// they answer with the entry AS STORED, which is how the caller learns the id
+// the server minted.
 func removeOp(c ir.Child, entity, seg, idParam, opName string) perChildOp {
 	if c.ArchivedAt != "" {
 		return perChildOp{
 			verb: "Remove", method: "fiber.MethodPatch",
-			path:    "/:id/" + seg + "/:" + idParam + "/archive",
-			request: "Remove" + opName + "Request", response: "Remove" + opName + "Response",
-			result: "Remove" + opName + "Result", status: "fiber.StatusOK",
-			summary: fmt.Sprintf("Archive one %s of %s %s", c.Name, articleFor(entity), entity),
+			path:     "/:id/" + seg + "/:" + idParam + "/archive",
+			request:  "Remove" + opName + "Request",
+			result:   "fwresults.None",
+			status:   "fiber.StatusNoContent",
+			bodyless: true,
+			summary:  fmt.Sprintf("Archive one %s of %s %s", c.Name, articleFor(entity), entity),
 			doc: "Archives ONE entry: the row stays, stamped, and stops being " +
-				"returned — reversible, which is why this is not a DELETE. 404 when the " +
-				"owner is not there, and 404 when it holds no entry with that id.",
+				"returned — which is why this is not a DELETE. There is no per-entry " +
+				"unarchive: an entry taken out this way does not come back, and adding " +
+				"the same value again mints a NEW entry with a new id. Answers 204 with " +
+				"no body. 404 when the owner is not there, and 404 when it holds no " +
+				"entry with that id.",
 		}
 	}
 	return perChildOp{
 		verb: "Remove", method: "fiber.MethodDelete",
-		path:    "/:id/" + seg + "/:" + idParam,
-		request: "Remove" + opName + "Request", response: "Remove" + opName + "Response",
-		result: "Remove" + opName + "Result", status: "fiber.StatusOK",
-		summary: fmt.Sprintf("Remove one %s from %s %s", c.Name, articleFor(entity), entity),
+		path:     "/:id/" + seg + "/:" + idParam,
+		request:  "Remove" + opName + "Request",
+		result:   "fwresults.None",
+		status:   "fiber.StatusNoContent",
+		bodyless: true,
+		summary:  fmt.Sprintf("Remove one %s from %s %s", c.Name, articleFor(entity), entity),
 		doc: "Removes ONE entry for good: this child declares no archive column, " +
-			"so there is nothing to bring back. 404 when the owner is not there, and " +
-			"404 when it holds no entry with that id.",
+			"so there is nothing to bring back. Answers 204 with no body. 404 when the " +
+			"owner is not there, and 404 when it holds no entry with that id.",
 	}
 }
 
 // perChildOp is one mounted per-entry verb, fully decided.
+//
+// result is the Go type the handler projects — QUALIFIED, because a bodyless
+// verb's is the framework's fwresults.None and the others' live in the service's
+// own commands package. response is empty exactly when bodyless is set: there is
+// no wire type to name.
 type perChildOp struct {
 	verb, method, path, request, response, result, summary, doc string
 	status                                                      string
+	bodyless                                                    bool
 }

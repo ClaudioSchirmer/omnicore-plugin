@@ -3,7 +3,8 @@
 The Claude Code plugin for the omnicore framework: 16 `/omnicore:*` skills under
 `plugins/omnicore/skills/`, plus **omnicore-gen** — the spec-driven code
 generator — as Go source under `plugins/omnicore/gen/`, launched by
-`plugins/omnicore/bin/omnicore-gen` (on the session PATH).
+`plugins/omnicore/bin/omnicore-gen` (on the session PATH), plus the write-time
+guards under `plugins/omnicore/hooks/`.
 
 Everything the plugin needs lives UNDER `plugins/omnicore/`. That is Claude Code's
 rule, not a preference: a path that traverses outside the plugin root stops
@@ -37,6 +38,32 @@ with it. What to update, and which parts the build already catches:
 
 The last two rows are the ones that rot, precisely because nothing fails when
 they do. Treat them as part of the change, not as follow-up.
+
+## Hooks — the floor under a rule, never the rule
+
+`plugins/omnicore/hooks/` holds `hooks.json` and the guards it runs. A hook goes here for
+one reason: **a rule that nothing enforces is a rule that rots** — the "❌ discipline only"
+rows of the table above are the ones this repo has watched decay. A hook does not replace
+the skill's knowledge; it catches the cases decidable from the text of a single tool call
+and hands the answer back.
+
+Three constraints, all of them learned the expensive way:
+
+- **Scope hard, then scope again.** A guard fires only for the paths it owns AND only in a
+  module that consumes omnicore — never the framework's own repository, never an unrelated
+  project. It exits 0 silently when a dependency it needs (`jq`) is missing. A guard that
+  misfires once gets the whole plugin's hooks disabled.
+- **Refuse what is certain, ASK what is a judgment.** Exit 2 is for a violation that holds
+  whatever the author intended; anything that could legitimately be what the author meant is
+  a `permissionDecision: "ask"` so the developer decides. Guessing on the developer's behalf
+  is how a guard becomes an obstacle.
+- **A refusal carries the destination, not just the rule.** The message says where the thing
+  goes instead and names the counter-arguments; blocking without an answer only produces a
+  detour.
+- **The guard and its owner file move together.** A hook enforcing a decision references the
+  `shared/*.md` that owns it; changing one without the other leaves the message and the rule
+  telling different stories. Prove a guard against the reference service before shipping it
+  — replay its real files through the hook and require ZERO refusals.
 
 ## Cutting a release — the number comes from what is PUBLISHED
 

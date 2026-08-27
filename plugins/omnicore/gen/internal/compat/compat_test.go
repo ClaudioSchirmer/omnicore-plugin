@@ -7,7 +7,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.60.0" {
+	if Supported != "v0.61.1" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,10 +18,15 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.60.0", false, Exact, false},
-		{"same line, later patch", "v0.60.9", false, Exact, false},
-		{"framework moved ahead", "v0.61.0", false, Ahead, false},
-		{"project is one line older", "v0.59.9", false, Behind, true},
+		{"the supported line", "v0.61.1", false, Exact, false},
+		{"same line, later patch", "v0.61.9", false, Exact, false},
+		// Same minor, EARLIER patch. It reads Behind and blocks, which is the
+		// intended answer whenever the supported line moves by a patch: v0.61.1
+		// is where the removal of a child without DeletedAt stopped failing, and
+		// a project still on v0.61.0 does not have it.
+		{"same line, earlier patch", "v0.61.0", false, Behind, true},
+		{"framework moved ahead", "v0.62.0", false, Ahead, false},
+		{"project is one line older", "v0.60.9", false, Behind, true},
 		{"project is older", "v0.49.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},
 		{"devel", "(devel)", false, Unknown, false},
