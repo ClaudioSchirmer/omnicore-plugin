@@ -543,6 +543,30 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 	s.L("}")
 	s.Blank()
 
+	// An entity with no insert mode has no "a valid one is accepted" baseline to
+	// assert: the framework refuses to build an Insertable from it AT ALL, which
+	// is the correct answer and the opposite of what that test claims. The
+	// read-only shape is worth a case of its own, though — it is a property of
+	// the aggregate, not of whichever surface happens not to mount a write.
+	if m.Op("insert") == nil {
+		s.Doc(
+			fmt.Sprintf("%s accepts no insert, and the domain is where that holds.", m.Entity.Pascal),
+			"",
+			"The entity declares no insert mode, so the framework refuses to build an "+
+				"Insertable from it — before any rule runs. A read-only entity that lost "+
+				"this guarantee would still look right from the routes: there would simply "+
+				"be no endpoint, and the first hand-written one would write.")
+		s.L("func TestNo%sCanBeInserted(t *testing.T) {", m.Entity.Pascal)
+		s.L("\tif _, err := domain.GetInsertable(valid%s(), %s, %s); err == nil {",
+			m.Entity.Pascal, serviceArg(m), quote(insertAction(m)))
+		s.L("\t\tt.Fatal(%s)",
+			quote("an insert was accepted on an entity whose modes do not include one"))
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
+		return
+	}
+
 	s.Doc(fmt.Sprintf("A valid %s must be accepted — otherwise every negative case "+
 		"below would pass for the wrong reason.", m.Entity.Pascal))
 	s.L("func TestValid%sIsAccepted(t *testing.T) {", m.Entity.Pascal)

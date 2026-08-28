@@ -1,0 +1,68 @@
+# Eixos: SÓ GraphQL, com uma coleção per-child. Nenhuma rota HTTP existe, e os
+# três verbos por entrada respondem mesmo assim.
+#
+# É a forma que o gerador perdia inteira: os verbos da coleção eram montados
+# dentro do ramo REST, então num serviço só-GraphQL eles eram gerados e
+# inalcançáveis — um consumidor podia criar o registro e nunca conceder nada a
+# ele. Este caso compila as duas metades que não têm gêmeo em REST: o Request do
+# `change`/`remove` com o id da entrada no input (o decodificador do framework
+# ignora tag `path:`) e o payload do `remove`, que existe porque um campo
+# GraphQL precisa resolver para algo onde REST responde 204.
+specVersion: 1
+entity: PerfilGQ
+plural: PerfisGQ
+language: pt-BR
+storage:
+  kind: flat
+  table: perfis_gq
+  description: Perfis de acesso servidos apenas pelo schema.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Chave, type: string, column: chave, length: 40, livesOn: root, example: operador, description: Chave do perfil.}
+  - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Operador, description: Nome exibido.}
+children:
+  - name: PerfilGQPermissao
+    plural: Permissoes
+    table: perfil_gq_permissoes
+    parentColumn: perfil_gq_id
+    description: As permissões que o perfil concede.
+    ownedBy: root
+    editStrategy: per-child
+    duplicateNotification: PermissaoJaConcedidaNotification
+    businessIdentity: [PermissaoID]
+    softRemove: true
+    archivedAt: deleted_at
+    # Sem bloco surfaces: a coleção SEGUE a entidade, que é o default e o ponto
+    # inteiro da mudança — ligar o schema já traz os três verbos junto.
+    permissions: {add: "perfilgq:conceder", remove: "perfilgq:conceder"}
+    fields:
+      - {name: PermissaoID, type: id, column: permissao_id, example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31, description: A permissão concedida.}
+      - {name: Observacao, type: string, column: observacao, length: 200, nullable: true, example: temporária, description: "Por que foi concedida, quando registrado."}
+    rules:
+      list:
+        - {id: permissao-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [PermissaoID], notification: RequiredFieldNotification}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+delete: {root: soft}
+rules:
+  list:
+    - {id: chave-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Chave], notification: RequiredFieldNotification}
+notifications:
+  - name: PermissaoJaConcedidaNotification
+    semantic: conflict
+    description: A permissão já consta no perfil.
+    text: {ptbr: "Essa permissao ja consta no perfil.", eng: "That permission is already in the profile.", esp: "Ese permiso ya consta en el perfil.", fra: "Cette permission figure deja dans le profil.", deu: "Diese Berechtigung ist bereits im Profil.", ita: "Questo permesso e gia nel profilo.", nld: "Die permissie staat al in het profiel."}
+read:
+  backing: relational
+  view: {name: perfis_gq}
+  byId: true
+  byParams:
+    filters:
+      - {field: Chave, ops: [eq]}
+    controls: {pagination: true, fields: true, onlyTotal: true, includeArchived: true}
+surfaces:
+  graphql: {enabled: true}
+authz:
+  resource: perfilgq
+  dataAccess: anyone-with-permission
+  permissions: {insert: "perfilgq:escrever", update: "perfilgq:escrever", patch: "perfilgq:escrever", archive: "perfilgq:arquivar", unarchive: "perfilgq:arquivar", read: "perfilgq:ler"}

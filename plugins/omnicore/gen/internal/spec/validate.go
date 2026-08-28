@@ -3945,6 +3945,7 @@ func validateSurfaces(s *Spec, ps *Problems) {
 		}
 		validateGraphQLExposesSomething(s, ps)
 	}
+	warnAboutModesOnNoSurface(s, ps)
 	validateChildSurfaces(s, ps)
 	if su.Exports != nil {
 		if s.Read.ByParams == nil {
@@ -3970,6 +3971,55 @@ func validateSurfaces(s *Spec, ps *Problems) {
 				"the spreadsheet needs a sheet name", "e.g. Students")
 		}
 	}
+}
+
+// warnAboutModesOnNoSurface says out loud when a mode is generated and routed
+// nowhere.
+//
+// A WARNING and not a blocker, and the difference is a legitimate shape: the
+// command, its rules and its DTOs still exist, and a hand-written route may
+// mount them — that is what a `source: manual` field is for. What must not
+// happen is the silence. `modes: [insert, update]` under a surface that carries
+// neither used to read exactly like a working API.
+//
+// The collection verbs ARE a blocker instead, because there the fix costs
+// nothing: children[].operations drops the verb outright, and reaching that
+// state takes an explicit narrowing rather than an omission.
+func warnAboutModesOnNoSurface(s *Spec, ps *Problems) {
+	if s.Surfaces.REST {
+		return
+	}
+	gqlOn := s.Surfaces.GraphQL != nil && s.Surfaces.GraphQL.Enabled
+	for _, m := range s.Modes {
+		if m == "display" {
+			// The reads: a display mode reaches the schema through the queries,
+			// and the exports are a read surface of their own.
+			if gqlOn || s.Surfaces.Exports != nil {
+				continue
+			}
+			ps.WarnFix("modes",
+				"display is declared and no surface serves a read: no REST routes, no schema, no export",
+				"turn a surface on, or drop display")
+			continue
+		}
+		if gqlOn && exposedAsMutation(s, m) {
+			continue
+		}
+		ps.WarnFix("modes",
+			fmt.Sprintf("the %s mode is generated but reaches no surface", m),
+			fmt.Sprintf("expose it (surfaces.rest, or surfaces.graphql.mutations), drop %q from modes, "+
+				"or ignore this if a hand-written route mounts the command", m))
+	}
+}
+
+// exposedAsMutation is whether one mode is a mutation, reading the same default
+// the IR resolves: an absent list narrows nothing.
+func exposedAsMutation(s *Spec, mode string) bool {
+	g := s.Surfaces.GraphQL
+	if len(g.Mutations) == 0 {
+		return GraphQLMutations.Has(mode)
+	}
+	return contains(g.Mutations, mode)
 }
 
 // validateGraphQLExposesSomething refuses a surface that is on and empty.

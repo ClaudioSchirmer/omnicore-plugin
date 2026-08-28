@@ -70,6 +70,26 @@ the one real constraint (the input decoder skips a `path`-tagged field) already 
   `remove` requests carry the entry id into the command, and the removal's payload
   acknowledges — the one projection in a collection's wire types that is not the generic
   mapper, so the one that has to be asserted rather than assumed.
+- **`check` warns when a MODE reaches no surface** — a warning and not a blocker, because
+  the command and its rules still exist and a hand-written route may mount them. The
+  collection verbs stay a blocker: there the fix costs nothing, since
+  `children[].operations` drops the verb outright and reaching that state takes an
+  explicit narrowing rather than an omission.
+- **Two golden cases for the shapes that had none**: an exports-only entity and a
+  GraphQL-only one with a per-child collection. Both are generated, built, vetted and
+  their generated tests run — the second is the exact shape that used to lose its
+  collection verbs, so it is now a lane rather than an argument.
+
+### Fixed
+
+- **A read-only entity generated a domain test that could not pass.** `modes: [display]`
+  still emitted `TestValid<Entity>IsAccepted`, which calls `GetInsertable` — and the
+  framework refuses to build an Insertable for an entity with no insert mode, correctly
+  and before any rule runs. The tree failed `go test` on the day it was generated. It now
+  asserts the opposite, which is the property worth holding: the read-only shape belongs
+  to the aggregate, not to whichever surface happens not to mount a write today. The bug
+  predates this release and was never hit because a display-only entity had no reason to
+  exist until the exports became a surface of their own.
 
 ## [0.46.0] — 2026-08-28
 

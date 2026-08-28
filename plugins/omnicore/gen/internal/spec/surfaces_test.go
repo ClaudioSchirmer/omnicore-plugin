@@ -229,3 +229,32 @@ func TestChildSurfaceRefusals(t *testing.T) {
 		})
 	}
 }
+
+// A mode that is generated and routed nowhere is a WARNING, not a refusal: the
+// command and its rules still exist, and a hand-written route may mount them.
+// What it must not be is silent — `mutations: [insert]` on a GraphQL-only entity
+// with four modes reads exactly like a working API.
+func TestModesOnNoSurfaceAreWarnedAbout(t *testing.T) {
+	ps := surfaceProblems(t, "atomic-replace", "",
+		"surfaces:\n  graphql: {enabled: true, mutations: [insert]}\n")
+	if ps.HasBlockers() {
+		t.Fatalf("a deliberate narrowing was refused instead of warned about:\n%v", ps.Error())
+	}
+	for _, verb := range []string{"update", "archive"} {
+		if warningSaying(ps, "the "+verb+" mode is generated but reaches no surface") == "" {
+			t.Errorf("nothing says the %s mode answers nowhere:\n%v", verb, ps.Items())
+		}
+	}
+	if warningSaying(ps, "the insert mode") != "" {
+		t.Error("the mode that IS exposed was warned about")
+	}
+}
+
+// The warning is about surfaces, not about modes: an entity on REST exposes
+// every verb it mounts, so there is nothing to say.
+func TestAFullSurfaceWarnsAboutNoMode(t *testing.T) {
+	ps := surfaceProblems(t, "atomic-replace", "", "surfaces: {rest: true}\n")
+	if warningSaying(ps, "reaches no surface") != "" {
+		t.Errorf("a REST entity was warned about its own verbs:\n%v", ps.Items())
+	}
+}
