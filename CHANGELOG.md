@@ -7,6 +7,31 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-08-28
+
+Every reload since `0.45.0` printed a load failure for the plugin's own hooks:
+
+    Failed to load hooks from …/0.47.0/hooks/hooks.json: Duplicate hooks file detected:
+    ./hooks/hooks.json resolves to already-loaded file …
+
+`0.45.0` shipped the write-time guards and, along with them, a `"hooks":
+"./hooks/hooks.json"` entry in the plugin manifest. That entry is what Claude Code
+refuses: `hooks/hooks.json` is the conventional path and is loaded automatically, so
+`manifest.hooks` exists to name ADDITIONAL hook files. Pointing it at the standard one
+resolves the same absolute path twice and the second load aborts.
+
+The guard itself was never off — the automatic load had already registered it, and only
+the redundant second pass failed — so the visible damage was three releases of noise on
+every reload, not an unenforced rule. Noise on startup is how a real failure goes unread,
+which is why it is a release of its own.
+
+### Fixed
+
+- **The plugin manifest no longer declares `hooks`.** `plugins/omnicore/.claude-plugin/plugin.json`
+  dropped the `"hooks": "./hooks/hooks.json"` line; `plugins/omnicore/hooks/hooks.json` is
+  unchanged and keeps being picked up by convention. A future hook file that is NOT at that
+  path is what the manifest key is for.
+
 ## [0.47.0] — 2026-08-28
 
 A consumer service reported a GraphQL schema that could create a role and never grant it
