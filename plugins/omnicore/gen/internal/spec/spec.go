@@ -259,9 +259,13 @@ type Field struct {
 	// which answers something different — 403 to a caller who lacks a permission,
 	// and the field to everyone who has it. This one is not about who is asking.
 	//
-	// Refused on a runtime-only field, which is in no response to begin with, and
-	// on a field read.fieldRestrict also names: a field nobody receives cannot be
-	// the one some callers may.
+	// Refused on a runtime-only field, and on a field read.fieldRestrict also
+	// names: a field nobody receives cannot be the one some callers may.
+	//
+	// A runtime field is out of every response by DEFAULT — there is no row for a
+	// read to render — so hiding it removes nothing. The direction that field can
+	// travel is the opposite one, and it has its own key: renderIn puts a
+	// source: manual value into the response of the write verb that minted it.
 	Hidden bool `yaml:"hidden"`
 	// Runtime marks the field as runtime-only: it reaches the entity and the
 	// rules read it, and no column ever holds it. WHERE its value comes from is
@@ -378,6 +382,59 @@ type Field struct {
 	// down there, dispatched into the same IfUpdate clause, so `update` covers
 	// both write shapes and there is no third value to write.
 	Modes []string `yaml:"modes"`
+	// RenderIn names the write verbs whose RESPONSE renders a source: manual
+	// runtime field. It is the output-side counterpart of modes, and the whole
+	// answer to "the server minted this value and the caller has to receive it
+	// exactly once".
+	//
+	// Without it the language could declare a machine credential and not hand it
+	// over. A client secret is minted from crypto/rand inside the insert rules,
+	// hashed, and only the hash is stored: no column, no outbox payload, no audit
+	// event, by design. The insert then DISCARDED the plaintext, because the
+	// Result and the Response are built from the persisted fields — so a row was
+	// born with a credential nobody could ever learn, and the only way out was a
+	// hand-written rotation endpoint or an `adopt` that freezes two owned files
+	// forever in exchange for one field.
+	//
+	// What it emits, and nothing else: the write Result gains the field, and its
+	// FromEntity reads it off the ENTITY after the write, next to the persisted
+	// projections; the write Response gains it too, so the generic Result→Response
+	// pair still lines up at boot. No column, no migration, no request schema, no
+	// read DTO, no `?fields=` vocabulary, no export column, no audit event and no
+	// sync payload — the value was never on the row, and this key does not put it
+	// there.
+	//
+	// The value set is the one `modes` uses, deliberately: `update` covers PUT and
+	// PATCH, because a key that spells the same axis differently on its two sides
+	// is the key nobody reads correctly. A verb the entity does not declare is
+	// refused — a response that never renders is not a promise this language will
+	// print in a report.
+	//
+	// It is accepted on source: manual and REFUSED on every other source, which is
+	// not a limitation but the point:
+	//
+	//   - `body` is a value the CALLER sent, and echoing it back hands someone
+	//     their own password confirmation from a surface nobody expected to carry
+	//     one. The generator has always refused that; a key that reopened it by
+	//     spelling would be the same leak with permission.
+	//   - the identity sources — claim, subject, tenant, permission, super-admin,
+	//     present — are facts the caller already holds. Rendering them is
+	//     reflecting the token back at whoever presented it.
+	//
+	// So it is refused on a persisted field as well: that side is already served
+	// by `hidden` (nobody receives it) and `redact` (the copies carry a mask), and
+	// a persisted field is in the response by default anyway.
+	//
+	// Two consequences the docs say out loud rather than letting a reader
+	// discover:
+	//
+	//   - a GraphQL mutation that reuses the same Response renders the field too.
+	//     One Response type serves both surfaces; there is no third shape.
+	//   - nothing this generator writes PUTS a value there — that is what
+	//     source: manual means. A rules.manual entry scoped to the verb has to
+	//     mint it, and the report asks for it by name. Unfilled, the field renders
+	//     its zero value and no error says so.
+	RenderIn []string `yaml:"renderIn"`
 	// AssignedFrom says the SERVER fills this persisted field, so the client
 	// never sends it: it is absent from every write request, every command and
 	// the OpenAPI request schema.

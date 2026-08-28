@@ -56,6 +56,7 @@ const (
 	CapBodyRuntime      Capability = "body-sourced runtime fields (a value the caller sends that reaches the entity for a rule to check and never a column — a password confirmation)"
 	CapBypassMaySet     Capability = "a server-assigned scope that yields to the bypass (the operator crossing the row scope states which tenant a new row belongs to)"
 	CapManualRuntime    Capability = "manual runtime fields (the aggregate carries it, this generator fills it from nowhere, and no write DTO, command or OpenAPI schema mentions it — for a hand-written operation sharing a mode with a generated verb)"
+	CapRenderedRuntime  Capability = "a runtime value rendered in the response of the write that minted it (a machine credential the caller receives once, whose hash is all the row keeps)"
 	CapIdentityRuntime  Capability = "identity-sourced runtime fields (the caller's subject, tenant, a permission they hold, the super-admin grant or their mere presence, carried onto the entity so a rule can read it without a ctx the domain does not have)"
 )
 
@@ -102,6 +103,7 @@ var implemented = map[Capability]bool{
 	CapBypassMaySet:     true,
 	CapIdentityRuntime:  true,
 	CapManualRuntime:    true,
+	CapRenderedRuntime:  true,
 }
 
 // phaseOf names the phase that will deliver a capability, so a refusal tells the
@@ -125,7 +127,7 @@ func AllCapabilities() []Capability {
 		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
 		CapRedactedField, CapBodyRuntime, CapBypassMaySet, CapIdentityRuntime,
-		CapManualRuntime,
+		CapManualRuntime, CapRenderedRuntime,
 	}
 }
 
@@ -176,6 +178,13 @@ func CheckCoverage(s *Spec) *Problems {
 		if FromManual(f) {
 			uses(CapManualRuntime, fmt.Sprintf("fields[%d].source", i),
 				"a field the aggregate carries and no generated write fills")
+			break
+		}
+	}
+	for i, f := range s.Fields {
+		if len(f.RenderIn) > 0 {
+			uses(CapRenderedRuntime, fmt.Sprintf("fields[%d].renderIn", i),
+				"a runtime value rendered in a write verb's response")
 			break
 		}
 	}

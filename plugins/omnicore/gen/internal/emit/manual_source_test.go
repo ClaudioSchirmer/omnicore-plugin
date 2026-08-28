@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -26,7 +27,11 @@ func TestAManualFieldIsOnTheAggregateAndNowhereElse(t *testing.T) {
 		}
 		switch {
 		case strings.HasSuffix(path, "domain/conta.go"):
-			onAggregate = strings.Contains(src, "SenhaAtual vos.Senha")
+			// Matched with the spacing left open: gofmt aligns a struct's field
+			// types on the longest NAME in the block, so a literal " vos.Senha"
+			// stops matching the day a neighbouring field gets a longer name —
+			// which says nothing about the property under test.
+			onAggregate = regexp.MustCompile(`SenhaAtual\s+vos\.Senha`).MatchString(src)
 		case strings.Contains(path, "web/requests"),
 			strings.Contains(path, "application/commands"),
 			strings.Contains(path, "infra/schemas"):

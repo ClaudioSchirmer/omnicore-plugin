@@ -109,6 +109,15 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	for _, f := range m.ResponseFields() {
 		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType, quote(jsonTag(f, false)), quote(f.Example))
 	}
+	// The runtime values this verb hands over — declared with renderIn, minted by
+	// a rule the author wrote, and on no row. This response is the only surface
+	// that carries them: no read renders them, because there is nothing stored to
+	// render. A GraphQL mutation reusing this Response renders them too, which is
+	// one shape by design and not an oversight.
+	for _, f := range m.RenderedRuntimeFields(ir.GateModeOf(op.Verb)) {
+		s.L("\t%s %s `json:%s example:%s`", f.Name, f.GoType,
+			quote(jsonTag(f, false)), quote(f.Example))
+	}
 	// The derived fields this verb can answer. A caller that just created the
 	// record gets the same rendering a read would give it, instead of having to
 	// fetch it again to see what it made.

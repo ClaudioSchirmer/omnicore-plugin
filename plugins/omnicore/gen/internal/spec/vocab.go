@@ -312,6 +312,14 @@ func Vocabularies() []Vocabulary {
 			"which write verbs carry a source: body field. Omitted = every write verb " +
 				"the entity has. `update` covers both PUT and PATCH: the rule gates cannot " +
 				"tell them apart, so neither does this key."},
+		{"fields[].renderIn", FieldModes,
+			"which write verbs RENDER a source: manual field in their response — the " +
+				"output-side counterpart of modes, for a value the server minted and the " +
+				"caller receives exactly once (a machine credential whose hash is all that " +
+				"is stored). Same two values, and for the same reason: `update` covers PUT " +
+				"and PATCH. Omitted = no verb renders it, which is what a runtime field " +
+				"does by default; there is no \"every verb\" reading, because a value " +
+				"minted on insert is not a value an update has in hand."},
 		{"redact.inSync.kind", RedactKinds,
 			"how the field appears in the outbox payload — and so on the topic, in every " +
 				"consuming service, in both failure ledgers and in the projected document; " +

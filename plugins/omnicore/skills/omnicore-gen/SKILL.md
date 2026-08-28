@@ -432,6 +432,40 @@ Four things to get right, because they are the ones that cost a migration later:
   - **Refused**: `claim:`, `permission:`, `modes:` (each says the generator brings the
     value, and the declaration says it does not), and a composite `vo:` (its parts are what
     the schema decomposes, and there are no columns to decompose into).
+  - **`renderIn: [insert]` — the way the value gets back OUT.** It is the output-side
+    counterpart of `modes`: `modes` names the write verbs whose BODY carries a value the
+    caller sends, `renderIn` names the write verbs whose RESPONSE carries a value the
+    server minted. The write `Result` gains the field and its `FromEntity` reads it off
+    the ENTITY after the write — the only place it exists — and the write `Response`
+    renders it, so the generic Result→Response pair still lines up at boot.
+    - **The case it exists for**: a machine credential. A client secret is drawn from
+      `crypto/rand` inside the insert rules, hashed, and only the hash is stored — no
+      column, no outbox payload, no audit event, by design. Without this key the insert
+      minted the secret and DISCARDED it: the row was born with a credential nobody could
+      ever learn, and the only ways out were a hand-written rotation endpoint or an
+      `adopt` that freezes two `owned` files forever in exchange for one field.
+    - **Nothing else changes.** No column, no migration, no request schema, no read DTO,
+      no `?fields=` vocabulary (naming it is still a typed 400), no export column, no
+      audit event, no sync payload. The value was never on the row and this does not put
+      it there.
+    - **A GraphQL mutation reusing the same Response renders it too.** One Response type
+      serves both surfaces; there is no third shape, and this is stated rather than left
+      to be discovered.
+    - **Only on `source: manual`.** On `source: body` it is refused because that value is
+      the CALLER's — answering with it hands someone their own password confirmation back
+      — and on the identity sources because those are facts the caller already holds, so
+      rendering one reflects the token at whoever presented it. On a persisted field it is
+      refused too: those are in the response by default, and the keys for the opposite
+      direction are `hidden` and `redact`.
+    - **The verbs are `insert` and `update`**, the two `modes` accepts and for the same
+      reason (`update` covers PUT and PATCH). A verb the entity does not declare is a
+      blocker. Omitted means NO verb renders it — there is no "every verb" default here,
+      because a value minted on insert is not one an update has in hand.
+    - **The obligation is sharper than the plain manual field's, and the gen-report says
+      so by name**: an unfilled field a rule merely reads is judged as `""` inside the
+      service; an unfilled field a response RENDERS is handed to a caller as their
+      credential, by a `201` that looks like every other one. Check that verb's response
+      against a real request before calling it done.
 - **The domain has no `ctx`, and the five identity `source`s are how a fact about the
   CALLER reaches a rule anyway.** An entity is handed itself and nothing else — no request,
   no `AppContext`, no `Identity`. So anything a rule needs to know about whoever is asking

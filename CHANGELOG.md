@@ -7,6 +7,58 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-08-27
+
+A consumer service declared a machine credential the way the language says to — minted
+from `crypto/rand` inside the insert rules, SHA-256'd, and only the hash stored, so no
+column, no outbox payload and no audit event carries it — and then found there was no
+key that let the plaintext OUT. The generated insert minted the secret and discarded it
+with the entity: the row was born with a credential nobody could ever learn. The six
+keys that look like they might say it (`hidden`, `runtime`, `source`, `modes`,
+`assignedFrom`, `redact`) each answer a different question, all of them on the input
+side or about removal. The two ways out were a hand-written rotation endpoint, or
+`adopt` on two `owned` files — freezing them against every future spec change in
+exchange for one field.
+
+Reported from a consumer service, with the generator's own `explain keys` output ruling
+out each candidate key.
+
+### Added
+
+- **`fields[].renderIn` — the write verbs whose RESPONSE renders a `source: manual`
+  runtime field.** It is the output-side counterpart of `modes`: that key names the write
+  verbs whose BODY carries a value the caller sends, this one names the write verbs whose
+  response carries a value the server minted. The write `Result` gains the field and its
+  `FromEntity` reads it off the ENTITY after the write — the only place it exists — and
+  the write `Response` renders it, so the generic Result→Response pair still lines up at
+  boot. Nothing else moves: no column, no migration, no request schema, no read DTO, no
+  `?fields=` vocabulary, no export column, no audit event, no sync payload. A GraphQL
+  mutation reusing that Response renders it too, which is one shape by design and is
+  documented rather than left to be discovered.
+  - **Accepted on `source: manual` and refused on every other source**, which is the
+    point rather than a limit. A `source: body` value is the CALLER's — answering with it
+    hands someone their own password confirmation back, which this generator has refused
+    since that source existed — and the identity sources are facts the caller already
+    holds, so rendering one reflects the token at whoever presented it. On a persisted
+    field it is refused as well: those are in every response already, and the keys for
+    the opposite direction are `hidden` and `redact`.
+  - **The vocabulary is `modes`' own** — `insert` and `update`, where `update` covers PUT
+    and PATCH — because a key that spelled the same axis differently on its two sides is
+    the key nobody reads correctly. A verb the entity does not declare is a blocker, an
+    empty `renderIn: []` is a blocker (the same silent no-op `modes: []` was), and an
+    absent key means no verb renders it: there is no "every verb" default here, since a
+    value minted on insert is not one an update has in hand.
+  - **The gen-report names the obligation apart from the plain manual field's.** Both are
+    filled by a `rules.manual` entry the author writes, but an unfilled field a rule
+    merely reads is judged as `""` inside the service, while an unfilled field a response
+    RENDERS is handed to a caller as their credential by a `201` that looks like every
+    other one. The report says which verb answers with which field, and to check that
+    response against a real request before calling it done.
+  - The flat `explain example` carries the whole shape — a hidden `assignedFrom: derived`
+    column for the hash beside the `renderIn: [insert]` runtime field for the plaintext,
+    and the `rules.manual` entry that mints both — and the coverage matrix generates,
+    builds, vets and tests it.
+
 ## [0.45.0] — 2026-08-26
 
 `0.44.0` gave the notification half of this question an owner. The same run had put a

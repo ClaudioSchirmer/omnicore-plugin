@@ -157,6 +157,16 @@ type Field struct {
 	// both the full replacement and the patch. Always populated for such a
 	// field, empty for every other.
 	Modes []string
+	// RenderIn are the write verbs whose RESPONSE renders a "manual" runtime
+	// field — the value the author's own rule minted, on its way out. Same two
+	// values Modes uses, and empty for every other field, which is the default a
+	// runtime field has always had: in no response at all.
+	//
+	// Exactly two emitters read it, and both on the WRITE side: the Result the
+	// command projects from the entity, and the Response that renders it. The
+	// read shapes never consult it, because there is nothing on the row for a
+	// read to project.
+	RenderIn []string
 	// IdentitySource says WHICH question about the caller fills a runtime field,
 	// naming the framework accessor that answers it: "subject" (Identity.Subject),
 	// "tenant" (the configured tenant claim, via Identity.TenantID), "permission"
@@ -822,6 +832,7 @@ func resolveField(entity string, f spec.Field) Field {
 		Nullable: f.Nullable, Length: f.Length,
 		JSONName: naming.Camel(f.Name), LabelKey: label, Text: f.Text.Map(),
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
+		RenderIn:       append([]string(nil), f.RenderIn...),
 		Source:         spec.SourceOf(f),
 		IdentitySource: spec.IdentitySourceOf(f),
 		Permission:     f.Permission,
@@ -2831,6 +2842,31 @@ func (m *Model) ManualRuntimeFields() []Field {
 	for _, f := range m.Runtime {
 		if f.Source == "manual" {
 			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// RenderedRuntimeFields are the runtime fields whose value this write verb
+// answers with — a machine credential the rules minted, whose hash is all the
+// row keeps, handed over in the one response that can hand it over.
+//
+// mode is the verb at the granularity the language speaks: "insert" or "update",
+// where update covers the full replacement and the patch alike. Nothing is
+// returned for any other mode, and nothing at all for a field that did not ask.
+//
+// It is deliberately NOT part of ResponseFields: that answer is shared by the
+// by-id read and the listing, and a runtime value has nothing on the row for
+// either of them to project. Widening it would have put the credential on every
+// read of every row from then on.
+func (m *Model) RenderedRuntimeFields(mode string) []Field {
+	var out []Field
+	for _, f := range m.Runtime {
+		for _, in := range f.RenderIn {
+			if in == mode {
+				out = append(out, f)
+				break
+			}
 		}
 	}
 	return out

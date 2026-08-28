@@ -462,6 +462,24 @@ func renderTodo(b *strings.Builder, in Input) {
 			fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", f.Name, f.EntityType,
 				strings.ReplaceAll(what, "\n", " "))
 		}
+		if rendered := renderedRuntime(manual); len(rendered) > 0 {
+			b.WriteString("\n**One of these leaves the service in a response, and it is the " +
+				"only place it ever will.** `renderIn` puts the value the rules minted into " +
+				"the write verb's own answer — the Result reads it off the entity after the " +
+				"write, the Response renders it, and a GraphQL mutation reusing that Response " +
+				"renders it too. Nothing else does: no read, no listing, no `?fields=`, no " +
+				"export column, no audit event, no sync payload. Whatever the row keeps of " +
+				"the value — a hash, normally — is a separate, persisted field.\n\n")
+			for _, f := range rendered {
+				fmt.Fprintf(b, "- `%s` — rendered by: %s\n", f.Name,
+					strings.Join(f.RenderIn, ", "))
+			}
+			b.WriteString("\nSo the assignment below is not optional for these: a verb that " +
+				"mints nothing answers with the zero value, and the caller receives an empty " +
+				"credential from a `201` that looks like every other one. Check the response " +
+				"of that verb against a real request before calling it done — it is the whole " +
+				"reason the field is declared.\n\n")
+		}
 		b.WriteString("\nWrite the assignment in the operation that owns it — the " +
 			"hand-written command whose mapper has both the request and the entity. The " +
 			"shape this exists for is an operation that dispatches the same mode a " +
@@ -614,6 +632,21 @@ func wildcardOf(permission string) string {
 		return permission[:i+1] + "*"
 	}
 	return permission
+}
+
+// renderedRuntime narrows the manual fields to the ones a write verb answers
+// with. They are the same declaration with one difference that changes who is
+// hurt by an unmet obligation: an unfilled field a rule merely reads is judged
+// as "" inside this service, while an unfilled field a response RENDERS is
+// handed to a caller as their credential.
+func renderedRuntime(fields []ir.Field) []ir.Field {
+	var out []ir.Field
+	for _, f := range fields {
+		if len(f.RenderIn) > 0 {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // bodyRuntimeCheck says what a reviewer has to look for on ONE such field. The
