@@ -581,8 +581,38 @@ func validateRuntimeField(s *Spec, f Field, where string, ps *Problems, isChild 
 				"neither the outbox payload nor the audit event")
 	}
 
+	// renderIn is a source: manual key. The two other families are refused here,
+	// once, rather than inside each branch — and neither refusal is a limitation
+	// of this build.
+	//
+	// A source: body value is one the CALLER sent: rendering it back hands
+	// someone their own password confirmation from a surface nobody expected to
+	// carry one, which this generator has refused since the source existed. An
+	// identity value is a fact the caller already holds, so the response would be
+	// reflecting the token at whoever presented it. What renderIn exists for is
+	// the value that came from NEITHER — minted server-side, stored only as a
+	// hash, and therefore unreachable unless this one response carries it.
+	if len(f.RenderIn) > 0 && !FromManual(f) {
+		if FromBody(f) {
+			ps.BlockerFix(where+".renderIn",
+				"this value came from the caller's own request body, and rendering it "+
+					"back hands them their own credential from a response nobody expected "+
+					"to carry one",
+				"drop renderIn — a source: body field is an INPUT, checked by a rule and "+
+					"dropped. renderIn is for a value your code MINTS, which is source: manual")
+		} else {
+			ps.BlockerFix(where+".renderIn",
+				fmt.Sprintf("a source: %s field is a fact about the caller, who already "+
+					"holds it — rendering it reflects the token back at whoever presented it",
+					SourceOf(f)),
+				"drop renderIn — it exists for a value the SERVER minted and nothing else "+
+					"can hand over, which is source: manual")
+		}
+		return
+	}
+
 	if FromManual(f) {
-		validateManualRuntimeField(f, where, ps)
+		validateManualRuntimeField(s, f, where, ps)
 		return
 	}
 	if !FromBody(f) {
@@ -629,7 +659,12 @@ func validateRuntimeField(s *Spec, f Field, where string, ps *Problems, isChild 
 // does — there is no column — and those checks already ran. What is left is the
 // set of keys that describe a value ARRIVING, and no generated verb brings this
 // one: not a claim, not a permission, not a set of write verbs.
-func validateManualRuntimeField(f Field, where string, ps *Problems) {
+//
+// The one key that DOES belong here is the mirror of that last refusal. Nothing
+// generated puts a value in the field, and renderIn is how the value the
+// author's own code put there gets out — so it is validated here, on the only
+// source that accepts it.
+func validateManualRuntimeField(s *Spec, f Field, where string, ps *Problems) {
 	if f.Claim != "" {
 		ps.BlockerFix(where+".claim",
 			"a source: manual field is filled by your code, so naming a claim says "+
@@ -649,6 +684,7 @@ func validateManualRuntimeField(f Field, where string, ps *Problems) {
 			"drop modes. If a generated write is meant to carry the value after all, that "+
 				"is source: body, and modes names which verbs")
 	}
+	validateRenderIn(s, f, where, ps)
 	// A composite is NOT refused here, and the omission is deliberate: every
 	// composite runtime field is already refused before this runs, by the
 	// composite pass, because validateOneField returns early for one. A second
@@ -836,6 +872,54 @@ func validateBodyFieldModes(s *Spec, f Field, where string, ps *Problems) {
 	}
 }
 
+// validateRenderIn judges the OUTPUT side of a source: manual field: which write
+// verbs answer with the value the author's own code minted.
+//
+// It is validateBodyFieldModes read in the other direction, and it is held to
+// the same two rules for the same reasons — the vocabulary is closed, and a verb
+// the entity does not mount is a response that never happens. Where the two part
+// company is the omitted key: `modes` omitted means EVERY write verb, because a
+// value the caller sends is a value every body can carry, while renderIn omitted
+// means none. A value minted on insert is not one an update has in hand, so
+// "every verb" would be a promise the entity cannot keep, and the default for a
+// runtime field — in no response at all — is the safe half of the pair.
+func validateRenderIn(s *Spec, f Field, where string, ps *Problems) {
+	// The brackets, written out, say "no verb renders it" — which is what leaving
+	// the key out already says, and the author who typed them meant something.
+	// The same refusal `modes: []` gets, for the same reason: a key whose empty
+	// form is indistinguishable from its absent form silently generates the
+	// opposite of what somebody wrote.
+	if f.RenderIn != nil && len(f.RenderIn) == 0 {
+		ps.BlockerFix(where+".renderIn",
+			"an empty renderIn list says no write verb renders the field, which is what "+
+				"leaving the key out already says",
+			"name the verb that mints the value — renderIn: [insert] — or drop the key")
+		return
+	}
+	seen := map[string]bool{}
+	for i, mode := range f.RenderIn {
+		at := fmt.Sprintf("%s.renderIn[%d]", where, i)
+		if !FieldModes.Has(mode) {
+			ps.BlockerFix(at,
+				fmt.Sprintf("%q is not a write verb whose response can render a field", mode),
+				"one of: "+FieldModes.String()+" — `update` names both PUT and PATCH, the "+
+					"same two values modes accepts, because it is the same axis")
+			continue
+		}
+		if seen[mode] {
+			ps.Blockerf(at, "%q is listed twice", mode)
+			continue
+		}
+		seen[mode] = true
+		if !contains(s.Modes, mode) {
+			ps.BlockerFix(at,
+				fmt.Sprintf("this entity has no %s verb, so no response would ever render "+
+					"the field", mode),
+				"add "+mode+" to the entity's modes, or drop it from this field's renderIn")
+		}
+	}
+}
+
 func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isFacet bool, opt Options) {
 	if f.Name == "" {
 		ps.Blockerf(where, "the field name is required")
@@ -900,6 +984,14 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 				"modes says which write verbs carry a source: body field, and this field is persisted",
 				"a persisted field is on every write verb the entity has; to keep one out "+
 					"of the partial update, name it under update.patchExcludes")
+		}
+		if len(f.RenderIn) > 0 {
+			ps.BlockerFix(where+".renderIn",
+				"renderIn puts a RUNTIME value into a write response, and this field has "+
+					"a column — every write already answers with it",
+				"drop renderIn. To keep a persisted field out of the responses instead, "+
+					"that is hidden: true; to mask it in the copies the framework makes of "+
+					"the row, redact")
 		}
 		if f.Permission != "" {
 			ps.BlockerFix(where+".permission",

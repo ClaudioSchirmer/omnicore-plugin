@@ -360,3 +360,40 @@ func TestAHookAddedAfterTheFileExistsIsNamed(t *testing.T) {
 			"section says these panic when asked, and this one does not get that far")
 	}
 }
+
+// TestTheOwedWorkNamesTheVerbThatMustMintARenderedValue is the row the "❌
+// discipline only" column of this repo's own table is about: nothing fails when
+// the report goes quiet, and a reviewer reads silence as "nothing owed".
+//
+// A manual runtime field and a RENDERED one carry the same obligation and a
+// different blast radius. Unfilled, the first is judged as "" by a rule inside
+// this service; the second is handed to a caller as their credential, by a 201
+// that looks like every other one. The report has to say which verb answers with
+// which field, or the check nobody performs is the one that mattered.
+func TestTheOwedWorkNamesTheVerbThatMustMintARenderedValue(t *testing.T) {
+	out := Render(Input{Model: &ir.Model{
+		Entity: ir.Names{Pascal: "Conta"}, Table: "contas",
+		Runtime: []ir.Field{
+			{Name: "SenhaAtual", EntityType: "vos.Senha", Source: "manual",
+				Runtime: true, Description: "A senha atual."},
+			{Name: "SenhaProvisoria", EntityType: "vos.Senha", Source: "manual",
+				Runtime: true, RenderIn: []string{"insert"},
+				Description: "A senha provisória sorteada na criação."},
+		},
+	}, SpecPath: "omnicore-gen/conta.omnicore.yaml"})
+
+	for _, want := range []string{
+		"`SenhaProvisoria` — rendered by: insert",
+		"only place it ever will",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report does not say %q, so the response nobody checks is the "+
+				"one that hands over a credential:\n%s", want, out)
+		}
+	}
+	// And the field that renders nowhere must not be dragged into the paragraph:
+	// it owes an assignment, not a response check.
+	if strings.Contains(out, "`SenhaAtual` — rendered by") {
+		t.Error("a manual field with no renderIn is listed as rendered by a verb")
+	}
+}

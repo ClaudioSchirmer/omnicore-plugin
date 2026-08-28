@@ -120,10 +120,10 @@ transaction.
 
 > **⚠️ NO per-child unarchive** — the edit-path load hides archived children and the
 > update never clears the archive stamp, so a soft-removed child cannot be revived alone;
-> only the ROOT's unarchive revives children, in cascade. **A child needing its own
-> reversible archive⇄unarchive is NOT a value object — promote it (model C).** Surface
-> this in the child-edit elicitation: "should a removed <child> be restorable on its
-> own?" → yes ⇒ C.
+> only the ROOT's unarchive revives children, in cascade — **and it revives only the ones
+> the root's OWN archive put to sleep** (below). **A child needing its own reversible
+> archive⇄unarchive is NOT a value object — promote it (model C).** Surface this in the
+> child-edit elicitation: "should a removed <child> be restorable on its own?" → yes ⇒ C.
 
 ## Application / Web
 
@@ -159,3 +159,18 @@ Archive/unarchive/delete cascade to all loaded children in the same TX. The audi
 buckets each child op by DIFF (a DB-loaded child re-added is `updated`, not `inserted`);
 replace-all emits add+remove pairs; only the targeted change path emits `changed`.
 Children auto-project into the view under the type-derived segment — never `Embed` them.
+
+**An unarchive brings back the children the root's own archive stamped — not every
+archived child.** The archive writes ONE instant on the root row and on every child row
+its cascade reaches (a child already archived keeps its own older stamp), so the unarchive
+restores exactly the rows carrying the root's stamp: a child removed on its own months
+earlier — through a PUT replace-all or a per-child archive — stays down. Same rule on a
+shared base, with TWO instants: the role's children come back from the ROLE's stamp and
+the base's native children from the BASE's, which are not the same write whenever a
+sibling role kept the identity up. This is what makes the column type a correctness
+question, not a style one — `deleted_at` must be sub-second and identical between root and
+child (migrations.md, Traps).
+
+> Since **v0.62.0**. Before it, the cascade was gated on "is this child archived?", so a
+> root's unarchive resurrected every archived child under it. On an older pin, warn the dev
+> that an aggregate mixing whole-root archives with per-child removals will over-restore.

@@ -430,6 +430,15 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 	// projected document; here the entity is in hand, which is strictly more —
 	// the exception is a derivation reading a framework-stamped column, which the
 	// entity does not carry, and those stay off the write shapes.
+	// The runtime values this verb hands over. No column backs them and no read
+	// will ever render them again: the row keeps a hash, and this response is the
+	// one place the minted value exists on the wire.
+	rendered := m.RenderedRuntimeFields(ir.GateModeOf(op.Verb))
+	for _, f := range rendered {
+		s.L("\t// %s is RUNTIME: no column holds it, and FromEntity reads it off the", f.Name)
+		s.L("\t// entity after the write — whatever the rules minted there.")
+		s.L("\t%s %s", f.Name, f.GoType)
+	}
 	writeComputed := writeComputedFields(m)
 	for _, c := range writeComputed {
 		s.L("\t// %s is COMPUTED: no column backs it, and FromEntity fills it", c.Name)
@@ -448,6 +457,12 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		"",
 		"It reads the entity, never the command: the domain may have normalised or " +
 			"defaulted a value, and echoing the input back would hide that from the caller.",
+	}
+	if len(rendered) > 0 {
+		doc = append(doc, "",
+			"That is also what makes the runtime fields here possible: nothing persisted "+
+				"them, so the entity in hand is the only place they exist. Whatever the "+
+				"rules put there is what the caller receives, once.")
 	}
 	ctxParam := "_"
 	if len(writeComputed) > 0 {
@@ -471,6 +486,9 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 	s.L("%s", head)
 	s.L("\t\tID: *e.GetID(),")
 	for _, f := range plain {
+		s.L("\t\t%s: %s,", f.Name, wireValue(f, "e"))
+	}
+	for _, f := range rendered {
 		s.L("\t\t%s: %s,", f.Name, wireValue(f, "e"))
 	}
 	for _, c := range m.Children {

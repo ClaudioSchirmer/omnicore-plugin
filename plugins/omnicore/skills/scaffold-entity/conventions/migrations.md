@@ -34,9 +34,10 @@ per dialect (infra.md).
 
 Nullable Go pointer → nullable column; money = `int64` minor units, never float; exact
 decimals → `string` (float64 rounds); binary floats fine for non-money numerics. Managed
-columns when declared: `deleted_at` nullable, `created_at`/`updated_at` NOT NULL with a DB
-default as belt-and-suspenders (the framework stamps actively). If the entity has no
-Archive mode, there is no archive column — keep `Modes()` ⟺ the schema declaration ⟺ the migration in
+columns when declared: `deleted_at` nullable **and sub-second, in the same type on a root
+and its children** (Traps), `created_at`/`updated_at` NOT NULL with a DB default as
+belt-and-suspenders (the framework stamps actively). If the entity has no Archive mode,
+there is no archive column — keep `Modes()` ⟺ the schema declaration ⟺ the migration in
 lockstep.
 
 **A COMPOSITE value object is N columns, and its nullability is TWO questions.** Each part
@@ -97,6 +98,18 @@ shape change, and `evolve-entity`'s impact map is where it belongs.
   cannot catch. On older pins (≤ v0.29.0): required reference ⇒ `BINARY(16)`, nullable
   (`*string`) ⇒ `VARCHAR(36)`; Postgres `UUID` for both. (The framework's own
   control-plane tables use `CHAR(36)` via a different write path — do NOT mirror them.)
+- **⚠️ The archive stamp column (`deleted_at`) needs SUB-SECOND precision, and a root and
+  its children must declare the SAME type — take it from the pinned `table-schema.html`,
+  never from the engine's friendliest default.** The stamp is not only a flag: it
+  identifies the archive OPERATION. One archive binds a single instant on the root row and
+  on every child row its cascade reaches, and the unarchive restores exactly the children
+  carrying the ROOT's instant — so a child archived on its own months earlier stays down.
+  That discriminator is an equality between two stored timestamps, so it is only as sharp
+  as the column. A second-resolution column (a bare MySQL `DATETIME` — the default that
+  looks right) folds two operations of the same second into one stamp and revives a child
+  the root never touched; a child column COARSER than the root's truncates the instant it
+  was given and matches nothing, so the restore reaches nothing. Neither raises an error:
+  the rows are simply wrong, and only a rebuild shows it.
 - **Unique constraints are named `<table>_<col>_key` on the four SQL engines** so the repo
   can bind that name; name them on the OWNING table (a base field's constraint lives on the
   base table — e.g. `persons_email_key`, not `students_email_key`). The PK name and, on

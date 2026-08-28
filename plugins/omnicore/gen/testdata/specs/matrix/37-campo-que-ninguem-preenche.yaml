@@ -20,7 +20,12 @@
 #     gerado nenhum o carrega — sem isso todo insert e todo patch seriam
 #     recusados por um valor que ninguém pôs lá;
 #   - a árvore compila, passa no vet e nos testes gerados com o campo vazio, que
-#     é exatamente o estado em que o gerador o deixa.
+#     é exatamente o estado em que o gerador o deixa;
+#   - e o outro lado da mesma chave: com `renderIn`, um desses campos SAI na
+#     resposta do verbo que o cunhou — o Result o lê do agregado depois do
+#     write, o Response o renderiza, e nenhuma leitura, listagem, exportação,
+#     evento de auditoria ou payload de sync o vê. É o único jeito de entregar
+#     uma credencial cujo hash é tudo o que a linha guarda.
 specVersion: 1
 entity: Conta
 plural: Contas
@@ -56,6 +61,18 @@ fields:
     livesOn: root
     example: s3nh4antiga
     description: A senha atual, provada pelo endpoint de troca escrito à mão.
+  - name: SenhaProvisoria
+    type: string
+    runtime: true
+    source: manual
+    renderIn: [insert]
+    vo: {kind: raw, ref: Senha}
+    livesOn: root
+    example: Pr0v1s0r1a!
+    description: >-
+      A senha provisória sorteada na criação da conta. A regra manual do insert
+      a escreve aqui e grava só o hash; a resposta do POST é o único lugar onde
+      ela aparece.
   - name: SolicitanteId
     type: string
     runtime: true
@@ -74,8 +91,9 @@ rules:
   manual:
     - id: hash-da-senha-no-insert
       description: >-
-        Calcular SenhaHash no insert. Sem esta regra a coluna fica com o valor
-        zero e nada acusa.
+        Sortear SenhaProvisoria, calcular SenhaHash a partir dela e guardar só o
+        hash. Sem esta regra a coluna fica com o valor zero e a resposta do
+        insert devolve uma senha vazia — nada acusa nenhum dos dois.
       scope: [insert]
     - id: provar-a-senha-atual-na-troca
       description: >-

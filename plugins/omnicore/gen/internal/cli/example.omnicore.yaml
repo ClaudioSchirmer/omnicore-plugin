@@ -316,6 +316,62 @@ fields:
       eng: E-mail confirmation
       ptbr: Confirmação de e-mail
 
+  # source: manual — the third kind of runtime field, and the ELSE of the three.
+  # The generator declares it on the aggregate and fills it from NOWHERE: no
+  # write DTO, no command, no mapper, no OpenAPI schema mentions it, because no
+  # generated verb has anything to put there. Your code does — a rules.manual
+  # entry on the verb that owns the value.
+  #
+  # renderIn is what gets it back OUT. It is the output-side counterpart of
+  # `modes` above: `modes` names the write verbs whose BODY carries a value the
+  # caller sends, renderIn names the write verbs whose RESPONSE carries a value
+  # the server minted. Here the code below the rules mints a one-time access
+  # code at enrollment, stores only its hash, and this is the single place the
+  # plaintext ever appears on the wire — not the by-id read, not a listing row,
+  # not `?fields=`, not the CSV/XLSX export, not the audit event, not the outbox
+  # payload. Without it the enrollment would mint a credential and discard it,
+  # which is a row born with a secret nobody can learn.
+  #
+  # Read the pair below as one declaration: the COLUMN keeps the hash (hidden,
+  # so nobody receives it) and the RUNTIME field carries the plaintext for the
+  # length of one request. Two keys, one credential.
+  #
+  # It is accepted on source: manual and refused everywhere else, which is the
+  # point rather than a limit: a source: body value is one the CALLER sent, and
+  # answering with it hands someone their own password confirmation back; an
+  # identity value is a fact the caller already holds. Neither is a secret only
+  # this response can deliver.
+  #
+  # And the same warning `source: manual` carries applies with a caller on the
+  # other end: nothing generated puts a value here, so an unwritten rule means a
+  # 201 that renders an empty code and no error anywhere.
+  - name: PortalAccessCodeHash
+    type: string
+    column: portal_access_code_hash
+    length: 64
+    livesOn: root
+    hidden: true
+    assignedFrom: derived
+    example: 5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8
+    description: SHA-256 of the portal access code — all the row keeps of it.
+    labelKey: StudentPortalAccessCodeHashField
+
+  - name: PortalAccessCode
+    type: string
+    runtime: true
+    source: manual
+    renderIn: [insert]
+    livesOn: root
+    example: 8F3K-2QP7-XR14
+    description: >-
+      The one-time code the guardian activates the portal with. Minted at
+      enrollment, hashed into the column above, and handed over in the
+      enrollment response alone.
+    labelKey: StudentPortalAccessCodeField
+    text:
+      eng: Portal access code
+      ptbr: Código de acesso ao portal
+
 valueObjects:
   - name: Email
     kind: raw
@@ -599,6 +655,15 @@ rules:
       scope: [insert]
       notification: OutsideEnrollmentWindowNotification
       attachTo: EnrolledAt
+    - id: portal-access-code
+      description: >-
+        Mint the portal access code when the enrollment is created: draw it
+        from crypto/rand, put the plaintext on PortalAccessCode — which the
+        insert response renders, and nothing else ever will — and write its
+        SHA-256 into PortalAccessCodeHash, which is all the row keeps. Without
+        this rule the response hands the guardian an empty code and no error
+        says so.
+      scope: [insert]
     - id: graduation-date
       description: >-
         Set GraduatedAt when the update carries the state that ends the
