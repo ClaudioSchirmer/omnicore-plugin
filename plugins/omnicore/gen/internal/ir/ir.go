@@ -653,7 +653,10 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	// root's operations are resolved.
 	resolveChildPermissions(s, m)
 	m.Constraints = resolveConstraints(s, m)
-	m.Surfaces = resolveSurfaces(s)
+	m.Surfaces = resolveSurfaces(s, m)
+	// After the surfaces, because a collection FOLLOWS its entity: what the
+	// child inherits does not exist until the entity's own answer does.
+	resolveChildSurfaces(s, m)
 	if f := lookupField(m, s.Authz.OwnerField); f != nil {
 		m.Authz.OwnerField = f
 	}
@@ -2153,6 +2156,16 @@ type Child struct {
 	// what is missing on this side is the surface, which is what a role that
 	// cannot reach the identity's collection is really missing.
 	Mounted bool
+	// OnREST and GQLMutations are WHERE this collection's per-entry verbs
+	// answer, resolved against the entity's own surfaces and the collection's
+	// optional narrowing. They are surface decisions and nothing else: the
+	// commands, the wire types and the tests follow MountsAdd/Change/Remove, so
+	// a verb taken off one surface is still fully generated for the other.
+	//
+	// GQLMutations is keyed by the same words operations uses (add, change,
+	// remove) and is empty when the collection is not on the schema at all.
+	OnREST       bool
+	GQLMutations map[string]bool
 	// OpBase names the types THIS spec generates for the collection's per-entry
 	// operations. It is the collection's own name when the entity owns it, and
 	// the entity's name in front of it when the collection is mounted: two roles
@@ -2729,23 +2742,170 @@ func readColumn(sp *spec.Spec, m *Model, name string) string {
 	return naming.Snake(name)
 }
 
-// Surfaces is what the entity exposes beyond REST.
+// PerEntryRoute is the method and the path — relative to the owner's group —
+// that one per-entry verb answers on. It is the ONE place that shape is
+// decided: the routes emitter mounts it and the report prints it, so a reader
+// comparing the two is comparing one decision with itself rather than two
+// copies that were equal on the day they were written.
+//
+// The removal's method is the child's own declaration read out loud. A
+// collection that archives keeps its row, stamped, and stops being returned —
+// which is not what DELETE promises a caller — so it mounts PATCH …/archive
+// instead, and only a collection with no archive column gets the honest DELETE.
+func (c Child) PerEntryRoute(verb string) (method, path string) {
+	collection := "/:id/" + c.Segment
+	entry := collection + "/:" + naming.Camel(c.Name) + "Id"
+	switch verb {
+	case "add":
+		return "POST", collection
+	case "change":
+		return "PUT", entry
+	case "remove":
+		if c.ArchivedAt != "" {
+			return "PATCH", entry + "/archive"
+		}
+		return "DELETE", entry
+	}
+	return "", ""
+}
+
+// PerEntryVerbs is the collection's verb vocabulary, in mount order. It is a
+// list rather than three booleans wherever something LOOPS over the trio — the
+// emitters, the report and this file all did it with their own literal before,
+// and a fourth verb would have had to be remembered in each of them.
+var PerEntryVerbs = []string{"add", "change", "remove"}
+
+// OnGQL is whether one per-entry verb of this collection is a mutation.
+func (c Child) OnGQL(verb string) bool { return c.GQLMutations[verb] }
+
+// AnyOnGQL is whether the collection reaches the schema at all — the question an
+// emitter asks before writing anything for it.
+func (c Child) AnyOnGQL() bool {
+	for _, v := range PerEntryVerbs {
+		if c.GQLMutations[v] && c.Mounts(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// Mounts is whether the collection has this per-entry verb at all, surfaces
+// aside. It reads the same three answers MountsAdd/Change/Remove hold, by name,
+// so a loop over the trio does not have to switch on them.
+func (c Child) Mounts(verb string) bool {
+	switch verb {
+	case "add":
+		return c.MountsAdd
+	case "change":
+		return c.MountsChange
+	case "remove":
+		return c.MountsRemove
+	}
+	return false
+}
+
+// resolveChildSurfaces answers, per collection, where its per-entry verbs go.
+//
+// The rule is FOLLOW-THEN-NARROW: a collection is on every surface its entity
+// serves, and children[].surfaces can only take it off one. That direction is
+// the whole fix — the shape it replaces had no seat at all, so every collection
+// verb was REST-only and no spec could say otherwise.
+func resolveChildSurfaces(s *spec.Spec, m *Model) {
+	for i := range m.Children {
+		c := &m.Children[i]
+		c.GQLMutations = map[string]bool{}
+		if !c.PerChild {
+			continue
+		}
+		decl := s.Children[i].Surfaces
+
+		c.OnREST = m.Surfaces.REST
+		if decl != nil && decl.REST != nil {
+			c.OnREST = m.Surfaces.REST && *decl.REST
+		}
+
+		onGQL := m.Surfaces.GraphQL
+		var narrowed []string
+		if decl != nil && decl.GraphQL != nil {
+			if decl.GraphQL.Enabled != nil {
+				onGQL = m.Surfaces.GraphQL && *decl.GraphQL.Enabled
+			}
+			narrowed = decl.GraphQL.Mutations
+		}
+		if !onGQL {
+			continue
+		}
+		for _, v := range PerEntryVerbs {
+			if !c.Mounts(v) {
+				continue
+			}
+			if len(narrowed) > 0 && !containsString(narrowed, v) {
+				continue
+			}
+			c.GQLMutations[v] = true
+		}
+	}
+}
+
+func containsString(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// Surfaces is where the entity answers, fully resolved: not what the spec wrote
+// but what each surface actually carries, so no emitter has to re-read a default.
+//
+// The GQL fields are the resolution of "absent narrows nothing": a spec that
+// enables the surface and says no more arrives here with every read it serves
+// and every write verb it mounts already spelled out.
 type Surfaces struct {
 	REST          bool
 	GraphQL       bool
 	GQLMutations  map[string]bool
 	GQLConnection bool
-	CSV           bool
-	CSVDelimiter  string
-	XLSX          bool
-	XLSXSheet     string
+	// GQLByID is the singular query. It follows read.byId rather than the
+	// connection flag: turning the listing off is not a reason to lose the one
+	// field that reads a record by its id.
+	GQLByID      bool
+	CSV          bool
+	CSVDelimiter string
+	XLSX         bool
+	XLSXSheet    string
 }
 
-func resolveSurfaces(s *spec.Spec) Surfaces {
+// Exports is whether either downloadable format is served. It is its own
+// surface: it needs a listing, not an HTTP CRUD surface beside it.
+func (s Surfaces) Exports() bool { return s.CSV || s.XLSX }
+
+// GQLVerb maps an operation back to the verb a spec names in its mutation list —
+// patch and put are both "update" there, because they are one verb in the
+// domain and the rule gates cannot tell them apart either.
+func GQLVerb(verb string) string {
+	if verb == "patch" {
+		return "update"
+	}
+	return verb
+}
+
+func resolveSurfaces(s *spec.Spec, m *Model) Surfaces {
 	out := Surfaces{REST: s.Surfaces.REST, GQLMutations: map[string]bool{}}
 	if g := s.Surfaces.GraphQL; g != nil && g.Enabled {
 		out.GraphQL = true
-		out.GQLConnection = g.Connection
+		out.GQLConnection = m.Read.ByParams && (g.Connection == nil || *g.Connection)
+		out.GQLByID = m.Read.ByID
+		if len(g.Mutations) == 0 {
+			// Absent narrows nothing: every write verb the entity mounts is a
+			// mutation. This is the default because the opposite one — silence
+			// meaning "no mutations" — produced an enabled surface with a read
+			// side and no write side, and said so nowhere.
+			for _, op := range m.WriteOps() {
+				out.GQLMutations[GQLVerb(op.Verb)] = true
+			}
+		}
 		for _, mu := range g.Mutations {
 			out.GQLMutations[mu] = true
 		}

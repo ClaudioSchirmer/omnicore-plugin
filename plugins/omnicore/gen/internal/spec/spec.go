@@ -869,6 +869,22 @@ type Child struct {
 	// collections has two edges, and gating both because one of them needed it
 	// is how a permission stops meaning anything.
 	Permissions map[string]string `yaml:"permissions"`
+	// Surfaces narrows WHERE the per-entry verbs are exposed, keyed the same way
+	// the entity's own surfaces block is. Per-child only, and absent means the
+	// collection follows the entity: every verb it mounts appears on every surface
+	// the entity serves.
+	//
+	// Following is the default because the alternative is what this key was added
+	// to end. A collection verb used to reach REST alone, with no way to say
+	// otherwise, so a GraphQL-only consumer could create a role and never grant it
+	// a permission — the write side of an aggregate silently halved, and nothing
+	// in the spec, the generated code or the report said so.
+	//
+	// It sits beside operations and permissions because the three are the same
+	// decision asked three ways — WHICH verbs the collection has, WHO may call
+	// them, WHERE they answer — and an author who narrows one usually wants to see
+	// the other two while doing it.
+	Surfaces *ChildSurfaces `yaml:"surfaces"`
 	// BusinessIdentity names the fields that make two entries THE SAME entry —
 	// the duplicate detector, and the match key per-child operations use.
 	BusinessIdentity []string `yaml:"businessIdentity"`
@@ -1644,24 +1660,82 @@ type FieldRestrict struct {
 
 // ---------------------------------------------------------------- surfaces
 
+// Surfaces is WHERE the entity answers. The three are independent switches: any
+// one of them alone is a complete answer, and any combination is legal.
+//
+// Independent means what it says. A GraphQL-only service is a service with no
+// HTTP route but the schema; a REST-only one has no schema; a project that wants
+// nothing but the spreadsheet mounts the two export paths and neither CRUD
+// surface. What none of them does is change the write: the command, the rules
+// and the permission are one set of objects, and a surface is a way in.
+//
+// Whatever the entity mounts appears on every surface that is on — the root's
+// verbs AND the per-entry verbs of its collections. The narrowing keys below
+// exist to take things OFF a surface, never to put them on; forgetting one
+// cannot silently halve an API.
 type Surfaces struct {
-	// REST mounts the HTTP endpoints; at least one surface must be on.
+	// REST mounts the HTTP endpoints — the entity's own routes and the per-entry
+	// routes of its per-child collections. At least one surface must be on.
 	REST bool `yaml:"rest"`
 	// GraphQL exposes the entity in the GraphQL schema.
 	GraphQL *GraphQL `yaml:"graphql"`
-	// Exports serves the listing as downloadable files.
+	// Exports serves the listing as downloadable files. It stands on its own: it
+	// needs a listing (read.byParams), not surfaces.rest.
 	Exports *Exports `yaml:"exports"`
 }
 
+// GraphQL is the schema surface: enabled, plus the two keys that NARROW it.
+//
+// Enabled alone is the whole declaration for most entities — it exposes the
+// reads the entity serves, every write verb it mounts, and every per-entry verb
+// of its collections. mutations and connection subtract from that; they do not
+// add to it, and neither is required.
 type GraphQL struct {
 	// Enabled turns the GraphQL surface on.
 	Enabled bool `yaml:"enabled"`
-	// Mutations lists the verbs exposed as mutations; each must be among the
-	// entity's modes.
+	// Mutations NARROWS the write side to the verbs listed; each must be among
+	// the entity's modes. Absent means every write verb the entity mounts.
+	//
+	// `update` covers both shapes, exactly as fields[].modes does: with
+	// update.shape: both, the PUT-shaped and the PATCH-shaped mutations are one
+	// decision here, because they are one verb in the domain.
+	//
+	// It governs the ROOT's verbs only. A collection's per-entry verbs are named
+	// in a different vocabulary (add | change | remove) and are narrowed where
+	// they are declared, under children[].surfaces.
 	Mutations []string `yaml:"mutations"`
 	// Connection serves the paginated connection query; it requires display
-	// among the modes.
-	Connection bool `yaml:"connection"`
+	// among the modes. Absent means served, whenever the entity has a listing.
+	//
+	// It governs the PLURAL query alone. The singular one follows read.byId: a
+	// schema that can read one record by id is the smallest useful GraphQL
+	// surface there is, and turning the listing off is not a reason to lose it.
+	Connection *bool `yaml:"connection"`
+}
+
+// ChildSurfaces narrows where ONE collection's per-entry verbs are exposed.
+//
+// Every key is optional and every absent key means "follow the entity". What it
+// cannot do is widen: a collection cannot reach a surface its entity does not
+// serve, because the mount that would carry it is not written at all.
+type ChildSurfaces struct {
+	// REST mounts this collection's per-entry routes. Absent = whatever the
+	// entity's surfaces.rest says.
+	REST *bool `yaml:"rest"`
+	// GraphQL exposes this collection's per-entry verbs as mutations.
+	GraphQL *ChildGraphQL `yaml:"graphql"`
+}
+
+// ChildGraphQL is one collection's seat on the schema surface.
+type ChildGraphQL struct {
+	// Enabled exposes the collection's per-entry verbs as mutations. Absent =
+	// whatever the entity's surfaces.graphql says; false takes the whole
+	// collection off the schema while leaving its REST routes standing.
+	Enabled *bool `yaml:"enabled"`
+	// Mutations NARROWS the exposed verbs to the ones listed, in the same
+	// vocabulary operations uses: add, change, remove. Absent means every verb
+	// the collection mounts, and each value must be one of them.
+	Mutations []string `yaml:"mutations"`
 }
 
 type Exports struct {

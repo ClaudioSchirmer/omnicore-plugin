@@ -124,7 +124,7 @@ func emitGraphQL(m *ir.Model) (*src, bool) {
 	s.L("\td bootstrap.Deps,")
 	s.L(") {")
 
-	if m.Surfaces.GQLConnection && m.Read.ByParams {
+	if m.Surfaces.GQLConnection {
 		op := m.Op("byParams")
 		s.L("\t// A paged connection over the same view the REST listing reads — same")
 		s.L("\t// handler, same Response, so the node type and the JSON body cannot drift.")
@@ -135,7 +135,7 @@ func emitGraphQL(m *ir.Model) (*src, bool) {
 		s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(op.Permission))
 		s.Blank()
 	}
-	if m.Surfaces.GQLConnection && m.Read.ByID {
+	if m.Surfaces.GQLByID {
 		op := m.Op("byId")
 		s.L("\t// The singular twin of the connection: one nullable node, the same")
 		s.L("\t// entity name, so both fields resolve to ONE type in the schema. A")
@@ -149,23 +149,79 @@ func emitGraphQL(m *ir.Model) (*src, bool) {
 	}
 
 	for _, op := range m.WriteOps() {
-		if !m.Surfaces.GQLMutations[gqlVerbOf(op.Verb)] {
+		if !m.Surfaces.GQLMutations[ir.GQLVerb(op.Verb)] {
 			continue
 		}
 		emitGQLMutation(s, m, op, entity)
 	}
+	emitPerChildMutations(s, m, entity)
 	emitFacetClearMutations(s, m, entity)
 	s.L("}")
 	return s, true
 }
 
-// gqlVerbOf maps an operation back to the verb a spec names in its mutation
-// list — patch and put are both "update" there.
-func gqlVerbOf(verb string) string {
-	if verb == "patch" {
-		return "update"
+// emitPerChildMutations gives the collections the same seat the root has.
+//
+// A per-entry verb is an UPDATE of the owner — it loads the aggregate, touches
+// one entry and saves the whole thing in one transaction — so it registers
+// through MutationWithBodyID with the owner's id in `id` and the entry in
+// `input`, which is the same pair the REST route mounts. The handler, the
+// command and the permission are the objects the REST route uses; nothing here
+// is a second implementation.
+//
+// The one place the two surfaces genuinely differ is WHERE the entry's own id
+// comes from. REST reads it out of a path segment; GraphQL has no path, and the
+// framework's input decoder skips a `path`-tagged field on purpose, so the verbs
+// that address an EXISTING entry (change, remove) carry it as an input field
+// instead — a second, GraphQL-shaped Request beside the REST one, written by
+// emitPerChildRequests.
+func emitPerChildMutations(s *src, m *ir.Model, entity string) {
+	for _, c := range m.Children {
+		if !c.PerChild || !c.AnyOnGQL() {
+			continue
+		}
+		op := c.OpBase
+		if c.MountsAdd && c.OnGQL("add") {
+			s.L("\t// The entry is the whole input; the owner is the id. The REST route's")
+			s.L("\t// own Request travels unchanged — it carries no path segment to lose.")
+			emitPerChildMutation(s, m, entity, gqlChildField("add", op),
+				"requests.Add"+op+"Request", "requests.Add"+op+"Response{}.FromResult",
+				"Add"+op+"Command", "commands.Add"+op+"Result", c.Permissions["add"])
+		}
+		if c.MountsChange && c.OnGQL("change") {
+			s.L("\t// The entry's id rides the INPUT here: GraphQL has no path segment, and")
+			s.L("\t// the framework's decoder skips a path-tagged field rather than filling")
+			s.L("\t// it from nowhere. Same command, same full-replacement contract.")
+			emitPerChildMutation(s, m, entity, gqlChildField("change", op),
+				"requests.Change"+op+"GraphQLRequest", "requests.Change"+op+"Response{}.FromResult",
+				"Change"+op+"Command", "commands.Change"+op+"Result", c.Permissions["change"])
+		}
+		if c.MountsRemove && c.OnGQL("remove") {
+			s.L("\t// REST answers 204 with no body; a GraphQL field must answer SOMETHING,")
+			s.L("\t// so the payload is the acknowledgement and nothing more. Whether the")
+			s.L("\t// row is archived or deleted follows the child's own declaration, the")
+			s.L("\t// same way it does on the REST verb.")
+			emitPerChildMutation(s, m, entity, gqlChildField("remove", op),
+				"requests.Remove"+op+"GraphQLRequest", "requests.Remove"+op+"GraphQLResponse{}.FromResult",
+				"Remove"+op+"Command", "fwresults.None", c.Permissions["remove"])
+		}
 	}
-	return verb
+}
+
+// gqlChildField is the mutation's name in the schema: the verb in front of the
+// types this spec generates for the collection. That base is already qualified
+// wherever two roles share one identity, which is what keeps two entities'
+// collections from claiming one field in a single global mutation namespace.
+func gqlChildField(verb, opBase string) string { return verb + opBase }
+
+func emitPerChildMutation(s *src, m *ir.Model, entity, field, request, project, command, result, permission string) {
+	s.L("\treg.Register(fwgraphql.MutationWithBodyID[%s](", request)
+	s.L("\t\t%s, %s,", quote(field), project)
+	s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.%s, %s]{", entity, command, result)
+	s.L("\t\t\tRepo: repo,%s", serviceField(m))
+	s.L("\t\t},")
+	s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(permission))
+	s.Blank()
 }
 
 func emitGQLMutation(s *src, m *ir.Model, op ir.Operation, entity string) {

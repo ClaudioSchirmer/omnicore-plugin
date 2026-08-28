@@ -135,10 +135,15 @@ var (
 	// revoked) rather than a smaller one.
 	ChildOperations = set("add", "change", "remove")
 
-	Modes        = set("display", "insert", "update", "delete", "archive", "unarchive")
-	UpdateShapes = set("patch", "put", "both")
-	DeleteRoot   = set("soft", "hard", "both")
-	DeleteChild  = set("soft", "hard")
+	Modes = set("display", "insert", "update", "delete", "archive", "unarchive")
+
+	// GraphQLMutations is Modes minus display: what a mutation can name. A read
+	// is a query, and `display` in a mutation list is an author saying "expose
+	// the reads too" — which is already what enabling the surface does.
+	GraphQLMutations = set("insert", "update", "delete", "archive", "unarchive")
+	UpdateShapes     = set("patch", "put", "both")
+	DeleteRoot       = set("soft", "hard", "both")
+	DeleteChild      = set("soft", "hard")
 
 	RuleKinds = set(
 		"required", "immutable", "length", "range", "comparison", "transition",
@@ -357,6 +362,14 @@ func Vocabularies() []Vocabulary {
 			"WHICH per-entry verbs a per-child collection mounts; absent = all three. " +
 				"Drop `change` where every field is the business identity — replacing " +
 				"such an entry is a removal plus an addition wearing an edit's clothes."},
+		{"surfaces.graphql.mutations", GraphQLMutations,
+			"NARROWS the root's write side on the schema; absent = every write verb the " +
+				"entity mounts. `update` covers PUT and PATCH together, and a collection's " +
+				"per-entry verbs are narrowed under children[].surfaces, not here."},
+		{"children[].surfaces.graphql.mutations", ChildOperations,
+			"NARROWS which of the collection's per-entry verbs become mutations; absent = " +
+				"every verb it mounts. To take the whole collection off the schema, say " +
+				"children[].surfaces.graphql.enabled: false instead."},
 		{"children[].permissions keys", ChildOperations,
 			"WHICH per-entry verb a permission is required for; a verb left out keeps " +
 				"inheriting the root's update permission, which is what every per-child " +

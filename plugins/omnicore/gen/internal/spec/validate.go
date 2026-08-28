@@ -3912,14 +3912,19 @@ func checkOpAgainstType(f Field, op, where string, ps *Problems) {
 func validateSurfaces(s *Spec, ps *Problems) {
 	su := s.Surfaces
 	gqlOn := su.GraphQL != nil && su.GraphQL.Enabled
-	if !su.REST && !gqlOn {
+	exportsOn := su.Exports != nil
+	// Three independent switches, and the check is that at least ONE of them is
+	// on. Exports counts: a spec that serves nothing but the spreadsheet is a
+	// legitimate shape, and refusing it forced surfaces.rest: true on a project
+	// that then published a CRUD API it never asked for.
+	if !su.REST && !gqlOn && !exportsOn {
 		ps.BlockerFix("surfaces",
 			"the entity exposes no surface",
-			"set surfaces.rest: true and/or surfaces.graphql.enabled: true")
+			"set surfaces.rest: true, surfaces.graphql.enabled: true, or declare surfaces.exports")
 	}
 	if gqlOn {
 		for _, m := range su.GraphQL.Mutations {
-			if !Modes.Has(m) || m == "display" {
+			if !GraphQLMutations.Has(m) {
 				ps.BlockerFix("surfaces.graphql.mutations",
 					fmt.Sprintf("%q is not a mutable verb", m),
 					"one of: insert | update | delete | archive | unarchive")
@@ -3933,12 +3938,14 @@ func validateSurfaces(s *Spec, ps *Problems) {
 					"add it to modes, or drop the mutation")
 			}
 		}
-		if su.GraphQL.Connection && !contains(s.Modes, "display") {
+		if su.GraphQL.Connection != nil && *su.GraphQL.Connection && !contains(s.Modes, "display") {
 			ps.BlockerFix("surfaces.graphql.connection",
 				"a connection is a paged read but the entity has no display mode",
 				"add display to modes")
 		}
+		validateGraphQLExposesSomething(s, ps)
 	}
+	validateChildSurfaces(s, ps)
 	if su.Exports != nil {
 		if s.Read.ByParams == nil {
 			ps.BlockerFix("surfaces.exports",
@@ -3961,6 +3968,137 @@ func validateSurfaces(s *Spec, ps *Problems) {
 		if su.Exports.XLSX != nil && su.Exports.XLSX.Sheet == "" {
 			ps.BlockerFix("surfaces.exports.xlsx.sheet",
 				"the spreadsheet needs a sheet name", "e.g. Students")
+		}
+	}
+}
+
+// validateGraphQLExposesSomething refuses a surface that is on and empty.
+//
+// Enabling GraphQL and narrowing everything off it is not a shape anyone means:
+// the generated Mount function compiles, the registry is wired, the playground
+// answers — and the schema has no field for this entity. It used to be
+// reachable by simply not writing `mutations` on an entity with no reads, and
+// nothing anywhere said the surface was hollow.
+func validateGraphQLExposesSomething(s *Spec, ps *Problems) {
+	g := s.Surfaces.GraphQL
+	connection := (g.Connection == nil || *g.Connection) && s.Read.ByParams != nil
+	byID := s.Read.ByID
+	mutations := len(g.Mutations) > 0
+	if g.Mutations == nil {
+		// Absent narrows nothing, so every write verb among the modes is a
+		// mutation — and `display` is not one of them.
+		for _, m := range s.Modes {
+			if GraphQLMutations.Has(m) {
+				mutations = true
+				break
+			}
+		}
+	}
+	children := false
+	for _, c := range s.Children {
+		if len(childGraphQLVerbs(s, c)) > 0 {
+			children = true
+			break
+		}
+	}
+	if connection || byID || mutations || children {
+		return
+	}
+	ps.BlockerFix("surfaces.graphql",
+		"the GraphQL surface is on and exposes nothing: no query, no mutation, no collection verb",
+		"give the entity a read (read.byId / read.byParams) or a write mode, or turn the surface off")
+}
+
+// childGraphQLVerbs is which per-entry verbs of one collection reach the schema,
+// resolved against the entity's own surface. Empty means the collection is not
+// on GraphQL at all — because the entity is not, because the collection said no,
+// or because it mounts no per-entry verb to expose.
+func childGraphQLVerbs(s *Spec, c Child) []string {
+	if c.EditStrategy != "per-child" {
+		return nil
+	}
+	if s.Surfaces.GraphQL == nil || !s.Surfaces.GraphQL.Enabled {
+		return nil
+	}
+	if cs := c.Surfaces; cs != nil && cs.GraphQL != nil {
+		if cs.GraphQL.Enabled != nil && !*cs.GraphQL.Enabled {
+			return nil
+		}
+		if len(cs.GraphQL.Mutations) > 0 {
+			return cs.GraphQL.Mutations
+		}
+	}
+	return PerChildOperations(c)
+}
+
+// childOnREST is whether one collection's per-entry routes are mounted.
+func childOnREST(s *Spec, c Child) bool {
+	if !s.Surfaces.REST {
+		return false
+	}
+	if cs := c.Surfaces; cs != nil && cs.REST != nil {
+		return *cs.REST
+	}
+	return true
+}
+
+// validateChildSurfaces checks the collection-level seat: that it is declared
+// where it can mean something, that it names verbs the collection actually
+// mounts, that it does not try to widen past the entity, and — the one this key
+// exists for — that no mounted verb ends up on NO surface.
+func validateChildSurfaces(s *Spec, ps *Problems) {
+	gqlOn := s.Surfaces.GraphQL != nil && s.Surfaces.GraphQL.Enabled
+	for _, c := range s.Children {
+		where := fmt.Sprintf("children[%s].surfaces", c.Name)
+		cs := c.Surfaces
+		if cs != nil && c.EditStrategy != "per-child" {
+			ps.BlockerFix(where,
+				"only a per-child collection has per-entry verbs to place on a surface",
+				"set editStrategy: per-child, or drop the surfaces block")
+			continue
+		}
+		if cs != nil {
+			if cs.REST != nil && *cs.REST && !s.Surfaces.REST {
+				ps.BlockerFix(where+".rest",
+					"the collection asks for REST and the entity serves no REST surface",
+					"set surfaces.rest: true on the entity, or drop this key")
+			}
+			if g := cs.GraphQL; g != nil {
+				if g.Enabled != nil && *g.Enabled && !gqlOn {
+					ps.BlockerFix(where+".graphql.enabled",
+						"the collection asks for GraphQL and the entity serves no GraphQL surface",
+						"set surfaces.graphql.enabled: true on the entity, or drop this key")
+				}
+				for _, v := range g.Mutations {
+					if !ChildOperations.Has(v) {
+						ps.BlockerFix(where+".graphql.mutations",
+							fmt.Sprintf("%q is not a per-entry verb", v),
+							"one of: add | change | remove")
+						continue
+					}
+					if !MountsPerChildOp(c, v) {
+						ps.BlockerFix(where+".graphql.mutations",
+							fmt.Sprintf("%q is exposed but the collection does not mount it", v),
+							fmt.Sprintf("add %s to children[%s].operations, or drop it here", v, c.Name))
+					}
+				}
+			}
+		}
+		if c.EditStrategy != "per-child" {
+			continue
+		}
+		// The point of the whole block: a verb the collection mounts and no
+		// surface carries is generated code nobody can call — the exact silence
+		// that made every collection REST-only and said nothing about it.
+		onREST := childOnREST(s, c)
+		onGQL := childGraphQLVerbs(s, c)
+		for _, v := range PerChildOperations(c) {
+			if onREST || contains(onGQL, v) {
+				continue
+			}
+			ps.BlockerFix(where,
+				fmt.Sprintf("the %s verb of %s reaches no surface: it would be generated and unreachable", v, c.Name),
+				fmt.Sprintf("expose it (surfaces.rest, or children[%s].surfaces.graphql), or drop %q from operations", c.Name, v))
 		}
 	}
 }

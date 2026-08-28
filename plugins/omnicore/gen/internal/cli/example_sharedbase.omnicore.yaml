@@ -261,6 +261,23 @@ children:
     # out here on purpose — correcting a class's subject is editing the record,
     # so it keeps inheriting teacher:update.
     permissions: {add: "teacher:assign", remove: "teacher:assign"}
+    # surfaces — WHERE the per-entry verbs answer. Absent, the collection
+    # FOLLOWS the entity: every verb it mounts appears on every surface the
+    # entity serves, which is exactly what this line spells out. It is written
+    # here for the same reason `operations` is — so the key is not something you
+    # have to guess exists — and because its default is the one that used to be
+    # missing: a collection verb reached REST and nothing else, whatever
+    # surfaces.graphql said, so a schema-only consumer could create a teacher and
+    # never give them a class.
+    #
+    # It only ever NARROWS. `rest: false` takes the collection's routes off HTTP
+    # while leaving its mutations standing; `graphql: {enabled: false}` does the
+    # reverse; `graphql: {mutations: [...]}` picks a subset of `operations`. A
+    # verb narrowed off every surface is refused rather than generated
+    # unreachable.
+    surfaces:
+      rest: true
+      graphql: {enabled: true, mutations: [add, change, remove]}
     duplicateNotification: ClassAlreadyAssignedNotification
     businessIdentity: [Code]
     softRemove: true
@@ -581,6 +598,15 @@ read:
       onlyTotal: true
       search: [Name]
 
+# WHERE this entity answers. The three switches are INDEPENDENT: any one of them
+# alone is a complete answer, and graphql/exports do not need rest.
+#
+# Enabling a surface exposes everything the entity mounts on it — both reads,
+# every write verb, and every per-entry verb of the collection above. The keys
+# below only NARROW: `mutations` picks a subset of the write verbs (absent = all
+# of them), `connection` turns the paged query off (absent = served; the singular
+# query follows read.byId either way). `delete` is missing from the list because
+# this entity has no hard delete, not because the schema hides one.
 surfaces:
   rest: true
   graphql: {enabled: true, connection: true, mutations: [insert, update, archive, unarchive]}

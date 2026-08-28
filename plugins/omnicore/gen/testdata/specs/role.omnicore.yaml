@@ -257,6 +257,14 @@ read:
 
 surfaces:
   rest: true
+  # Enabled and nothing more, which is the whole declaration: the surface
+  # carries every read this entity serves, every write verb it mounts and every
+  # per-entry verb of its collection. This fixture is the RBAC shape the gap was
+  # reported from — a role that could be created through the schema and never
+  # granted a permission — so it is the one that has to compile with the
+  # collection's three mutations in it.
+  graphql:
+    enabled: true
 
 authz:
   resource: role
