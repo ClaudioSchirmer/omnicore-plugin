@@ -1,0 +1,38 @@
+# Eixos: SÓ os exports. Sem REST, sem GraphQL — a superfície inteira do serviço
+# são os dois downloads da listagem.
+#
+# A forma existe porque os exports deixaram de morar dentro do ramo REST: eles
+# se apoiam em read.byParams, não em surfaces.rest, e um projeto que só quer a
+# planilha não precisa mais publicar um CRUD que ninguém pediu. Só display entre
+# os modos, que é o que sobra coerente quando nenhuma superfície carrega verbo de
+# escrita — `check` avisa quando um modo é gerado e não chega a lugar nenhum.
+specVersion: 1
+entity: RelatorioEX
+plural: RelatoriosEX
+language: pt-BR
+storage:
+  kind: flat
+  table: relatorios_ex
+  description: Linhas de um relatório, servidas apenas como arquivo.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Referencia, type: string, column: referencia, length: 20, livesOn: root, example: "2026-08", description: Competência da linha.}
+  - {name: Centro, type: string, column: centro, length: 80, livesOn: root, example: Operações, description: Centro de custo.}
+  - {name: Valor, type: float64, column: valor, livesOn: root, example: "1240.5", description: Valor apurado.}
+modes: [display]
+read:
+  backing: relational
+  view: {name: relatorios_ex}
+  byId: true
+  byParams:
+    filters:
+      - {field: Referencia, ops: [eq]}
+      - {field: Centro, ops: [eq, contains]}
+    sort: [ID, Referencia]
+    controls: {pagination: true, orderBy: true, fields: true, onlyTotal: true}
+surfaces:
+  exports: {csv: {delimiter: ";"}, xlsx: {sheet: Relatorios}}
+authz:
+  resource: relatorioex
+  dataAccess: anyone-with-permission
+  permissions: {read: "relatorioex:ler"}
