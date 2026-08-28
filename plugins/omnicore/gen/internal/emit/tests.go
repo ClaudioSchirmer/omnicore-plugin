@@ -1968,6 +1968,9 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\tfwqueries %s", quote(fwImport("application/queries")))
+	// For the GraphQL removal's acknowledgement, which projects from the
+	// framework's None. Pruned when no collection exposes that verb there.
+	s.L("\tfwresults %s", quote(fwImport("application/results")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
 	s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
 	s.L(")")
@@ -3116,7 +3119,76 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 		if c.MountsRemove {
 			emitRemoveChildWireTest(s, c, op)
 		}
+		// The GraphQL-shaped halves are a second wire type each, with a mapper
+		// of their own — so they are a second way for the entry id to go
+		// missing, and the failure is silent in exactly the same way: a mutation
+		// that answers 200 and replaced nothing.
+		if c.MountsChange && c.OnGQL("change") {
+			emitChangeChildGraphQLRequestTest(s, c, op, fields)
+		}
+		if c.MountsRemove && c.OnGQL("remove") {
+			emitRemoveChildGraphQLWireTest(s, c, op)
+		}
 	}
+}
+
+// emitChangeChildGraphQLRequestTest is the path-vs-input half of the same proof.
+//
+// The REST request reads the entry id from a path segment and the GraphQL one
+// from the input object, and the whole reason the second type exists is that the
+// framework's decoder would leave a path-tagged field empty. A test that only
+// covers the REST shape proves nothing about the surface that needed the change.
+func emitChangeChildGraphQLRequestTest(s *src, c ir.Child, op string, fields []ir.Field) {
+	s.Doc(
+		fmt.Sprintf("Change%sGraphQLRequest carries the entry id from the INPUT.", op),
+		"",
+		"Same command as its REST twin; the difference is where the id comes from, "+
+			"and that difference is the reason this type exists at all.")
+	s.L("func TestChange%sGraphQLRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
+	s.L("\tr := Change%sGraphQLRequest{%sID: %s, %sRequest: %sRequest{", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"), c.Name, c.Name)
+	for _, f := range fields {
+		s.L("\t\t%s: %s,", f.Name, wireSample(f))
+	}
+	s.L("\t}}")
+	s.L("\tcmd := r.ToCommand()")
+	s.L("\tif cmd.%sID != %s {", c.Name, quote("01890000-0000-7000-8000-000000000000"))
+	s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be replaced\")")
+	s.L("\t}")
+	for _, f := range fields {
+		s.L("\tif cmd.%s != %s {", f.Name, wireSample(f))
+		s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitRemoveChildGraphQLWireTest covers the one wire pair with no REST twin.
+func emitRemoveChildGraphQLWireTest(s *src, c ir.Child, op string) {
+	s.Doc(fmt.Sprintf("Remove%sGraphQLRequest names the entry through its input.", op))
+	s.L("func TestRemove%sGraphQLRequest_NamesTheEntry(t *testing.T) {", op)
+	s.L("\tr := Remove%sGraphQLRequest{%sID: %s}", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"))
+	s.L("\tif r.ToCommand().%sID != %s {", c.Name,
+		quote("01890000-0000-7000-8000-000000000000"))
+	s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be removed\")")
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
+
+	s.Doc(
+		fmt.Sprintf("Remove%sGraphQLResponse acknowledges, since a mutation must answer something.", op),
+		"",
+		"Its REST twin answers 204 with no body at all. This one is the only "+
+			"projection in the collection's wire types that is not the generic mapper, "+
+			"which is exactly why it is asserted rather than assumed.")
+	s.L("func TestRemove%sGraphQLResponse_Acknowledges(t *testing.T) {", op)
+	s.L("\tif !(Remove%sGraphQLResponse{}).FromResult(fwresults.None{}).Success {", op)
+	s.L("\t\tt.Error(\"a successful removal answered success: false\")")
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
 }
 
 // emitAddChildRequestTest proves the entry reaches the command that stores it.

@@ -270,6 +270,8 @@ var specTypes = map[string]reflect.Type{
 	"Computed":      reflect.TypeOf(Computed{}),
 	"Surfaces":      reflect.TypeOf(Surfaces{}),
 	"GraphQL":       reflect.TypeOf(GraphQL{}),
+	"ChildSurfaces": reflect.TypeOf(ChildSurfaces{}),
+	"ChildGraphQL":  reflect.TypeOf(ChildGraphQL{}),
 	"Exports":       reflect.TypeOf(Exports{}),
 	"CSVExport":     reflect.TypeOf(CSVExport{}),
 	"XLSXExport":    reflect.TypeOf(XLSXExport{}),

@@ -622,6 +622,9 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("\t%s", quote(fwImport("domain")))
 	s.L("\tfwrequests %s", quote(fwImport("web/requests")))
 	s.L("\tfwresponses %s", quote(fwImport("web/responses")))
+	// For the GraphQL removal's payload, which projects from the framework's
+	// None. Pruned when the collection does not expose that verb there.
+	s.L("\tfwresults %s", quote(fwImport("application/results")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
 	s.L(")")
 	s.Blank()
@@ -631,9 +634,15 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	}
 	if c.MountsChange {
 		emitChangeChildRequest(s, m, c, op, idParam)
+		if c.OnGQL("change") {
+			emitChangeChildGraphQLRequest(s, c, op, idParam)
+		}
 	}
 	if c.MountsRemove {
 		emitRemoveChildRequest(s, c, op, idParam)
+		if c.OnGQL("remove") {
+			emitRemoveChildGraphQLPair(s, c, op, idParam)
+		}
 	}
 
 	return goFile("internal/web/requests/"+naming.Snake(op)+"_requests.go",
@@ -699,6 +708,85 @@ func emitRemoveChildRequest(s *src, c ir.Child, op, idParam string) {
 	s.L("}")
 	s.Blank()
 	emitAutoToCommand(s, "Remove"+op+"Request", "Remove"+op+"Command")
+}
+
+// emitChangeChildGraphQLRequest writes the same request with the entry's id in
+// the BODY.
+//
+// It exists because of one framework fact, not a taste: the GraphQL input
+// decoder skips a `path`-tagged field — deliberately, since there is no path to
+// read it from — so the REST Request would reach the command with an empty entry
+// id and replace nothing. Everything else is shared: the same embedded entry
+// shape, the same command, the same Response.
+//
+// The id keeps the name the REST path segment gives it, so one entry id is one
+// word across both surfaces.
+func emitChangeChildGraphQLRequest(s *src, c ir.Child, op, idParam string) {
+	s.Doc(
+		fmt.Sprintf("Change%sGraphQLRequest is Change%sRequest with the entry's id in the input.", op, op),
+		"",
+		"GraphQL has no path segment, and the framework's decoder does not fill a "+
+			"path-tagged field from an input object — it skips it. So the id travels "+
+			"as a field here, under the same name the REST route spells in its path, "+
+			"and the command on the other side is the same one.")
+	s.L("type Change%sGraphQLRequest struct {", op)
+	s.L("\t%s", autoRequestEmbed)
+	s.L("\t%sID string `json:%s`", c.Name, quote(idParam))
+	s.L("\t%sRequest", c.Name)
+	s.L("}")
+	s.Blank()
+	emitAutoToCommand(s, "Change"+op+"GraphQLRequest", "Change"+op+"Command")
+	s.Blank()
+}
+
+// emitRemoveChildGraphQLPair writes the removal's GraphQL wire pair.
+//
+// Both halves exist for the same reason and neither has a REST twin. The
+// REQUEST carries the entry id as an input field, for the decoder reason the
+// change verb has. The RESPONSE exists because a GraphQL field must resolve to
+// SOMETHING: REST answers 204 with no body at all, and a payload type with no
+// field is not a schema a server can publish.
+//
+// So the payload is the acknowledgement and nothing else. It does not carry the
+// owner id — that is the argument the caller itself sent — and it does not carry
+// the entry, which is the whole point of the verb. It is written by hand rather
+// than through the generic mapper for the plainest possible reason: there is no
+// Result field behind it to map from, only the framework's None.
+func emitRemoveChildGraphQLPair(s *src, c ir.Child, op, idParam string) {
+	s.Doc(
+		fmt.Sprintf("Remove%sGraphQLRequest names the entry to take out.", op),
+		"",
+		"The entry id is an input field rather than a path segment: GraphQL has no "+
+			"path, and the framework's decoder skips a path-tagged field instead of "+
+			"inventing a value for it.")
+	s.L("type Remove%sGraphQLRequest struct {", op)
+	s.L("\t%s", autoRequestEmbed)
+	s.Blank()
+	s.L("\t%sID string `json:%s`", c.Name, quote(idParam))
+	s.L("}")
+	s.Blank()
+	emitAutoToCommand(s, "Remove"+op+"GraphQLRequest", "Remove"+op+"Command")
+	s.Blank()
+
+	s.Doc(
+		fmt.Sprintf("Remove%sGraphQLResponse acknowledges the removal, and says nothing else.", op),
+		"",
+		"The REST verb answers 204 with no body. A GraphQL field cannot: it must "+
+			"resolve to a type, and a payload with no fields is not publishable. So "+
+			"the payload is a single true — the owner id is what the caller passed in, "+
+			"and the entry is gone by definition.",
+		"",
+		"No generic mapper here, and it is not an oversight: the command projects the "+
+			"framework's None, so there is no Result field for a mapped one to read.")
+	s.L("type Remove%sGraphQLResponse struct {", op)
+	s.L("\tSuccess bool `json:\"success\"`")
+	s.L("}")
+	s.Blank()
+	s.Doc(fmt.Sprintf("FromResult answers true: the pipeline only projects a result it succeeded with."))
+	s.L("func (Remove%sGraphQLResponse) FromResult(fwresults.None) Remove%sGraphQLResponse {", op, op)
+	s.L("\treturn Remove%sGraphQLResponse{Success: true}", op)
+	s.L("}")
+	s.Blank()
 }
 
 func emitPerChildResponse(s *src, m *ir.Model, c ir.Child, verb string) {

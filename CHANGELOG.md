@@ -7,6 +7,70 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-08-28
+
+A consumer service reported a GraphQL schema that could create a role and never grant it
+a permission. Its spec declared the collection verbs (`children[].operations`) and gated
+them (`children[].permissions`), and there was no value in the language that put any of
+them on the schema: `surfaces.graphql.mutations` only accepts the entity's own modes, and
+`children[]` had no surface seat at all. The verbs were mounted inside the REST branch of
+the routes emitter, so on a GraphQL-only service they were generated and unreachable.
+Nothing said so — not the spec, not the generated code, not the gen-report — and the
+service's own spec carried a comment recording the behaviour as if it had been a choice.
+
+Two more halves of the same shape came out with it: the exports were mounted inside that
+same REST branch, so "the spreadsheet without a CRUD API" was unspecifiable, and an
+enabled GraphQL surface with no `mutations` list published a mount function with no
+fields in it.
+
+Reported from a consumer service, with the framework primitive (`MutationWithBodyID`) and
+the one real constraint (the input decoder skips a `path`-tagged field) already identified.
+
+### Changed
+
+- **`surfaces` is three independent switches, and each one is now a full mirror.** `rest`,
+  `graphql` and `exports` are chosen separately and any combination is legal, including
+  exports alone — the export paths hang off the listing, not off `surfaces.rest`, and the
+  view name they read through is declared whether or not a REST route asked for it first.
+  Enabling a surface exposes **everything the entity mounts on it**: both reads, every
+  write verb, and every per-entry verb of every per-child collection.
+  - **`surfaces.graphql.mutations` absent now means every write verb**, where it used to
+    mean none. The narrowing keys subtract and no longer have to be remembered: forgetting
+    one used to halve an API in silence. A spec that lists them explicitly keeps exactly
+    the surface it had.
+  - **`surfaces.graphql.connection` governs the PLURAL query alone**, and absent means
+    served. The singular query follows `read.byId`: turning the listing off used to cost
+    the read-one field as well, which no spec ever asked for.
+- **A per-entry child verb reaches every surface its entity serves.** `add<Entry>`,
+  `change<Entry>` and `remove<Entry>` are registered as mutations through
+  `MutationWithBodyID` — the same command, the same handler and the same per-verb
+  permission the REST route carries, resolved through `children[].permissions` exactly as
+  before. Where the two surfaces genuinely differ, the generator writes the difference: the
+  entry id travels in the INPUT for `change` and `remove` (the framework's decoder skips a
+  `path`-tagged field, so the REST Request would reach the command with an empty id), and
+  the removal gets a payload of its own because a mutation must resolve to something where
+  REST answers `204`. `add` needed no second shape.
+
+### Added
+
+- **`children[].surfaces`** — the collection's own seat, keyed like the entity's: `rest`,
+  and `graphql: {enabled, mutations}` over the `add | change | remove` vocabulary. Every
+  key is optional and absent means FOLLOW the entity. It only ever narrows: a collection
+  cannot reach a surface its entity does not serve, and `check` refuses that rather than
+  writing a mount nobody calls.
+- **`check` refuses the two silences this shape allowed.** A per-entry verb that reaches
+  no surface at all is a blocker naming the verb and the two ways to fix it, and a GraphQL
+  surface that is enabled and exposes nothing — no query, no mutation, no collection verb
+  — is refused instead of emitting an empty registration.
+- **The gen-report carries a surface matrix.** "Where each endpoint answers" lists every
+  generated endpoint against REST and GraphQL, with the exports beneath it, and names each
+  narrowing under the table — a dash that is a decision reads differently from a dash that
+  is a surface being off, and only the first is something for a reviewer to confirm.
+- **The generated tests cover the new wire types**: the GraphQL-shaped `change` and
+  `remove` requests carry the entry id into the command, and the removal's payload
+  acknowledges — the one projection in a collection's wire types that is not the generic
+  mapper, so the one that has to be asserted rather than assumed.
+
 ## [0.46.0] — 2026-08-28
 
 A consumer service declared a machine credential the way the language says to — minted

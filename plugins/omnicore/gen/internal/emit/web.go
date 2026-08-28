@@ -448,25 +448,38 @@ func emitRoutes(m *ir.Model) (fsplan.File, error) {
 	s.L("\tview %s,", viewType(m))
 	s.L("\td bootstrap.Deps,")
 	s.L(") {")
-	if !m.Surfaces.REST {
-		// surfaces.rest is false: this entity is reachable through GraphQL only.
+	// The two HTTP surfaces are mounted independently, because they ARE
+	// independent: the CRUD routes answer to surfaces.rest, the two export paths
+	// to surfaces.exports, and a spec may ask for either one alone. What they
+	// share is this function and the view behind it, so a project serving only
+	// the spreadsheet still wires exactly what a full one does.
+	switch {
+	case !m.Surfaces.REST && !m.Surfaces.Exports():
+		// Neither HTTP surface: this entity is reachable through GraphQL only.
 		// The mount still exists and is still called, so the wiring, the
 		// repository and the view stay identical — what changes is that no HTTP
 		// route is registered, which is the whole of what the author asked for.
-		s.L("\t// No HTTP routes: surfaces.rest is false, so %s is served through", m.Entity.Pascal)
-		s.L("\t// GraphQL alone. Everything else is wired exactly as it would be.")
+		s.L("\t// No HTTP routes: surfaces.rest is false and no export is declared, so")
+		s.L("\t// %s is served through GraphQL alone. Everything else is wired", m.Entity.Pascal)
+		s.L("\t// exactly as it would be.")
 		s.L("}")
-	} else {
-		s.L("\tgroup := app.Group(%s)", quote(m.Entity.Route))
-		if m.Read.Enabled {
+	default:
+		if m.Surfaces.REST {
+			s.L("\tgroup := app.Group(%s)", quote(m.Entity.Route))
+		}
+		// The exports read through the same handler the listing does, so they
+		// need the view's name whether or not a REST route asked for it first.
+		if (m.Surfaces.REST && m.Read.Enabled) || m.Surfaces.Exports() {
 			s.L("\tviewName := view.Name()")
 		}
 		s.Blank()
 
-		for _, op := range m.Ops {
-			emitRoute(s, m, op, entity)
+		if m.Surfaces.REST {
+			for _, op := range m.Ops {
+				emitRoute(s, m, op, entity)
+			}
+			emitPerChildRoutes(s, m, entity)
 		}
-		emitPerChildRoutes(s, m, entity)
 		emitExports(s, m)
 		s.L("}")
 	}
@@ -713,12 +726,13 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 // callers.
 func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 	for _, c := range m.Children {
-		if !c.PerChild {
+		if !c.PerChild || !c.OnREST {
+			// Not on this surface: children[].surfaces took the collection off
+			// REST, or the entity serves none. Its commands and wire types are
+			// still generated — the verbs answer on GraphQL instead.
 			continue
 		}
-		seg := c.Segment
 		opName := c.OpBase // qualified when the collection is mounted from a shared identity
-		idParam := lowerFirst(c.Name) + "Id"
 		// The Go type string is for the CODE positions below; the OpenAPI
 		// summaries are read by an API consumer, who got "a appdomain.Person".
 		human := m.Entity.Pascal
@@ -732,7 +746,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		var ops []perChildOp
 		if c.MountsAdd {
 			ops = append(ops, perChildOp{
-				verb: "Add", method: "fiber.MethodPost", path: "/:id/" + seg,
+				verb: "Add", method: fiberMethod(c, "add"), path: pathOf(c, "add"),
 				request: "Add" + opName + "Request", response: "Add" + opName + "Response",
 				result: "commands.Add" + opName + "Result", status: "fiber.StatusCreated",
 				summary: fmt.Sprintf("Add one %s to %s %s", c.Name, articleFor(human), human),
@@ -745,7 +759,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		}
 		if c.MountsChange {
 			ops = append(ops, perChildOp{
-				verb: "Change", method: "fiber.MethodPut", path: "/:id/" + seg + "/:" + idParam,
+				verb: "Change", method: fiberMethod(c, "change"), path: pathOf(c, "change"),
 				request: "Change" + opName + "Request", response: "Change" + opName + "Response",
 				result: "commands.Change" + opName + "Result", status: "fiber.StatusOK",
 				summary: fmt.Sprintf("Replace one %s of %s %s", c.Name, articleFor(human), human),
@@ -756,7 +770,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			})
 		}
 		if c.MountsRemove {
-			ops = append(ops, removeOp(c, human, seg, idParam, opName))
+			ops = append(ops, removeOp(c, human, opName))
 		}
 
 		for _, op := range ops {
@@ -795,17 +809,6 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 	}
 }
 
-func lowerFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	r := []rune(s)
-	if r[0] >= 'A' && r[0] <= 'Z' {
-		r[0] += 'a' - 'A'
-	}
-	return string(r)
-}
-
 // removeOp picks the VERB that tells the truth about what removal does here.
 //
 // A child that declares softRemove keeps its row and its archive stamp, so the
@@ -830,36 +833,47 @@ func lowerFirst(s string) string {
 // archive/delete. add and change are the opposite case and keep their 200/201:
 // they answer with the entry AS STORED, which is how the caller learns the id
 // the server minted.
-func removeOp(c ir.Child, entity, seg, idParam, opName string) perChildOp {
-	if c.ArchivedAt != "" {
-		return perChildOp{
-			verb: "Remove", method: "fiber.MethodPatch",
-			path:     "/:id/" + seg + "/:" + idParam + "/archive",
-			request:  "Remove" + opName + "Request",
-			result:   "fwresults.None",
-			status:   "fiber.StatusNoContent",
-			bodyless: true,
-			summary:  fmt.Sprintf("Archive one %s of %s %s", c.Name, articleFor(entity), entity),
-			doc: "Archives ONE entry: the row stays, stamped, and stops being " +
-				"returned — which is why this is not a DELETE. There is no per-entry " +
-				"unarchive: an entry taken out this way does not come back, and adding " +
-				"the same value again mints a NEW entry with a new id. Answers 204 with " +
-				"no body. 404 when the owner is not there, and 404 when it holds no " +
-				"entry with that id.",
-		}
-	}
-	return perChildOp{
-		verb: "Remove", method: "fiber.MethodDelete",
-		path:     "/:id/" + seg + "/:" + idParam,
+func removeOp(c ir.Child, entity, opName string) perChildOp {
+	op := perChildOp{
+		verb: "Remove", method: fiberMethod(c, "remove"), path: pathOf(c, "remove"),
 		request:  "Remove" + opName + "Request",
 		result:   "fwresults.None",
 		status:   "fiber.StatusNoContent",
 		bodyless: true,
-		summary:  fmt.Sprintf("Remove one %s from %s %s", c.Name, articleFor(entity), entity),
-		doc: "Removes ONE entry for good: this child declares no archive column, " +
-			"so there is nothing to bring back. Answers 204 with no body. 404 when the " +
-			"owner is not there, and 404 when it holds no entry with that id.",
 	}
+	// The ROUTE already knows which of the two this is — PerEntryRoute reads the
+	// same archive column — so what is decided here is the WORDING, and only the
+	// wording. Two copies of the method and the path were how the summary and
+	// the endpoint drifted apart in the first place.
+	if c.ArchivedAt != "" {
+		op.summary = fmt.Sprintf("Archive one %s of %s %s", c.Name, articleFor(entity), entity)
+		op.doc = "Archives ONE entry: the row stays, stamped, and stops being " +
+			"returned — which is why this is not a DELETE. There is no per-entry " +
+			"unarchive: an entry taken out this way does not come back, and adding " +
+			"the same value again mints a NEW entry with a new id. Answers 204 with " +
+			"no body. 404 when the owner is not there, and 404 when it holds no " +
+			"entry with that id."
+		return op
+	}
+	op.summary = fmt.Sprintf("Remove one %s from %s %s", c.Name, articleFor(entity), entity)
+	op.doc = "Removes ONE entry for good: this child declares no archive column, " +
+		"so there is nothing to bring back. Answers 204 with no body. 404 when the " +
+		"owner is not there, and 404 when it holds no entry with that id."
+	return op
+}
+
+// fiberMethod and pathOf spell ONE decision — ir.Child.PerEntryRoute — in the
+// two forms this file needs it: the fiber constant the mount call takes, and the
+// path relative to the entity's group. The report prints the same answer, so a
+// route that moves moves in both places or in neither.
+func fiberMethod(c ir.Child, verb string) string {
+	method, _ := c.PerEntryRoute(verb)
+	return "fiber.Method" + method[:1] + strings.ToLower(method[1:])
+}
+
+func pathOf(c ir.Child, verb string) string {
+	_, path := c.PerEntryRoute(verb)
+	return path
 }
 
 // perChildOp is one mounted per-entry verb, fully decided.

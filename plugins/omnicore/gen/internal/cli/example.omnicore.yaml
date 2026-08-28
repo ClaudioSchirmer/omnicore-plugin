@@ -1140,6 +1140,20 @@ read:
       onlyTotal: true
       includeArchived: true
 
+# WHERE this entity answers. Three INDEPENDENT switches: any one of them alone
+# is a complete answer. graphql does not need rest, and neither does exports —
+# a service that publishes nothing but the spreadsheet declares exports and
+# leaves rest false.
+#
+# Enabling a surface exposes everything the entity mounts on it: both reads,
+# every write verb, and (for a per-child collection) every per-entry verb it
+# mounts. The keys below only NARROW — `mutations` picks a subset of the write
+# verbs, absent meaning all of them; `connection` turns the paged query off,
+# absent meaning served. The singular query follows read.byId either way, so
+# turning the listing off never costs you the read-one field.
+#
+# A collection narrows its own seat where it is declared, under
+# children[].surfaces — see the sharedbase example (`explain example sharedbase`).
 surfaces:
   rest: true
   graphql:

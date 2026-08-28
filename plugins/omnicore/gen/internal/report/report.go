@@ -1338,6 +1338,158 @@ func renderCheck(b *strings.Builder, in Input) {
 			j.Target, j.Verb(), j.FKColumn, joinWhere(j), joinNote(m, j))
 	}
 	b.WriteString("\n")
+
+	renderSurfaceMatrix(b, m)
+}
+
+// renderSurfaceMatrix says, endpoint by endpoint, where each one answers.
+//
+// It exists because of the failure it makes impossible. A collection's per-entry
+// verbs used to be REST-only with no way to say otherwise, and NOTHING said so:
+// not the spec, not the generated code, not this report. A service shipped half
+// its write side on one surface, and the note somebody eventually wrote in their
+// spec recorded the behaviour as if it had been a decision.
+//
+// So a surface is a choice now, and a choice belongs in the report. The rule the
+// table encodes is one line: whatever the entity mounts reaches every surface
+// that is on, unless the spec narrowed it — and a narrowing shows up here as a
+// dash, called out by name underneath so it is not read as an absence.
+func renderSurfaceMatrix(b *strings.Builder, m *ir.Model) {
+	su := m.Surfaces
+	b.WriteString("### Where each endpoint answers\n\n")
+
+	var on []string
+	if su.REST {
+		on = append(on, "REST")
+	}
+	if su.GraphQL {
+		on = append(on, "GraphQL")
+	}
+	if su.Exports() {
+		on = append(on, "exports")
+	}
+	fmt.Fprintf(b, "Surfaces enabled: **%s**. The three are independent, and every "+
+		"endpoint below is generated from ONE command with ONE permission — a surface "+
+		"is a way in, never a second implementation.\n\n", strings.Join(on, " · "))
+
+	b.WriteString("| endpoint | REST | GraphQL |\n|---|---|---|\n")
+	for _, op := range m.Ops {
+		fmt.Fprintf(b, "| %s | %s | %s |\n", op.Summary,
+			presence(su.REST, "`"+httpVerbOf(op.Method)+" "+routeOf(m, op.Path)+"`", "—"),
+			gqlOpCell(m, op))
+	}
+	for _, c := range m.Children {
+		if !c.PerChild {
+			continue
+		}
+		for _, verb := range ir.PerEntryVerbs {
+			if !c.Mounts(verb) {
+				continue
+			}
+			// The route comes from the child itself, which is where the routes
+			// emitter reads it too: a table that re-derived the path would
+			// eventually print one the service does not serve.
+			method, path := c.PerEntryRoute(verb)
+			fmt.Fprintf(b, "| %s one `%s` | %s | %s |\n", perEntryLabel(verb), c.Name,
+				presence(c.OnREST, "`"+method+" "+routeOf(m, path)+"`", "—"),
+				presence(c.OnGQL(verb), "`"+verb+c.OpBase+"`", "—"))
+		}
+	}
+	if su.CSV {
+		fmt.Fprintf(b, "| Export the listing as CSV | `GET /%s.csv` | — |\n", m.Entity.PluralSnake)
+	}
+	if su.XLSX {
+		fmt.Fprintf(b, "| Export the listing as a spreadsheet | `GET /%s.xlsx` | — |\n", m.Entity.PluralSnake)
+	}
+	b.WriteString("\n")
+
+	// The dash that is a DECISION, named. A reader scanning the column cannot
+	// tell "the surface is off" from "this one verb was taken off it", and only
+	// the second is something to confirm.
+	var narrowed []string
+	for _, op := range m.WriteOps() {
+		if su.GraphQL && !su.GQLMutations[ir.GQLVerb(op.Verb)] {
+			narrowed = append(narrowed, "`"+op.Verb+"` off GraphQL (surfaces.graphql.mutations)")
+		}
+	}
+	for _, c := range m.Children {
+		if !c.PerChild {
+			continue
+		}
+		if su.REST && !c.OnREST {
+			narrowed = append(narrowed, fmt.Sprintf("`%s` off REST (children[].surfaces.rest)", c.Name))
+		}
+		for _, verb := range ir.PerEntryVerbs {
+			if c.Mounts(verb) && su.GraphQL && !c.OnGQL(verb) {
+				narrowed = append(narrowed, fmt.Sprintf("`%s %s` off GraphQL (children[].surfaces.graphql)",
+					verb, c.Name))
+			}
+		}
+	}
+	if len(narrowed) > 0 {
+		fmt.Fprintf(b, "Narrowed on purpose — confirm each is still what you want: %s.\n\n",
+			strings.Join(narrowed, ", "))
+	}
+	if su.GraphQL && su.Exports() {
+		b.WriteString("The exports have no GraphQL twin, and it is not an omission: a schema " +
+			"field answers JSON and a spreadsheet is a file transfer. They stand on the " +
+			"listing, not on `surfaces.rest`.\n\n")
+	}
+}
+
+// perEntryLabel is the word this report uses for a per-entry verb — the code
+// names them add/change/remove, a reader meets them in a sentence. The SET
+// itself is ir.PerEntryVerbs, so a verb added there cannot go missing from the
+// table by being forgotten in a second list here.
+func perEntryLabel(verb string) string {
+	switch verb {
+	case "add":
+		return "Add"
+	case "change":
+		return "Replace"
+	case "remove":
+		return "Take out"
+	}
+	return verb
+}
+
+// httpVerbOf is the method as an API consumer writes it, out of the fiber
+// constant the emitters carry.
+func httpVerbOf(method string) string {
+	return strings.ToUpper(strings.TrimPrefix(method, "fiber.Method"))
+}
+
+// routeOf is the absolute path, without the trailing slash the root's own "/"
+// would otherwise leave behind: `POST /roles/` is not what the service answers
+// on, and a reader checking the report against the routes should not have to
+// decide whether the difference matters.
+func routeOf(m *ir.Model, path string) string {
+	full := m.Entity.Route + path
+	if len(full) > 1 {
+		full = strings.TrimSuffix(full, "/")
+	}
+	return full
+}
+
+// gqlOpCell is the schema field a root operation becomes, or a dash.
+func gqlOpCell(m *ir.Model, op ir.Operation) string {
+	if !m.Surfaces.GraphQL {
+		return "—"
+	}
+	switch op.Verb {
+	case "byParams":
+		return presence(m.Surfaces.GQLConnection, "`"+m.Entity.PluralCamel+"`", "—")
+	case "byId":
+		return presence(m.Surfaces.GQLByID, "`"+m.Entity.Camel+"`", "—")
+	}
+	if !m.Surfaces.GQLMutations[ir.GQLVerb(op.Verb)] {
+		return "—"
+	}
+	field := op.Verb + m.Entity.Pascal
+	if op.Verb == "insert" {
+		field = "create" + m.Entity.Pascal
+	}
+	return "`" + field + "`"
 }
 
 // compositePartNames lists the exposed names of the composite value object

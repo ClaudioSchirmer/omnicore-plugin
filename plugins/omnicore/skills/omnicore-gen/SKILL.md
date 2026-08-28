@@ -706,6 +706,17 @@ Four things to get right, because they are the ones that cost a migration later:
   and an explicit null reach the code identically, so "clear this" cannot be told from
   "leave this alone" and the intent needs its own verb. You declare the facet; the clear
   path on both surfaces comes with it.
+- **`surfaces` is three independent switches, and each one is a full mirror.** `rest`,
+  `graphql` and `exports` are chosen separately: a GraphQL-only service leaves `rest`
+  false, a spreadsheet-only one declares `exports` and neither CRUD surface, and any
+  combination is legal. Enabling a surface exposes **everything the entity mounts on it** —
+  both reads, every write verb, and every per-entry verb of a per-child collection. The
+  narrowing keys subtract: `graphql.mutations` picks a subset of the write verbs (absent =
+  all of them; `update` covers PUT and PATCH together), `graphql.connection` turns the
+  paged query off (absent = served, and the singular query follows `read.byId` either
+  way). `check` refuses a surface that is on and carries nothing. What you never have to
+  do is remember to add something to a surface: the failure this replaced was a spec that
+  looked complete while half its write side existed on one surface only.
 - **`children[].editStrategy`.** `atomic-replace` means the root's update swaps the whole
   collection — a caller adding one entry must resend every other one, and two callers
   doing that lose each other's work. `per-child` adds POST/PUT/DELETE on
@@ -757,6 +768,26 @@ Four things to get right, because they are the ones that cost a migration later:
     and any of it under `atomic-replace`. **Ask before declaring it**, the same way you
     ask about `dataAccess`: a permission the deployment has not granted turns a route that
     used to answer into a 403, and nothing on the wire says which claim is missing.
+  - **`children[].surfaces` narrows WHERE those verbs answer, and its default is the point.**
+    Absent, the collection follows the entity: every verb it mounts appears on every
+    surface the entity serves, so `surfaces.graphql.enabled: true` alone gives you
+    `add<Entry>`, `change<Entry>` and `remove<Entry>` beside the root's mutations, each
+    under the same permission its REST route carries. Declare the key only to take
+    something OFF — `rest: false` keeps the mutations and drops the routes,
+    `graphql: {enabled: false}` does the reverse, `graphql: {mutations: [...]}` picks a
+    subset of `operations`. It cannot widen: a collection may not reach a surface its
+    entity does not serve, and `check` refuses a verb narrowed off every surface rather
+    than generating code nobody can call. **This is the shape a real service lost before
+    the key existed**: every collection verb was REST-only whatever the spec said, so a
+    schema-only consumer could create a role and never grant it a permission — and nothing
+    in the spec, the generated code or the gen-report mentioned it. If you are reading a
+    spec whose comment says a collection is "REST-only, as the others ship it", that
+    comment is recording the old limitation as if it had been a decision.
+  - **On GraphQL the entry id travels in the INPUT, not in a path.** `change` and `remove`
+    get a second, GraphQL-shaped Request beside the REST one for that single reason (the
+    framework's input decoder skips a `path`-tagged field), and `remove` gets a payload of
+    its own because a mutation must resolve to something where REST answers 204. Both are
+    generated; there is nothing to write. `add` needs no second shape at all.
 - **`unique.enforce: service-precheck+constraint` is a pair, and the fact is your half.**
   The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
   `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
@@ -1260,6 +1291,12 @@ Do not re-read every file. Read against the plan the dev approved and against th
    root's PUT with the facet's fields null, and `clear<Facet>Of<Entity>`. The report lists
    them side by side. A facet a caller can grant and never revoke is the failure this
    pair exists to prevent.
+7. **The surface matrix** — "Where each endpoint answers" in the report, one row per
+   generated endpoint against REST and GraphQL. Read the DASHES, not the checkmarks: the
+   report names each one that came from a narrowing key underneath the table, and those
+   are the ones to confirm. A collection whose verbs are absent from a surface the entity
+   serves is either a decision you made or the spec saying something you did not mean —
+   and it is the second one often enough that the table exists.
 
 Anything wrong here is fixed **in the spec**, then regenerated. The only files you author
 are the `*_manual.go` hooks — the rules one, the service one, and the computed-read one
