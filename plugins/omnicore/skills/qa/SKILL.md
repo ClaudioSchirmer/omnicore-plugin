@@ -128,7 +128,10 @@ Map what the service declares — this inventory IS the test surface:
    it; the wrong-state one is also raised by the FRAMEWORK on a write the pin's
    `lifecycle-map` guards, so derive it from there, not from the spec) · archive
    round-trip (`archive → hidden → ?includeArchived reveals → unarchive → visible`;
-   with `DeleteOnArchive`, absence instead) · read vocabulary (one filter/`?orderBy=`
+   with `DeleteOnArchive`, absence instead; on an aggregate whose child declares an
+   archive column, the same round-trip proves the unarchive is STAMP-SCOPED — a child
+   removed on its own BEFORE the root's archive stays archived after the root comes
+   back, and the payload/audit report no transition for it) · read vocabulary (one filter/`?orderBy=`
    per declared operator family, `?fields=` when opted in, `?search=` where a text index
    serves it, `?onlyTotal=true` only-total, `?last=` alone serving the TAIL window, and
    the PAGINATION ENVELOPE as a contract: `pagination.totalCount`/`hasNextPage`/

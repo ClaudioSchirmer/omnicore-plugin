@@ -7,7 +7,7 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
-## [0.46.0] — 2026-08-27
+## [0.46.0] — 2026-08-28
 
 A consumer service declared a machine credential the way the language says to — minted
 from `crypto/rand` inside the insert rules, SHA-256'd, and only the hash stored, so no
@@ -22,6 +22,38 @@ exchange for one field.
 
 Reported from a consumer service, with the generator's own `explain keys` output ruling
 out each candidate key.
+
+### Changed
+
+- **`omnicore-gen` now targets framework `v0.62.0`** (`compat.Supported`, and the vendored
+  host the golden gate builds). The bump is required, not cosmetic: `v0.62.0` is where an
+  unarchive stopped resurrecting every archived child under a root and started restoring
+  only the ones the root's OWN archive put to sleep. The cascade used to be gated on "is
+  this child archived?", so a child removed on its own months earlier — through a PUT
+  replace-all or a per-child archive — came back with the root; it is now gated on the
+  archive stamp the root row carries, which the cascade writes as ONE instant on the root
+  and on every child row it reaches. No column, no migration, no backfill: rows written by
+  earlier versions already carry the discriminator. A project on `v0.61.1` or older reads
+  as **behind** and is refused by default (`--force-unsupported` still overrides), which is
+  the intended answer — the restore path it would generate against over-restores.
+  - **Nothing in the emitters changed for it, and that is a fact worth stating rather than
+    assuming.** The new rule makes the archive column's TYPE a correctness question: the
+    discriminator is an equality between two stored timestamps, so a second-resolution
+    column folds two operations of the same second into one stamp, and a child column
+    coarser than its root's truncates the stamp it was given and matches nothing — neither
+    raises an error. The DDL the generator emits was already sub-second on all four engines
+    (`TIMESTAMPTZ`, `DATETIME(6)`, `DATETIMEOFFSET`, `TIMESTAMP WITH TIME ZONE`) and
+    uniform between a root and its children, so generated migrations satisfy the
+    requirement everywhere — the exposure is a HAND-WRITTEN migration, which is where the
+    trap is now documented.
+  - `scaffold-entity`'s `migrations.md` gained that trap (the bare MySQL `DATETIME` is the
+    default that looks right and is wrong), and `aggregate-children.md` carried the old
+    cascade as fact — "only the ROOT's unarchive revives children, in cascade" — and now
+    states the stamp scoping, including the shared base's TWO instants (the role's children
+    restore from the role's stamp, the base's native children from the base's), with the
+    pre-`v0.62.0` behaviour kept as a note for anyone on an older pin. The `qa` skill's
+    archive round-trip asks for the case that proves it: a child removed BEFORE the root's
+    archive must still be archived after the root comes back.
 
 ### Added
 
