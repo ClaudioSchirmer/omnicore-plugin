@@ -120,6 +120,8 @@ answer. Beside it, one thing the fact language could not say.
   "broken there" — `--force-unsupported` generates anyway, and `/omnicore:upgrade` is the
   clean answer.
 
+## [0.51.0] — 2026-08-29
+
 0.50.0 taught `service.facts` to ask about a SET. A consumer took it to the write
 path and found the other half missing: `filters` could batch the QUESTION
 (`op: in` takes the whole set) and `returns` could only answer a SCALAR. So a
