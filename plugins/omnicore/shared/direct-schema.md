@@ -16,18 +16,20 @@ the neutral transaction, with placeholders, identifier quoting and id encoding r
 dialect. Both answers are still in the other shared files; this one says when they stop being
 the answer.
 
-## Availability — the pin decides, and the test is mechanical
+## Availability — pin ≥ v0.64.0, and the test is mechanical
 
-**Direct is NOT in every release.** It arrives with the version that ships it, and the skills
-here are version-agnostic by doctrine: they never stamp a version, they read the project's
-pin.
+**Direct is NOT in every release.** It shipped in framework **v0.64.0**; on anything older
+the door does not exist. The version is named here the way `read-joins.md` names its own —
+as the fact a reader needs to place the feature in time — and it is never the thing an agent
+DECIDES on, because a stamped version drifts and a pin does not.
 
-**The test:** does the pinned framework's `docs/content/sections/` carry `direct-schema.html`
-(equivalently: does `nav.json` list `direct-schema` under Infrastructure)? Present → the door
-exists in this project and everything below applies. Absent → the project's pin predates the
-feature, and this file's only correct output is the OLD answer plus, if the developer wants
-it, a route to `/omnicore:upgrade`. Never design a consumer against a door its pin does not
-have; the failure is an undefined symbol at build time, three steps after the decision.
+**The test, always run against the project's own pin:** does the pinned framework's
+`docs/content/sections/` carry `direct-schema.html` (equivalently: does `nav.json` list
+`direct-schema` under Infrastructure)? Present → the door exists in this project and
+everything below applies. Absent → the pin predates the feature, and this file's only correct
+output is the OLD answer plus, if the developer wants it, a route to `/omnicore:upgrade`.
+Never design a consumer against a door its pin does not have; the failure is an undefined
+symbol at build time, three steps after the decision.
 
 ## What it is — and what it is NOT
 
@@ -42,6 +44,13 @@ the cheap one.
 
 **It is not a lighter aggregate.** Everything an aggregate gives you is absent, deliberately.
 See the two lists below before proposing it for anything.
+
+**The two axes — the one sentence that settles "why are children refused but joins fine?"**
+The DOWNWARD composition an aggregate is — root plus children, satellites and shared identity
+persisted as ONE unit — is gone: a Direct write is one statement against the anchor table.
+The SIDEWAYS reach is untouched: a read traverses its declared joins with the same rules and
+the same reach an aggregate repository has. So "it cannot compose" is the wrong summary; it
+composes horizontally and not vertically, and every refusal below falls out of that.
 
 ## The decision — read it top to bottom, first YES wins
 

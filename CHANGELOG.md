@@ -7,6 +7,14 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.52.0] — 2026-08-29
+
+Framework `v0.64.0` opens a SECOND door into the relational engine — one anchored on a
+TABLE instead of an aggregate — and a door nobody is told about is a door nobody uses. This
+release is that half: the skills learn which door a given table goes through and what the
+new one does not guarantee, and the generator's own hand-off stops implying there is no
+answer. Beside it, one thing the fact language could not say.
+
 ### Added
 
 - **`shared/direct-schema.md` — the skills learn the framework's second door into the
