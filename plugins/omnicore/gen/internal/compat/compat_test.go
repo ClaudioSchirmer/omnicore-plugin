@@ -7,7 +7,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.62.0" {
+	if Supported != "v0.63.0" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,16 +18,18 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.62.0", false, Exact, false},
-		{"same line, later patch", "v0.62.9", false, Exact, false},
-		{"framework moved ahead", "v0.63.0", false, Ahead, false},
-		// One line older, INCLUDING its last patch. It reads Behind and blocks,
-		// which is the intended answer: v0.62.0 is where an unarchive stopped
-		// reviving every archived child and started restoring only the ones the
-		// root's own archive stamped, and the whole v0.61 line does not have it.
-		// There is no "same line, earlier patch" case while the supported line
-		// is a .0 — the patch comparison is exercised by the later-patch row.
-		{"project is one line older", "v0.61.1", false, Behind, true},
+		{"the supported line", "v0.63.0", false, Exact, false},
+		{"same line, later patch", "v0.63.9", false, Exact, false},
+		{"framework moved ahead", "v0.64.0", false, Ahead, false},
+		// One line older. It reads Behind and blocks, which is the intended
+		// answer: v0.63.0 is where ChangeAggregateChild started refusing a
+		// replacement that takes an identity another ACTIVE entry holds, and the
+		// per-entry change this generator emits is the verb that calls it — on
+		// v0.62 the same generated code silently produces the duplicate the
+		// contract forbids. There is no "same line, earlier patch" case while
+		// the supported line is a .0 — the patch comparison is exercised by the
+		// later-patch row.
+		{"project is one line older", "v0.62.0", false, Behind, true},
 		{"project is older", "v0.49.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},
 		{"devel", "(devel)", false, Unknown, false},

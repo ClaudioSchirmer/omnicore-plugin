@@ -1709,6 +1709,7 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 					"two entries the same one; declare the field(s) that identify an entry")
 		}
 		validateChildOperations(c, where, ps)
+		validateChildChange(s, c, where, ps)
 		validateChildPermissions(s, c, where, ps)
 		// A per-entry collection mounts up to three verbs, and one of them can
 		// be meaningless: if every writable field is part of the business
@@ -1724,7 +1725,11 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 		// It is not said at all once the author has answered it, which is what
 		// operations is for: a collection that mounts add and remove and no
 		// change has no such verb to be surprised by.
-		if MountsPerChildOp(c, "change") && len(c.Fields) > 0 &&
+		// Said about the PUT half only. A collection that serves patch alone has
+		// no verb with this shape, and the same observation there is a BLOCKER
+		// raised by validateChildChange — there would be nothing left for a
+		// partial change to carry.
+		if ChildServesPut(c) && len(c.Fields) > 0 &&
 			len(c.BusinessIdentity) == len(c.Fields) {
 			ps.WarnFix(where+".businessIdentity",
 				"the collection has no field outside its business identity, so the "+
@@ -1737,15 +1742,19 @@ func validateChildren(s *Spec, ps *Problems, opt Options) {
 					"root's update carries the whole collection, so an entry a partial "+
 					"client omits is removed")
 		}
+		// The key reaches the ADD and only the ADD, so that is what the advice
+		// names. It used to name the change path as well — "an update can edit
+		// one entry into another's identity" — and that stopped being this key's
+		// business at framework v0.63.0: ChangeAggregateChild now refuses a
+		// replacement that takes an identity another ACTIVE entry holds, with the
+		// framework's own EntityAlreadyAddedNotification. Declaring this one
+		// would not make THAT rejection specific, and advice that recommends a
+		// key for a case the key does not cover is worse than none.
 		if MountsPerChildOp(c, "add") && c.SoftRemove && c.DuplicateNotification == "" {
-			fix := "the update path can edit one entry into another's identity; naming a " +
-				"notification makes the rejection specific"
-			if !MountsPerChildOp(c, "change") {
-				fix = "an add can name an entry the collection already holds; naming a " +
-					"notification makes the rejection specific"
-			}
 			ps.WarnFix(where+".duplicateNotification",
-				"no duplicate notification for a per-child collection", fix)
+				"no duplicate notification for a per-child collection",
+				"an add can name an entry the collection already holds; naming a "+
+					"notification makes the rejection specific")
 		}
 		validateNotificationRef(s, c.DuplicateNotification, where+".duplicateNotification", ps)
 		// A per-entry verb addresses ONE entry, so its command carries the
@@ -1813,6 +1822,131 @@ func validateChildOperations(c Child, where string, ps *Problems) {
 		}
 		seen[op] = true
 	}
+}
+
+// validateChildChange checks the key that says HOW the change verb takes its
+// body — and insists, where the root does not have to, that the entry's
+// business identity is off-limits to a partial one.
+//
+// The insistence is the whole difference between the two levels, and it is a
+// CHECK rather than a silent exclusion so that the language stays the one the
+// author already knows. At the root, a natural key is kept out of the PATCH
+// body by naming it under update.patchExcludes; here the same words do the same
+// job. What differs is the consequence of forgetting: the root's row is
+// addressed by an id no body carries, so a natural key left patchable is at
+// worst a re-key the rules can refuse, while an ENTRY's identity left patchable
+// turns one grant into another while keeping the first one's row id — the exact
+// shape children[].operations documents as the reason to drop change entirely,
+// produced here by the generator itself. So the spec is refused, with the line
+// to write.
+//
+// The other two refusals are the root's own, transposed. A partial change with
+// nothing left to change accepts a body and does nothing (update.patchExcludes
+// is refused the same way), and it is the honest end of the collection whose
+// every field is its identity: the answer there is operations without change,
+// not a verb with an empty body. And a collection named after its own entity
+// would have this build write Patch<Name>Command twice into one package —
+// generated code the author did not write and cannot fix.
+func validateChildChange(s *Spec, c Child, where string, ps *Problems) {
+	if c.Change != nil {
+		if c.EditStrategy != "per-child" {
+			ps.BlockerFix(where+".change",
+				"change shapes a PER-ENTRY verb, and this collection mounts none of them: "+
+					"an atomic replace is edited through the root's own update, in the "+
+					"root's own shape",
+				"drop it, or set editStrategy: per-child")
+			return
+		}
+		if !MountsPerChildOp(c, "change") {
+			ps.BlockerFix(where+".change",
+				"change is shaped here but is not among the verbs this collection mounts",
+				"add change to operations, or drop this block")
+			return
+		}
+		if c.Change.Shape == "" {
+			ps.BlockerFix(where+".change.shape",
+				"the block is declared and does not say what shape the verb has",
+				"patch (partial) | put (full body) | both — leaving the whole block out "+
+					"means put, which is what a collection without it serves")
+		} else if !UpdateShapes.Has(c.Change.Shape) {
+			ps.BlockerFix(where+".change.shape",
+				fmt.Sprintf("%q is not a change shape", c.Change.Shape),
+				"one of: "+UpdateShapes.String())
+		}
+		for _, ex := range c.Change.PatchExcludes {
+			// Same two spellings the root accepts: a composite may be excluded
+			// whole, or one exposed part at a time.
+			if findField(c.Fields, ex) == nil && findLogicalField(c.Fields, s, ex) == nil {
+				ps.Blockerf(where+".change.patchExcludes",
+					"%q does not name a field of this collection", ex)
+			}
+		}
+	}
+	if !ChildServesPatch(c) {
+		return
+	}
+
+	excluded := func(name string) bool { return c.Change != nil && contains(c.Change.PatchExcludes, name) }
+	var open []string
+	for _, bi := range c.BusinessIdentity {
+		if !excluded(bi) {
+			open = append(open, bi)
+		}
+	}
+	if len(open) > 0 {
+		ps.BlockerFix(where+".change.patchExcludes",
+			fmt.Sprintf("a partial change that accepts %s re-keys the entry while keeping "+
+				"its row id — the audit trail then reads as one entry being edited where "+
+				"two things happened", strings.Join(quoted(open), ", ")),
+			fmt.Sprintf("name %s under change.patchExcludes — the identity of the entry "+
+				"the caller addressed comes from what is STORED, never from the body; if "+
+				"the entry really is meant to be swapped for another, that is "+
+				"shape: put, or operations without change",
+				strings.Join(quoted(open), ", ")))
+	}
+
+	patchable := 0
+	for _, f := range c.Fields {
+		if excluded(f.Name) {
+			continue
+		}
+		if !IsComposite(f) {
+			patchable++
+			continue
+		}
+		for _, p := range f.Parts {
+			if !excluded(ExposedName(p)) {
+				patchable++
+			}
+		}
+	}
+	if patchable == 0 {
+		ps.BlockerFix(where+".change.shape",
+			"every field of the entry is excluded from the partial change, so it could "+
+				"never change anything",
+			"leave at least one field patchable — or, if the entry has nothing outside "+
+				"its business identity, take the verb out with operations: [add, remove]")
+	}
+
+	if c.Name == s.Entity {
+		ps.BlockerFix(where,
+			fmt.Sprintf("the collection is named after its own entity, and a partial "+
+				"change generates Patch%sCommand into the same package the entity's own "+
+				"patch types live in", c.Name),
+			"rename the collection — the two names travel together through every "+
+				"generated type, and only one of them can hold the name")
+	}
+}
+
+// quoted renders a list for a message, each entry in its own quotes. A refusal
+// naming three fields runs them together otherwise, and the reader has to guess
+// where one ends.
+func quoted(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, fmt.Sprintf("%q", n))
+	}
+	return out
 }
 
 // validateChildPermissions checks the key that gates the per-entry verbs on

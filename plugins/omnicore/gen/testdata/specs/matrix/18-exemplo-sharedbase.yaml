@@ -10,7 +10,8 @@
 #   the whole storage.base block   — link, naturalKey, schemaFunc, linkColumn,
 #                                    rowUniqueness, orphanPolicy, reuse
 #   fields[].livesOn: base|role    — which table a field is stored in
-#   children[].editStrategy: per-child + duplicateNotification + operations
+#   children[].editStrategy: per-child + duplicateNotification + operations +
+#     change (the entry's own shape: put, patch or both)
 #   children[].ownedBy: base       — a collection of the IDENTITY, not of the role
 #   siblings[].attachTo: role      — a 1:1 facet of the role
 #   rules: requiredIf · skipWhen · transition · comparison · groupCap ·
@@ -251,6 +252,23 @@ children:
     # another while keeping the first one's row id — which an audit trail reads
     # as one thing becoming another rather than as a removal and an addition.
     operations: [add, change, remove]
+    # change — HOW that change verb takes its body, in the same two words the
+    # root's own `update` block uses: shape and patchExcludes. Absent means put,
+    # which is what a change was before this key existed — a full replacement of
+    # the entry, business identity included.
+    #
+    # `both` mounts the two: PUT .../classes/:classId replaces the entry whole,
+    # PATCH .../classes/:classId moves only the fields the body carries. The
+    # partial one reads everything it was not sent off the STORED entry, which
+    # is why the class code is excluded here rather than merely left alone: a
+    # partial change that ACCEPTED the code could re-key the entry while keeping
+    # its row id, and the history would read as one class being edited where a
+    # class was really swapped for another. Naming it under patchExcludes is not
+    # optional — a spec that serves patch and leaves an identity field out of
+    # this list is refused, with the line to write.
+    change:
+      shape: both
+      patchExcludes: [Code]
     # permissions — gate the per-entry verbs SEPARATELY from the root's update.
     # Absent (and absent per verb: this map names two of the three) the entry
     # verbs require whatever the root's update requires, which is the default

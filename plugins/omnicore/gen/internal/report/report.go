@@ -1195,9 +1195,9 @@ func renderCheck(b *strings.Builder, in Input) {
 		if !c.PerChild {
 			continue
 		}
-		fmt.Fprintf(b, "| Collection `%s` | %s | These routes hang off `/%s/:id/%s`. %s%s |\n",
+		fmt.Fprintf(b, "| Collection `%s` | %s | These routes hang off `/%s/:id/%s`. %s%s%s |\n",
 			c.Plural, childPermissionCells(c), m.Entity.PluralSnake, c.Segment,
-			childPermissionAdvice(c), childRemovalNote(c))
+			childPermissionAdvice(c), childChangeNote(c), childRemovalNote(c))
 	}
 
 	if m.Managed.Archiving {
@@ -1382,8 +1382,8 @@ func renderSurfaceMatrix(b *strings.Builder, m *ir.Model) {
 		if !c.PerChild {
 			continue
 		}
-		for _, verb := range ir.PerEntryVerbs {
-			if !c.Mounts(verb) {
+		for _, verb := range ir.PerEntryRoutes {
+			if !c.Serves(verb) {
 				continue
 			}
 			// The route comes from the child itself, which is where the routes
@@ -1419,8 +1419,8 @@ func renderSurfaceMatrix(b *strings.Builder, m *ir.Model) {
 		if su.REST && !c.OnREST {
 			narrowed = append(narrowed, fmt.Sprintf("`%s` off REST (children[].surfaces.rest)", c.Name))
 		}
-		for _, verb := range ir.PerEntryVerbs {
-			if c.Mounts(verb) && su.GraphQL && !c.OnGQL(verb) {
+		for _, verb := range ir.PerEntryRoutes {
+			if c.Serves(verb) && su.GraphQL && !c.OnGQL(verb) {
 				narrowed = append(narrowed, fmt.Sprintf("`%s %s` off GraphQL (children[].surfaces.graphql)",
 					verb, c.Name))
 			}
@@ -1437,16 +1437,18 @@ func renderSurfaceMatrix(b *strings.Builder, m *ir.Model) {
 	}
 }
 
-// perEntryLabel is the word this report uses for a per-entry verb — the code
-// names them add/change/remove, a reader meets them in a sentence. The SET
-// itself is ir.PerEntryVerbs, so a verb added there cannot go missing from the
-// table by being forgotten in a second list here.
+// perEntryLabel is the word this report uses for a per-entry route — the code
+// names them add/change/patch/remove, a reader meets them in a sentence. The
+// SET itself is ir.PerEntryRoutes, so a verb added there cannot go missing from
+// the table by being forgotten in a second list here.
 func perEntryLabel(verb string) string {
 	switch verb {
 	case "add":
 		return "Add"
 	case "change":
 		return "Replace"
+	case "patch":
+		return "Update"
 	case "remove":
 		return "Take out"
 	}
@@ -1820,6 +1822,56 @@ func childPermissionCells(c ir.Child) string {
 // entry is not loaded into the aggregate, so nothing can address it afterwards.
 // On an authorization model that is the difference between "revoked, recoverable"
 // and "revoked, and the way back mints a different grant".
+// childChangeNote says what editing ONE entry actually accepts, because the two
+// shapes differ in something a reviewer has an opinion about and neither the
+// route table nor the permission cell shows: whether the entry's own identity is
+// on the wire.
+//
+// A full replacement carries it, so a caller who sends a different one re-keys
+// the entry while keeping its row id — an audit trail then reads as one thing
+// being edited where two things happened. That is a legitimate API and it is
+// also the exact defect this note exists to surface, so it is stated for the
+// DEFAULT shape too: saying nothing about it is how it got shipped.
+func childChangeNote(c ir.Child) string {
+	if !c.MountsChange {
+		return ""
+	}
+	var out string
+	if c.ChangesByPut() {
+		out += " Changing ONE entry is a FULL replacement (`PUT`): the body carries the " +
+			"whole entry, business identity included, so a caller who sends a different " +
+			"identity re-keys the entry and keeps its row id. The framework refuses only " +
+			"the COLLISION — an identity another active entry already holds answers 409 — " +
+			"so moving to a free one is allowed. Check that this is the contract you want " +
+			"— `children[].change: {shape: patch}` is the other answer."
+	}
+	if c.ChangesByPatch() {
+		out += fmt.Sprintf(" Changing ONE entry is PARTIAL (`PATCH`): what the body leaves "+
+			"out is read off the STORED entry, and what `change.patchExcludes` names — %s "+
+			"— never reaches the wire, so it cannot move.", quotedList(sortedExcludes(c)))
+	}
+	return out
+}
+
+// sortedExcludes is what a partial change may not touch, in a stable order: the
+// note names them, and a set printed in map order would reword the report on
+// every run.
+func sortedExcludes(c ir.Child) []string {
+	out := make([]string, 0, len(c.PatchExcludes))
+	for name := range c.PatchExcludes {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func quotedList(names []string) string {
+	if len(names) == 0 {
+		return "nothing"
+	}
+	return "`" + strings.Join(names, "`, `") + "`"
+}
+
 func childRemovalNote(c ir.Child) string {
 	if !c.MountsRemove {
 		return ""

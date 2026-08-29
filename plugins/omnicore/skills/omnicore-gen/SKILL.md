@@ -720,7 +720,8 @@ Four things to get right, because they are the ones that cost a migration later:
 - **`children[].editStrategy`.** `atomic-replace` means the root's update swaps the whole
   collection — a caller adding one entry must resend every other one, and two callers
   doing that lose each other's work. `per-child` adds POST/PUT/DELETE on
-  `/<entity>/:id/<collection>[/:entryId]`, a duplicate answer on ADD (declare
+  `/<entity>/:id/<collection>[/:entryId]` (the PUT becomes — or is joined by — a PATCH
+  when `children[].change` says so), a duplicate answer on ADD (declare
   `duplicateNotification`) and a 404 for an entry that is not there. Per-child needs
   `businessIdentity`: it is what "the same entry" means.
   - **`children[].operations` picks WHICH of the three to mount** — absent means all
@@ -735,8 +736,31 @@ Four things to get right, because they are the ones that cost a migration later:
     about the swap verb when the key is absent, and stops warning once you have answered
     it. A verb you leave out leaves no trace: no route, no command, no wire type, no
     domain method, no generated test.
+  - **`children[].change` picks HOW the change verb takes its body** — the entry-level
+    twin of the root's `update` block, and deliberately the same two keys in the same
+    words: `shape: patch | put | both` and `patchExcludes`. Absent means `put`, which is
+    what a change was before this key existed. Reach for `patch` (or `both`) whenever the
+    entry has a field that does NOT change — a foreign key into a catalogue, a code, any
+    business identity — because a full replacement makes the caller echo it back on every
+    edit AND accepts what they echo as the new one: the entry is re-keyed while keeping
+    its row id, which is the same audit-trail lie `operations` exists to avoid. (Since
+    framework `v0.63.0` the framework refuses the COLLISION — an identity another active
+    entry already holds answers 409 — but moving to a FREE identity is still a change the
+    full body accepts, and that is the one this key takes off the wire.) The
+    partial verb reads everything the body does not carry off the **stored** entry, so the
+    excluded fields are what the server already holds rather than whatever arrived.
+    **`patchExcludes` is not optional here**: a spec that serves patch and leaves a
+    `businessIdentity` field patchable is REFUSED, with the line to write — the root
+    spells the same decision out loud for its natural key, and a collection that applied
+    it invisibly would be one more rule to know. `check` also refuses a patch with nothing
+    left patchable (the answer there is `operations` without `change`, not a verb with an
+    empty body). `both` mounts `PUT` and `PATCH` over the one entry path, exactly as
+    `update.shape: both` does at the root; the two share the `change` permission and the
+    `change` entry of `children[].surfaces`, because one verb asked twice is not two jobs.
   - **What each of the three ANSWERS, and why they differ.** `add` → **201** with the entry
-    as stored, `change` → **200** with the entry as stored: the body pays for itself,
+    as stored, `change` → **200** with the entry as stored (its partial shape answers the
+    same 200, and with the WHOLE entry: what a caller needs to see is where the entry
+    stands now, not an echo of the fields they moved): the body pays for itself,
     because it is how the caller learns the id the server minted and what the store
     actually holds. `remove` → **204, no body**, exactly like the root's own `archive` and
     `delete`. It carries nothing because it has nothing to carry: the entry it named is
@@ -783,11 +807,14 @@ Four things to get right, because they are the ones that cost a migration later:
     in the spec, the generated code or the gen-report mentioned it. If you are reading a
     spec whose comment says a collection is "REST-only, as the others ship it", that
     comment is recording the old limitation as if it had been a decision.
-  - **On GraphQL the entry id travels in the INPUT, not in a path.** `change` and `remove`
-    get a second, GraphQL-shaped Request beside the REST one for that single reason (the
-    framework's input decoder skips a `path`-tagged field), and `remove` gets a payload of
-    its own because a mutation must resolve to something where REST answers 204. Both are
-    generated; there is nothing to write. `add` needs no second shape at all.
+  - **On GraphQL the entry id travels in the INPUT, not in a path.** `change` (in either
+    shape) and `remove` get a second, GraphQL-shaped Request beside the REST one for that
+    single reason (the framework's input decoder skips a `path`-tagged field), and
+    `remove` gets a payload of its own because a mutation must resolve to something where
+    REST answers 204. All are generated; there is nothing to write. `add` needs no second
+    shape at all. A collection serving `shape: both` gets TWO fields — `change<Entry>` and
+    `patch<Entry>` — because a schema has no method to tell a full replacement from a
+    partial one, so the field name is all a client has to choose between them.
 - **`unique.enforce: service-precheck+constraint` is a pair, and the fact is your half.**
   The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
   `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
@@ -1312,7 +1339,9 @@ this order — each step is cheap and most problems die at the first:
    uniqueness scoped to the active rows is `unique.scope`, "required only when that other
    field is filled" is `requiredIf`, "valid IF present" is `skipWhen`, per-entry endpoints
    are `editStrategy: per-child` and which of those verbs to mount is
-   `children[].operations`, "adding to this collection needs a permission of its own,
+   `children[].operations`, "editing one entry must not make the caller resend the
+   foreign key it is identified by" is `children[].change: {shape: patch}`,
+   "adding to this collection needs a permission of its own,
    not the one that edits the record" is `children[].permissions`,
    "a super-admin crosses the tenant" is `authz.bypass: "*:*"`,
    "the server fills this from the caller" is

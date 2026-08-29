@@ -845,6 +845,34 @@ type Child struct {
 	// is still stored, still projected and still validated the same way, and the
 	// root's own verbs still carry the whole of it.
 	Operations []string `yaml:"operations"`
+	// Change is HOW the change verb takes its body — the entry-level twin of the
+	// root's `update` block, and deliberately the same two keys in the same
+	// words: shape (patch | put | both) and patchExcludes.
+	//
+	// It exists because operations, permissions and surfaces answer WHICH verbs,
+	// WHO may call them and WHERE they answer, and nothing answered WHAT THE BODY
+	// IS. So a change was a PUT and only a PUT: a full replacement of the entry,
+	// business identity included. On a collection whose identity is a foreign key
+	// and whose one editable value is a single field, that costs the caller a
+	// round trip to re-send a value the server already holds — and buys a second
+	// thing nobody asked for, since the identity arrives writable. The entry's
+	// row id survives, so re-keying it reads in the history as one grant becoming
+	// another instead of a revoke plus a grant, which is the exact shape
+	// `operations` documents as the reason to drop `change` altogether.
+	//
+	// Absent means put, which is what change meant before this key existed: a
+	// spec written against the older language keeps generating what it generated
+	// then. `both` mounts the two, the same way update.shape: both mounts PUT and
+	// PATCH at the root.
+	//
+	// The one thing this key does NOT do implicitly is protect the business
+	// identity. A partial change that accepts an identity field is refused at
+	// validation with the line to write — `patchExcludes` — rather than having
+	// the exclusion applied behind the author's back: the root spells the same
+	// decision out loud for its natural key, and a child that spelled it
+	// invisibly would be one more rule to know about a language whose whole
+	// value here is that it reads the same at both levels.
+	Change *ChildChange `yaml:"change"`
 	// Permissions gates the PER-ENTRY verbs on their own, keyed by the same
 	// names operations uses: add, change, remove. Per-child only, and every key
 	// must name a verb the collection actually mounts.
@@ -937,6 +965,56 @@ type Child struct {
 	// DuplicateNotification names the conflict answer a per-child ADD raises
 	// when the entry is already there.
 	DuplicateNotification string `yaml:"duplicateNotification"`
+}
+
+// ChildChange is the body contract of one collection's change verb.
+//
+// It is Update with a different seat, on purpose: same key names, same closed
+// set, same meaning. An author who has decided what the root's update looks
+// like has already decided how to say it here, and a second vocabulary for the
+// same question is how a spec ends up declaring one thing for the parent and
+// another for the child.
+type ChildChange struct {
+	// Shape is which change verbs exist: patch | put | both. PATCH cannot say
+	// "set this to null" here either — an absent field and an explicit null are
+	// the same thing on the wire — so a collection with a clearable field keeps
+	// put among its shapes.
+	Shape string `yaml:"shape"`
+	// PatchExcludes names entry fields a partial change may NOT touch. The
+	// business identity belongs here whenever patch is served: without it the
+	// verb can re-key the entry while keeping its row id, which is a removal and
+	// an addition wearing an edit's clothes.
+	PatchExcludes []string `yaml:"patchExcludes"`
+}
+
+// ChildChangeShape is HOW a collection serves its change verb: put (the
+// default), patch, or both — and "" when it mounts no change at all.
+//
+// The default is put because that is the only shape the language could express
+// before children[].change existed. Reading it as anything else would take a
+// running service's PUT away on a regeneration that changed no key.
+func ChildChangeShape(c Child) string {
+	if !MountsPerChildOp(c, "change") {
+		return ""
+	}
+	if c.Change == nil || c.Change.Shape == "" {
+		return "put"
+	}
+	return c.Change.Shape
+}
+
+// ChildServesPut and ChildServesPatch split that answer into the two verbs the
+// emitters mount. They are asked one at a time everywhere — a route, a command,
+// a wire pair and a test per verb — so the shape string is resolved once, here,
+// and no consumer re-reads the default.
+func ChildServesPut(c Child) bool {
+	shape := ChildChangeShape(c)
+	return shape == "put" || shape == "both"
+}
+
+func ChildServesPatch(c Child) bool {
+	shape := ChildChangeShape(c)
+	return shape == "patch" || shape == "both"
 }
 
 // PerChildOperations is the effective set of per-entry verbs a collection

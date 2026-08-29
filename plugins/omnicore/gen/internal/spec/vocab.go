@@ -366,6 +366,10 @@ func Vocabularies() []Vocabulary {
 			"NARROWS the root's write side on the schema; absent = every write verb the " +
 				"entity mounts. `update` covers PUT and PATCH together, and a collection's " +
 				"per-entry verbs are narrowed under children[].surfaces, not here."},
+		{"children[].change.shape", UpdateShapes,
+			"HOW the change verb takes its body — the same three answers update.shape " +
+				"gives at the root. Absent = put, which is what change meant before this " +
+				"key existed."},
 		{"children[].surfaces.graphql.mutations", ChildOperations,
 			"NARROWS which of the collection's per-entry verbs become mutations; absent = " +
 				"every verb it mounts. To take the whole collection off the schema, say " +
