@@ -148,7 +148,12 @@ never defaulted. Sections (structural — `N/A — <why>`, never deleted):
    FIELDS disappear from it (a rules-only field changes a rule; a SERVED one is an API
    break for that entity's consumers), and where that entity's read model is RELATIONAL,
    any filter or sort declared over one of those fields goes with them
-   (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`). **Two shared-base cases need their
+   (`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md`). **The same slot holds one dependent that
+   is not another entity at all:** a DIRECT repository — one table, no aggregate
+   (`${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`) — may name this entity's `TableSchema`
+   as a JOIN TARGET, which is the intended reuse and lives in `internal/infra/` where no
+   per-layer sweep of the domain would find it. Grep the schema constructor's name across
+   `internal/infra/` alongside the repositories, and list each hit as an EDIT. **Two shared-base cases need their
    own verdict, never improvised:** removing the BASE itself while any role lives is
    forbidden by design — but the PHYSICAL guard exists only if the dev's migrations
    declared the role→base FKs `ON DELETE RESTRICT` (the framework asks for it, never
