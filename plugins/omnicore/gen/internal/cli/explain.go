@@ -216,6 +216,26 @@ twice. And a factRange rule cannot read a fact narrowed by a stamped column with
 a PARAMETER: a declarative rule fills arguments from the entity, and the entity
 carries no CreatedAt.
 
+THE ROW'S OWN ID is addressable the same way, as ID — the framework's fixed
+logical name, the one criteria.ByID and excludeSelf already write against. The
+parameter arrives typed: id domain.ID, or idSet []domain.ID for a set.
+
+    - {field: ID, op: in}    "which of these ids are still live"
+    - ID                     eq: this row, under the fact's scope
+
+This is what a kind: manual fact that needs the id asks for. manual gives you the
+BODY and never the signature — the parameter list comes from filters — so without
+it the id had to be re-derived inside the body from a natural key, paying a join
+whose only job was translating a value the caller already held. Do NOT reach for
+excludeSelf to smuggle it in: that key means "leave the record being written out
+of the answer", and a body that excludes nothing makes the name lie. The two
+coexist when both are meant.
+
+A factRange rule cannot read a fact narrowed by ID either, for its own reason:
+the id is not minted until AFTER the rules have run. Call it from rules.manual,
+or use excludeSelf, which passes the same id under the insert gate the generator
+writes for it.
+
 FILTERS ARE THE FACT'S WHERE, and they speak the framework's own criteria — not
 a list of equalities. A bare name is an eq whose value the caller passes, which
 is what a filter has always meant; the block form names the operator, and the

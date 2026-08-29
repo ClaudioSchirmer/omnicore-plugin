@@ -7,6 +7,51 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+### Added
+
+- **`service.facts[].filters` accepts `ID`, the row's own identity.** It was the
+  one fixed name this key could not say while everything under it could: the
+  framework locks the Go side of every primary key to `"ID"`, `criteria.ByID` is
+  literally `Where(Eq("ID", id))`, the aggregate loader types that slot as an
+  identity on every schema, and the `excludeSelf` gate this same generator emits
+  is `Ne("ID", selfID)`. The generator was strictly more restrictive than the
+  surface it generates against.
+
+  The cost landed hardest on `kind: manual`, which hands the author the BODY and
+  never the signature — the parameter list comes from `filters`. A manual fact
+  whose body needed the id had no way to receive one, so the id was re-derived
+  inside the body from a natural key: reported from a consumer as an `INNER JOIN`
+  back to the entity's own table whose only job was translating a value the
+  caller was already holding, plus an archived-row guard and a tenant argument
+  that existed only to disambiguate the natural key. The alternative in use was
+  worse — `excludeSelf: true` on a manual fact, taken purely for the `selfID` it
+  puts in the signature, with a body that excludes nothing and a key name that
+  lies to every later reader.
+
+  The parameter arrives typed, `id domain.ID` (`idSet []domain.ID` for `in`/`nin`),
+  which is what every caller already holds and what `excludeSelf` has always taken.
+  It is accepted for every kind, not only `manual`: `{field: ID, op: in}` over an
+  `exists` or a `count` is the referential probe ("which of these ids are still
+  live") that the read side could already ask and the write side could not. The
+  two ids coexist — a filter on `ID` and `excludeSelf` name different parameters
+  and answer different questions ("any of these, other than me").
+
+  Three refusals come with it, each for its own reason:
+  - a **`rules.list` `factRange` naming a fact narrowed by `ID`** — a declarative
+    rule fills a fact's arguments from the entity being written, and the id is not
+    minted until after the rules have run. The message points at `rules.manual`,
+    and at `excludeSelf` for the insert case the generator already writes a gate for;
+  - **pinning an id** (`{field: ID, value: …}`) and **ordering two of them**
+    (`op: gt`) — both already refused for any `id`-typed field, and both simply
+    unreachable while the name resolved to nothing;
+  - a **near-spelling** (`Id`, `id`) is answered with the spelling instead of
+    "does not name a field of this entity", which read as "this entity has no id".
+
+  Covered by `explain coverage` as its own capability, documented on the key
+  (`explain keys`), and proven end to end by matrix case 41, whose sqlite runtime
+  lane now runs the id probe against a real engine — the half a compile cannot
+  show, since a bare-text bind matches nothing on three of the four engines.
+
 ## [0.51.0] — 2026-08-29
 
 0.50.0 taught `service.facts` to ask about a SET. A consumer took it to the write

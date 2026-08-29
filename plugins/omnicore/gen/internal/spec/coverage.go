@@ -52,6 +52,7 @@ const (
 	CapFactCriteria     Capability = "facts narrowed by the full criteria vocabulary (a comparison other than equality, a set, an OR, or a value pinned in the spec)"
 	CapMultiAggregate   Capability = "facts answering SEVERAL numbers in one query (count, sum, avg, min and max over the same rows, in a single pass)"
 	CapStampedFilter    Capability = "facts narrowed by a framework-stamped column (CreatedAt, UpdatedAt, DeletedAt) — a time window, or the archived rows alone"
+	CapIdentityFilter   Capability = "facts narrowed by the aggregate id (ID) — the framework's own fixed logical name, so a manual fact's body receives the id instead of re-deriving it from a natural key"
 	CapCompositeVO      Capability = "composite value objects (a value spanning several columns)"
 	CapManualVO         Capability = "hand-written value objects (declared here, written by you): a scalar with kind: manual, a composite with written: manual"
 	CapArchiveOnUpdate  Capability = "an update that finishes as an archive (CompleteAsArchive)"
@@ -82,6 +83,7 @@ var implemented = map[Capability]bool{
 	CapFactCriteria:     true,
 	CapMultiAggregate:   true,
 	CapStampedFilter:    true,
+	CapIdentityFilter:   true,
 	CapChildren:         true,
 	CapSiblings:         true,
 	CapSharedBase:       true,
@@ -139,7 +141,7 @@ func AllCapabilities() []Capability {
 		CapChildUnique, CapPerEntryFact, CapBatchedFact, CapArchivedScope, CapJoinedFact,
 		CapGeneratedTests, CapPerChild, CapPerChildPatch,
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
-		CapMultiAggregate, CapStampedFilter,
+		CapMultiAggregate, CapStampedFilter, CapIdentityFilter,
 		CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
@@ -364,6 +366,10 @@ func CheckCoverage(s *Spec) *Problems {
 				if ManagedReads.Has(n.Field) && factField(s, n.Field) == nil {
 					uses(CapStampedFilter, fmt.Sprintf("service.facts[%d].filters", i),
 						"a fact narrowed by a column the framework stamps")
+				}
+				if n.Field == IdentityName {
+					uses(CapIdentityFilter, fmt.Sprintf("service.facts[%d].filters", i),
+						"a fact narrowed by the aggregate id")
 				}
 				if _, _, isJoin := JoinFactField(s, Options{}, n.Field); isJoin {
 					uses(CapJoinedFact, fmt.Sprintf("service.facts[%d].filters", i),

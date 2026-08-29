@@ -182,3 +182,23 @@ service:
         - {field: Nota, op: lte, as: notaMaxima}
         - {field: Situacao, op: nin, values: [Cancelado]}
       activeOnly: true
+
+    # G. o ID do PROPRIO agregado. E o nome logico fixo do framework — o mesmo
+    #    slot que criteria.ByID e o excludeSelf logo acima escrevem — e era o
+    #    unico que esta chave nao sabia dizer. Sem ele um fato `kind: manual`
+    #    cujo corpo precisa do id nao tinha por onde recebe-lo (o corpo e do
+    #    autor, a assinatura nao), e o id acabava re-derivado la dentro a partir
+    #    de uma chave natural: um join cujo unico trabalho era traduzir um valor
+    #    que quem chamou ja tinha na mao.
+    #
+    #    Nao e uma coluna declarada e nao ha `fields[]` para ele: o carrier
+    #    gerenciado do framework o carrega, e a query e o unico lugar onde ele e
+    #    nomeado. O parametro chega tipado, `idSet []domain.ID`, porque o slot e
+    #    tipado como identidade em todo schema — como texto puro a comparacao
+    #    nao casaria com nada em tres dos quatro engines, em silencio.
+    - name: VivosEntreEstes
+      kind: count
+      description: Quantos destes chamados ainda estao vivos.
+      filters:
+        - {field: ID, op: in}
+      activeOnly: true

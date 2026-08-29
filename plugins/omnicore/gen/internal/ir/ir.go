@@ -1531,6 +1531,15 @@ func lookupFactFilter(s *spec.Spec, m *Model, name string) (*Field, string) {
 			}
 		}
 	}
+	// The aggregate id, under the same fixed logical name the exclude-self gate
+	// already writes Ne against. Nothing declares it and the aggregate carries
+	// no Go field for it — the framework's managed carrier holds it — so the
+	// query is the only place it is named, which is what makes "is this row the
+	// one" and "which of these ids are still live" askable at all.
+	if name == spec.IdentityName {
+		fld := identityFilterField()
+		return &fld, ""
+	}
 	// A framework-stamped column, addressed by the fixed logical name the
 	// framework's own resolver answers for. The entity declares no field for it
 	// and the aggregate carries no Go field — the query is the only place it is
@@ -1605,6 +1614,27 @@ func identityReadField(m *Model, name string) *Field {
 		EntityType: "string", BaseEntityType: "string",
 		JSONName: "id", LabelKey: m.Entity.Pascal + "IDField",
 		Example:     "7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51",
+		Description: "The row's identity, minted by the framework.",
+	}
+}
+
+// identityFilterField renders the aggregate id as the leaf a FACT's criteria
+// compares against.
+//
+// It is deliberately not identityReadField. That one is the WIRE shape, string,
+// because the only emitter reading it writes the request struct the framework
+// binds `?id=` into. This leaf goes to criteria instead, where the value is
+// bound by the dialect's typed id codec — and domain.ID is what the caller
+// already holds (`e.GetID()`, a repository's own handle) and what every
+// exclude-self signature this generator writes has always taken. Handing a
+// string here would compile and still be right, because the translator lifts a
+// bare probe on the ID slot; taking the typed value is what stops a caller from
+// passing some other string that happens to be one.
+func identityFilterField() Field {
+	return Field{
+		Name: spec.IdentityName, Column: "id", SpecType: "id",
+		GoType: "domain.ID", BaseGoType: "domain.ID",
+		EntityType: "domain.ID", BaseEntityType: "domain.ID",
 		Description: "The row's identity, minted by the framework.",
 	}
 }

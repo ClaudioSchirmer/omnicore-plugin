@@ -2802,6 +2802,21 @@ func validateFactRange(s *Spec, opt Options, r Rule, scopeFields []Field, w stri
 		if _, _, isGroup := n.Group(); isGroup || n.Pinned() || !TakesValue(n.Operator()) {
 			return
 		}
+		// The aggregate id is the framework's, and it arrives LATER than this
+		// rule: the row has no identity until the write is accepted, which is
+		// exactly why the exclude-self gate passes an empty domain.ID on an
+		// insert. There is no `e.ID` for this rule to fill the argument from —
+		// left unrefused it emitted `e.` and the tree did not build.
+		if n.Field == IdentityName {
+			ps.BlockerFix(w+".fact",
+				fmt.Sprintf("%s is narrowed by the aggregate id, and this rule fills a "+
+					"fact's arguments from the entity — whose id is not minted until "+
+					"after the rules have run", factName),
+				fmt.Sprintf("call %s from rules.manual, where the insert case is a branch "+
+					"you write — or use excludeSelf, which is the same id passed under the "+
+					"gate the generator writes for it", factName))
+			return
+		}
 		// A field a READ JOIN brings in is on the ENTITY, so `e.<Field>` compiles
 		// — and on an INSERT there is no loaded row behind it, so what it passes
 		// is the zero value. That is the same silence the stamped columns are
@@ -3729,6 +3744,19 @@ func resolveFactFilterField(s *Spec, opt Options, f Fact, name, at string, ps *P
 			return nil, false
 		}
 		return joined, true
+	}
+	// The aggregate id, under the fixed logical name the framework locks on
+	// every schema. It was the one name this key could not say while everything
+	// under it could: criteria.ByID is Where(Eq("ID", id)), the exclude-self
+	// gate this same emitter writes is Ne("ID", selfID), and a listing already
+	// narrows by it. A manual fact whose body needs the id had to re-derive it
+	// from a natural key instead — a join that exists only to translate a value
+	// the caller was holding.
+	//
+	// It cannot shadow anything: "ID" is a reserved field name, so no entity
+	// declares one.
+	if id := identityRead(name); id != nil {
+		return id, true
 	}
 	// The entity's own fields answer FIRST, so nothing that resolved before
 	// resolves differently now: a spec that happens to declare a field called
@@ -5787,7 +5815,8 @@ func sortedTransitionKeys(m map[string][]string) []string {
 // without anything declaring it.
 const IdentityName = "ID"
 
-// identityRead renders the aggregate id as the field a filter or a sort needs.
+// identityRead renders the aggregate id as the field a QUERY needs: a listing's
+// filter or sort, and a fact's filter.
 //
 // It is deliberately NOT part of the readable set. The id is not projected
 // through the field pipeline — every response carries it because the framework
@@ -5795,8 +5824,11 @@ const IdentityName = "ID"
 // fieldRestrict, computed.from) have nothing here to address: an index would be
 // declared over `id` while the document's key is `_id`, a restriction would be
 // asked to scrub the handle the response is required to carry, and a derivation
-// would read a value the reader never selects. Filtering and ordering are the
-// two questions the STORE answers, and those the framework resolves by name.
+// would read a value the reader never selects. What the STORE answers is what
+// resolves here, and the framework maps the name itself on both of its sides:
+// the view reader's own Eq("ID", …), and the aggregate loader's, whose ID slot
+// is typed as an identity on every schema so a probe binds in the dialect's
+// native id form rather than as text that matches nothing on three engines.
 func identityRead(name string) *Field {
 	if name != IdentityName {
 		return nil
