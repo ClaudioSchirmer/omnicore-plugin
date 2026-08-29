@@ -169,7 +169,19 @@ var (
 	// cannot compute honestly goes through the same door — a third-party API, a
 	// cache, a rule of thumb someone codes by hand — without the language having
 	// to grow a keyword per case it failed to anticipate.
-	FactKinds = set("exists", "count", "sum", "avg", "min", "max", "manual")
+	//
+	// notExists is exists negated, and it is here so a fact can be named for
+	// the PROBLEM — which is what every rule that reads one is about, and what
+	// keeps a freshly generated suite green: the test stub answers "nothing
+	// found", and under the healthy-state naming that reads as the row being
+	// gone.
+	FactKinds = set("exists", "notExists", "count", "sum", "avg", "min", "max", "manual")
+
+	// FactScopes is which rows a computed fact's question is about, on the
+	// archived axis. It is criteria.Query's own three-way gate — the default
+	// (active), IncludeArchived and OnlyArchived — named in the spec so the
+	// third one is reachable at all.
+	FactScopes = set("active", "all", "archivedOnly")
 
 	// AggregateKinds is what ONE entry of service.facts[].aggregates computes.
 	//
@@ -427,9 +439,19 @@ func Vocabularies() []Vocabulary {
 		{"notifications[].package", NotificationPackages,
 			"where the type is declared; one raised by a child's rule must live in aggregatevos."},
 		{"service.facts[].kind", FactKinds,
-			"how the fact is answered; manual means you write it in the hook file."},
+			"how the fact is answered; manual means you write it in the hook file. " +
+				"notExists is exists negated, so the fact can be named for the PROBLEM " +
+				"— which is what the rule reading it raises a notification about."},
+		{"service.facts[].scope", FactScopes,
+			"which rows the question is about, on the archived axis. Absent = all, " +
+				"which is what a fact has always done; active is the same thing " +
+				"activeOnly: true says, and the two together are refused. archivedOnly " +
+				"asks about the archived rows and nothing else, and needs the entity to " +
+				"declare an archive column — with no marker column every scope yields no " +
+				"gate, so it would answer about every row instead of about none."},
 		{"service.facts[].returns", FactReturns,
-			"the Go type the fact answers with."},
+			"the Go type the fact answers with. Under perEntry it is the map's VALUE " +
+				"— the answer for one entry — not the method's return type."},
 		{"service.facts[].aggregates[].kind", AggregateKinds,
 			"what ONE of the numbers a fact answers is. The list asks several of them " +
 				"in ONE query, which is what the framework's aggregate loader takes; " +

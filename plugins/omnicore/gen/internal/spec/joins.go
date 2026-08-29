@@ -492,29 +492,9 @@ func joinReachOf(s *Spec, opt Options) joinReach {
 	for _, j := range s.Joins {
 		target := neighbourNamed(opt.Neighbours, j.To)
 		for _, f := range j.Fields {
-			specType, targetNullable := f.Type, false
-			if target != nil {
-				if tf := neighbourFieldByColumn(target.Fields, f.Column); tf != nil {
-					specType, targetNullable = tf.Type, tf.Nullable
-				}
-			}
-			if specType == "" {
+			rf, ok := joinFieldAsColumn(j, f, target)
+			if !ok {
 				continue
-			}
-			// An identity crosses as TEXT (a join field carries no domain type),
-			// so the operators a filter may declare on it are a string's. The
-			// framework still binds the predicate in the target's native id form —
-			// it takes that typing from the TARGET's schema rather than from this
-			// side, precisely because nothing about the field says "identity".
-			if specType == "id" {
-				specType = "string"
-			}
-			rf := Field{
-				Name: f.Name, Type: specType, Column: f.Column,
-				// Two independent sources of absence: no counterpart (left), or a
-				// column the target itself declares nullable.
-				Nullable: j.Kind == "left" || targetNullable,
-				LivesOn:  "root",
 			}
 			if j.InChild == "" {
 				jr.root = append(jr.root, rf)
@@ -529,6 +509,75 @@ func joinReachOf(s *Spec, opt Options) joinReach {
 		}
 	}
 	return jr
+}
+
+// joinFieldAsColumn resolves ONE mapped field to the column it stands for, in
+// the type the TARGET declares for it — the shape every check that treats a
+// joined field like a column of this table needs.
+//
+// It answers false when the type cannot be derived at all, which happens only
+// for a hand-written target that also left `type` out. That combination is
+// already refused by validateJoinField; here it simply means the field is not
+// checkable, and inventing a type for it would produce a refusal about a column
+// nobody can see.
+func joinFieldAsColumn(j Join, f JoinField, target *Neighbour) (Field, bool) {
+	specType, targetNullable := f.Type, f.Nullable
+	if target != nil {
+		if tf := neighbourFieldByColumn(target.Fields, f.Column); tf != nil {
+			specType, targetNullable = tf.Type, tf.Nullable
+		}
+	}
+	if specType == "" {
+		return Field{}, false
+	}
+	// An identity crosses as TEXT (a join field carries no domain type), so the
+	// operators a filter may declare on it are a string's. The framework still
+	// binds the predicate in the target's native id form — it takes that typing
+	// from the TARGET's schema rather than from this side, precisely because
+	// nothing about the field says "identity".
+	if specType == "id" {
+		specType = "string"
+	}
+	return Field{
+		Name: f.Name, Type: specType, Column: f.Column,
+		// Two independent sources of absence: no counterpart (left), or a
+		// column the target itself declares nullable.
+		Nullable: j.Kind == "left" || targetNullable,
+		LivesOn:  "root",
+	}, true
+}
+
+// JoinFactField resolves a name a fact's filter gives to a field one of this
+// entity's READ JOINS brings in.
+//
+// It is deliberately NOT gated on the read backing, the way joinReachOf is. A
+// join is declared on the REPOSITORY, so it is compiled into every query that
+// loader runs — the framework says so of `Exists` in as many words ("criteria
+// may reference sibling and shared-base fields — the same LEFT JOINs FindAll
+// uses apply"), and the aggregate calls resolve their field through the same
+// accumulator. A projection is the one thing a join never reaches, and a fact
+// is not a projection: it is a question asked on the write path.
+//
+// The second return is the traversal the name came from, so a refusal can say
+// WHY a child join is not it. The third is whether the name matched any join
+// field at all — root or child — which is what tells "you meant a joined field
+// and it is out of reach" apart from "this name resolves to nothing anywhere".
+func JoinFactField(s *Spec, opt Options, name string) (*Field, *Join, bool) {
+	for i := range s.Joins {
+		j := s.Joins[i]
+		target := neighbourNamed(opt.Neighbours, j.To)
+		for _, f := range j.Fields {
+			if f.Name != name {
+				continue
+			}
+			fld, ok := joinFieldAsColumn(j, f, target)
+			if !ok {
+				return nil, &s.Joins[i], true
+			}
+			return &fld, &s.Joins[i], true
+		}
+	}
+	return nil, nil, false
 }
 
 // canonicalChildName is the spec-side twin of ir.canonicalCollection: one

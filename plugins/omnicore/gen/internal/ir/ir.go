@@ -616,6 +616,16 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	m.Notifications = resolveNotifications(s)
 	placeNotifications(s, m)
 	m.ValueObjects = resolveValueObjects(s)
+	// Before the service: a FACT may be narrowed by a field a root join brings
+	// in, and the join is what says the column exists and what type it lands
+	// in. Resolved after, the fact found nothing and hit the panic that guards
+	// against exactly this kind of generator inconsistency.
+	//
+	// Nothing between here and where this used to sit reads the joins, and the
+	// two things that DO need them — a relational read model, which serves the
+	// root joins' fields, and a per-entry derivation reading a field declared
+	// inChild — are both further down still.
+	resolveJoins(s, p, m)
 	m.Service = resolveService(s, m)
 	m.Clauses = resolveClauses(s, m)
 	m.Clauses = mergeClauses(m.Clauses, hoisted)
@@ -641,9 +651,6 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 			}
 		}
 	}
-	// Before the read: a relational read model serves the ROOT joins' fields, so
-	// the read side has to be resolved with them already in hand.
-	resolveJoins(s, p, m)
 	// After the joins, for the same reason the read model is: a field a join
 	// declared `inChild` is on the entry now, and a per-entry derivation may
 	// read it.
@@ -1490,12 +1497,19 @@ func lookupFactFilter(s *spec.Spec, m *Model, name string) (*Field, string) {
 		if coll == nil {
 			return nil, ""
 		}
+		// The field is whatever follows the dot, taken by CUTTING rather than
+		// by trimming the collection's plural: the head is one of the
+		// collection's TWO names, and a spec addressing it by the entry type
+		// (`Claim.ClaimID`) resolved here against `Claims.` , kept the whole
+		// string, matched no field, and reached the panic in resolveFactConds
+		// that exists to catch a generator inconsistency.
+		_, want, _ := strings.Cut(name, ".")
 		for i := range m.Children {
 			if m.Children[i].Plural != coll.Plural {
 				continue
 			}
 			for j := range m.Children[i].Fields {
-				if m.Children[i].Fields[j].Name == strings.TrimPrefix(name, coll.Plural+".") {
+				if m.Children[i].Fields[j].Name == want {
 					return &m.Children[i].Fields[j], coll.Plural
 				}
 			}
@@ -1504,6 +1518,18 @@ func lookupFactFilter(s *spec.Spec, m *Model, name string) (*Field, string) {
 	}
 	if fld := lookupField(m, name); fld != nil {
 		return fld, ""
+	}
+	// A field a ROOT read join brings in from another aggregate. The framework
+	// compiles the traversal into the probe and the aggregate calls exactly as
+	// it does into FindAll, so the column is reachable; the generator was the
+	// half that could not name it. A child join is load-only and never reaches
+	// a predicate — validation refuses that one, so only the root's are here.
+	for _, j := range m.RootJoins() {
+		for i := range j.Fields {
+			if j.Fields[i].Name == name {
+				return &j.Fields[i], ""
+			}
+		}
 	}
 	// A framework-stamped column, addressed by the fixed logical name the
 	// framework's own resolver answers for. The entity declares no field for it
@@ -1894,10 +1920,20 @@ type Fact struct {
 	// GroupType is the generated struct one group comes back as. It lives in the
 	// domain package beside the port, because the port cannot speak in the
 	// framework's own *read.Group without dragging infra into the domain.
-	GroupType   string
-	ActiveOnly  bool
+	GroupType string
+	// Scope is which rows the question is about on the ARCHIVED axis, already
+	// resolved to one word: active | all | archivedOnly. The spec says it in
+	// two spellings (`activeOnly: true` and `scope:`), and everything
+	// downstream reads this one — an emitter that had to know both would be a
+	// second place for them to disagree.
+	Scope       string
 	Description string
-	Params      []FactParam
+	// PerEntry is set when the fact asks ONE question about a whole collection
+	// and answers PER ENTRY of it. Empty for every other fact, including the
+	// once-per-entry form, where the loop lives in the rule and the method sees
+	// one entry at a time.
+	PerEntry *FactPerEntry
+	Params   []FactParam
 	// Where is the criteria tree the query narrows by, as an implicit AND of
 	// the nodes at the top — which is what the spec's `filters` list is.
 	//
@@ -2005,6 +2041,44 @@ type FactParam struct {
 	PerEntry string
 }
 
+// FactPerEntry is the batched shape: the entries go in together and the answer
+// comes back keyed by one of their fields.
+//
+// It carries the whole difference between the two per-entry forms. Without it
+// the rule loops and the body answers about ONE entry; with it the body is
+// asked once and answers about all of them, which is the difference between N
+// round trips and one — and, because the answer is keyed, the rule can still
+// name the offending entry in the notification it raises.
+type FactPerEntry struct {
+	// Collection is the collection the entries come from, by its plural — the
+	// name the port's documentation uses.
+	Collection string
+	// Key is the field the answer is attributed to: the map's key.
+	Key FactParam
+	// Fields are what ONE entry contributes, in tree order with the key first.
+	// One of them means the method takes a plain slice of the key; more means
+	// it takes the generated carrier, because two parallel slices are two
+	// things a caller can misalign.
+	Fields []FactParam
+	// EntryType is the generated carrier's name, empty when the entry
+	// contributes the key alone.
+	EntryType string
+	// Param is what the entries arrive under — the slice parameter's name.
+	Param string
+}
+
+// Carrier reports whether an entry contributes more than its key, and therefore
+// travels as a generated struct rather than as a bare value.
+func (p *FactPerEntry) Carrier() bool { return p != nil && p.EntryType != "" }
+
+// Batched reports whether this fact asks once about a whole collection.
+func (f Fact) Batched() bool { return f.PerEntry != nil }
+
+// existsKind reports whether a fact answers yes/no rather than a number.
+// notExists is exists with the reading inverted: same probe, same criteria,
+// same one query.
+func existsKind(kind string) bool { return kind == "exists" || kind == "notExists" }
+
 func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 	if s.Service == nil || !s.Service.Required {
 		return nil
@@ -2015,9 +2089,10 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 	for _, f := range s.Service.Facts {
 		fact := Fact{
 			Name: f.Name, Kind: f.Kind, Field: f.Field,
-			Manual:     f.Kind == "manual",
-			Multi:      len(f.Aggregates) > 0,
-			ActiveOnly: f.ActiveOnly, Description: f.Description,
+			Manual:       f.Kind == "manual",
+			Multi:        len(f.Aggregates) > 0,
+			Scope:        factScope(f),
+			Description:  f.Description,
 			ReturnType:   factReturnType(f, m),
 			ReturnsFound: factReturnsFound(f.Kind),
 		}
@@ -2046,6 +2121,7 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 			fact.ResultType = m.Entity.Pascal + f.Name + "Result"
 		}
 		fact.Where = resolveFactConds(s, m, f, f.Filters, &fact.Params)
+		resolvePerEntry(s, m, f, &fact)
 		if f.ExcludeSelf {
 			// The row being updated must not count against itself, or every
 			// update of a unique field would report a duplicate of itself.
@@ -2056,6 +2132,95 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 		sm.Facts = append(sm.Facts, fact)
 	}
 	return sm
+}
+
+// factScope resolves the archived gate to ONE word.
+//
+// The language says it two ways — `activeOnly: true` from before the key
+// existed, and `scope:` — and validation refuses declaring both. Collapsing
+// them here means every emitter reads one field, instead of each remembering
+// that a missing `scope` might still be narrowed by the older key.
+//
+// The DEFAULT is `all`, not `active`: a fact has always included the archived
+// rows unless told otherwise, and quietly narrowing that would change what
+// every existing spec asks.
+func factScope(f spec.Fact) string {
+	switch {
+	case f.Scope != "":
+		return f.Scope
+	case f.ActiveOnly:
+		return "active"
+	}
+	return "all"
+}
+
+// resolvePerEntry turns the per-entry filters into the batched shape: the
+// entries as one parameter, and the answer keyed by one of their fields.
+//
+// The parameters the filter walk already collected are REPLACED, not appended
+// to: a per-entry leaf contributed one scalar each, and in the batched form
+// those same leaves are fields of an entry rather than arguments of the
+// method. Leaving them behind would emit a signature that takes the collection
+// AND one entry's values beside it.
+func resolvePerEntry(s *spec.Spec, m *Model, f spec.Fact, fact *Fact) {
+	if f.PerEntry == "" {
+		return
+	}
+	coll, _, dotted := spec.ChildFactField(s, f.PerEntry)
+	if !dotted || coll == nil {
+		return // refused by validation; nothing honest to build here
+	}
+	keyField, _ := lookupFactFilter(s, m, f.PerEntry)
+	if keyField == nil {
+		return
+	}
+	key := FactParam{
+		Name:     naming.Camel(keyField.Name),
+		GoType:   keyField.BaseGoType,
+		Field:    keyField.Name,
+		PerEntry: coll.Plural,
+	}
+
+	// The entry's fields: the key first, then every other per-entry parameter
+	// the filter walk found, in the order the tree wrote them. The key leads
+	// because it is what the answer is keyed by, whether or not `filters` also
+	// names it.
+	fields := []FactParam{key}
+	var rest []FactParam
+	for _, p := range fact.Params {
+		if p.PerEntry == "" {
+			rest = append(rest, p)
+			continue
+		}
+		if p.Field == key.Field {
+			continue // the key, already leading
+		}
+		fields = append(fields, p)
+	}
+
+	pe := &FactPerEntry{Collection: coll.Plural, Key: key, Fields: fields}
+	if len(fields) > 1 {
+		// More than the key: a generated carrier, because two parallel slices
+		// are two things a caller can put out of step with each other.
+		pe.EntryType = m.Entity.Pascal + f.Name + "Entry"
+		pe.Param = "entries"
+	} else {
+		pe.Param = spec.SetParamName(key.Name)
+	}
+	fact.PerEntry = pe
+	fact.Params = append(rest, FactParam{
+		Name: pe.Param, GoType: "[]" + pe.EntryGoType(), Field: key.Field,
+		PerEntry: coll.Plural, Role: "per-entry",
+	})
+}
+
+// EntryGoType is what ONE entry travels as: the carrier when the entry
+// contributes more than its key, and the key's own type when it does not.
+func (p *FactPerEntry) EntryGoType() string {
+	if p.EntryType != "" {
+		return p.EntryType
+	}
+	return p.Key.GoType
 }
 
 // resolveFactConds walks the spec's filter tree into the IR's, collecting the
@@ -2190,7 +2355,7 @@ func factEnumOf(s *spec.Spec, fld Field) *spec.ValueObject {
 // needs a Found beside it, so the port, the implementation, the group struct
 // and the generated stub cannot disagree about any of the three.
 func resolveFactSlots(f spec.Fact, m *Model, grouped bool) []FactSlot {
-	if f.Kind == "exists" || f.Kind == "manual" {
+	if existsKind(f.Kind) || f.Kind == "manual" {
 		return nil
 	}
 	if len(f.Aggregates) == 0 {
@@ -2307,7 +2472,7 @@ func factReturnType(f spec.Fact, m *Model) string {
 		return ""
 	}
 	switch f.Kind {
-	case "exists":
+	case "exists", "notExists":
 		return "bool"
 	case "count":
 		return "int64"

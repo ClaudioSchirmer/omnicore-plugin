@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -192,6 +193,7 @@ func Generate(w io.Writer, opt GenerateOptions) error {
 		// successful. The report is the hand-off, so it is where that has to be
 		// said, by name.
 		UnimplementedFacts:     unimplementedFacts(proj.Root, model, decisions),
+		OrphanedFacts:          orphanedFacts(proj.Root, model, decisions),
 		UnimplementedRedactors: unimplementedRedactors(proj.Root, model, decisions),
 		CompatLevel:            string(verdict.Level),
 		CompatMessage:          verdict.Message,
@@ -419,6 +421,60 @@ func unimplementedFacts(root string, m *ir.Model, decisions []fsplan.Decision) [
 	}
 	return out
 }
+
+// orphanedFacts is unimplementedFacts read the other way: methods the hook file
+// still answers for and the spec no longer declares.
+//
+// It is the half nobody was told about. A fact ADDED after the file existed is
+// a compile error the report already names; a fact REMOVED left its body
+// behind as dead code that still compiled, so nothing anywhere said the file
+// had drifted from the spec — and the language's own posture is that dead code
+// goes out with the change that stranded it.
+//
+// One of these is no longer merely dead: a BATCHED per-entry fact's body names
+// the entry carrier, which is declared beside the port and disappears with the
+// fact. The tree then fails to build on a symbol, in the author's own file,
+// with nothing saying which decision produced it. That is precisely what this
+// list exists to turn back into a sentence.
+func orphanedFacts(root string, m *ir.Model, decisions []fsplan.Decision) []string {
+	if m.Service == nil {
+		return nil
+	}
+	var hook string
+	for _, d := range decisions {
+		if d.Action == fsplan.KeptHook && strings.HasSuffix(d.File.Path, "_service_manual.go") {
+			hook = d.File.Path
+		}
+	}
+	if hook == "" {
+		return nil // freshly written, so it carries exactly this run's stubs
+	}
+	body, err := os.ReadFile(filepath.Join(root, hook))
+	if err != nil {
+		return nil
+	}
+	declared := map[string]bool{}
+	for _, f := range m.Service.Facts {
+		declared[f.Name] = true
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, match := range hookMethodRe.FindAllStringSubmatch(string(body), -1) {
+		name := match[1]
+		if declared[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// hookMethodRe finds the methods a service hook file declares. The receiver is
+// not pinned to the implementation's name on purpose: a file written before an
+// entity was renamed still declares bodies, and reporting them is more useful
+// than matching nothing.
+var hookMethodRe = regexp.MustCompile(`func \([A-Za-z_]\w* \*\w+\) (\w+)\(`)
 
 // unimplementedRedactors is the same question for the redactor hook: a `hook`
 // axis added to the spec AFTER the file first existed gets no stub, because the

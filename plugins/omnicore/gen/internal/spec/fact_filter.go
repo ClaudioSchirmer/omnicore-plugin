@@ -125,7 +125,35 @@ func (f FactFilter) ParamName() string {
 	if _, after, dotted := strings.Cut(name, "."); dotted {
 		name = after
 	}
-	return naming.Camel(name)
+	camel := naming.Camel(name)
+	// A set operator takes the whole set, and the parameter is a slice. Left
+	// singular it read as one value in every signature the language emits —
+	// `claimID []domain.ID` — which is the one place a reader looks to find out
+	// whether they are asking about one thing or many.
+	if TakesSet(f.Operator()) {
+		return SetParamName(camel)
+	}
+	return camel
+}
+
+// SetParamName names the parameter that carries MANY values — the slice an
+// `in`/`nin` leaf takes, and the keys a batched per-entry fact is asked about.
+//
+// A SUFFIX and not a plural, deliberately. This language pluralises nothing for
+// the author anywhere else: a collection's plural and an entity's route are
+// both DECLARED, precisely because no rule derives them reliably — and the
+// specs this generator reads are not written in English, so `situacao` would
+// come back `situacaos` and `pais` as `paises` by luck rather than by grammar.
+// A suffix is never the wrong WORD, only ever a longer one.
+//
+// `Set` is the framework's own noun for what these operators take, so the
+// signature and the criteria vocabulary say the same thing. `as:` overrides it
+// wherever the author has a better name.
+func SetParamName(s string) string {
+	if s == "" {
+		return s
+	}
+	return s + "Set"
 }
 
 // TakesValue reports whether the operator compares against anything at all.

@@ -7,6 +7,123 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.51.0] — 2026-08-29
+
+0.50.0 taught `service.facts` to ask about a SET. A consumer took it to the write
+path and found the other half missing: `filters` could batch the QUESTION
+(`op: in` takes the whole set) and `returns` could only answer a SCALAR. So a
+fact about a collection was stuck being asked ONCE PER ENTRY — the loop in the
+rule, the body run per entry — and a single `POST` carrying three groups, five
+roles and twenty claims measured **≈49 reads where the batched questions are ≈6**.
+
+The generator was asymmetric, and the asymmetry was invisible: nothing in the
+spec, the signature or the report said the cost was there. Worse, the one shape
+available for batching answered one `bool` for twenty ids, which cannot say WHICH
+id is the bad one — so batching meant trading nineteen queries for a 422 no
+operator can act on.
+
+This release closes the answer side, plus three questions a fact could not ask at
+all and the false sentences the emitters were printing on top of them.
+
+### Added
+
+- **`service.facts[].perEntry` — ONE question about a whole collection, answered
+  PER ENTRY.** Its value is `<Collection>.<Field>`, the key the answer is
+  attributed to, and it changes both halves of the signature: the entries arrive
+  together and the method answers `map[<key>]<returns>`. The rule asks once,
+  walks the map in memory, and still names the offending entry in the
+  notification it raises.
+  - **An entry may contribute MORE than its key.** Those fields travel as ONE
+    generated carrier (`<Entity><Fact>Entry`, declared beside the port) rather
+    than as parallel slices a caller can put out of step — a defect that
+    compiles, runs, and answers about the wrong entry. With the key alone the
+    parameter stays a plain slice of it, because a struct there is ceremony.
+  - **A MISSING key is defined, once, so two services cannot read one silence two
+    ways.** It is the fact answering nothing for that entry; at the call site
+    Go's zero value settles what that means — absent reads as `false`, which is
+    the answer a fact named for the PROBLEM wants. The port's own documentation
+    says so, and says to put the verdict in the map rather than to imply it by
+    omission.
+  - **The key has to be findable again**: non-nullable, and one of
+    `string int int64 id`. A `time` compares by wall clock AND monotonic reading
+    AND location, so two values that print the same are two keys; a `float64` can
+    be NaN, which never equals itself; a `bool` makes the map two buckets rather
+    than an answer per entry.
+  - Manual only — a computed fact is a query over this entity's own table and the
+    entries are on the collection's — and refused to `factRange`, which fills a
+    fact's arguments from the ROOT and would have a collection to pass.
+- **`kind: notExists`** — `exists` with the reading inverted once, in the
+  generated body. It exists so a fact can be NAMED FOR THE PROBLEM, which is what
+  the rule reading it raises: spelled as `exists`, such a fact has to be named
+  for the healthy state, and then the generated test stub's "nothing found" reads
+  as "the row is gone" and turns a correct spec red on the day it is written.
+  Same probe, same criteria, same one query.
+- **`service.facts[].scope` — the archived gate, said out loud**:
+  `active | all | archivedOnly`. Absent is `all`, which is what a fact has always
+  done; `active` is what `activeOnly: true` says, and declaring both is refused
+  rather than reconciled — they govern one gate, and picking one silently would
+  run a query nobody wrote. `archivedOnly` is the one that was unaskable: "was
+  this taken and then withdrawn" is about the archived rows ALONE, and the
+  language could only ask about the living ones or about every row. It is
+  `criteria.Query.OnlyArchived`, which the framework has always offered and
+  nothing here reached. Refused without `storage.managed.archivedAt`: with no
+  marker column the framework applies NO gate under any scope, so it would answer
+  about every row instead of about none.
+- **A fact may narrow by a field a ROOT `joins[]` entry brings in.** The
+  framework already served this and the generator could not name the column: a
+  root join is in the FROM of every query the loader runs, `Exists` compiles the
+  same traversal `FindAll` does, and the loader even types an identity column
+  across the join leg so the bind is the dialect's native id form rather than
+  text that matches nothing on three of the four engines. "Does an active row
+  exist whose CAMPUS is labelled this" is one query; it was hand-written per
+  service. A join declared `inChild` is refused — it rides the collection's own
+  batched SELECT and never reaches a predicate — and `factRange` may not fill a
+  joined argument, because on an INSERT the traversal has not run and the zero
+  would be passed as though it were an answer.
+- **The gen-report names bodies the spec no longer asks for.** The service hook
+  is written once and never reopened, so it drifts from the spec in both
+  directions — and only one was reported. A fact ADDED was a compile error the
+  report already named; a fact REMOVED left its body behind as dead code that
+  still compiled, and nothing anywhere said the file had drifted. With a batched
+  fact it stops being merely dead: the entry carrier leaves with the fact, so the
+  stranded body fails to build on `undefined: <Entity><Fact>Entry` — a symbol,
+  with no decision attached to it. Now there is one.
+
+### Fixed
+
+- **A fact filtered by TWO collections was accepted** and emitted a port
+  documented as "asked ONCE PER ENTRY of A and B" — a pair of nested loops nobody
+  wrote, with no stated order between them. A per-entry question is about one
+  collection, in either form.
+- **A per-entry filter addressing its collection by the ENTRY TYPE's name
+  crashed the generator.** Every key that addresses a collection accepts both its
+  `plural` and the entry type's `name`; this one validated under either and then
+  resolved by trimming the plural, so `Claim.ClaimID` kept the whole string,
+  matched no field, and hit the panic that guards against generator
+  inconsistency. `check` said the spec was fine.
+- **A `factRange` rule over a once-per-entry fact generated a tree that did not
+  build.** The rule fills arguments from the root, and the value is on the
+  collection's table, so `e.<Field>` named nothing.
+- **`op: in` kept the singular parameter name** (`claimID []domain.ID`) and the
+  stale "asked once per entry … cost multiplied by the size of the collection"
+  note — a sentence that was false of the very signature it sat on, since the
+  parameter is a slice. The parameter now says it holds many, and the note says
+  the question is already batched and what a scalar answer costs.
+- **Every fact's implementation carried the `exists` sentence**: *"the probe
+  exists precisely so a yes/no question does not pay for full hydration"*, on top
+  of sums, averages and grouped counts. The point was true of all of them and the
+  words were true of one.
+- **A grouped `count` mentioned `Found`** — *"where a group's own scalar can
+  still be null, its Found says so"* — in a file the developer is meant to read,
+  for a flag `count` never carries and cannot.
+- **`joinReachOf` ignored a joined field's declared `nullable`** while the IR
+  honoured it, so for a hand-written target the read side was told a column that
+  can be NULL cannot be. Both now read one resolver.
+- **The gen-report built manual-fact signatures of its own** from the parameter
+  list and the return TYPE, which stopped being the whole answer the moment a
+  fact could answer a map or take a carrier — it would have handed the author a
+  signature they cannot paste. It now prints what the port declares.
+
 ## [0.50.0] — 2026-08-28
 
 A consumer service needed a fact about a SET — "how many claims admit one of
