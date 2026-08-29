@@ -2703,8 +2703,11 @@ func emitPerChildOpTests(s *src, m *ir.Model) {
 		if c.MountsAdd {
 			emitAddChildOpTest(s, m, c)
 		}
-		if c.MountsChange {
+		if c.ChangesByPut() {
 			emitChangeChildOpTest(s, m, c)
+		}
+		if c.ChangesByPatch() {
+			emitPatchChildOpTest(s, m, c)
 		}
 		if c.MountsRemove {
 			emitRemoveChildOpTest(s, m, c)
@@ -2798,6 +2801,130 @@ func emitChangeChildOpTest(s *src, m *ir.Model, c ir.Child) {
 	ownerFixture(s, m)
 	s.L("\tcmd := &Change%sCommand{%sID: %s}",
 		c.OpBase, c.Name, quote("019ffd00-0000-7000-8000-0000000000ff"))
+	s.L("\tout, err := cmd.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	s.L("\tif !out.%s.ID.IsEmpty() {", c.Name)
+	s.L("\t\tt.Errorf(%s, out.%s)", quote("an unknown id projected an entry: %+v"), c.Name)
+	s.L("\t}")
+	s.L("}")
+	s.Blank()
+}
+
+// emitPatchChildOpTest covers the two things a PARTIAL change can silently get
+// wrong, and neither of them fails loudly.
+//
+// A field the caller did not send has to come back off the STORED entry. If the
+// merge is dropped, the command still compiles, still answers 200, and quietly
+// blanks every field the body left out — with the business identity among them,
+// which is the entry silently becoming a different one. And a field the caller
+// DID send has to land: a patch that keeps everything as it was is a 200 that
+// changed nothing, which no status code reports.
+func emitPatchChildOpTest(s *src, m *ir.Model, c ir.Child) {
+	stored := writableChildFields(c)
+	sendable := patchableChildFields(c)
+
+	s.Doc(
+		fmt.Sprintf("Patch%sCommand leaves everything the caller did not send exactly as "+
+			"the entry holds it.", c.OpBase),
+		"",
+		"This is the whole contract of the verb, and the identity fields are the part "+
+			"that matters: they are not on the wire at all, so what survives here is the "+
+			"only thing that decides which entry this still is.")
+	s.L("func TestPatch%sCommand_KeepsWhatWasNotSent(t *testing.T) {", c.OpBase)
+	s.L("\tctx := &configuration.AppContext{}")
+	emitTestIdentity(s, m, "\t")
+	ownerFixture(s, m)
+	s.L("\tseeded := domain.WithID(")
+	s.L("\t\t%s.To%s(),", childInputLiteral(m, c, false), c.Name)
+	s.L("\t\tdomain.NewID(%s),", quote(seededEntryID))
+	s.L("\t)")
+	s.L("\te.AggregateConstructor([]domain.AggregateValueObject{seeded})")
+	s.Blank()
+	s.L("\t// An empty body: the id and nothing else.")
+	s.L("\tcmd := &Patch%sCommand{%sID: %s}", c.OpBase, c.Name, quote(seededEntryID))
+	s.L("\tif err := cmd.ApplyPartiallyTo(ctx, e); err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyPartiallyTo: %v"))
+	s.L("\t}")
+	emitIdentityArrived(s, m, "\t")
+	s.L("\tout, err := cmd.FromEntity(ctx, e)")
+	s.L("\tif err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+	s.L("\t}")
+	s.L("\tif out.%s.ID.Value() != %s {", c.Name, quote(seededEntryID))
+	s.L("\t\tt.Error(%s)", quote("the entry lost its id across the patch"))
+	s.L("\t}")
+	for _, f := range stored {
+		s.L("\tif out.%s.%s != %s {", c.Name, f.Name, literalFor(f))
+		s.L("\t\tt.Errorf(%s, out.%s.%s)",
+			quote(f.Name+" was not sent and did not survive the patch: %v"), c.Name, f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+
+	if len(sendable) > 0 {
+		s.Doc(
+			fmt.Sprintf("What the caller DID send reaches the entry. Patch%s starts from an "+
+				"empty entry so that a value arriving is the only thing that could have put it "+
+				"there.", c.OpBase))
+		s.L("func TestPatch%sCommand_AppliesWhatWasSent(t *testing.T) {", c.OpBase)
+		s.L("\tctx := &configuration.AppContext{}")
+		ownerFixture(s, m)
+		s.L("\tseeded := domain.WithID(")
+		s.L("\t\t%s.To%s(),", childInputLiteral(m, c, true), c.Name)
+		s.L("\t\tdomain.NewID(%s),", quote(seededEntryID))
+		s.L("\t)")
+		s.L("\te.AggregateConstructor([]domain.AggregateValueObject{seeded})")
+		s.Blank()
+		s.L("\tcmd := &Patch%sCommand{", c.OpBase)
+		s.L("\t\t%sID: %s,", c.Name, quote(seededEntryID))
+		for _, f := range sendable {
+			s.L("\t\t%s: %s,", f.Name, patchSample(f))
+		}
+		s.L("\t}")
+		s.L("\tif err := cmd.ApplyPartiallyTo(ctx, e); err != nil {")
+		s.L("\t\tt.Fatalf(%s, err)", quote("ApplyPartiallyTo: %v"))
+		s.L("\t}")
+		s.L("\tout, err := cmd.FromEntity(ctx, e)")
+		s.L("\tif err != nil {")
+		s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
+		s.L("\t}")
+		for _, f := range sendable {
+			s.L("\tif out.%s.%s != %s {", c.Name, f.Name, literalFor(f))
+			s.L("\t\tt.Errorf(%s, out.%s.%s)",
+				quote(f.Name+" was sent and did not reach the entry: %v"), c.Name, f.Name)
+			s.L("\t}")
+		}
+		s.L("}")
+		s.Blank()
+	}
+
+	s.Doc(
+		fmt.Sprintf("An id the collection does not hold changes nothing. Patch%s reaches the "+
+			"aggregate with an empty replacement in that case, so what is proved here is that "+
+			"the empty one never lands: the collection is left as it was, and the projection "+
+			"invents no entry to fill the gap.", c.OpBase))
+	s.L("func TestPatch%sCommand_UnknownIDChangesNothing(t *testing.T) {", c.OpBase)
+	s.L("\tctx := &configuration.AppContext{}")
+	ownerFixture(s, m)
+	s.L("\tseeded := domain.WithID(")
+	s.L("\t\t%s.To%s(),", childInputLiteral(m, c, false), c.Name)
+	s.L("\t\tdomain.NewID(%s),", quote(seededEntryID))
+	s.L("\t)")
+	s.L("\te.AggregateConstructor([]domain.AggregateValueObject{seeded})")
+	s.Blank()
+	s.L("\tcmd := &Patch%sCommand{%sID: %s}",
+		c.OpBase, c.Name, quote("019ffd00-0000-7000-8000-0000000000ff"))
+	s.L("\tif err := cmd.ApplyPartiallyTo(ctx, e); err != nil {")
+	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyPartiallyTo: %v"))
+	s.L("\t}")
+	s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot())", c.Name)
+	s.L("\tif len(items) != 1 {")
+	s.L("\t\tt.Errorf(%s, len(items))",
+		quote("a patch addressed at an unknown id changed the collection: %d entries"))
+	s.L("\t}")
 	s.L("\tout, err := cmd.FromEntity(ctx, e)")
 	s.L("\tif err != nil {")
 	s.L("\t\tt.Fatalf(%s, err)", quote("FromEntity: %v"))
@@ -3131,14 +3258,20 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 		if c.MountsAdd {
 			emitAddChildRequestTest(s, c, op, fields)
 		}
-		if c.MountsChange {
+		if c.ChangesByPut() {
 			emitChangeChildRequestTest(s, c, op, fields)
+		}
+		if c.ChangesByPatch() {
+			emitPatchChildRequestTest(s, c, op, patchableChildFields(c))
 		}
 		if c.MountsAdd {
 			emitAddChildResponseTest(s, m, c, op, fields)
 		}
-		if c.MountsChange {
+		if c.ChangesByPut() {
 			emitChangeChildResponseTest(s, m, c, op, fields)
+		}
+		if c.ChangesByPatch() {
+			emitPatchChildResponseTest(s, m, c, op, fields)
 		}
 		if c.MountsRemove {
 			emitRemoveChildWireTest(s, c, op)
@@ -3147,8 +3280,11 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 		// of their own — so they are a second way for the entry id to go
 		// missing, and the failure is silent in exactly the same way: a mutation
 		// that answers 200 and replaced nothing.
-		if c.MountsChange && c.OnGQL("change") {
+		if c.ChangesByPut() && c.OnGQL("change") {
 			emitChangeChildGraphQLRequestTest(s, c, op, fields)
+		}
+		if c.ChangesByPatch() && c.OnGQL("patch") {
+			emitPatchChildGraphQLRequestTest(s, c, op, patchableChildFields(c))
 		}
 		if c.MountsRemove && c.OnGQL("remove") {
 			emitRemoveChildGraphQLWireTest(s, c, op)
@@ -3347,6 +3483,106 @@ func emitChangeChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fie
 	s.Blank()
 }
 
+// emitPatchChildRequestTest proves the partial change's wire type carries the
+// entry AND its id.
+//
+// It has one assertion its full-replacement twin cannot have: a field the
+// collection excluded is not on this type at all, so what is checked is that
+// everything that IS on it arrives — a field silently dropped by the mapper is a
+// PATCH that answers 200 and moves nothing, which no status code reports.
+func emitPatchChildRequestTest(s *src, c ir.Child, op string, fields []ir.Field) {
+	s.Doc(
+		fmt.Sprintf("Patch%sRequest names the entry AND carries what may change.", op),
+		"",
+		"The id comes from the path and the body is partial, so an id that does not "+
+			"reach the command patches the wrong entry, or none.")
+	s.L("func TestPatch%sRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
+	s.L("\tr := Patch%sRequest{%sID: %s,", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"))
+	for _, f := range fields {
+		s.L("\t\t%s: %s,", f.Name, patchSample(f))
+	}
+	s.L("\t}")
+	s.L("\tcmd := r.ToCommand()")
+	s.L("\tif cmd.%sID != %s {", c.Name, quote("01890000-0000-7000-8000-000000000000"))
+	s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be patched\")")
+	s.L("\t}")
+	for _, f := range fields {
+		s.L("\tif cmd.%s == nil || *cmd.%s != %s {", f.Name, f.Name, literalFor(f))
+		s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitPatchChildGraphQLRequestTest is the path-vs-input half of the same proof,
+// for the surface where there is no path to read the entry id from.
+func emitPatchChildGraphQLRequestTest(s *src, c ir.Child, op string, fields []ir.Field) {
+	s.Doc(
+		fmt.Sprintf("Patch%sGraphQLRequest carries the entry id from the INPUT.", op),
+		"",
+		"Same command as its REST twin; the difference is where the id comes from, "+
+			"and that difference is the reason this type exists at all.")
+	s.L("func TestPatch%sGraphQLRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
+	s.L("\tr := Patch%sGraphQLRequest{%sID: %s,", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"))
+	for _, f := range fields {
+		s.L("\t\t%s: %s,", f.Name, patchSample(f))
+	}
+	s.L("\t}")
+	s.L("\tcmd := r.ToCommand()")
+	s.L("\tif cmd.%sID != %s {", c.Name, quote("01890000-0000-7000-8000-000000000000"))
+	s.L("\t\tt.Error(\"the entry id did not reach the command, so the wrong entry would be patched\")")
+	s.L("\t}")
+	for _, f := range fields {
+		s.L("\tif cmd.%s == nil || *cmd.%s != %s {", f.Name, f.Name, literalFor(f))
+		s.L("\t\tt.Errorf(\"%s did not reach the command\")", f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
+// emitPatchChildResponseTest covers the mapper on the way back.
+//
+// The response of a partial change carries the WHOLE entry — every field, not
+// only the ones that moved — because what the caller needs to see is the entry
+// as it now stands. So this asserts over the entry's writable fields rather than
+// over the patchable ones: a mapper that only rendered what was sent would
+// answer 200 with the rest of the entry blanked.
+func emitPatchChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fields []ir.Field) {
+	s.Doc(
+		fmt.Sprintf("The Patch%s response carries the entry back WHOLE, with the id it keeps.", op),
+		"",
+		"A partial change answers with the entry as stored, which is how the caller "+
+			"sees what the fields they did not send actually hold.")
+	s.L("func TestPatch%sResponse_CarriesTheStoredEntry(t *testing.T) {", op)
+	s.L("\townerID := domain.NewRandomID()")
+	s.L("\tentryID := domain.NewRandomID()")
+	s.L("\tres := Patch%sResponse{}.FromResult(commands.Patch%sResult{", op, op)
+	s.L("\t\t%sID: ownerID,", m.Entity.Pascal)
+	s.L("\t\t%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+	for _, f := range fields {
+		s.L("\t\t\t%s: %s,", f.Name, wireSample(f))
+	}
+	s.L("\t\t},")
+	s.L("\t})")
+	s.L("\tif res.%sID != ownerID {", m.Entity.Pascal)
+	s.L("\t\tt.Error(\"the owner id did not reach the response\")")
+	s.L("\t}")
+	s.L("\tif res.%s.ID != entryID {", c.Name)
+	s.L("\t\tt.Error(\"the entry kept its id and the response did not carry it\")")
+	s.L("\t}")
+	for _, f := range fields {
+		s.L("\tif res.%s.%s != %s {", c.Name, f.Name, wireSample(f))
+		s.L("\t\tt.Errorf(\"%s did not reach the response\")", f.Name)
+		s.L("\t}")
+	}
+	s.L("}")
+	s.Blank()
+}
+
 // emitRemoveChildWireTest covers the REQUEST of the verb that takes one entry
 // out. There is no response half: the endpoint answers 204, so the only mapper
 // it has is the one that carries the addressed entry into the command — and
@@ -3369,8 +3605,18 @@ func emitRemoveChildWireTest(s *src, c ir.Child, op string) {
 // skip them — a pointer sample compares by address, and the test would fail
 // against a correct mapper.
 func writableChildFields(c ir.Child) []ir.Field {
+	return assertableChildFields(c.Fields)
+}
+
+// patchableChildFields is the same narrowing over what a PARTIAL change may
+// carry — the entry's fields minus what change.patchExcludes put off-limits.
+func patchableChildFields(c ir.Child) []ir.Field {
+	return assertableChildFields(c.PatchableFields())
+}
+
+func assertableChildFields(fields []ir.Field) []ir.Field {
 	var out []ir.Field
-	for _, f := range c.Fields {
+	for _, f := range fields {
 		if f.Nullable || f.Facet != "" {
 			continue
 		}

@@ -246,6 +246,7 @@ var specTypes = map[string]reflect.Type{
 	"ValueObject":   reflect.TypeOf(ValueObject{}),
 	"EnumMember":    reflect.TypeOf(EnumMember{}),
 	"Child":         reflect.TypeOf(Child{}),
+	"ChildChange":   reflect.TypeOf(ChildChange{}),
 	"Sibling":       reflect.TypeOf(Sibling{}),
 	"Update":        reflect.TypeOf(Update{}),
 	"Delete":        reflect.TypeOf(Delete{}),

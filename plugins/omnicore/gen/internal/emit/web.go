@@ -757,7 +757,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 					c.Segment, human),
 			})
 		}
-		if c.MountsChange {
+		if c.ChangesByPut() {
 			ops = append(ops, perChildOp{
 				verb: "Change", method: fiberMethod(c, "change"), path: pathOf(c, "change"),
 				request: "Change" + opName + "Request", response: "Change" + opName + "Response",
@@ -767,6 +767,25 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 					"is updated rather than removed and re-added, so the audit trail reads " +
 					"as a change. 404 when the owner is not there, and 404 when the owner " +
 					"exists but holds no entry with that id."),
+			})
+		}
+		// The same operation in its partial shape, and a route of its own, exactly
+		// as update.shape: both gives the root a PUT and a PATCH over /:id. The
+		// permission is the change's — one verb asked twice is not two jobs.
+		if c.ChangesByPatch() {
+			ops = append(ops, perChildOp{
+				verb: "Patch", method: fiberMethod(c, "patch"), path: pathOf(c, "patch"),
+				request: "Patch" + opName + "Request", response: "Patch" + opName + "Response",
+				result: "commands.Patch" + opName + "Result", status: "fiber.StatusOK",
+				handler: "handlers.PartialUpdateCommandHandler",
+				summary: fmt.Sprintf("Update one %s of %s %s (partial)", c.Name, articleFor(human), human),
+				doc: "Partial change of ONE entry, keeping its id. Only the fields present " +
+					"in the body change; the rest keep what the entry already holds, which " +
+					"is why the business identity is not among them — it comes from the " +
+					"stored entry and cannot be moved here. Because an absent field and an " +
+					"explicit null cannot be told apart, this verb cannot set a value back " +
+					"to null. 404 when the owner is not there, and 404 when the owner " +
+					"exists but holds no entry with that id.",
 			})
 		}
 		if c.MountsRemove {
@@ -786,8 +805,8 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			} else {
 				s.L("\t\trequests.%s{}.FromResult,", op.response)
 			}
-			s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.%s, %s]{",
-				entity, op.verb+opName+"Command", op.result)
+			s.L("\t\t&%s[*%s, *commands.%s, %s]{",
+				op.handlerType(), entity, op.verb+opName+"Command", op.result)
 			s.L("\t\t\tRepo: repo,%s", serviceField(m))
 			s.L("\t\t}, %s)", op.status)
 			s.L("\tfwopenapi.Mount(d.OpenAPIRegistry, group, %s, %s,", op.method, quote(op.path))
@@ -886,4 +905,18 @@ type perChildOp struct {
 	verb, method, path, request, response, result, summary, doc string
 	status                                                      string
 	bodyless                                                    bool
+	// handler is the framework handler this verb runs through, and it is empty
+	// for all but one of them. Every per-entry verb is an UPDATE of the owner, so
+	// the full-body handler is the answer everywhere except the PARTIAL change:
+	// UpdateCommandHandler embeds pipeline.FullBody, which makes the wrapper
+	// require every exported field of the command in the body — the exact demand
+	// a partial verb exists to drop.
+	handler string
+}
+
+func (op perChildOp) handlerType() string {
+	if op.handler != "" {
+		return op.handler
+	}
+	return "handlers.UpdateCommandHandler"
 }

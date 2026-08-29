@@ -33,6 +33,10 @@ func grantsCollection() []ir.Child {
 		Name: "RolePermission", Plural: "Permissions", Segment: "permissions",
 		OpBase:   "RolePermission",
 		PerChild: true, MountsAdd: true, MountsChange: true, MountsRemove: true,
+		// The shape the resolver defaults to when children[].change says nothing:
+		// a change is a full replacement, so the collection mounts a PUT and no
+		// PATCH. Spelled here because this fixture builds the IR by hand.
+		ChangeShape: "put",
 		ArchivedAt:  "deleted_at",
 		Permissions: map[string]string{"add": "role:grant", "change": "role:update", "remove": "role:grant"},
 		// What the resolver fills in from the entity's surfaces and the
@@ -63,6 +67,35 @@ func TestSurfaceMatrixListsEveryEndpoint(t *testing.T) {
 		// The removal's method is the child's own declaration: this one archives,
 		// so it is a PATCH and not the DELETE a caller would read as permanent.
 		"| Take out one `RolePermission` | `PATCH /roles/:id/permissions/:rolePermissionId/archive` | `removeRolePermission` |",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the surface matrix is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A collection serving BOTH shapes of its change mounts two routes over one
+// entry path, and the table has to say so: a reviewer reading one row would
+// conclude the partial verb does not exist, which is the same silence this
+// section was added to end. The GraphQL column carries the pair too — a schema
+// has no method to tell them apart, so the field name is all a client has.
+func TestSurfaceMatrixListsBothShapesOfAChange(t *testing.T) {
+	children := grantsCollection()
+	children[0].ChangeShape = "both"
+	children[0].Permissions["patch"] = children[0].Permissions["change"]
+	children[0].GQLMutations["patch"] = true
+
+	out := Render(Input{
+		Model: surfaceModel(children, ir.Surfaces{
+			REST: true, GraphQL: true,
+			GQLMutations: map[string]bool{"insert": true, "update": true},
+		}),
+		SpecPath: "omnicore-gen/role.omnicore.yaml",
+	})
+
+	for _, want := range []string{
+		"| Replace one `RolePermission` | `PUT /roles/:id/permissions/:rolePermissionId` | `changeRolePermission` |",
+		"| Update one `RolePermission` | `PATCH /roles/:id/permissions/:rolePermissionId` | `patchRolePermission` |",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the surface matrix is missing %q:\n%s", want, out)

@@ -2129,6 +2129,18 @@ type Child struct {
 	MountsAdd    bool
 	MountsChange bool
 	MountsRemove bool
+	// ChangeShape is HOW the change verb takes its body: put, patch or both —
+	// children[].change.shape, defaulted to put. It is "" exactly when
+	// MountsChange is false, so a consumer never has to ask both questions.
+	//
+	// MountsChange stays the OPERATION-level answer: it is what permissions are
+	// keyed on, what the report prints one row for, and what the spec's
+	// operations list decides. Which ROUTES that operation puts up is this
+	// field, read through ChangesByPut/ChangesByPatch.
+	ChangeShape string
+	// PatchExcludes are the entry fields a partial change may not touch, by
+	// name. Empty for a collection that serves no patch.
+	PatchExcludes map[string]bool
 	// Permissions is what each MOUNTED per-entry verb requires, keyed add,
 	// change, remove — already resolved, so no consumer repeats the fallback.
 	//
@@ -2260,6 +2272,15 @@ func resolveChildPermissions(s *spec.Spec, m *Model) {
 			}
 			perms[op] = inherited
 		}
+		// The two shapes of a change are ONE operation and ask for ONE
+		// permission: a deployment that grants "may change what this group
+		// confers" has not said anything different about the partial form of the
+		// same verb. Mirrored here rather than at the route so that the emitter's
+		// lookup by route verb finds an answer without knowing that patch is a
+		// change wearing another method.
+		if p, ok := perms["change"]; ok {
+			perms["patch"] = p
+		}
 		m.Children[i].Permissions = perms
 		m.Children[i].Declared = declared
 	}
@@ -2280,6 +2301,7 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 			MountsAdd:             spec.MountsPerChildOp(c, "add"),
 			MountsChange:          spec.MountsPerChildOp(c, "change"),
 			MountsRemove:          spec.MountsPerChildOp(c, "remove"),
+			ChangeShape:           spec.ChildChangeShape(c),
 			ChangeMethod:          "Change" + c.Name + "ByID",
 			RemoveMethod:          "Remove" + c.Name + "ByID",
 			DuplicateNotification: c.DuplicateNotification,
@@ -2319,6 +2341,15 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 				Example: cc.Example, Description: cc.Description,
 				Sources: append([]string(nil), cc.From...),
 			})
+		}
+		// Resolved AFTER the fields are expanded, and kept as the names the SPEC
+		// wrote: an exclusion may address a composite whole, and the field list
+		// by then holds its parts. PatchableFields is what reconciles the two.
+		if c.Change != nil && len(c.Change.PatchExcludes) > 0 {
+			ch.PatchExcludes = map[string]bool{}
+			for _, ex := range c.Change.PatchExcludes {
+				ch.PatchExcludes[ex] = true
+			}
 		}
 		for _, id := range c.BusinessIdentity {
 			for _, f := range ch.Fields {
@@ -2752,6 +2783,10 @@ func readColumn(sp *spec.Spec, m *Model, name string) string {
 // collection that archives keeps its row, stamped, and stops being returned —
 // which is not what DELETE promises a caller — so it mounts PATCH …/archive
 // instead, and only a collection with no archive column gets the honest DELETE.
+//
+// change and patch are ONE operation over the same entry path, in the two
+// shapes children[].change.shape chooses between — exactly as the root's single
+// update mode mounts PUT, PATCH or both over /:id.
 func (c Child) PerEntryRoute(verb string) (method, path string) {
 	collection := "/:id/" + c.Segment
 	entry := collection + "/:" + naming.Camel(c.Name) + "Id"
@@ -2760,6 +2795,8 @@ func (c Child) PerEntryRoute(verb string) (method, path string) {
 		return "POST", collection
 	case "change":
 		return "PUT", entry
+	case "patch":
+		return "PATCH", entry
 	case "remove":
 		if c.ArchivedAt != "" {
 			return "PATCH", entry + "/archive"
@@ -2769,11 +2806,22 @@ func (c Child) PerEntryRoute(verb string) (method, path string) {
 	return "", ""
 }
 
-// PerEntryVerbs is the collection's verb vocabulary, in mount order. It is a
-// list rather than three booleans wherever something LOOPS over the trio — the
-// emitters, the report and this file all did it with their own literal before,
-// and a fourth verb would have had to be remembered in each of them.
+// PerEntryVerbs is the collection's OPERATION vocabulary, in mount order — the
+// three words children[].operations, children[].permissions and
+// children[].surfaces.graphql.mutations are all keyed by. It is a list rather
+// than three booleans wherever something LOOPS over the trio, so a fourth
+// operation would not have to be remembered in each of them.
 var PerEntryVerbs = []string{"add", "change", "remove"}
+
+// PerEntryRoutes is what those operations actually MOUNT. It differs from the
+// vocabulary in one place: `change` serves two shapes, and a collection that
+// declares both mounts both — the same way one `update` mode mounts PUT and
+// PATCH at the root.
+//
+// Anything that emits or prints a ROUTE walks this list; anything that reads a
+// permission or a surface narrowing walks PerEntryVerbs, because those are
+// declared per operation and the two shapes of a change share them.
+var PerEntryRoutes = []string{"add", "change", "patch", "remove"}
 
 // OnGQL is whether one per-entry verb of this collection is a mutation.
 func (c Child) OnGQL(verb string) bool { return c.GQLMutations[verb] }
@@ -2781,18 +2829,18 @@ func (c Child) OnGQL(verb string) bool { return c.GQLMutations[verb] }
 // AnyOnGQL is whether the collection reaches the schema at all — the question an
 // emitter asks before writing anything for it.
 func (c Child) AnyOnGQL() bool {
-	for _, v := range PerEntryVerbs {
-		if c.GQLMutations[v] && c.Mounts(v) {
+	for _, v := range PerEntryRoutes {
+		if c.GQLMutations[v] && c.Serves(v) {
 			return true
 		}
 	}
 	return false
 }
 
-// Mounts is whether the collection has this per-entry verb at all, surfaces
-// aside. It reads the same three answers MountsAdd/Change/Remove hold, by name,
-// so a loop over the trio does not have to switch on them.
-func (c Child) Mounts(verb string) bool {
+// MountsOp is whether the collection has this OPERATION at all, surfaces aside.
+// It reads the same three answers MountsAdd/Change/Remove hold, by name, so a
+// loop over the trio does not have to switch on them.
+func (c Child) MountsOp(verb string) bool {
 	switch verb {
 	case "add":
 		return c.MountsAdd
@@ -2802,6 +2850,46 @@ func (c Child) Mounts(verb string) bool {
 		return c.MountsRemove
 	}
 	return false
+}
+
+// Serves is whether the collection mounts one ROUTE verb. It is MountsOp with
+// the change split into its shapes, and it is what every route-shaped consumer
+// asks: a collection serving `change` alone has no PATCH to mount, and one
+// serving `patch` alone has no PUT.
+func (c Child) Serves(verb string) bool {
+	switch verb {
+	case "change":
+		return c.ChangesByPut()
+	case "patch":
+		return c.ChangesByPatch()
+	}
+	return c.MountsOp(verb)
+}
+
+// ChangesByPut and ChangesByPatch read the resolved shape. They are the pair
+// every emitter branches on, and they are methods rather than two more fields
+// because the shape is one decision and three copies of it drift.
+func (c Child) ChangesByPut() bool { return c.ChangeShape == "put" || c.ChangeShape == "both" }
+
+func (c Child) ChangesByPatch() bool { return c.ChangeShape == "patch" || c.ChangeShape == "both" }
+
+// PatchableFields are the entry fields a partial change may set.
+//
+// A composite excluded WHOLE takes every one of its parts with it: the spec
+// names the value object, the field list here holds the columns it spans, and
+// leaving a part behind would let a caller re-key half an identity.
+func (c Child) PatchableFields() []Field {
+	var out []Field
+	for _, f := range c.Fields {
+		if c.PatchExcludes[f.Name] {
+			continue
+		}
+		if f.Composite != nil && c.PatchExcludes[f.Composite.Owner] {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // resolveChildSurfaces answers, per collection, where its per-entry verbs go.
@@ -2836,13 +2924,21 @@ func resolveChildSurfaces(s *spec.Spec, m *Model) {
 			continue
 		}
 		for _, v := range PerEntryVerbs {
-			if !c.Mounts(v) {
+			if !c.MountsOp(v) {
 				continue
 			}
 			if len(narrowed) > 0 && !containsString(narrowed, v) {
 				continue
 			}
 			c.GQLMutations[v] = true
+		}
+		// children[].surfaces narrows OPERATIONS — `change` is the word it
+		// accepts, and it covers both shapes, exactly as surfaces.graphql's own
+		// `update` covers the root's PUT and PATCH together. A collection cannot
+		// put one shape of its change on the schema and keep the other off, and
+		// that is deliberate: the two are one verb asked twice.
+		if c.GQLMutations["change"] {
+			c.GQLMutations["patch"] = true
 		}
 	}
 }

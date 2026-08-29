@@ -172,9 +172,14 @@ func emitGraphQL(m *ir.Model) (*src, bool) {
 // The one place the two surfaces genuinely differ is WHERE the entry's own id
 // comes from. REST reads it out of a path segment; GraphQL has no path, and the
 // framework's input decoder skips a `path`-tagged field on purpose, so the verbs
-// that address an EXISTING entry (change, remove) carry it as an input field
-// instead — a second, GraphQL-shaped Request beside the REST one, written by
-// emitPerChildRequests.
+// that address an EXISTING entry (change, patch, remove) carry it as an input
+// field instead — a second, GraphQL-shaped Request beside the REST one, written
+// by emitPerChildRequests.
+//
+// The other difference REST spells with a method and the schema cannot: a
+// collection serving both shapes of its change gets TWO fields here, change<X>
+// and patch<X>, because a mutation name is all a GraphQL client has to choose
+// between a full replacement and a partial one.
 func emitPerChildMutations(s *src, m *ir.Model, entity string) {
 	for _, c := range m.Children {
 		if !c.PerChild || !c.AnyOnGQL() {
@@ -186,15 +191,28 @@ func emitPerChildMutations(s *src, m *ir.Model, entity string) {
 			s.L("\t// own Request travels unchanged — it carries no path segment to lose.")
 			emitPerChildMutation(s, m, entity, gqlChildField("add", op),
 				"requests.Add"+op+"Request", "requests.Add"+op+"Response{}.FromResult",
-				"Add"+op+"Command", "commands.Add"+op+"Result", c.Permissions["add"])
+				"Add"+op+"Command", "commands.Add"+op+"Result", c.Permissions["add"],
+				"handlers.UpdateCommandHandler")
 		}
-		if c.MountsChange && c.OnGQL("change") {
+		if c.ChangesByPut() && c.OnGQL("change") {
 			s.L("\t// The entry's id rides the INPUT here: GraphQL has no path segment, and")
 			s.L("\t// the framework's decoder skips a path-tagged field rather than filling")
 			s.L("\t// it from nowhere. Same command, same full-replacement contract.")
 			emitPerChildMutation(s, m, entity, gqlChildField("change", op),
 				"requests.Change"+op+"GraphQLRequest", "requests.Change"+op+"Response{}.FromResult",
-				"Change"+op+"Command", "commands.Change"+op+"Result", c.Permissions["change"])
+				"Change"+op+"Command", "commands.Change"+op+"Result", c.Permissions["change"],
+				"handlers.UpdateCommandHandler")
+		}
+		if c.ChangesByPatch() && c.OnGQL("patch") {
+			s.L("\t// The partial shape of the same operation, under its own field — the")
+			s.L("\t// schema has no verb to carry the difference, so the name does, exactly")
+			s.L("\t// as the root's patch<Entity> stands beside its update<Entity>. The")
+			s.L("\t// handler is the partial one: the full-body wrapper would demand every")
+			s.L("\t// field of a command whose whole point is that they are optional.")
+			emitPerChildMutation(s, m, entity, gqlChildField("patch", op),
+				"requests.Patch"+op+"GraphQLRequest", "requests.Patch"+op+"Response{}.FromResult",
+				"Patch"+op+"Command", "commands.Patch"+op+"Result", c.Permissions["patch"],
+				"handlers.PartialUpdateCommandHandler")
 		}
 		if c.MountsRemove && c.OnGQL("remove") {
 			s.L("\t// REST answers 204 with no body; a GraphQL field must answer SOMETHING,")
@@ -203,7 +221,8 @@ func emitPerChildMutations(s *src, m *ir.Model, entity string) {
 			s.L("\t// same way it does on the REST verb.")
 			emitPerChildMutation(s, m, entity, gqlChildField("remove", op),
 				"requests.Remove"+op+"GraphQLRequest", "requests.Remove"+op+"GraphQLResponse{}.FromResult",
-				"Remove"+op+"Command", "fwresults.None", c.Permissions["remove"])
+				"Remove"+op+"Command", "fwresults.None", c.Permissions["remove"],
+				"handlers.UpdateCommandHandler")
 		}
 	}
 }
@@ -214,10 +233,10 @@ func emitPerChildMutations(s *src, m *ir.Model, entity string) {
 // collections from claiming one field in a single global mutation namespace.
 func gqlChildField(verb, opBase string) string { return verb + opBase }
 
-func emitPerChildMutation(s *src, m *ir.Model, entity, field, request, project, command, result, permission string) {
+func emitPerChildMutation(s *src, m *ir.Model, entity, field, request, project, command, result, permission, handler string) {
 	s.L("\treg.Register(fwgraphql.MutationWithBodyID[%s](", request)
 	s.L("\t\t%s, %s,", quote(field), project)
-	s.L("\t\t&handlers.UpdateCommandHandler[*%s, *commands.%s, %s]{", entity, command, result)
+	s.L("\t\t&%s[*%s, *commands.%s, %s]{", handler, entity, command, result)
 	s.L("\t\t\tRepo: repo,%s", serviceField(m))
 	s.L("\t\t},")
 	s.L("\t\tfwgraphql.RequirePermission(%s)))", quote(permission))

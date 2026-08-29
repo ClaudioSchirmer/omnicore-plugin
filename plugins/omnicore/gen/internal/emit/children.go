@@ -421,6 +421,12 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	// The removal verb projects fwresults.None. Pruned when the collection does
 	// not mount it, like every other import this file offers.
 	s.L("\tfwresults %s", quote(fwImport("application/results")))
+	// An entry field of type: time lands on these commands as a time.Time, so
+	// the package is as much a dependency here as it is in the entry's own DTO.
+	// Declared unconditionally, like every other import this file offers: gofile
+	// prunes what a spec does not use, which is the only version of this that
+	// cannot go stale.
+	s.L("\t%s", quote("time"))
 	s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
 	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
@@ -430,8 +436,11 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	if c.MountsAdd {
 		emitAddChildCommand(s, m, c, entity, op)
 	}
-	if c.MountsChange {
+	if c.ChangesByPut() {
 		emitChangeChildCommand(s, m, c, entity, op)
+	}
+	if c.ChangesByPatch() {
+		emitPatchChildCommand(s, m, c, entity, op)
 	}
 	if c.MountsRemove {
 		emitRemoveChildCommand(s, m, c, entity, op)
@@ -557,6 +566,97 @@ func emitChangeChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) 
 	s.Blank()
 }
 
+// emitPatchChildCommand writes the verb that changes SOME fields of ONE entry.
+//
+// It is the entry-level twin of the root's patch, and it exists for the reason
+// the root's does: a caller who wants to move one value should not have to
+// resend the rest of the record to do it. On a collection the cost was higher
+// than at the root, because the rest of the record INCLUDES the business
+// identity — so a full replacement asked the caller to echo the very fields
+// that say which entry this is, and accepted them as new ones if they differed.
+//
+// The merge is the answer to both halves. What the caller did not send comes
+// from the entry AS STORED, read back through the collection's own projector,
+// so the fields this verb excludes are not "whatever arrived" but what the
+// server already holds — and the identity among them cannot move at all,
+// because no wire field reaches it.
+func emitPatchChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
+	patchable := c.PatchableFields()
+	s.Doc(
+		fmt.Sprintf("Patch%sCommand changes SOME fields of ONE entry, keeping its id.", op),
+		"",
+		"Every field is a pointer because a partial change is tri-state: a nil field "+
+			"means the caller did not send it, which is different from sending an empty "+
+			"value. The consequence is the root patch's own — this verb cannot set a "+
+			"value back to null.",
+		"",
+		"The fields it does not carry are not defaults and not blanks: they are read "+
+			"off the stored entry, which is what makes this a change to the entry rather "+
+			"than a replacement of it. An id the collection does not hold answers "+
+			"not-found, exactly as the full replacement does.")
+	s.L("type Patch%sCommand struct {", op)
+	s.L("\tpipeline.CommandWithBodyIDBase")
+	s.L("\t%sID string", c.Name)
+	for _, f := range patchable {
+		s.L("\t%s %s", f.Name, commandFieldType(f, true))
+	}
+	s.L("}")
+	s.Blank()
+	s.L("func (cmd *Patch%sCommand) ApplyPartiallyTo(%s *configuration.AppContext, e *appdomain.%s) error {",
+		op, identityParam(m), entity)
+	s.L("\t// The entry AS STORED. A partial change is a change to what the server")
+	s.L("\t// already holds, so everything this verb does not carry — the business")
+	s.L("\t// identity first of all — comes from here and never from the body.")
+	s.L("\tvar entry dtos.%s", c.InputType)
+	s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+	s.L("\t\tif current.GetID().Value() != cmd.%sID {", c.Name)
+	s.L("\t\t\tcontinue")
+	s.L("\t\t}")
+	s.L("\t\tstored := projectOne%s(current)", c.Name)
+	s.L("\t\tentry = dtos.%s{", c.InputType)
+	for _, f := range c.Fields {
+		s.L("\t\t\t%s: stored.%s,", f.Name, f.Name)
+	}
+	s.L("\t\t}")
+	s.L("\t\tbreak")
+	s.L("\t}")
+	if len(patchable) > 0 {
+		s.Blank()
+		s.L("\t// Then what the caller sent, and only that.")
+	}
+	for _, f := range patchable {
+		s.L("\tif cmd.%s != nil {", f.Name)
+		if f.Nullable {
+			s.L("\t\tentry.%s = cmd.%s", f.Name, f.Name)
+		} else {
+			s.L("\t\tentry.%s = *cmd.%s", f.Name, f.Name)
+		}
+		s.L("\t}")
+	}
+	s.Blank()
+	s.L("\t// Addressed by id, always — including when the loop above matched nothing.")
+	s.L("\t// The aggregate answers not-found for an entry it does not hold, and it is")
+	s.L("\t// the ONE place that answer is decided: the empty replacement never lands,")
+	s.L("\t// because there is no entry for it to land on.")
+	s.L("\te.%s(cmd.%sID, entry.To%s())", c.ChangeMethod, c.Name, c.Name)
+	emitIdentityFeed(s, m)
+	s.L("\treturn nil")
+	s.L("}")
+	s.Blank()
+	emitPerChildResult(s, m, c, "Patch")
+	s.L("func (cmd *Patch%sCommand) FromEntity(_ *configuration.AppContext, e *appdomain.%s) (Patch%sResult, error) {", op, entity, op)
+	s.L("\tout := Patch%sResult{%sID: *e.GetID()}", op, entity)
+	s.L("\tfor _, item := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
+	s.L("\t\tif item.GetID().Value() == cmd.%sID {", c.Name)
+	s.L("\t\t\tout.%s = projectOne%s(item)", c.Name, c.Name)
+	s.L("\t\t\tbreak")
+	s.L("\t\t}")
+	s.L("\t}")
+	s.L("\treturn out, nil")
+	s.L("}")
+	s.Blank()
+}
+
 // emitRemoveChildCommand writes the verb that takes ONE entry out. Nothing is
 // projected back AT ALL — the endpoint answers 204, like the root's own archive
 // and delete — so the command declares fwresults.None and the wire pair has no
@@ -620,6 +720,11 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.Blank()
 	s.L("import (")
 	s.L("\t%s", quote(fwImport("domain")))
+	// The partial change declares the entry's fields itself, one pointer each,
+	// instead of embedding the collection's own Request — so a time field lands
+	// in THIS file rather than in the shared one that already imports the
+	// package. Pruned when no such field exists.
+	s.L("\t%s", quote("time"))
 	s.L("\tfwrequests %s", quote(fwImport("web/requests")))
 	s.L("\tfwresponses %s", quote(fwImport("web/responses")))
 	// For the GraphQL removal's payload, which projects from the framework's
@@ -632,10 +737,16 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	if c.MountsAdd {
 		emitAddChildRequest(s, m, c, entity, op)
 	}
-	if c.MountsChange {
+	if c.ChangesByPut() {
 		emitChangeChildRequest(s, m, c, op, idParam)
 		if c.OnGQL("change") {
 			emitChangeChildGraphQLRequest(s, c, op, idParam)
+		}
+	}
+	if c.ChangesByPatch() {
+		emitPatchChildRequest(s, m, c, op, idParam)
+		if c.OnGQL("patch") {
+			emitPatchChildGraphQLRequest(s, c, op, idParam)
 		}
 	}
 	if c.MountsRemove {
@@ -684,6 +795,69 @@ func emitChangeChildRequest(s *src, m *ir.Model, c ir.Child, op, idParam string)
 	emitAutoToCommand(s, "Change"+op+"Request", "Change"+op+"Command")
 	s.Blank()
 	emitPerChildResponse(s, m, c, "Change")
+}
+
+// emitPatchChildRequest writes the wire pair of the verb that changes some
+// fields of one entry.
+//
+// It declares the entry's fields itself instead of embedding the collection's
+// `<Child>Request`, and that is the point rather than a duplication: the
+// embedded type is the FULL entry, every field mandatory and the business
+// identity among them. What this verb accepts is a different set — narrower by
+// change.patchExcludes — and every field of it is optional. A caller reading
+// the type sees exactly what may move; a field that may not is not there to be
+// sent.
+func emitPatchChildRequest(s *src, m *ir.Model, c ir.Child, op, idParam string) {
+	s.Doc(
+		fmt.Sprintf("Patch%sRequest changes some fields of one entry, keeping its id.", op),
+		"",
+		fmt.Sprintf("The entry is named by the %s path segment. Every field of the body is "+
+			"optional: one left out keeps the value the entry already has.", idParam),
+		"",
+		"A field the collection put off-limits to a partial change is ABSENT here, not "+
+			"ignored — the caller sees what this verb can move, and the entry's business "+
+			"identity is decided by what is stored, never by what arrives.")
+	s.L("type Patch%sRequest struct {", op)
+	s.L("\t%s", autoRequestEmbed)
+	s.L("\t%sID string `path:%s`", c.Name, quote(idParam))
+	emitPatchChildFields(s, c)
+	s.L("}")
+	s.Blank()
+	emitAutoToCommand(s, "Patch"+op+"Request", "Patch"+op+"Command")
+	s.Blank()
+	emitPerChildResponse(s, m, c, "Patch")
+}
+
+// emitPatchChildGraphQLRequest is the partial change with the entry's id in the
+// INPUT, for the same decoder reason its full-replacement twin has one: the
+// framework skips a `path`-tagged field, so the REST type would reach the
+// command with an empty entry id and change nothing.
+func emitPatchChildGraphQLRequest(s *src, c ir.Child, op, idParam string) {
+	s.Doc(
+		fmt.Sprintf("Patch%sGraphQLRequest is Patch%sRequest with the entry's id in the input.", op, op),
+		"",
+		"GraphQL has no path segment, and the framework's decoder does not fill a "+
+			"path-tagged field from an input object. The id travels as a field here, "+
+			"under the name the REST route spells in its path, and the command on the "+
+			"other side is the same one.")
+	s.L("type Patch%sGraphQLRequest struct {", op)
+	s.L("\t%s", autoRequestEmbed)
+	s.L("\t%sID string `json:%s`", c.Name, quote(idParam))
+	emitPatchChildFields(s, c)
+	s.L("}")
+	s.Blank()
+	emitAutoToCommand(s, "Patch"+op+"GraphQLRequest", "Patch"+op+"Command")
+	s.Blank()
+}
+
+// emitPatchChildFields declares what a partial change may carry: the patchable
+// fields, each one optional, each one omitempty — the same tri-state shape the
+// root's patch request has, over the entry's own fields.
+func emitPatchChildFields(s *src, c ir.Child) {
+	for _, f := range c.PatchableFields() {
+		s.L("\t%s %s `json:%s example:%s`", f.Name,
+			commandFieldType(f, true), quote(jsonTag(f, true)), quote(f.Example))
+	}
 }
 
 // emitRemoveChildRequest writes the REQUEST of the verb that takes one entry

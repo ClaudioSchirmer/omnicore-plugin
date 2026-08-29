@@ -7,6 +7,92 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.49.0] — 2026-08-28
+
+A consumer service reported an entry of a collection it could not edit honestly. The
+collection held a foreign key into a catalogue — immutable by construction — and one
+field that actually changes. `children[].operations` could say WHICH verbs to mount,
+`children[].permissions` WHO may call them and `children[].surfaces` WHERE they answer,
+and nothing could say what the body IS. So the change was a `PUT` and only a `PUT`, and
+it cost twice:
+
+- the caller had to resend the foreign key on every edit — a value the server already
+  holds — for no reason other than that the body demanded it (`UpdateCommandHandler`
+  embeds `pipeline.FullBody`, which makes the wrapper require every exported field of the
+  command);
+- and the key arrived **writable**. `Change<Entry>ByID` replaces the whole entry and only
+  puts the row id back, so a body carrying a different reference re-keyed the entry while
+  keeping its row — an audit trail then reads as one grant being edited where a grant was
+  really swapped for another. That is the exact behaviour `children[].operations` argues
+  against in prose, produced by the generator itself.
+
+The root has had the answer since the beginning: `update.shape` + `update.patchExcludes`.
+The collection now has the same one, in the same words.
+
+### Added
+
+- **`children[].change` — the shape of a collection's change verb.** Two keys, spelled
+  exactly as the root's `update` block spells them: `shape: patch | put | both` and
+  `patchExcludes`. Absent means `put`, so a spec written against the older language keeps
+  generating what it generated then; `patch` mounts `PATCH /<entity>/:id/<collection>/:entryId`
+  and no `PUT`; `both` mounts the two over the one entry path, the way `update.shape: both`
+  mounts `PUT` and `PATCH` over `/:id`. The partial verb runs through the framework's
+  `PartialUpdateCommandHandler` — the one that does NOT embed `FullBody` — and its command
+  merges: everything the body does not carry is read off the **stored** entry through the
+  collection's own projector, so an excluded field is what the server holds rather than
+  whatever arrived. The two shapes share the `change` permission and the `change` entry of
+  `children[].surfaces`, because one verb asked twice is not two jobs; on GraphQL a
+  collection serving both gets `change<Entry>` and `patch<Entry>`, since a schema has no
+  method to tell them apart.
+- **The identity is refused, not excluded behind the author's back.** A spec that serves a
+  partial change and leaves a `businessIdentity` field out of `change.patchExcludes` is
+  blocked, naming the field and the line to write. Applying the exclusion silently would
+  have been one more rule to know about a language whose value here is that it reads the
+  same at both levels — the root spells the same decision out loud for its natural key.
+  Two more refusals come with it: a partial change with nothing left patchable (the honest
+  answer is `operations` without `change`, which is what the message says), and a
+  collection named after its own entity, which would emit `Patch<Name>Command` twice into
+  one package.
+- **The gen-report says what editing ONE entry accepts**, per collection, for BOTH shapes
+  — including the default. A full replacement carrying the business identity is a
+  legitimate contract and it is also the defect above; a reviewer could not see it in the
+  route table or the permission cell, and saying nothing about the default is how it
+  shipped.
+
+### Changed
+
+- **`omnicore-gen` now targets framework `v0.63.0`** (`compat.Supported`, and the vendored
+  host the golden gate builds). Nothing the generator EMITS had to move — no signature
+  changed, and the whole matrix generates, builds, vets, tests and boots against it — but
+  the bump is required rather than cosmetic, because `v0.63.0` is where
+  `ChangeAggregateChild` started refusing a replacement that takes a business identity
+  another ACTIVE entry already holds (`EntityAlreadyAddedNotification`, 409). The
+  per-entry change this generator emits is the verb that calls it: on `v0.62` the same
+  generated code silently produced the duplicate the aggregate contract forbids, and every
+  later match — a `DELETE …/{entryId}`, the next change, the outbox payload every
+  projection is fed from — then resolved to the wrong row.
+
+  It narrows the full-replacement problem `children[].change` exists for without closing
+  it: the collision is refused, but moving an entry onto a FREE identity is still
+  something a `PUT` body accepts. `shape: patch` is what takes the field off the wire.
+
+### Fixed
+
+- **Two places told the developer to guard something the framework now guards.** The
+  aggregate-children convention read "the framework guards ADD via
+  `IsSameBusinessIdentity`, but CHANGE only swaps — a payload can edit one child into
+  another's identity unchallenged", and sent them to hand-write a change-time duplicate
+  check; `check` warned that naming `children[].duplicateNotification` would make the
+  update path's rejection specific, which it never could — the generated duplicate guard
+  sits on the add path alone, so that collision is answered by the framework's own
+  notification. Both now say what `v0.63.0` actually does, and what it still leaves to
+  you: identity FINDS the entry, it does not freeze it.
+- **A per-entry collection with a `time` field emitted two files that did not compile.**
+  The per-entry commands and wire types declare the entry's fields directly, and neither
+  file's import list carried `time` — every other file holding those fields did. Latent
+  until a collection used the type; the import is now declared in both and pruned, like
+  every other one, when a spec does not reach it.
+
 ## [0.48.0] — 2026-08-28
 
 Every reload since `0.45.0` printed a load failure for the plugin's own hooks:

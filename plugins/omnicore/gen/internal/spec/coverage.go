@@ -41,6 +41,7 @@ const (
 	CapChildUnique      Capability = "uniqueness of a collection entry (index per owner + its 409 binding)"
 	CapGeneratedTests   Capability = "generated unit tests"
 	CapPerChild         Capability = "per-entry child operations"
+	CapPerChildPatch    Capability = "partial change of ONE collection entry (PATCH over the entry: the caller sends what moves, everything else — the business identity first — is read off what is stored)"
 	CapAssignedField    Capability = "server-assigned fields (from the caller's identity)"
 	CapDerivedField     Capability = "server-derived fields (computed from the entity's own, kept out of every write DTO)"
 	CapMountedChild     Capability = "a shared identity's collection, exposed on a second role"
@@ -88,6 +89,7 @@ var implemented = map[Capability]bool{
 	CapChildUnique:      true,
 	CapGeneratedTests:   true,
 	CapPerChild:         true,
+	CapPerChildPatch:    true,
 	CapAssignedField:    true,
 	CapDerivedField:     true,
 	CapMountedChild:     true,
@@ -122,7 +124,7 @@ func AllCapabilities() []Capability {
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapScopeBypass, CapScopedUnique,
-		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild,
+		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild, CapPerChildPatch,
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
@@ -261,6 +263,10 @@ func CheckCoverage(s *Spec) *Problems {
 		if c.EditStrategy == "per-child" {
 			uses(CapPerChild, fmt.Sprintf("children[%d].editStrategy", i),
 				"per-entry child operations")
+		}
+		if ChildServesPatch(c) {
+			uses(CapPerChildPatch, fmt.Sprintf("children[%d].change.shape", i),
+				"a partial change of one entry")
 		}
 		if c.DuplicateNotification != "" && c.EditStrategy != "per-child" {
 			ps.BlockerFix(fmt.Sprintf("children[%d].duplicateNotification", i),

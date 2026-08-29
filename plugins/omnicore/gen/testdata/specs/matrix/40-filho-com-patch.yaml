@@ -1,0 +1,101 @@
+# Eixos: children[].change com shape: patch — a entrada de coleção editada
+# PARCIALMENTE, que é o caso que o `change` só-PUT não atendia.
+#
+# O relato: a coleção guarda um id de catálogo (a identidade de negócio, uma FK
+# imutável) e UM campo que muda. Com PUT, o cliente tinha de reenviar o id do
+# catálogo em toda edição — um valor que o servidor já tem — e o corpo aceitava
+# esse id como NOVO: a entrada era re-chaveada mantendo o id da linha, que é
+# exatamente o que `operations` documenta como motivo para não ter `change`.
+#
+#   change: {shape: patch}     Monta PATCH .../coberturas/:coberturaId e NENHUM
+#                              PUT. O que não vem no corpo é lido da entrada
+#                              GRAVADA, não zerado.
+#   patchExcludes: [CoberturaRef]  A identidade fica fora do corpo — não por
+#                              gentileza, mas porque o spec é RECUSADO se um
+#                              campo de businessIdentity ficar patchável.
+#
+# O campo `time` na coleção é de propósito: as commands e os requests por
+# entrada declaram os campos da entrada diretamente, então é este caso que
+# prova que o import de `time` chega nesses dois arquivos.
+specVersion: 1
+entity: ContratoPP
+plural: ContratosPP
+language: pt-BR
+storage:
+  kind: flat
+  table: contratos_pp
+  description: Contratos e as coberturas contratadas em cada um.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Numero, type: string, column: numero, length: 20, livesOn: root, example: "CT-2026-77", description: Número do contrato.}
+  - {name: Titular, type: string, column: titular, length: 120, livesOn: root, example: Helena Duarte, description: Nome do titular.}
+children:
+  - name: Cobertura
+    plural: Coberturas
+    table: contrato_pp_coberturas
+    parentColumn: contrato_pp_id
+    description: As coberturas do catálogo contratadas neste contrato.
+    ownedBy: root
+    editStrategy: per-child
+    operations: [add, change, remove]
+    # Só a forma parcial: não existe PUT nesta coleção. Trocar a cobertura
+    # contratada por outra é remover uma e adicionar outra — duas coisas, e a
+    # trilha de auditoria as lê como duas.
+    change:
+      shape: patch
+      patchExcludes: [CoberturaRef]
+    duplicateNotification: CoberturaJaContratadaNotification
+    businessIdentity: [CoberturaRef]
+    softRemove: true
+    archivedAt: deleted_at
+    fields:
+      - {name: CoberturaRef, type: id, column: cobertura_ref, example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31, description: Cobertura do catálogo — a identidade da entrada.}
+      - {name: Valor, type: float64, column: valor, example: "1250.5", description: Valor mensal da cobertura.}
+      - {name: VigenteDesde, type: time, column: vigente_desde, example: "2026-03-01T00:00:00Z", description: Início da vigência desta cobertura.}
+    rules:
+      list:
+        - {id: valor-positivo, kind: range, scope: [insertOrUpdate], fields: [Valor], min: 1, notification: ValorDeCoberturaInvalidoNotification}
+modes: [display, insert, update, archive]
+update: {shape: both}
+delete: {root: soft}
+rules:
+  list:
+    - {id: numero-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Numero], notification: RequiredFieldNotification}
+    - {id: titular-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Titular], notification: RequiredFieldNotification}
+notifications:
+  - name: CoberturaJaContratadaNotification
+    semantic: conflict
+    description: A mesma cobertura ja consta no contrato.
+    text:
+      ptbr: Esta cobertura ja consta no contrato.
+      eng: That coverage is already on the contract.
+      esp: Esa cobertura ya consta en el contrato.
+      fra: Cette garantie figure deja au contrat.
+      deu: Diese Deckung ist bereits im Vertrag enthalten.
+      ita: Questa copertura e gia presente nel contratto.
+      nld: Die dekking staat al in het contract.
+  - name: ValorDeCoberturaInvalidoNotification
+    semantic: validation
+    tvars: [min]
+    text:
+      ptbr: O valor da cobertura deve ser de ao menos {min}.
+      eng: The coverage amount must be at least {min}.
+      esp: El valor de la cobertura debe ser de al menos {min}.
+      fra: Le montant de la garantie doit etre d'au moins {min}.
+      deu: Der Deckungsbetrag muss mindestens {min} betragen.
+      ita: L'importo della copertura deve essere almeno {min}.
+      nld: Het dekkingsbedrag moet ten minste {min} zijn.
+read:
+  backing: relational
+  view: {name: contratos_pp}
+  byId: true
+  byParams:
+    filters: [{field: Numero, ops: [eq, contains]}]
+    controls: {pagination: true, fields: true, includeArchived: true}
+surfaces:
+  rest: true
+  graphql: {enabled: true, mutations: [insert, update]}
+authz:
+  resource: contratopp
+  dataAccess: anyone-with-permission
+  permissions: {insert: "contratopp:escrever", update: "contratopp:escrever", patch: "contratopp:escrever", archive: "contratopp:arquivar", read: "contratopp:ler"}

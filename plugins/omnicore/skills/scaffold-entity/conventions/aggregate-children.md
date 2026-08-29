@@ -34,9 +34,17 @@ Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.htm
     **The lookup + not-found lives in the DOMAIN method (`<Verb><Child>ByID`), never as a
     loop inside `ApplyPartiallyTo`** — the command is a one-liner that calls it. Two ops
     scanning the collection themselves is the same invariant written twice, in the layer
-    that does not own it; and the domain method is then also where the change-time duplicate
-    guard belongs (the framework guards ADD via `IsSameBusinessIdentity`, but CHANGE only
-    swaps — a payload can edit one child into another's identity unchallenged).
+    that does not own it. Since **v0.63.0** the change-time duplicate guard is NOT yours to
+    write: `ChangeAggregateChild` refuses a replacement that would take a business identity
+    another ACTIVE child already holds, answering `EntityAlreadyAddedNotification`
+    (409) and leaving the collection untouched — the same answer the ADD path gives. Before
+    it, CHANGE only swapped, so a payload could edit one child into another's identity
+    unchallenged and every later match (`remove`, the next `change`, the outbox payload)
+    resolved to the wrong row. What the framework still does NOT freeze is the identity
+    itself: a replacement may reshape those fields freely as long as the value is free, so
+    "this reference must never move" is a rule of yours — a child `immutable` rule, or the
+    generator's `children[].change: {shape: patch, patchExcludes: [...]}`, which keeps the
+    field off the wire altogether.
     Child ops are NOT in
     `auto-handlers.html`'s six-verb table — that table is root-only. In the docs this
     is `aggregate-persistence.html`'s "Update(root) with items StatusRemoved →
