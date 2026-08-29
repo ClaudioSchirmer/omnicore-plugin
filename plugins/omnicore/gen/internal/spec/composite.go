@@ -298,6 +298,18 @@ func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
 				"column by the time the store sees it", exposedNamesOf(*owner)))
 		return
 	}
+	// A near-spelling of the aggregate id. The exact name resolves now — a fact
+	// narrows by it like any other column — so what is left here is the typo,
+	// and the answer to a typo is the spelling rather than a refusal of the
+	// concept. Said the other way round it read as "this entity has no id".
+	if strings.EqualFold(name, IdentityName) {
+		ps.BlockerFix(where,
+			fmt.Sprintf("%q resolves nothing: the aggregate id answers to %q, in that "+
+				"exact case", name, IdentityName),
+			fmt.Sprintf("spell it %q — it is the framework's own fixed logical name, and "+
+				"a filter naming it compares against the row's identity", IdentityName))
+		return
+	}
 	// A framework-stamped column the storage does not declare. It resolves by
 	// name on the read side and here, and only when there IS a column: without
 	// this line the author is told the name does not exist, which is the wrong
@@ -449,8 +461,9 @@ func reportUnreadable(s *Spec, name, where string, ps *Problems) {
 				fmt.Sprintf("%q resolves nothing: the aggregate id answers to %q, in that "+
 					"exact case", name, IdentityName),
 				fmt.Sprintf("spell it %q — it narrows and orders a listing "+
-					"(read.byParams.filters, read.byParams.sort) and is refused only where a "+
-					"key names a projected column", IdentityName))
+					"(read.byParams.filters, read.byParams.sort), narrows a fact "+
+					"(service.facts[].filters), and is refused only where a key names a "+
+					"projected column", IdentityName))
 			return
 		}
 		// The exact name, so this is one of the keys that address a PROJECTED

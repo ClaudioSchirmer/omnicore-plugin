@@ -51,6 +51,17 @@ cannot change it."* That sentence is false.
   - This is the whole anti-drift mechanism: only reading the versioned docs keeps
     generation correct when the framework changes. A v2 breaking change updates the docs;
     code you copied mirrors the old error. Read the docs, always.
+- **Not every table is an entity — check the DOOR before the first question.** This is the
+  skill a dev reaches for when they say "add a table", and on a pin that carries the
+  **Direct schema** door that request has two answers. A table that is listed through the
+  read side, audited, projected, event-raising or lifecycle-driven is an entity and this
+  skill owns it. A table with no aggregate behind it at all — a control table, a job queue,
+  a lookup, an idempotency ledger — is a Direct schema, has no domain struct, no rules, no
+  view and no bootstrap feature, and scaffolding an entity for it manufactures six layers
+  nobody asked for. `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md` owns the decision and
+  the availability test; when it comes out Direct, say so and hand over to
+  `/omnicore:implement` instead of generating. Ambiguity resolves in ONE question to the
+  dev — "is this ever listed, audited or projected?" — never by assuming.
 - **Mirror local convention; validate framework correctness.** If the project has existing
   entities, mirror their LOCAL flavor (naming, style). But validate every framework usage
   against the docs. If the consumer's code MISUSES the framework (a missing parameter, a
@@ -829,6 +840,7 @@ only a genuinely missing docs file does.
 | value objects: raw vs enum vs **composite** (a value spanning several columns), auto-validation, EnumByValue, Ignore/Validate | value-objects |
 | decomposing a composite value object (`Composite`/`As`, the once rule, absence semantics) | table-schema · value-objects |
 | domain service / scalar & grouped facts (rules needing existence, counts, totals, extremes, per-key breakdowns) | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner — WHICH primitive answers the question) · custom-command-handler · service-to-service |
+| a fact whose truth is in a table this service has **no aggregate for** — another aggregate's CHILD table, a control table, a lookup: which ANCHOR the probe hangs off | `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md` (owner) · direct-schema for version-exact contract |
 | aggregate children / cascade | aggregate-persistence |
 | insert/update/patch + in-TX hooks | auto-handlers · lifecycle-hooks |
 | what one write touches end-to-end (SQL ↔ outbox ↔ Mongo op ↔ audit verb; PUT/PATCH share verb `update` — `actionName` tells them apart) | lifecycle-map |

@@ -193,10 +193,19 @@ serves only the changelog/newer-release peeks of the version check below.
 
 1. **Route** the question to a section via the Documentation Map (concepts:
    architecture · rules-dsl · aggregate-persistence · command-handler · query-side ·
-   table-schema · bootstrap · yaml-reference · migrations · authz-seams ·
-   graphql · grpc · transport · httpclient · tracing · … — these are the Map's
-   OWN file names, and the Map is the authority; the exact `<name>.html` always
-   comes from the Map, never derived from the concept's wording).
+   table-schema · direct-schema · bootstrap · yaml-reference · migrations ·
+   authz-seams · graphql · grpc · transport · httpclient · tracing · … — these are
+   the Map's OWN file names, and the Map is the authority; the exact `<name>.html`
+   always comes from the Map, never derived from the concept's wording).
+   **A question about querying or writing ONE table with no aggregate behind it**
+   — "can I just query a table?", "how do I count another aggregate's children?",
+   "how do I write a control/job/lookup table?" — routes to `direct-schema`, and
+   its ABSENCE from the pin's Map is itself the answer: the door arrived in a
+   later release, so say which release the pin is on and offer the newer-release
+   peek rather than describing a surface this project does not have.
+   `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md` carries the decision (which
+   door, and what the Direct one does not guarantee) that the docs state as
+   mechanics.
 2. **Read** that section — and every other section the QUESTION genuinely needs:
    a narrow "what is X" stays in one section; a cross-cutting "how does the whole
    write path work" legitimately spans several. Unlike the generator skills, this

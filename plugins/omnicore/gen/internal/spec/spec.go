@@ -1640,8 +1640,24 @@ type FactAggregate struct {
 type FactFilter struct {
 	// Field is what the comparison is about — a field of this entity, a part of
 	// a composite value object, a field a ROOT read join brings in from another
-	// aggregate, or `<Collection>.<Field>` for a fact about an entry of a
-	// collection.
+	// aggregate, `ID` for the row's own identity, or `<Collection>.<Field>` for
+	// a fact about an entry of a collection.
+	//
+	// `ID` is the framework's fixed logical name for the aggregate id, and it is
+	// addressable here for the same reason it is under read.byParams.filters:
+	// the STORE resolves it, on a slot every schema types as an identity, so the
+	// probe binds in the dialect's native id form. It reaches the method as
+	// `id domain.ID` (a set operator as `idSet []domain.ID`), which is what
+	// makes "is this row still live", "which of these ids are" and — above all —
+	// a `kind: manual` body that needs the id askable at all. Without it a
+	// hand-written body had to re-derive the id from a natural key, paying a
+	// join to translate a value its caller was already holding.
+	//
+	// A rule cannot fill it: rules.list fills a fact's arguments from the entity
+	// being written, and the id is not minted until after the rules have run.
+	// That combination is refused where it is written, and points at
+	// rules.manual — or at excludeSelf, which passes the same id under the gate
+	// the generator writes for the insert case.
 	//
 	// The join spelling is the one that is easy to miss, and it costs nothing:
 	// a root join is ALWAYS in the FROM, and the framework compiles the same

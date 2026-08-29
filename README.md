@@ -35,9 +35,16 @@ drift as the framework evolves.
 The **skills** work with any published omnicore release (docs-pinned by design). The
 **generator** is the one part that targets a single line — one supported version, one shape
 of emitted code, because branching templates per framework version is the largest drift
-source a generator can have: today that is the framework's **v0.56.0**, paired with plugin
-**0.31.0**. Publish the two in sync. An older pin is refused by default with the fix named;
+source a generator can have: today that is the framework's **v0.64.0**, paired with plugin
+**0.52.0**. Publish the two in sync. An older pin is refused by default with the fix named;
 a newer one generates anyway, and the compiler is the oracle.
+
+Those two numbers are the ones that rot fastest in this file, so do not trust them — read
+them: the generator's line is `compat.Supported` in
+`plugins/omnicore/gen/internal/compat/compat.go` (and the vendored gate host's `go.mod`
+beside it), and the plugin's is the `version` field of
+`plugins/omnicore/.claude-plugin/plugin.json`. `omnicore-gen check` prints the verdict for
+whatever a given project actually pins.
 
 ### Where the skills write — `specs/`
 

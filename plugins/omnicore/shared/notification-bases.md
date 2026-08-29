@@ -52,12 +52,19 @@ Two consequences worth stating, because both have been gotten wrong:
 Moving a notification out of the domain does NOT mean the endpoint has no domain artifact.
 Ask the two questions separately:
 
-- **Does a persisted table need a domain struct? YES, when the framework's repository
-  writes it.** The write-backed schema is type-anchored over a Go type, and binding a
-  type-less schema to a repository is a boot abort, not a style opinion. A resource whose
-  rules are not domain rules gets a domain struct with an **empty `BuildRules`** — that is
-  the legitimate shape, not a workaround. Confirm the exact contract in the pin
-  (`table-schema`, `custom-command-handler`) before writing it.
+- **Does a persisted table need a domain struct? YES, when the framework's AGGREGATE
+  repository writes it.** The write-backed schema is type-anchored over a Go type, and
+  binding a type-less schema to a repository is a boot abort, not a style opinion. A
+  resource whose rules are not domain rules gets a domain struct with an **empty
+  `BuildRules`** — that is the legitimate shape, not a workaround. Confirm the exact
+  contract in the pin (`table-schema`, `custom-command-handler`) before writing it.
+  - **The carve-out, on a pin that carries it:** a table with no aggregate behind it at all
+    — a control table, a job queue, a lookup — is written through a **Direct schema**, and
+    its row is a storage shape declared in `internal/infra/`, not a domain struct. That is
+    the one persisted type this rule does not claim. `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`
+    owns which door a given table goes through and how to test whether the pin has it; the
+    paragraph above is what remains true when the answer is the aggregate one, which is
+    still every resource that is listed, audited, projected or lifecycle-driven.
 - **Does it need domain NOTIFICATIONS? Only if the aggregate raises any.** An empty
   `BuildRules` raises none, so that entity contributes no `notifications.go` entries at
   all, and every rejection the endpoint can produce is an application notification.

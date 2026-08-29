@@ -989,6 +989,29 @@ Four things to get right, because they are the ones that cost a migration later:
     they are refused (the scope already removed every archived row, so `notnull` matches
     nothing and `isnull` says it twice), and a `factRange` rule cannot read a fact whose
     stamped filter takes a PARAMETER — the entity carries no `CreatedAt` for it to pass.
+  - **The row's own id is filterable too, as `ID`** — the framework's fixed logical name,
+    the same one `criteria.ByID` and `excludeSelf` write against. Nothing declares it and
+    the aggregate carries no Go field for it; the parameter arrives typed
+    (`id domain.ID`, or `idSet []domain.ID` for a set).
+
+    ```yaml
+    - {field: ID, op: in}   # "quantos destes ids ainda estão vivos"
+    - ID                    # eq: "esta linha, ainda viva?"
+    ```
+
+    **This is what a `kind: manual` fact that needs the id asks for.** `manual` gives you
+    the BODY, never the signature — the parameter list comes from `filters` — so without
+    it the id had to be re-derived inside the body from a natural key, paying a join whose
+    only job was translating a value the caller already held. Do not reach for
+    `excludeSelf` to smuggle it in: that key means "leave the record being written out of
+    the answer", and a body that excludes nothing makes the name lie to every later reader
+    (`explain keys` documents it as an exclusion). The two coexist when both are meant.
+
+    A `factRange` rule cannot read a fact narrowed by `ID`, and the reason is not the same
+    as the stamped columns': a rule fills a fact's arguments from the entity being written,
+    and the id is **not minted until after the rules have run**. Call it from `rules.manual`
+    — or use `excludeSelf`, which passes the same id under the insert gate the generator
+    writes for it.
   - **`filters` is the fact's WHERE, and it speaks the framework's own `criteria` — not
     a list of equalities.** A bare name is an `eq` whose value the caller passes, which is
     what a filter has always meant and still means; the block form names the operator, and
@@ -1268,6 +1291,19 @@ external API, an upstream mirror). When it is local instead — a question this 
 answer that the DSL could not phrase — the primitive is still the hydration-free one:
 `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` owns that choice, and the generated
 declarative facts next to it are what the right shape looks like.
+
+**And when the truth is local but in ANOTHER TABLE, ask the anchor question before writing
+a line of SQL.** This is the single most common shape of a local manual fact — "does any
+row of another aggregate's child table still point at this one", "how many rows of a
+control table are pending" — and the generated facts beside it are no model for it: they
+run over THIS entity's repository, which cannot reach a table it does not anchor. On a pin
+that carries the **Direct schema** door, that table gets its own one-table anchor and the
+body keeps the same existence probe and aggregate DSL, in every dialect, inside the same
+transaction. `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md` owns it, including the
+availability test. What it replaces is worth naming, because both are in this codebase's
+history: hand-written SQL against the neutral transaction with placeholders and id encoding
+re-derived per dialect, and declaring a whole aggregate — domain struct, rules, view,
+bootstrap feature — for a table that exists only to be counted.
 
 **A manual body may need a MECHANISM — and that contract does not join the domain package.**
 This is where a hand-written item most often leaks: the rule stub needs something hashed,

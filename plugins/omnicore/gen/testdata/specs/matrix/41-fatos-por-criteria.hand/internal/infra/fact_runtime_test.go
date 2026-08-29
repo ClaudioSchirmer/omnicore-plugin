@@ -190,3 +190,29 @@ func TestExcludedSetIsComparedAsASet(t *testing.T) {
 		t.Errorf("ForaDasSituacoes(nil) = %d, want 4 — an empty NOT IN excludes nothing", got)
 	}
 }
+
+// The aggregate id as a filter, RUN — the half a compile cannot show. "ID" is
+// not a column name: it is the framework's fixed logical one, resolved to the
+// primary key on a slot every schema types as an identity, so the value binds
+// in the dialect's own id form. Bound as plain text it matches nothing on three
+// of the four engines, silently, and the count is simply zero.
+func TestTheAggregateIDIsComparedAsAnIdentity(t *testing.T) {
+	svc := seed(t)
+	um := domain.NewID("11111111-1111-4111-8111-111111111111")
+	dois := domain.NewID("22222222-2222-4222-8222-222222222222")
+	nenhum := domain.NewID("99999999-9999-4999-8999-999999999999")
+
+	if got := svc.VivosEntreEstes([]domain.ID{um, dois}); got != 2 {
+		t.Errorf("VivosEntreEstes([CH-001 CH-002]) = %d, want 2 — the id did not "+
+			"resolve to the primary key, or did not bind as an identity", got)
+	}
+	// One known and one that names no row: the answer has to be the known one
+	// alone, which is what says the comparison is per VALUE and not "did the
+	// predicate match at all".
+	if got := svc.VivosEntreEstes([]domain.ID{um, nenhum}); got != 1 {
+		t.Errorf("VivosEntreEstes with one unknown id = %d, want 1", got)
+	}
+	if got := svc.VivosEntreEstes(nil); got != 0 {
+		t.Errorf("VivosEntreEstes(nil) = %d, want 0 — an empty IN matches nothing", got)
+	}
+}
