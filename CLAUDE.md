@@ -34,6 +34,7 @@ with it. What to update, and which parts the build already catches:
 | a capability | the `Cap*` name in `internal/spec/coverage.go` — it is what `explain coverage` prints | ✅ manifest test |
 | anything an author must SEE to use | one of the two examples (`explain example [flat|sharedbase]`) | ✅ every key must appear in one |
 | how an author should WORK | `skills/omnicore-gen/SKILL.md` | ❌ **discipline only** |
+| the OWNERSHIP framing of generated code (the file header, `explain ownership`, the gen-report's review section) | `plugins/omnicore/shared/generated-code-review.md` — the doctrine all 16 skills route to, plus `hooks/guard-generated-code.sh`, its floor | ❌ **discipline only** |
 | what a reviewer must CHECK | `internal/report` — the gen-report is the hand-off | ❌ **discipline only** |
 
 The last two rows are the ones that rot, precisely because nothing fails when
