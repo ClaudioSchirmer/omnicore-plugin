@@ -1022,6 +1022,57 @@ service:
         the Catalog service. It is NOT answerable from this service's tables —
         the catalogue is owned elsewhere.
 
+    # `perEntry` batches a question about a COLLECTION. Without it, a fact
+    # naming a collection field is asked ONCE PER ENTRY: the loop lives in the
+    # rule, the body runs once per guardian, and a write carrying six of them
+    # pays six round trips for a question one `IN` answers. The language could
+    # already batch the QUESTION (`op: in` takes the whole set) and had no way
+    # to batch the ANSWER — one bool for six documents cannot say WHICH one is
+    # the problem, which is the difference between a 422 the caller can act on
+    # and one they cannot.
+    #
+    # Its value is the key the answer is attributed to, so the method answers
+    # `map[string]bool` and the rule names the offending document in the
+    # notification it raises. A key MISSING from that map is the fact answering
+    # nothing for that entry: absent reads as false at the call site, which is
+    # the reading a fact named for the PROBLEM wants.
+    #
+    # The entry contributes two fields here, so they travel as ONE generated
+    # carrier rather than as two parallel slices a caller could put out of step.
+    # With the key alone the parameter would be a plain slice of it.
+    - name: GuardianIsBarredFromContact
+      kind: manual
+      returns: bool
+      perEntry: Guardians.Document
+      filters: [Guardians.Document, Guardians.FullName]
+      description: >-
+        Which of the guardians this write carries are barred from being named
+        as a contact, according to the safeguarding register — a list this
+        service does not own. Asked ONCE for all of them and answered per
+        document, so the refusal can name the guardian it is about.
+
+    # `notExists` is `exists` read the other way round, and it is what lets a
+    # fact be named for the PROBLEM — which is what the rule reading it raises.
+    # Named for the healthy state instead, the generated test stub's "nothing
+    # found" reads as "the number is gone" and turns a correct spec red.
+    #
+    # `scope` is the archived gate, said out loud: active | all | archivedOnly.
+    # Absent means `all`, which is what a fact has always done. `archivedOnly`
+    # is the one that was unaskable — "was this number used and then withdrawn"
+    # is about the archived rows ALONE, and a fact could only ask about the
+    # living ones or about every row. It needs storage.managed.archivedAt: with
+    # no marker column the framework applies no gate at all, so it would answer
+    # about every row instead of about none.
+    - name: EnrollmentNumberWasNeverWithdrawn
+      kind: notExists
+      filters: [EnrollmentNumber]
+      scope: archivedOnly
+      description: >-
+        Whether this enrollment number has NO withdrawn record behind it. A
+        number that was issued, used and then archived is not free to reissue,
+        and the active rows cannot say so — they are exactly the rows it is not
+        in.
+
     - name: EnrollmentNumberTaken
       kind: exists
       filters: [EnrollmentNumber]

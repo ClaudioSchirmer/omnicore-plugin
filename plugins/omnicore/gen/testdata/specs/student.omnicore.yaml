@@ -753,6 +753,49 @@ service:
         the Catalog service. It is NOT answerable from this service's tables —
         the catalogue is owned elsewhere.
 
+    # ONE question about the whole collection, answered PER ENTRY. Without
+    # perEntry the same fact is asked once per guardian: the loop lives in the
+    # rule and a write carrying six of them pays six round trips. The answer is
+    # keyed, so the refusal can still name the guardian it is about — which one
+    # bool for six documents never could.
+    #
+    # Two entry fields, so they travel as one generated carrier instead of two
+    # parallel slices a caller could put out of step.
+    - name: GuardianIsBarredFromContact
+      kind: manual
+      returns: bool
+      perEntry: Guardians.Document
+      filters: [Guardians.Document, Guardians.FullName]
+      description: >-
+        Which of the guardians this write carries are barred from being named
+        as a contact, according to the safeguarding register — a list this
+        service does not own.
+
+    # A fact narrowed by a field a ROOT JOIN brings in. The framework compiles
+    # the traversal into the existence probe exactly as it does into FindAll, so
+    # this costs no second query and no hand-written SQL: CampusName is a column
+    # of the Campus table, reached across campus_id.
+    - name: NamesakeOnTheSameCampus
+      kind: exists
+      filters: [Name, CampusName]
+      excludeSelf: true
+      activeOnly: true
+      description: >-
+        Whether another active student of the SAME NAME is enrolled on the
+        campus with this label — the label living on the campus row, not here.
+
+    # notExists is exists read the other way round, so the fact is named for the
+    # PROBLEM. archivedOnly asks about the archived rows ALONE, which no
+    # predicate can express: the gate is the framework's, on whichever column
+    # this entity marks with.
+    - name: EnrollmentNumberWasNeverWithdrawn
+      kind: notExists
+      filters: [EnrollmentNumber]
+      scope: archivedOnly
+      description: >-
+        Whether this enrollment number has NO withdrawn record behind it. The
+        active rows cannot say so — they are exactly the rows it is not in.
+
     - name: EnrollmentNumberTaken
       kind: exists
       filters: [EnrollmentNumber]

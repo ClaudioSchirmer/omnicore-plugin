@@ -951,6 +951,11 @@ if [[ $prune_ok -eq 1 ]]; then
   # and a rule: the body-sourced confirmation exists to be compared against
   # Email, and a comparison whose `other` is gone is refused — correctly, and
   # before this lane's own subject is reached.
+  #
+  # The same rule one level up: dropping the COLLECTION means dropping the fact
+  # asked about its entries. A batched per-entry fact names the collection in
+  # `perEntry` and in its filters, and a fact about a collection this spec no
+  # longer declares is refused for the same good reason the child join is.
   python3 - "$PRUNE_WORK/specs/omnicore-gen/student.omnicore.yaml" <<'PYEOF'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
@@ -959,9 +964,33 @@ s = re.sub(r'(?:    #.*\n)*    - id: email-confirmed\n(?:      .*\n)+?\n', '', s
 s = re.sub(r'  - name: EmailConfirmationMismatchNotification\n(?:    .*\n)+?\n', '', s, count=1)
 s = re.sub(r'  - name: Email\n(?:    .*\n)+?\n', '', s, count=1)
 s = re.sub(r'  - name: Email\n    kind: raw\n(?:    .*\n)+?\n', '', s, count=1)
+s = re.sub(r'(?:    #.*\n)*    - name: GuardianIsBarredFromContact\n(?:      .*\n)+?\n', '', s, count=1)
 s = re.sub(r'\nchildren:\n(?:.*\n)*?\nsiblings:', '\nsiblings:', s)
 s = re.sub(r'\n  # A join FROM ONE OF THIS ENTITY.S OWN COLLECTIONS\..*\n(?:.*\n)*?\nservice:', '\nservice:', s)
 s = s.replace("    version: 1", "    version: 2")
+open(p, 'w').write(s)
+PYEOF
+  # And the author's own half of dropping a fact: the hook file is THEIRS, so
+  # the generator never reaches in to remove the body it stubbed. The gen-report
+  # names it under "bodies the spec no longer asks for" — this is that line being
+  # acted on, which is what a real author does and what keeps this lane honest
+  # about the workflow rather than about a file nobody edits.
+  #
+  # It is not merely tidiness here: a BATCHED per-entry fact's body names the
+  # entry carrier declared beside the port, and that type is removed with the
+  # fact — so the stranded body does not compile.
+  python3 - "$PRUNE_WORK/internal/infra/student_service_manual.go" <<'PYEOF'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s = re.sub(r'(?://.*\n)*func \(s \*\w+\) GuardianIsBarredFromContact\(.*\n(?:.*\n)*?\}\n', '', s, count=1)
+# And the import that body was the only user of. Ordinary Go editing — the
+# compiler names it exactly — but it is the second half of "delete these", so
+# the lane does both halves rather than proving only the easy one.
+if 'appdomain.' not in s:
+    # Two shapes: inside the parenthesised block, or collapsed to a single
+    # unparenthesised line when it is the only import left standing.
+    s = re.sub(r'(?m)^import appdomain "[^"]+"\n\n?', '', s, count=1)
+    s = re.sub(r'\n\tappdomain "[^"]+"', '', s, count=1)
 open(p, 'w').write(s)
 PYEOF
   (cd "$GEN_DIR" && GOWORK=off go run ./cmd/omnicore-gen generate \

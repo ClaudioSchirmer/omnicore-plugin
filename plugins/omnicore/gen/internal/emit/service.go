@@ -108,15 +108,33 @@ func emitServiceImports(s *src) {
 	s.L(")")
 }
 
-// emitAnswerTypes writes the shapes a fact answers with when the answer is not
-// a bare scalar: one row of a per-group fact, and the struct an ungrouped fact
-// answering SEVERAL numbers returns.
+// emitStubImports is emitServiceImports plus the app domain, which the hook
+// file needs for the ENTRY CARRIER of a batched per-entry fact: the type is
+// declared beside the port, and this file is in infra. gofile prunes the line
+// for every service whose facts take no carrier, which is most of them.
+func emitStubImports(s *src, m *ir.Model) {
+	s.L("import (")
+	s.L("\t%s", quote("time"))
+	s.Blank()
+	s.L("\t%s", quote(fwImport("domain")))
+	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
+	s.L(")")
+}
+
+// emitAnswerTypes writes the shapes a fact speaks in when a bare scalar is not
+// one: one row of a per-group fact, the struct an ungrouped fact answering
+// SEVERAL numbers returns, and the carrier ONE entry of a batched per-entry
+// fact arrives as.
 //
 // They live here, in the domain, and not in infra: the port is what the rules
 // speak to, and a domain that had to name the framework's own *read.Group to
-// read an answer would import infra to state an invariant.
+// read an answer would import infra to state an invariant. The entry carrier is
+// the same argument on the way IN — the rule builds those values.
 func emitAnswerTypes(s *src, m *ir.Model) {
 	for _, f := range m.Service.Facts {
+		if f.PerEntry.Carrier() {
+			emitEntryType(s, f)
+		}
 		switch {
 		case f.Grouped():
 			emitGroupType(s, f)
@@ -124,6 +142,37 @@ func emitAnswerTypes(s *src, m *ir.Model) {
 			emitResultType(s, f)
 		}
 	}
+}
+
+// emitEntryType writes what ONE entry of a batched per-entry fact contributes.
+//
+// A struct rather than parallel slices, and that is the whole reason it exists:
+// two slices the caller has to keep index-aligned is a defect that compiles,
+// runs, and answers about the wrong entry. With one field it would be pure
+// ceremony, so the language does not build it — the parameter is a plain slice
+// of the key there.
+func emitEntryType(s *src, f ir.Fact) {
+	s.Blank()
+	names := make([]string, 0, len(f.PerEntry.Fields))
+	for _, p := range f.PerEntry.Fields {
+		names = append(names, p.Field)
+	}
+	s.Doc(
+		fmt.Sprintf("%s is ONE entry of %s, as %s is asked about it.",
+			f.PerEntry.EntryType, f.PerEntry.Collection, f.Name),
+		"",
+		fmt.Sprintf("The question needs %s of the same entry, and they travel together "+
+			"for one reason: two parallel slices are two things a caller can put out of "+
+			"step, and the answer would then be about a different entry than the one "+
+			"whose values were sent.", strings.Join(names, " and ")),
+		"",
+		fmt.Sprintf("%s is what the answer is keyed by.", f.PerEntry.Key.Field),
+	)
+	s.L("type %s struct {", f.PerEntry.EntryType)
+	for _, p := range f.PerEntry.Fields {
+		s.L("\t%s %s", p.Field, p.GoType)
+	}
+	s.L("}")
 }
 
 // emitGroupType writes one row of a per-group answer: the key, and this group's
@@ -220,6 +269,10 @@ func factDoc(f ir.Fact) string {
 	switch f.Kind {
 	case "exists":
 		return fmt.Sprintf("%s reports whether a matching row already exists.", f.Name)
+	case "notExists":
+		return fmt.Sprintf("%s reports whether NO matching row exists — the same probe as "+
+			"an exists fact, read the other way round so the question is named for the "+
+			"problem the rule raises.", f.Name)
 	case "count":
 		if f.Grouped() {
 			return fmt.Sprintf("%s counts the matching rows per group, in one query.", f.Name)
@@ -248,6 +301,25 @@ func factDoc(f ir.Fact) string {
 // the signature says so on its own — a `permissionID domain.ID` reads exactly
 // like a root field would.
 func perEntryNote(f ir.Fact) string {
+	if f.Batched() {
+		key := f.PerEntry.Key.Field
+		note := fmt.Sprintf(" Asked ONCE for the WHOLE of %s and answered per entry, "+
+			"keyed by %s.", f.PerEntry.Collection, key)
+		if f.PerEntry.Carrier() {
+			note += fmt.Sprintf(" An entry contributes more than its key, so the entries "+
+				"travel as %s rather than as parallel slices a caller could misalign.",
+				f.PerEntry.EntryType)
+		}
+		// The one thing a map's type cannot say, and the one two services would
+		// otherwise read two ways.
+		return note + fmt.Sprintf(" A key MISSING from the answer is this fact answering "+
+			"NOTHING for that entry, and at the call site Go's zero value settles what "+
+			"that means: %s, so nothing is raised. Say \"this entry IS the problem\" by "+
+			"putting the answer in the map — never by leaving the key out, which is "+
+			"silence rather than a verdict. Where the source could not be reached at "+
+			"all, fail: the port returns no error precisely so that decision is made "+
+			"here.", absentReading(f.ReturnType))
+	}
 	var of []string
 	seen := map[string]bool{}
 	for _, p := range f.Params {
@@ -260,9 +332,47 @@ func perEntryNote(f ir.Fact) string {
 	if len(of) == 0 {
 		return ""
 	}
+	// A SET operator already asks about the whole collection at once, so the
+	// once-per-entry sentence would be false of the very signature it sits on:
+	// the parameter is a slice. What is still missing there is the answer,
+	// which is one scalar for all of them — the thing perEntry exists to fix.
+	if setValued(f) {
+		return fmt.Sprintf(" Narrowed by a SET of values from %s, so the question is "+
+			"asked ONCE about the whole collection — and answered as ONE %s for all of "+
+			"it, which cannot say WHICH entry the answer is about. Where the rule needs "+
+			"to name the entry, declare perEntry: <collection>.<field> and the answer "+
+			"comes back keyed by it.",
+			strings.Join(of, " and "), f.ReturnType)
+	}
 	return fmt.Sprintf(" Asked ONCE PER ENTRY of %s, so the answer is about that entry "+
-		"and the cost of the body is multiplied by the size of the collection.",
+		"and the cost of the body is multiplied by the size of the collection. Where "+
+		"that cost matters, declare perEntry: <collection>.<field> — the entries arrive "+
+		"together and the answer comes back keyed by that field.",
 		strings.Join(of, " and "))
+}
+
+// setValued reports whether a per-entry filter compares against a SET, which
+// makes the whole collection arrive in one call already.
+func setValued(f ir.Fact) bool {
+	for _, p := range f.Params {
+		if p.PerEntry != "" && strings.HasPrefix(p.GoType, "[]") {
+			return true
+		}
+	}
+	return false
+}
+
+// absentReading names what a missing key reads as, in the fact's own return
+// type. It is stated rather than left to the reader because the alternative
+// reading — absent means "unresolvable", so treat it as a problem — is what
+// hand-written per-entry bodies do today, and two readings of one silence is a
+// bug generator.
+func absentReading(returnType string) string {
+	if returnType == "bool" {
+		return "absent reads as false, which is the answer a fact named for the " +
+			"PROBLEM wants"
+	}
+	return "absent reads as the zero " + returnType
 }
 
 // factResults renders what a fact answers with. The second return exists only
@@ -275,6 +385,13 @@ func factResults(f ir.Fact) string { return factResultsIn(f, "") }
 // The group type is DECLARED in the domain beside the port, so infra names it
 // through its import alias while the port and the generated stub name it bare.
 func factResultsIn(f ir.Fact, pkg string) string {
+	if f.Batched() {
+		// One question, one answer per entry. A key MISSING from the map is the
+		// fact answering nothing for that entry, and for the problem-named bool
+		// this language asks for, Go's zero value already reads that correctly
+		// at the call site.
+		return fmt.Sprintf("map[%s]%s", f.PerEntry.Key.GoType, f.ReturnType)
+	}
 	if f.Grouped() {
 		return "[]" + pkg + f.GroupType
 	}
@@ -287,10 +404,31 @@ func factResultsIn(f ir.Fact, pkg string) string {
 	return f.ReturnType
 }
 
-func factParams(f ir.Fact) string {
+// FactSignature is the method as it reads on the port: name, parameters and
+// what it answers with.
+//
+// Exported because the REPORT hands these to whoever writes the bodies, and it
+// built the line itself from the parameter list and the return TYPE. That
+// stopped being the whole answer the moment a fact could answer a map or take a
+// generated carrier — the report would have printed a signature the author
+// could not paste. One function, one truth.
+func FactSignature(f ir.Fact) string {
+	return fmt.Sprintf("%s(%s) %s", f.Name, factParams(f), factResults(f))
+}
+
+func factParams(f ir.Fact) string { return factParamsIn(f, "") }
+
+// factParamsIn is the same, qualified for a package that is not the domain's.
+// Only the generated ENTRY CARRIER needs it: every other parameter is a scalar
+// or a framework type both packages already name the same way.
+func factParamsIn(f ir.Fact, pkg string) string {
 	var params []string
 	for _, p := range f.Params {
-		params = append(params, p.Name+" "+p.GoType)
+		goType := p.GoType
+		if pkg != "" && f.PerEntry.Carrier() && p.Role == "per-entry" {
+			goType = "[]" + pkg + f.PerEntry.EntryType
+		}
+		params = append(params, p.Name+" "+goType)
 	}
 	return strings.Join(params, ", ")
 }
@@ -381,13 +519,47 @@ func emitServiceImpl(m *ir.Model) (fsplan.File, error) {
 		fmt.Sprintf("the %s service implementation", m.Entity.Pascal), s)
 }
 
+// factCostNote says what the generated body buys, in the terms of the question
+// it actually asks.
+//
+// It used to say the same sentence for every kind — "the probe exists precisely
+// so a YES/NO QUESTION does not pay for full hydration" — on top of sums,
+// averages and grouped counts, none of which are yes/no questions. The point
+// being made is true of all of them and the words were true of one.
+func factCostNote(f ir.Fact) string {
+	const instead = "It asks the database the question directly instead of loading " +
+		"aggregates and folding the answer in Go"
+	switch {
+	case existsKind(f.Kind):
+		return instead + " — the probe exists precisely so a yes/no question does not " +
+			"pay for full hydration."
+	case f.Grouped():
+		return instead + " — one GROUP BY answers every key at once, where the same " +
+			"question asked per key is one query per bucket."
+	case f.Multi:
+		return instead + " — and every number in ONE pass, so they are all about the " +
+			"same instant, which separate queries never guarantee."
+	default:
+		return instead + " — the aggregate is computed where the rows are, and only " +
+			"the number travels back."
+	}
+}
+
+// anySlotFound reports whether any of the fact's numbers carries a Found flag.
+func anySlotFound(f ir.Fact) bool {
+	for _, sl := range f.Slots {
+		if sl.Found {
+			return true
+		}
+	}
+	return false
+}
+
 func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 	s.Doc(
 		fmt.Sprintf("%s %s", f.Name, strings.TrimPrefix(factDoc(f), f.Name+" ")),
 		"",
-		"It asks the database the question directly instead of loading aggregates and "+
-			"counting them in Go — the probe exists precisely so a yes/no question does "+
-			"not pay for full hydration.",
+		factCostNote(f),
 		"",
 		"On a query failure it PANICS, and that is the intended behaviour: the "+
 			"pipeline turns the panic into a 500 and the write never happens. Returning "+
@@ -397,12 +569,7 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 	s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), factResultsIn(f, "appdomain."))
 
 	emitFactQuery(s, m, f)
-	if f.ActiveOnly {
-		s.L("\t// Archived rows do not take part: a removed row must not block a new one.")
-		s.L("\t// The active scope is the query default, so nothing is added here.")
-	} else {
-		s.L("\tq = q.IncludeArchived()")
-	}
+	emitFactScope(s, f)
 	s.Blank()
 
 	if f.Grouped() {
@@ -412,12 +579,19 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 		return
 	}
 
-	if f.Kind == "exists" {
+	if existsKind(f.Kind) {
 		s.L("\tfound, err := s.repo.Loader.Exists(s.queryContext(), q)")
 		s.L("\tif err != nil {")
 		s.L("\t\tpanic(%s)", quote(fmt.Sprintf("%s: %s probe failed", m.Entity.Pascal, f.Name)))
 		s.L("\t}")
-		s.L("\treturn found")
+		if f.Kind == "notExists" {
+			s.L("\t// The fact is named for the PROBLEM, so the probe's answer is inverted")
+			s.L("\t// here rather than at every call site: the rule asks one question and")
+			s.L("\t// raises its notification when the answer is yes.")
+			s.L("\treturn !found")
+		} else {
+			s.L("\treturn found")
+		}
 		s.L("}")
 		s.Blank()
 		return
@@ -425,6 +599,32 @@ func emitFactImpl(s *src, m *ir.Model, impl string, f ir.Fact) {
 	emitScalarFactBody(s, m, f)
 	s.L("}")
 	s.Blank()
+}
+
+// existsKind reports whether the fact answers yes/no. notExists is the same
+// probe read the other way round.
+func existsKind(kind string) bool { return kind == "exists" || kind == "notExists" }
+
+// emitFactScope writes the archived gate — the framework's own three-way one,
+// said out loud in every body so a reader never has to remember which of the
+// three is the default.
+//
+// The default is `all`, and it is the one that is easy to get wrong: a fact
+// with no scope key has always included the archived rows, so narrowing it here
+// would change what every spec written before the key asks.
+func emitFactScope(s *src, f ir.Fact) {
+	switch f.Scope {
+	case "active":
+		s.L("\t// Archived rows do not take part: a removed row must not block a new one.")
+		s.L("\t// The active scope is the query default, so nothing is added here.")
+	case "archivedOnly":
+		s.L("\t// The archived rows and nothing else — what \"was this taken and then")
+		s.L("\t// withdrawn\" asks, and the one scope a predicate cannot express: the")
+		s.L("\t// gate is the framework's, on whichever column this entity marks with.")
+		s.L("\tq = q.OnlyArchived()")
+	default:
+		s.L("\tq = q.IncludeArchived()")
+	}
 }
 
 // emitFactQuery binds the criteria the fact narrows by.
@@ -723,8 +923,13 @@ func emitGroupedFactBody(s *src, m *ir.Model, f ir.Fact) {
 	s.L("\t}")
 	s.Blank()
 	s.L("\t// One entry per distinct key. An empty set yields NO groups at all, so")
-	s.L("\t// there is no row of zeroes to tell apart from a real one — and where a")
-	s.L("\t// group's own scalar can still be null, its Found says so.")
+	s.L("\t// there is no row of zeroes to tell apart from a real one.")
+	if anySlotFound(f) {
+		// Only where one exists. A count carries no Found — it cannot — and
+		// naming it in the file the developer is meant to read sends them
+		// looking for a field that is not in the struct above.
+		s.L("\t// Where a group's own scalar can still be null, its Found says so.")
+	}
 	s.L("\tout := make([]appdomain.%s, 0, len(groups))", f.GroupType)
 	s.L("\tfor _, g := range groups {")
 	s.L("\t\tout = append(out, appdomain.%s{", f.GroupType)
@@ -792,7 +997,7 @@ func emitServiceStubFile(m *ir.Model) (fsplan.File, error) {
 	// excludeSelf fact, take a domain.ID; one narrowed by an instant takes a
 	// time.Time. The block was missing entirely, and then missing "time".
 	// gofile prunes whichever the specs' facts do not take.
-	emitServiceImports(s)
+	emitStubImports(s, m)
 	s.Blank()
 
 	impl := m.Service.Impl
@@ -806,7 +1011,8 @@ func emitServiceStubFile(m *ir.Model) (fsplan.File, error) {
 		}
 		s.L("//")
 		s.L("// TODO(%s): implement. The request context is s.queryContext().", f.Name)
-		s.L("func (s *%s) %s(%s) %s {", impl, f.Name, factParams(f), factResults(f))
+		s.L("func (s *%s) %s(%s) %s {", impl, f.Name,
+			factParamsIn(f, "appdomain."), factResults(f))
 		s.L("\tpanic(%s)", quote(fmt.Sprintf(
 			"%s.%s is not implemented yet — see the generation report", m.Entity.Pascal, f.Name)))
 		s.L("}")

@@ -905,7 +905,45 @@ Four things to get right, because they are the ones that cost a migration later:
     entity's own table, and the entry's column is on another one. Naming the entry's field
     BARE is refused with the spelling that works — for a while it was accepted in silence
     and the method arrived with no parameter at all, uncallable, discovered while
-    hand-writing the rule that needed it.
+    hand-writing the rule that needed it. A fact may reach into **one** collection: two of
+    them is a pair of nested loops nobody wrote, with no stated order between them.
+  - **`perEntry` turns that into ONE question, answered per entry.** Without it the loop
+    lives in the rule, so a write carrying twenty entries pays twenty round trips — and
+    nothing in the spec or the signature said the cost was there. The language could
+    already batch the QUESTION (`op: in` takes the whole set) and had no way to batch the
+    ANSWER: one `bool` for twenty ids cannot say WHICH one is the problem, which is the
+    difference between a 422 the caller can act on and one they cannot.
+
+    ```yaml
+    - name: PermissaoIndisponivelNoTenant
+      kind: manual
+      returns: bool                       # the map's VALUE, not the return type
+      perEntry: Permissoes.PermissaoID    # the key the answer is attributed to
+      filters: [TenantID, Permissoes.Rotulo]
+    ```
+
+    → `PermissaoIndisponivelNoTenant(tenantID domain.ID, entries []<E>…Entry) map[domain.ID]bool`
+
+    The key must be findable again — non-nullable, and one of `string int int64 id`
+    (a `time` compares by monotonic reading and location, a `float64` can be NaN, a `bool`
+    is two buckets). An entry contributing MORE than its key travels as a generated
+    carrier rather than as parallel slices a caller could misalign; with the key alone the
+    parameter is a plain slice of it. **A key MISSING from the map is the fact answering
+    nothing for that entry** — absent reads as the zero value at the call site, which is
+    the answer a fact named for the PROBLEM wants. Put the verdict in the map; never say
+    it by leaving the key out. Manual only, and `factRange` cannot read one: a declarative
+    range fills arguments from the root, and this takes a collection.
+  - **`kind: notExists` is `exists` read the other way round**, and it exists so the fact
+    can be named for the PROBLEM — which is what the rule reading it raises. Named for the
+    healthy state, the generated test stub's "nothing found" reads as "the row is gone"
+    and turns a correct spec red on the day it is written. Same probe, same one query.
+  - **`scope` is the archived gate, said out loud: `active | all | archivedOnly`.**
+    Absent means `all`, which is what a fact has always done; `active` is what
+    `activeOnly: true` says, and declaring both is refused rather than reconciled — they
+    govern one gate. `archivedOnly` is the one that was unaskable: "was this taken and
+    then withdrawn" is about the archived rows ALONE. It needs
+    `storage.managed.archivedAt` — with no marker column the framework applies no gate at
+    all, so it would answer about every row instead of about none.
   - **One fact may answer SEVERAL numbers, in one query.** `aggregates` is `kind`
     widened from a single answer to a named set of them — the framework's loader takes
     as many specs as it is handed and computes them in a single pass:
@@ -971,6 +1009,20 @@ Four things to get right, because they are the ones that cost a migration later:
     none and require a nullable column · `contains startswith endswith` are text, with the
     pattern escaping already done (which is why raw `like`/`ilike` are not in the set;
     `between` is not either — it is `gte` + `lte`, two leaves whose parameters you name).
+    A set parameter is named for a set (`situacaoSet`), because the signature is where a
+    reader finds out whether they are asking about one thing or many; `as:` overrides it.
+  - **A fact may narrow by a field a ROOT `joins[]` entry brings in — no extra query.**
+    The traversal is declared on the repository, so the framework compiles it into the
+    existence probe and the aggregate calls exactly as it does into `FindAll`; it even
+    types an identity column across the join leg, so the bind is the dialect's native id
+    form rather than text that would match nothing on three of the four engines. "Does an
+    active row exist whose CAMPUS is labelled this" is therefore one query, and it used to
+    be hand-written because the generator could not name the column. Address it by the Go
+    name the join lands on, never by the target's column. Two limits: a join declared
+    `inChild` is **load-only** and never reaches a predicate (the framework's own words),
+    and a `factRange` rule cannot fill a joined argument — on an INSERT the traversal has
+    not run, so it would pass the zero as though it were an answer. Call that one from
+    `rules.manual`, where the absence is a branch you write.
   - **Decide WHERE the set comes from, because it decides whether a declarative rule can
     read the fact.** `values: [...]` pins the comparison in the spec: the definition lives
     beside the question named for it — a fifth member of the enum is one line here instead
@@ -990,7 +1042,9 @@ Four things to get right, because they are the ones that cost a migration later:
     fixture through. `TenantIsUnavailable`, `WorkspaceTaken`, `PermissionKeyTaken` read
     false under that stub and the happy path passes; the same question spelled
     `TenantIsActive` reads false too — and now means the tenant is gone, so a perfectly
-    correct spec ships with a red generated test.
+    correct spec ships with a red generated test. When the honest query is the healthy
+    one, `kind: notExists` is how the fact keeps the problem's name without the body
+    lying: the probe is the same, the reading is inverted once, in the generated body.
 
   So: *"no more than 5 active enrolments per course"* is a fact with `groupBy` — it is about
   rows that exist. *"no more than 30 photos in this listing"* is a `groupCap` — it is about

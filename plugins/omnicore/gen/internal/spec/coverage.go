@@ -37,6 +37,9 @@ const (
 	CapTenantAccess     Capability = "tenant data access (read filter AND write guard)"
 	CapScopeBypass      Capability = "a permission that crosses the row scope (operator support)"
 	CapPerEntryFact     Capability = "per-entry facts (a service question about ONE entry of a collection)"
+	CapBatchedFact      Capability = "batched per-entry facts (ONE question about the whole collection, answered per entry — the loop leaves the rule and the answer stays keyed to the entry that caused it)"
+	CapArchivedScope    Capability = "facts asked about the ARCHIVED rows alone (scope: archivedOnly)"
+	CapJoinedFact       Capability = "facts narrowed by a field a read join brings in from another aggregate"
 	CapScopedUnique     Capability = "uniqueness scoped by other fields (unique per tenant, per workspace)"
 	CapChildUnique      Capability = "uniqueness of a collection entry (index per owner + its 409 binding)"
 	CapGeneratedTests   Capability = "generated unit tests"
@@ -91,6 +94,9 @@ var implemented = map[Capability]bool{
 	CapTenantAccess:     true,
 	CapScopeBypass:      true,
 	CapPerEntryFact:     true,
+	CapBatchedFact:      true,
+	CapArchivedScope:    true,
+	CapJoinedFact:       true,
 	CapScopedUnique:     true,
 	CapChildUnique:      true,
 	CapGeneratedTests:   true,
@@ -130,7 +136,8 @@ func AllCapabilities() []Capability {
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapScopeBypass, CapScopedUnique,
-		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild, CapPerChildPatch,
+		CapChildUnique, CapPerEntryFact, CapBatchedFact, CapArchivedScope, CapJoinedFact,
+		CapGeneratedTests, CapPerChild, CapPerChildPatch,
 		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
 		CapMultiAggregate, CapStampedFilter,
 		CapCompositeVO,
@@ -341,6 +348,14 @@ func CheckCoverage(s *Spec) *Problems {
 						"a fact asked per entry of a collection")
 				}
 			}
+			if fa.PerEntry != "" {
+				uses(CapBatchedFact, fmt.Sprintf("service.facts[%d].perEntry", i),
+					"a fact asked once about a whole collection and answered per entry")
+			}
+			if fa.Scope == "archivedOnly" {
+				uses(CapArchivedScope, fmt.Sprintf("service.facts[%d].scope", i),
+					"a fact asked about the archived rows alone")
+			}
 			WalkFactFilters(fa.Filters, "", func(n FactFilter, _ string) {
 				if _, _, isGroup := n.Group(); isGroup || n.Operator() != "eq" || n.Pinned() {
 					uses(CapFactCriteria, fmt.Sprintf("service.facts[%d].filters", i),
@@ -349,6 +364,10 @@ func CheckCoverage(s *Spec) *Problems {
 				if ManagedReads.Has(n.Field) && factField(s, n.Field) == nil {
 					uses(CapStampedFilter, fmt.Sprintf("service.facts[%d].filters", i),
 						"a fact narrowed by a column the framework stamps")
+				}
+				if _, _, isJoin := JoinFactField(s, Options{}, n.Field); isJoin {
+					uses(CapJoinedFact, fmt.Sprintf("service.facts[%d].filters", i),
+						"a fact narrowed by a field a read join brings in")
 				}
 			})
 			if len(fa.Aggregates) > 0 {

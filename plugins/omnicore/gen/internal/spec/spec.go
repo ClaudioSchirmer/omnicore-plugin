@@ -1452,7 +1452,15 @@ type Fact struct {
 	// It answers ONE question. A fact that must answer several numbers over the
 	// same rows declares `aggregates` instead — the two are mutually exclusive,
 	// because a fact answers in one shape or the other and never in both.
-	Kind string `yaml:"kind"` // exists | count | sum | avg | min | max | manual
+	//
+	// `notExists` is `exists` read the other way round, and it exists so a fact
+	// can be NAMED FOR THE PROBLEM. "Is unavailable", "is not in the catalog",
+	// "does not apply here" are the questions a rule actually asks, and the
+	// healthy state is the one nobody raises a notification about. Spelled as
+	// `exists`, such a fact has to be named for the healthy state — and then the
+	// generated test stub, which answers "nothing found", reads as "the row is
+	// gone" and turns a correct spec red on the day it is written.
+	Kind string `yaml:"kind"` // exists | notExists | count | sum | avg | min | max | manual
 	// Returns is required for a manual fact: the generator has to know the
 	// signature it is declaring, and for the other kinds it follows from the kind.
 	//
@@ -1512,12 +1520,77 @@ type Fact struct {
 	// exactly what it said. A bare name is `eq` against a parameter; the block
 	// form names the operator, and a group node (all/any/not) nests.
 	Filters []FactFilter `yaml:"filters"`
+	// PerEntry turns a question about ONE ENTRY of a collection into ONE
+	// question about the WHOLE collection, answered per entry.
+	//
+	// Its value is the key the answer is attributed to — `<Collection>.<Field>`
+	// — and it changes both halves of the signature: the entries arrive
+	// together, and the answer is a `map[<key>]<returns>` instead of a scalar.
+	//
+	// Without it, a fact naming a collection field is asked once per entry: the
+	// loop lives in the rule, the body runs N times, and a write carrying
+	// twenty entries pays twenty round trips for a question one `IN` would have
+	// answered. The language could already BATCH THE QUESTION — `op: in` takes
+	// the whole set — and had no way to batch the ANSWER, so the only shape
+	// available was one bool for twenty ids, which cannot say WHICH id is the
+	// bad one. That is not cosmetic: it is the difference between a 422 the
+	// caller can act on and one they cannot.
+	//
+	// What the map means where a key is MISSING is decided here, once, so two
+	// services do not read the same silence two ways: an absent key is the fact
+	// answering NOTHING for that entry. For a fact named after the problem —
+	// which is the naming this language asks for — Go's zero value already
+	// gives the right reading at the call site: absent is `false`, and nothing
+	// is raised. A body that means "I could not resolve this one" must say so
+	// by putting `true` in the map, never by leaving the key out.
+	//
+	// The key field must be one an entry can actually be FOUND BY again, so it
+	// is non-nullable (every entry without a value would collapse onto one key,
+	// the same argument groupBy already makes) and one of string, int, int64 or
+	// id. A `time` key compares by wall clock AND monotonic reading AND
+	// location, so two values that print the same are two different keys; a
+	// `float64` key can be NaN, which never equals itself; a `bool` key makes
+	// the map two buckets rather than an answer per entry.
+	//
+	// An entry may contribute MORE THAN ONE field: every other filter naming
+	// the same collection becomes a field of a generated entry carrier, so what
+	// the method takes is `[]<Entity><Fact>Entry` rather than two parallel
+	// slices the caller could misalign. With the key alone, the parameter stays
+	// a plain slice of it.
+	//
+	// Only a manual fact may declare it, for the same reason a computed fact
+	// cannot be filtered by a collection field at all: a computed fact is a
+	// query over THIS entity's own table, and the entries are on another one.
+	PerEntry string `yaml:"perEntry"`
 	// ExcludeSelf leaves the record being written out of the answer, so an
 	// update never collides with itself.
 	ExcludeSelf bool `yaml:"excludeSelf"`
 	// ActiveOnly considers only the rows that are not archived. Refused for a
 	// manual fact.
+	//
+	// It is `scope: active` in the spelling that shipped first, and it stays
+	// legal forever. Declaring both is refused rather than reconciled — they
+	// govern the same gate, and picking one silently would run a query the
+	// author did not write.
 	ActiveOnly bool `yaml:"activeOnly"`
+	// Scope is which rows the question is about, on the ARCHIVED axis — the
+	// framework's own three-way gate, said in the spec instead of assumed.
+	//
+	//   active       — only the rows that are not archived (`activeOnly: true`).
+	//   all          — archived rows included. THE DEFAULT, and what a fact
+	//                  with neither key has always done.
+	//   archivedOnly — the archived rows and nothing else.
+	//
+	// The third is the one that was unaskable. "Is this tenant unavailable"
+	// means missing OR archived, and a fact could ask about the living rows or
+	// about all of them, never about the archived ones alone — so the question
+	// was written by hand or not asked. It is `criteria.Query.OnlyArchived`,
+	// which the framework has always offered and nothing here reached.
+	//
+	// Refused when the entity declares no archive column: with no marker column
+	// every scope yields no gate, so `archivedOnly` would quietly answer about
+	// EVERY row rather than about none.
+	Scope string `yaml:"scope"`
 	// Description says what the answer means. Required for a manual fact — it
 	// is what the generated stub and the report tell the implementer to write.
 	Description string `yaml:"description"`
@@ -1566,8 +1639,22 @@ type FactAggregate struct {
 // before this shape still says what it said.
 type FactFilter struct {
 	// Field is what the comparison is about — a field of this entity, a part of
-	// a composite value object, or `<Collection>.<Field>` for a fact asked once
-	// per entry of a collection.
+	// a composite value object, a field a ROOT read join brings in from another
+	// aggregate, or `<Collection>.<Field>` for a fact about an entry of a
+	// collection.
+	//
+	// The join spelling is the one that is easy to miss, and it costs nothing:
+	// a root join is ALWAYS in the FROM, and the framework compiles the same
+	// traversal for `Exists` and for the aggregate calls as it does for
+	// `FindAll` — it even types an identity column across the join leg, so the
+	// bind is the dialect's native id form rather than text that would match
+	// nothing on three of the four engines. So "does an active row exist whose
+	// OWNER's tenant is this one" is one query the store already knows how to
+	// answer, and the generator was the half that could not name the column.
+	//
+	// A join declared `inChild` is NOT reachable here. It rides the
+	// collection's own batched SELECT and never reaches a predicate — the same
+	// boundary every other child field has.
 	//
 	// It is the leaf half of the node and is required there; a group node
 	// (all/any/not) names no field of its own.

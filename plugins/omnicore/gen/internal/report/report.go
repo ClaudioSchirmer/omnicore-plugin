@@ -57,6 +57,11 @@ type Input struct {
 	// run mentions the gap, and the package does not compile until it is
 	// closed.
 	UnimplementedFacts []string
+	// OrphanedFacts is the mirror: methods the EXISTING service hook still
+	// answers for and the spec no longer declares. Dead code at best, and a
+	// broken build where the body names a generated type that left with the
+	// fact — see orphanedFacts.
+	OrphanedFacts []string
 	// UnimplementedRedactors names the hand-written redactors the EXISTING hook
 	// file does not declare — the same shape as UnimplementedFacts, and the same
 	// consequence: the schema calls a function nothing defines, so the package
@@ -307,7 +312,7 @@ func renderTodo(b *strings.Builder, in Input) {
 			owed[name] = true
 		}
 		for _, f := range manual {
-			fmt.Fprintf(b, "**`%s(%s) %s`**\n\n", f.Name, factSignature(f), f.ReturnType)
+			fmt.Fprintf(b, "**`%s`**\n\n", emit.FactSignature(f))
 			fmt.Fprintf(b, "> %s\n\n", strings.ReplaceAll(f.Description, "\n", " "))
 		}
 		b.WriteString("The method returns a plain value and no error, so decide what an " +
@@ -327,12 +332,34 @@ func renderTodo(b *strings.Builder, in Input) {
 				if !owed[f.Name] {
 					continue
 				}
-				fmt.Fprintf(b, "- `func (s *%s) %s(%s) %s`\n",
-					m.Service.Impl, f.Name, factSignature(f), f.ReturnType)
+				fmt.Fprintf(b, "- `func (s *%s) %s`\n", m.Service.Impl, emit.FactSignature(f))
 			}
 			b.WriteString("\nAdd them to that file — it is yours, and the generator will " +
 				"not write into it again.\n\n")
 		}
+	}
+
+	// Independent of the block above: when the LAST manual fact is what the spec
+	// dropped, there is no manual-facts section for this to hang under, and that
+	// is exactly the run where the hook file is most out of step.
+	if len(in.OrphanedFacts) > 0 {
+		empty = false
+		fmt.Fprintf(b, "### `internal/infra/%s_service_manual.go` — bodies the spec no longer asks for\n\n",
+			m.Entity.Snake)
+		b.WriteString("This file still answers for questions the spec has stopped declaring. " +
+			"The generator did not open it and will not: it is yours. **Delete these — a body " +
+			"nothing calls is dead code the next reader has to rule out**, and it goes with " +
+			"the change that stranded it rather than later.\n\n")
+		for _, name := range in.OrphanedFacts {
+			fmt.Fprintf(b, "- `func (s *%s) %s(...)`\n", m.Service.Impl, name)
+		}
+		b.WriteString("\n⚠ **One of these can break the build rather than merely sit there.** " +
+			"A BATCHED per-entry fact (`perEntry`) takes a generated entry carrier declared " +
+			"beside the port, and that type is removed with the fact — so the body naming it " +
+			"stops compiling. The compiler will say `undefined: <Entity><Fact>Entry` and name " +
+			"a symbol; the decision behind it is this line. Deleting the body may also " +
+			"strand the `appdomain` import it was the only user of — the compiler names " +
+			"that one too.\n\n")
 	}
 
 	if hooks := ir.RedactionHooks(m); len(hooks) > 0 {
@@ -1896,14 +1923,6 @@ func manualFacts(m *ir.Model) []ir.Fact {
 		}
 	}
 	return out
-}
-
-func factSignature(f ir.Fact) string {
-	var parts []string
-	for _, p := range f.Params {
-		parts = append(parts, p.Name+" "+p.GoType)
-	}
-	return strings.Join(parts, ", ")
 }
 
 // perChildVerbs is the union of the per-entry verbs the collections mount, in

@@ -160,10 +160,13 @@ func TestAPinnedEnumIsWrittenAsItsSTOREDValue(t *testing.T) {
 // because every generated implementation lands in ONE infra package.
 func TestASetParameterIsWidenedOnce(t *testing.T) {
 	got := fileNamed(t, factCriteriaModel(t), "internal/infra/chamado_service.go")
-	if !strings.Contains(got, "ConjuntoPeloChamador(situacao []string) int64") {
-		t.Errorf("the set did not reach the signature as a slice:\n%s", got)
+	// The name says MANY. Left as the field's own — `situacao []string` — the
+	// one place a reader looks to find out whether they are asking about one
+	// thing or many said "one" while the type said the opposite.
+	if !strings.Contains(got, "ConjuntoPeloChamador(situacaoSet []string) int64") {
+		t.Errorf("the set did not reach the signature as a slice named for a set:\n%s", got)
 	}
-	if !strings.Contains(got, `criteria.In("Situacao", chamadoCriteriaSet(situacao)...)`) {
+	if !strings.Contains(got, `criteria.In("Situacao", chamadoCriteriaSet(situacaoSet)...)`) {
 		t.Errorf("the set is not spread into the comparison:\n%s", got)
 	}
 	if n := strings.Count(got, "func chamadoCriteriaSet["); n != 1 {
