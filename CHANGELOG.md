@@ -104,7 +104,21 @@ answer. Beside it, one thing the fact language could not say.
   lane now runs the id probe against a real engine — the half a compile cannot
   show, since a bare-text bind matches nothing on three of the four engines.
 
-## [0.51.0] — 2026-08-29
+### Changed
+
+- **`omnicore-gen` now targets framework `v0.64.0`** (`compat.Supported`, and the vendored
+  host the golden gate builds). Unlike the previous bump, this one is **not** required by
+  anything the generator EMITS: `v0.64.0`'s feature is a door this generator does not
+  write, and the criteria compiler that moved packages with it is internal to the
+  framework, so no emitted signature changed and the whole matrix generates, builds, vets,
+  tests and boots against it unchanged.
+
+  What moves it is the posture `compat` states in its own header — floor == ceiling, ONE
+  proven line — and the fact that this release documents a `v0.64.0` capability. Say the
+  consequence plainly, because it is the one a consumer meets: a project pinned to
+  `v0.63.0` now reads **Behind** and is refused by default. That is "untested here", not
+  "broken there" — `--force-unsupported` generates anyway, and `/omnicore:upgrade` is the
+  clean answer.
 
 0.50.0 taught `service.facts` to ask about a SET. A consumer took it to the write
 path and found the other half missing: `filters` could batch the QUESTION
