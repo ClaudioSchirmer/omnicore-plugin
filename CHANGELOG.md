@@ -97,6 +97,47 @@ engine rather than merely compiled.
     exits 0, and a lane that cannot tell "passed" from "never executed" proves
     nothing.
 
+### Changed — generated code is a shortcut, not the source of truth
+
+A consumer reported agents **building around** generated code instead of improving it:
+several queries issued and folded in Go beside a generated fact, a second finder next to
+a generated one — reported to the developer as *"generated code cannot be changed"*. That
+sentence is false, and the workaround is worse than the edit it avoided. It had happened
+in more than one skill, `implement` among them.
+
+The doctrine existed — `skills/omnicore-gen/SKILL.md` has carried a review step and an
+edit gate for a long time — and it reached exactly one of the sixteen skills. Most skills
+never run the generator and still open projects where it has run, so the rule had to be
+general.
+
+- **`shared/generated-code-review.md` is the new owner of the rule, and all 16 skills
+  route to it.** Three lines: editing generated code is NORMAL; always ask the dev first;
+  once accepted, `adopt` the file. Plus the workarounds it exists to stop, named, and the
+  two rungs — change the SPEC and regenerate (cheaper, survives every upgrade) or edit the
+  file and adopt it (normal when the framework can do it and the spec cannot say it).
+  `query-primitives.md` and `capabilities.md` were being read as rules for hand-written
+  code only; they apply to generated code exactly the same.
+- **The generated file header no longer reads as a prohibition.** The
+  `// Code generated … DO NOT EDIT.` line stays — it is the Go convention that makes
+  linters skip the file — and the paragraph under it now says what is actually true: the
+  line is a tooling marker, the file is yours, changing the spec is the cheaper edit, and
+  when it is the file you edit, ask the owner and then `adopt` so regeneration keeps it.
+  The old text was written to "warn against hand edits", and that framing is what was
+  being obeyed.
+- **`explain ownership` and the gen-report say the same thing**, so the four places an
+  agent can meet generated code agree. The report's `What to check` now OPENS with the
+  duty to read what was generated — logic, and the QUESTION each query asks — measured
+  against what the FRAMEWORK offers rather than against what the spec language can say.
+- **`hooks/guard-generated-code.sh` is the floor.** A rule nothing enforces rots, and this
+  one already had. Editing an owned generated file now ASKS — never refuses — carrying the
+  two facts the agent keeps missing: it is allowed, and it needs `adopt` afterwards. It is
+  silent for hook files, non-generated files, new files, the framework's own repository,
+  this plugin's, the vendored golden host, and any project that does not consume omnicore.
+- **`upgrade` names adopted files BEFORE it bumps the pin.** That is when their cost comes
+  due: an adopted file stopped tracking the spec, so every emitter improvement the release
+  carries lands in every other project and never there. Nothing said so at the moment it
+  mattered.
+
 ### Fixed
 
 - **A grouped `min`, `max` or `avg` over a NULLABLE column reported "nothing to
