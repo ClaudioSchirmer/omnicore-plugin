@@ -982,6 +982,14 @@ func emitServiceStubFile(m *ir.Model) (fsplan.File, error) {
 			"the rows and folding the answer in Go reads a whole table to compute what "+
 			"one SELECT computes, on the write path.",
 		"",
+		"If it is this database but ANOTHER TABLE — another aggregate's child table, a "+
+			"control table, a lookup — this repository cannot reach it, and hand-written "+
+			"SQL is not the next step. Check whether the pinned framework documents a "+
+			"DIRECT schema (one table, no aggregate behind it): it anchors the same "+
+			"probes and the same aggregate DSL on that table, in every dialect, and "+
+			"joins the caller's open transaction. Declaring a whole aggregate for a "+
+			"table that exists only to be counted is the other wrong answer.",
+		"",
 		"Two constraints the port imposes. The method returns a plain value and NO "+
 			"error, so decide here what an unavailable source means — failing loudly is "+
 			"the safe default, because returning a plausible answer skips the very rule "+

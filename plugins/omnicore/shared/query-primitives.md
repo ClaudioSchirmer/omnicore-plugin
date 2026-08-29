@@ -34,6 +34,7 @@ the one that grows; the primitive costs nothing extra to pick correctly at write
 | a user-facing LISTING | the read side: the query handler → `ViewReader.ReadPage` | `FindAll` on the request path |
 | a user-facing "how many match" | the request DTO's `onlyTotal` opt-in (`auto-query-handlers.html`) — no documents materialized | `ReadPage` + `len(Items)` |
 | "the rule needs a field that belongs to ANOTHER aggregate" | a **read join** declared on the repository — the value becomes an ordinary field of the entity, filled on every load (`read-joins.md`) | a second `FindOne` inside the rule · copying the column into this table and keeping it in step |
+| the truth lives in a table this service has **no aggregate for** — another aggregate's CHILD table, a control table, a lookup | a **Direct schema** anchoring the same primitives on that one table (`direct-schema.md`) — where the pin has it | hand-written SQL against the neutral transaction · promoting the table to an aggregate just to be able to ask |
 
 **`FindAll(…)[0]` is a correctness bug, not only a slow one.** `FindOne` is the
 framework's BIRTH point for a write-side entity: it stamps the old-state snapshot, so
@@ -41,6 +42,19 @@ framework's BIRTH point for a write-side entity: it stamps the old-state snapsho
 deliberately does not snapshot — it is the list path, where nothing mutates and the
 per-row clone would be pure cost. An entity loaded through it and then written has no
 old state, and every rule and every audit line that reads `Old` is quietly wrong.
+
+## Which ANCHOR the primitive hangs off — the second question
+
+Every row above assumes the question is about an aggregate this service owns, because for a
+long time that was the only anchor there was. It is not any more, on a pin that carries it:
+the same existence probe, the same aggregate DSL and the same grouped form run over a
+**Direct schema** — one table, no entity behind it — which is what makes "how many rows does
+this aggregate's child table hold" and "does this control row exist" askable without either
+hand-written SQL or a whole aggregate declared to host the question.
+
+`direct-schema.md` owns that decision, including the availability test (the pin's docs are
+the oracle) and the guarantees a Direct write does NOT carry. Pick the primitive here; pick
+the anchor there. Neither choice changes the other.
 
 ## What the choice does NOT change
 

@@ -154,7 +154,16 @@ Bench-proven cause patterns to CHECK, not to assume:
     diagnosis and the answer is `/omnicore:upgrade`).
   - genuinely shared database → prescribe isolating this service in its own, per the
     bootstrap section.
-- **Writes 2xx forever, views never arrive** → read the BOOT LOG first: the INFO
+- **Writes 2xx forever, views never arrive** → before the boot log, settle ONE thing about
+  the write itself: **was it an aggregate write at all?** A **Direct** repository write (one
+  table, no aggregate — `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`) emits no outbox
+  row BY DESIGN, so there is no CDC record, nothing for the relay to stream and nothing for
+  the projection to apply — on every posture, Mongo present or not. The signature is a
+  clean split: the row is in the table, the outbox has nothing for it, and the boot log is
+  innocent. It is a design mismatch, not a broken pipeline, and the answer is the door
+  (promote the resource to an aggregate), never a relay fix. The same read explains a
+  missing AUDIT trail and absent domain/integration events on that write. Then, for a
+  genuine aggregate write, read the BOOT LOG: the INFO
   anchor `projection consumer not started: no transport configured` is direct
   evidence — with no `transport:` block the sync consumer is skipped BY DESIGN
   (registry, spec application and drift detection still run, so collections exist
@@ -253,6 +262,7 @@ for concepts this table doesn't list.
 | infra-free / relational-view posture (views by design, no relay) | `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` (owner) · relational-view for version-exact capability |
 | reaching ANOTHER aggregate from a query — read joins (repository-declared), and the rule-vs-wire split | `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` (owner) · read-joins for version-exact contract |
 | a write that got slower as the table grew · a hand-written Service/finder that lists rows to answer a scalar · `Old()` empty on a write loaded by hand (a list load does not snapshot) | `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` (owner) · custom-command-handler · old-state |
+| a row that landed but produced NO outbox record, NO audit line and NO event · a declaration panic naming a child/sibling/shared base, or an entity schema refused as an anchor · a write rejected before any statement (empty predicate, id or stamped timestamp in the values) | `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md` (owner) · direct-schema for version-exact contract |
 | projection / sync / view versioning | auto-query-handlers · mongo-schema-evolution |
 | parked events / failed ripples / `omnicore_projection_failures` / `ProjectionHealth` / `parkedRetry`·`reconcile` knobs | views · auto-query-handlers · yaml-reference |
 | declaration boot panics (undeclared field, reserved names, depth, `Modes()`⟺archive column, index guards — the write/read schema guard families) | table-schema · views |

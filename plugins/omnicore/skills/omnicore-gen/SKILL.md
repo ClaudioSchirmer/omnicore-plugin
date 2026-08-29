@@ -1292,6 +1292,19 @@ answer that the DSL could not phrase — the primitive is still the hydration-fr
 `${CLAUDE_PLUGIN_ROOT}/shared/query-primitives.md` owns that choice, and the generated
 declarative facts next to it are what the right shape looks like.
 
+**And when the truth is local but in ANOTHER TABLE, ask the anchor question before writing
+a line of SQL.** This is the single most common shape of a local manual fact — "does any
+row of another aggregate's child table still point at this one", "how many rows of a
+control table are pending" — and the generated facts beside it are no model for it: they
+run over THIS entity's repository, which cannot reach a table it does not anchor. On a pin
+that carries the **Direct schema** door, that table gets its own one-table anchor and the
+body keeps the same existence probe and aggregate DSL, in every dialect, inside the same
+transaction. `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md` owns it, including the
+availability test. What it replaces is worth naming, because both are in this codebase's
+history: hand-written SQL against the neutral transaction with placeholders and id encoding
+re-derived per dialect, and declaring a whole aggregate — domain struct, rules, view,
+bootstrap feature — for a table that exists only to be counted.
+
 **A manual body may need a MECHANISM — and that contract does not join the domain package.**
 This is where a hand-written item most often leaks: the rule stub needs something hashed,
 signed, fetched or timestamped, so a `…Hasher`/`…Client`/`Clock` interface gets declared

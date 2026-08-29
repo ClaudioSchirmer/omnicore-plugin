@@ -83,14 +83,22 @@ cannot change it."* That sentence is false.
   skill after — say the sequence, don't interleave.
   **The row that is easy to miss: a NEW PERSISTED RESOURCE whose rules are not the
   aggregate's** — "a couple of endpoints with a table behind them, the logic is in the
-  handler". The write side of it is still an entity (`scaffold-entity` owns the domain
-  struct, the `TableSchema`, the migration, the repository, the bootstrap feature), and
-  this skill takes the handler-side logic AFTER it, in that sequence. What is NOT an
-  option is skipping the domain artifact: the framework's write-backed schema is
-  type-anchored, so the shape is a domain struct with an EMPTY `BuildRules`, whose
-  rejections are then application notifications
-  (`${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md`). Say the sequence and let the dev
-  confirm the scope before either half runs.
+  handler". **Ask which DOOR first, because there are now two and the wrong one is
+  invisible until much later:**
+  `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md` is the owner. A table that is LISTED
+  through the read side, audited, projected, event-raising or lifecycle-driven goes through
+  an aggregate — the write side of it is an entity (`scaffold-entity` owns the domain
+  struct, the `TableSchema`, the migration, the repository, the bootstrap feature), this
+  skill takes the handler-side logic AFTER it, and skipping the domain artifact is not an
+  option: the write-backed schema is type-anchored, so the shape is a domain struct with an
+  EMPTY `BuildRules`, whose rejections are application notifications
+  (`${CLAUDE_PLUGIN_ROOT}/shared/notification-bases.md`). A table with **no aggregate behind
+  it at all** — a control table, a job queue, a lookup, an idempotency ledger, something
+  nothing lists or audits — is a **Direct schema** on a pin that carries one, and then there
+  is no entity, no `scaffold-entity` leg and no domain struct: the row is a storage shape in
+  `internal/infra/` and this skill owns the whole thing. Say which door and WHY, name the
+  guarantees the Direct one does not carry (no outbox → no view, ever; no audit; no revision
+  guard), and let the dev confirm the scope before anything runs.
 - **Docs-first, version-agnostic — same anti-drift doctrine as every omnicore skill.**
   This skill carries NO code; every code shape composes from the routed sections at the
   pin. Never assume or stamp a framework version.
@@ -102,7 +110,11 @@ cannot change it."* That sentence is false.
   answers which question. The recurring failure is reaching for the list load and folding
   the answer in Go; the framework has a hydration-free primitive for every one of these,
   on the same criteria surface, and one of them is a correctness trap rather than merely
-  a slow one.
+  a slow one. The second question, when the truth is in a table this service has no
+  aggregate for — another aggregate's CHILD table, a control table, a lookup — is which
+  ANCHOR the primitive hangs off: `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`. Neither
+  "write the SQL by hand" nor "declare a whole aggregate so the question can be asked" is
+  the answer on a pin that carries the Direct door.
 - **"This rule/service/handler needs a field from ANOTHER aggregate" is not an
   integration.** Before proposing a second `FindOne` inside a rule, a denormalized column
   kept in step by the write path, or a call out to another service, check

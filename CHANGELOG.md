@@ -9,6 +9,50 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ### Added
 
+- **`shared/direct-schema.md` — the skills learn the framework's second door into the
+  database.** The framework is adding `DirectSchema` / `DirectRepository`: the same
+  relational engine — same field resolution, same criteria compiler in four dialects, same
+  declared joins, same aggregate DSL, same statement builders — reached over ONE table with
+  no aggregate and no domain entity behind it. Until now that engine had exactly one door,
+  a repository bound to a `domain.Entity`, so a control table, a fact about another
+  aggregate's child table, or a single-table write inside the current transaction had no
+  supported path: the answers were hand-written SQL against the neutral transaction, with
+  placeholders, quoting and id encoding re-derived per dialect, or a whole aggregate
+  declared for a table that exists only to be queried.
+
+  No skill writes code, so what is mapped here is the DECISION, not the API — the pin's
+  `direct-schema` section owns every shape. The new shared file is the single owner of
+  "which door does this table go through", and it carries the two halves an agent gets
+  wrong on its own: the decision table (anything listed, audited, projected,
+  event-raising, lifecycle-driven or holding children is an aggregate; a control table
+  with none of those is Direct) and the guarantees the Direct door does NOT carry — **no
+  outbox row, so a Direct write never feeds a projected view on any posture**, no audit
+  trail, no domain or integration events, no revision guard, no cascade.
+
+  **Availability is tested, never assumed.** The skills stay version-agnostic: the test is
+  whether the PINNED framework's docs carry the `direct-schema` section. Absent → the
+  project predates the door and the old answers stand. No version is stamped anywhere.
+
+  Routed from every seat that used to give the old answer alone: `implement` (the
+  "persisted resource whose rules are not the aggregate's" row now asks which door first),
+  `scaffold-entity` (a core principle — not every table is an entity, and scaffolding six
+  layers for a control table is the failure), `doctor` (a write that produced no outbox
+  row, no audit line and no event is a design mismatch, not a broken relay — checked
+  BEFORE the boot log), `help` (a routing target, whose absence from the pin's map is
+  itself the answer), `omnicore-gen` (a `kind: manual` fact whose truth is in another
+  table), plus `query-primitives.md` (which ANCHOR the primitive hangs off — the second
+  question after which primitive), `domain-membership.md` and `notification-bases.md` (a
+  Direct row is a storage shape in `internal/infra/`, the one persisted type that is
+  genuinely not domain), and `capabilities.md`.
+
+- **The generator's own hand-off says it too.** The `<entity>_service_manual.go` stub
+  header and the gen-report's manual-facts section now tell the implementer to check the
+  door before writing a query against another table — the facts beside that file run over
+  this entity's repository and cannot reach one it does not anchor — and "What was NOT
+  generated" names the table with no aggregate behind it as a shape this spec language
+  cannot express rather than one the framework cannot serve. Both were places a reader
+  would otherwise conclude there was no supported answer and reach for raw SQL.
+
 - **`service.facts[].filters` accepts `ID`, the row's own identity.** It was the
   one fixed name this key could not say while everything under it could: the
   framework locks the Go side of every primary key to `"ID"`, `criteria.ByID` is

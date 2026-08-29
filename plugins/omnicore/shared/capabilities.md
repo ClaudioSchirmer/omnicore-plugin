@@ -26,9 +26,13 @@ capability actually needs; never refuse what the posture doesn't gate:
   projected collection); the LOCAL relay plays no part in it.
 - **Works EVERYWHERE, SQLite included** — offer freely: httpclient (+ its middleware),
   cache (both slots), gRPC and GraphQL surfaces, exports, auth/authz, audit, tracing,
-  lifecycle hooks, domain events (in-process), the whole write side. The mirror-image
-  failure — refusing an available capability "because it's an MVP" — is as wrong as
-  offering an unavailable one.
+  lifecycle hooks, domain events (in-process), the whole write side, and the **Direct
+  schema/repository** door (one table, no aggregate — gated by the PIN and by nothing in
+  the posture; `../direct-schema.md` owns it). The mirror-image failure — refusing an
+  available capability "because it's an MVP" — is as wrong as offering an unavailable one.
+  - The one posture-shaped consequence to state whenever Direct is offered: a Direct write
+    emits **no outbox row**, so it never feeds a Mongo-projected view on ANY posture. That
+    is a property of the door, not of the infra — adding Mongo does not change it.
 - **The transport BUILD TAG is part of enabling messaging.** A consumer or upstream
   subscription wired into a service that builds without the tag passes every
   compile-and-boot gate and dies at the point of use — an enable plan must carry the
@@ -99,4 +103,6 @@ a heading inside it, not a separate section) · outbound gRPC → `grpc` (client
 inbound surfaces → `grpc` / `graphql` · cache → `cache-subsystem` · permissions →
 `authz-seams` (there is no section named `authz`) · inbound auth → `auth-middleware` ·
 audit → `audit` · tracing → `tracing` · logs → `logs` · hooks → `lifecycle-hooks` ·
-exports/OpenAPI → `openapi` · config keys → `yaml-reference`.
+exports/OpenAPI → `openapi` · config keys → `yaml-reference` · one table with no aggregate
+→ `direct-schema` (under Infrastructure, beside `table-schema`; its ABSENCE from the pin's
+nav is the availability test — see `../direct-schema.md`).

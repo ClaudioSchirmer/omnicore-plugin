@@ -318,6 +318,21 @@ func renderTodo(b *strings.Builder, in Input) {
 		b.WriteString("The method returns a plain value and no error, so decide what an " +
 			"unavailable source means. Failing loudly is the safe default — returning a " +
 			"plausible answer skips the rule this exists to enforce.\n\n")
+		// WHERE the answer comes from decides the shape, and the reviewer is the
+		// last person positioned to ask it. The two wrong answers this line
+		// exists to catch are both cheap to reach for and expensive to undo: SQL
+		// written by hand against the neutral transaction (placeholders, quoting
+		// and id encoding re-derived per dialect), and a whole aggregate declared
+		// for a table that exists only to be counted.
+		b.WriteString("**Before writing one of these against another TABLE, check the " +
+			"door.** The facts beside this file run over this entity's own repository, " +
+			"so a question about another aggregate's child table, a control table or a " +
+			"lookup cannot be asked there. If the pinned framework documents a DIRECT " +
+			"schema — one table, no aggregate behind it — that table gets its own anchor " +
+			"and the body keeps the same existence probe and aggregate DSL, in every " +
+			"dialect, inside the caller's transaction. Hand-written SQL and a whole " +
+			"aggregate declared for a table that is only ever counted are both the wrong " +
+			"answer to that question.\n\n")
 		// A fact added AFTER the hook was first written is the one case where
 		// the section above is not enough: the file already exists, so this run
 		// wrote no stub for it, and the port now declares a method with nothing
@@ -1783,7 +1798,19 @@ func renderNotGenerated(b *strings.Builder, in Input) {
 		"which edits this spec and regenerates. The CODE comes back from the spec; the " +
 		"DATABASE never does — the migration a change needs is written by hand, and that " +
 		"skill's impact map is what carries it, along with the orphans a shrinking spec " +
-		"leaves and everything outside this generator's ownership\n\n")
+		"leaves and everything outside this generator's ownership\n")
+	// This generator writes AGGREGATES, and the spec language has no way to say
+	// "this table is not one". A reader who needs a table with no aggregate
+	// behind it would otherwise conclude the framework has no answer and reach
+	// for hand-written SQL — or declare an entity, with rules, a view and a
+	// bootstrap feature, for a table that exists only to be queried.
+	b.WriteString("- a table with NO aggregate behind it — a control table, a job queue, " +
+		"a lookup, an idempotency ledger. This generator writes aggregates and this spec " +
+		"language cannot say \"not one\"; that does not mean the framework has no answer. " +
+		"If the pinned version documents a DIRECT schema (one table, no entity), it is " +
+		"the door for those, and `/omnicore:implement` owns wiring it. Neither " +
+		"hand-written SQL nor an entity declared for a table that is only ever queried is " +
+		"the right shape\n\n")
 
 	if m.Read.ByParams {
 		var undeclared []string
