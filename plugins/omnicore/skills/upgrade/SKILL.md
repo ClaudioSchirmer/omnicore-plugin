@@ -23,6 +23,25 @@ dev's explicit approval.
 **Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
+## Generated code is a shortcut, not the source of truth
+
+`${CLAUDE_PLUGIN_ROOT}/shared/generated-code-review.md` — **read it before you work around
+anything `omnicore-gen` wrote.** `// Code generated … DO NOT EDIT.` is a TOOLING MARKER,
+not a permission boundary: the file is ordinary Go in the dev's repository, and
+`omnicore-gen adopt <path>` is the asked-for act that makes a hand edit survive
+regeneration.
+
+So: **review what was generated — logic and performance — against what the FRAMEWORK
+offers**, not against what the spec language happens to be able to say. The language is a
+subset of the framework and always will be, so "the generator does not emit that" is a
+fact about the generator, never a reason for the service to do the worse thing. When the
+framework does it better you **MUST** name the difference and offer the manual adjustment
++ `adopt` as a CHOICE for the dev.
+
+Never build around generated code — N queries folded in Go, a parallel finder beside the
+generated one, a wrapper that patches its answer — and never say *"it is generated, I
+cannot change it."* That sentence is false.
+
 ## Core principles
 - **Show before you touch.** Never bump silently. The target version's own
   `changelog.html` is the authority on what changes — read it, summarize the delta, flag
@@ -79,6 +98,16 @@ tooling; say so if the dev conflates them).
   `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`, Build tags, owns the law). Every
   verify below uses THIS discovered tag set — and a multi-dialect project verifies
   every target set, not one.
+- **Adopted generated files — name them BEFORE the bump.** If the project has
+  `specs/omnicore-gen/`, run `omnicore-gen doctor` and list every file reported as
+  *carrying a hand edit adopted at framework X*. **This is the one moment their cost
+  comes due:** an adopted file stopped tracking the spec, so every emitter improvement
+  the release carries — a bug fixed, a guard closed, a query made cheaper — lands in
+  every other project and never there, silently. List each one with the `-why` it was
+  adopted for, and tell the dev plainly: after the bump, those files are the ones to
+  re-review by hand, because nothing else will. If the reason no longer holds (the new
+  release's spec language can now say it), regenerating that file is the cheaper
+  outcome and worth offering — see `${CLAUDE_PLUGIN_ROOT}/shared/generated-code-review.md`.
 - **Vendored?** A `vendor/` dir means the build is `-mod=vendor`: the bump is not
   observable until `go mod vendor` re-runs, and the go.mod+go.sum snapshot alone is
   then an incomplete restore point — say so and include the vendor refresh in both

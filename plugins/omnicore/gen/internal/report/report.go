@@ -1118,6 +1118,38 @@ func renderCheck(b *strings.Builder, in Input) {
 
 	b.WriteString("## What to check\n\n")
 
+	// FIRST, and unconditional: the duty to review what was just written. It
+	// leads the section because the failure it addresses is not a subtle one —
+	// a reader who takes the tree as finished builds AROUND it, and the
+	// workaround (N queries folded in Go beside a generated fact, a second
+	// finder next to a generated one) is worse than the thing it avoided
+	// touching.
+	b.WriteString("### Read what was generated — it is a first draft, not a verdict\n\n")
+	b.WriteString("This tree is ordinary Go in your repository. **`// Code generated … DO " +
+		"NOT EDIT.` is the Go convention that tells linters to skip a file — it is not a " +
+		"rule that the code may not change.** Review it the way you would review a " +
+		"colleague's: for logic, and for the QUESTION each query asks.\n\n")
+	b.WriteString("Measure it against what the FRAMEWORK offers, not against what the spec " +
+		"language can say — the language is a subset of the framework and always will be, " +
+		"so \"the generator does not emit that\" is a fact about the generator and never a " +
+		"reason for the service to do the worse thing. If something here should be a " +
+		"single pass over the table instead of several, or a primitive the framework " +
+		"ships and this spec cannot name, that is worth changing.\n\n")
+	b.WriteString("Two ways to change it, and the only reason to prefer the first is cost:\n\n")
+	b.WriteString("1. **Change the spec and regenerate** — survives every later run and " +
+		"every upgrade, and leaves nothing to maintain. Check `omnicore-gen explain keys` " +
+		"before assuming the language cannot say it.\n")
+	b.WriteString("2. **Edit the file, then adopt it** — normal and expected when the " +
+		"framework can do it and the spec cannot say it:\n\n")
+	b.WriteString("   ```\n   omnicore-gen adopt <path> -why '<what the spec could not " +
+		"express>'\n   ```\n\n")
+	b.WriteString("   Adopting re-hashes the file as it stands, so regeneration KEEPS the " +
+		"edit; without it the next run stops rather than overwriting your work. The cost " +
+		"is real and worth saying out loud: an adopted file is PINNED — it stops " +
+		"tracking the spec, so a later framework version's improvements to it never " +
+		"arrive. Every later `generate` prints the file as adopted and `doctor` lists " +
+		"it, which is how it stays visible.\n\n")
+
 	// One line per raw value object. The generator cannot know whether a set is
 	// closed — but the question is worth asking every time, because the wrong
 	// answer is invisible: a shape check accepts every string that LOOKS right,

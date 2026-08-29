@@ -15,6 +15,25 @@ skill delegates to (scaffold-service, scaffold-entity, evolve-entity, remove-ent
 scaffold-view, evolve-view, upgrade — and future ones): they
 finish their change, ask "want to run it?", and hand off here.
 
+## Generated code is a shortcut, not the source of truth
+
+`${CLAUDE_PLUGIN_ROOT}/shared/generated-code-review.md` — **read it before you work around
+anything `omnicore-gen` wrote.** `// Code generated … DO NOT EDIT.` is a TOOLING MARKER,
+not a permission boundary: the file is ordinary Go in the dev's repository, and
+`omnicore-gen adopt <path>` is the asked-for act that makes a hand edit survive
+regeneration.
+
+So: **review what was generated — logic and performance — against what the FRAMEWORK
+offers**, not against what the spec language happens to be able to say. The language is a
+subset of the framework and always will be, so "the generator does not emit that" is a
+fact about the generator, never a reason for the service to do the worse thing. When the
+framework does it better you **MUST** name the difference and offer the manual adjustment
++ `adopt` as a CHOICE for the dev.
+
+Never build around generated code — N queries folded in Go, a parallel finder beside the
+generated one, a wrapper that patches its answer — and never say *"it is generated, I
+cannot change it."* That sentence is false.
+
 ## Core principles
 
 - **Run, don't change.** No file edits, no scaffolding, no git. The only state touched

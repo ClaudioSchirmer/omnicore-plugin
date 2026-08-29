@@ -365,10 +365,14 @@ func explainOwnership() string {
 	return `Which files the generator owns
 ==============================
 
-  owned         written in full by the generator and hashed. If you edit one, the
-                next run REFUSES it and leaves your edit alone — it never
-                overwrites your work. Use --force=<path> to deliberately discard
-                an edit, one path at a time.
+  owned         written in full by the generator and hashed. Editing one is
+                NORMAL — it is your file, in your repository, and "Code
+                generated ... DO NOT EDIT." is the Go convention that makes
+                linters skip it, not a rule against changing it. The hash exists
+                so the generator NOTICES: the next run refuses rather than
+                overwriting, and your edit is never lost. Tell it with
+                "adopt <path>" and regeneration keeps the edit; use
+                --force=<path> to deliberately discard one instead.
 
   hook          written once when missing, then never touched and never hashed —
                 which is what keeps regeneration routine. Everything named
@@ -419,8 +423,9 @@ them (and the lock records for files already deleted by hand, which is why docto
 keeps reporting "is gone"), and removes them with -apply. A migration is never a
 candidate: its effect outlived the file the moment it ran.
 
-When an owned file has to carry a hand edit — a framework newer than this build,
-or something this generator simply does not cover — run
+When an owned file carries a hand edit — a framework newer than this build, or
+something this generator simply does not cover, which is ordinary rather than
+exceptional — ask whoever owns the service, and then run
 "omnicore-gen adopt <path> -why '<what the spec could not express>'". The edit is
 then recorded and survives regeneration instead of resurfacing as an unexplained
 refusal.

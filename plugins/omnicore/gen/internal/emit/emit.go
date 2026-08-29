@@ -383,8 +383,15 @@ func goFile(path string, class fsplan.Class, describes string, s *src) (fsplan.F
 }
 
 // header is the banner every generated file carries. It names the spec so a
-// reader who finds a surprising line knows where to change it — and states the
-// ownership rule, so the file itself warns against hand edits.
+// reader who finds a surprising line knows where to change it, and states the
+// ownership rule — which is an INVITATION with a condition, not a prohibition.
+//
+// It used to read as "warns against hand edits", and that framing cost more than
+// it saved: agents and people alike read "DO NOT EDIT" as a boundary and built
+// around the file instead of improving it — a second finder beside a generated
+// one, N queries folded in Go where the store answers in one pass. The banner
+// now says what is actually true: the file is the reader\'s, editing it is
+// ordinary, ask the owner, then adopt so regeneration keeps the edit.
 // quote renders a Go string literal.
 func quote(s string) string {
 	return fmt.Sprintf("%q", s)

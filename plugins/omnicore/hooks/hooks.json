@@ -8,6 +8,11 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/guard-domain-membership.sh\"",
             "statusMessage": "Checking domain membership..."
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/guard-generated-code.sh\"",
+            "statusMessage": "Checking generated-code ownership..."
           }
         ]
       }
