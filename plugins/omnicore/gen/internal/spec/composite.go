@@ -298,7 +298,51 @@ func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
 				"column by the time the store sees it", exposedNamesOf(*owner)))
 		return
 	}
+	// A framework-stamped column the storage does not declare. It resolves by
+	// name on the read side and here, and only when there IS a column: without
+	// this line the author is told the name does not exist, which is the wrong
+	// half of the truth and sends them to declare a field[] entry for a column
+	// the framework owns.
+	if ManagedReads.Has(name) {
+		key := "storage.managed." + strings.ToLower(name[:1]) + name[1:]
+		if name == "DeletedAt" {
+			key = "storage.managed.archivedAt"
+		}
+		ps.BlockerFix(where,
+			fmt.Sprintf("%s is a column the framework stamps, and this entity declares "+
+				"no such column", name),
+			"declare "+key+" — it is not a fields[] entry; the framework owns the value "+
+				"and resolves the name itself")
+		return
+	}
 	ps.Blockerf(where, "%q does not name a field of this entity", name)
+}
+
+// ManagedFilterField resolves one of the framework's stamped columns as the
+// field a fact's filter compares against.
+//
+// The three of them (CreatedAt, UpdatedAt, DeletedAt) are addressable by their
+// fixed logical names all the way down: the framework's own schema resolver
+// answers for them, which is what read.managed already relies on. So "how many
+// were written since this instant" and "how many are archived" are questions
+// the query language can ask without the entity declaring a column it does not
+// own.
+//
+// Filters ONLY, deliberately. Aggregating one is refused by the type check (a
+// timestamp has no carrier), and grouping BY one would be one group per row
+// unless it were truncated to a day or a month — a shape this language cannot
+// state, so it is not offered.
+func ManagedFilterField(s *Spec, name string) *Field {
+	if !ManagedReads.Has(name) || ManagedColumn(s, name) == "" {
+		return nil
+	}
+	return &Field{
+		Name: name, Column: ManagedColumn(s, name), Type: "time",
+		// DeletedAt is the only one that is ever absent: a row that was never
+		// archived has none, which is exactly what isnull/notnull ask about.
+		Nullable:    name == "DeletedAt",
+		Description: "Stamped by the framework.",
+	}
 }
 
 // reportUnknownPerEntryFilter explains a dotted filter that resolved to nothing.

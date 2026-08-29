@@ -67,6 +67,9 @@ var unreadByEmitters = map[string]string{
 	"Rule.OnlyFieldName": "the resolver binds it into OnlyField against the collection " +
 		"it counts, and that is what the emitter reads; the name is kept because a " +
 		"collection whose field vanished is worth reporting as the author wrote it",
+	"Rule.FactSlotName": "the resolver binds it into FactSlot alongside Fact, and the " +
+		"emitter reads the RESOLVED slot — a name and a slot that could disagree is " +
+		"the whole reason the binding happens in one place",
 	"Rule.FactName": "the resolver binds it into Fact once the port exists, and that " +
 		"is what the emitter reads; the name is kept because a rule naming a fact " +
 		"that vanished is worth reporting as the author wrote it",

@@ -163,6 +163,99 @@ generated happy-path test fails against a spec that is perfectly correct. The
 convention is not a style preference; it is what makes the generated suite green
 on the day it is written.
 
+ONE FACT MAY ANSWER SEVERAL NUMBERS, in one query. aggregates is kind
+widened from a single answer to a named set of them, and the store never had the
+one-at-a-time limit — the framework's loader takes as many specs as it is given
+and computes them in a single pass:
+
+    aggregates:
+      - {kind: count, as: Enrolments}
+      - {kind: sum,   field: Credits, as: Credits}
+      - {kind: avg,   field: Grade,   as: AverageGrade}
+    groupBy: [Status]        # optional, exactly as it is for kind:
+
+  count sum avg min max      what an entry may compute. exists is a probe, not
+                             an aggregate, and manual has no generated query —
+                             neither can share a query with the others.
+  as                         REQUIRED: the entry becomes a FIELD of the answer,
+                             and a min and a max of one column have no distinct
+                             name to derive from the field.
+
+The answer becomes a struct: one field per entry, plus the grouping keys when
+there are any. A rule bounds ONE of them and says which — fact: <Fact>.<As>;
+naming the fact bare is refused, because picking a number for the author is a
+generator enforcing a rule nobody wrote. Declaring ONE entry is refused too:
+that is what kind says.
+
+Asked as one fact each, the same three numbers are three queries over identical
+criteria — and two answers a rule compares were never guaranteed to be about the
+same instant.
+
+WHEN ZERO IS NOT AN ANSWER. min, max and avg carry a <Name>Found beside their
+value; count and sum never do, because zero IS the count and the empty sum. Per
+GROUP the question narrows: a group exists BECAUSE a row matched, so its scalar
+is null only when the aggregated column is null in EVERY row of it — which is
+possible over a nullable column and not otherwise. That is where the flag is
+emitted, and nowhere else.
+
+THE THREE COLUMNS THE FRAMEWORK STAMPS — CreatedAt, UpdatedAt, DeletedAt — are
+addressable in a fact's filters by those fixed logical names, whenever
+storage.managed declares them. Nothing declares a field for them and the
+aggregate carries no Go field; the framework's own resolver answers for the
+name, exactly as read.managed relies on.
+
+    - {field: CreatedAt, op: gte, as: since}     "how many since this instant"
+    - {field: DeletedAt, op: notnull}            the archived rows alone
+    - {field: DeletedAt, op: isnull}             the living ones
+
+Filters only: aggregating a timestamp has no carrier, and grouping BY one would
+be one group per row unless it were truncated to a day or a month, which this
+language cannot state. Beside activeOnly they are refused — the scope already
+removed every archived row, so notnull matches nothing and isnull says it
+twice. And a factRange rule cannot read a fact narrowed by a stamped column with
+a PARAMETER: a declarative rule fills arguments from the entity, and the entity
+carries no CreatedAt.
+
+FILTERS ARE THE FACT'S WHERE, and they speak the framework's own criteria — not
+a list of equalities. A bare name is an eq whose value the caller passes, which
+is what a filter has always meant; the block form names the operator, and the
+entries are ANDed, so nothing written before this reads differently.
+
+    filters:
+      - TenantID                                     eq, value from the caller
+      - {field: AppliesTo, op: in}                   the method takes a slice
+      - {field: AppliesTo, op: in, values: [User]}   pinned here: NO parameter
+      - {field: RevokedAt, op: isnull}               about the column, no value
+      - {field: Age, op: gte, as: minAge}            as names the parameter
+      - any: [...]  ·  all: [...]  ·  not: [...]     the connectives
+
+  eq ne gt gte lt lte      one value
+  in nin                   a SET — a slice parameter, or values: [...] pinned
+  isnull notnull           no value at all; nullable columns only
+  contains startswith endswith   text, with the pattern escaping done for you
+
+  like/ilike are absent because they take a raw pattern, and the three above ARE
+  those builders with the escaping done. between is absent because it is gte +
+  lte: two leaves, whose parameters you name.
+
+WHERE THE VALUE COMES FROM is the decision behind values. Pinned in the spec,
+the definition lives beside the question it belongs to — a fifth member of the
+enum is one line here rather than an edit in every rule that asks — and the fact
+keeps NO parameter for it, which is what lets a factRange rule still read it: a
+declarative rule fills a fact's arguments from the entity, and the entity carries
+one value per field, never a set. Taken as a parameter, the caller decides the
+set and the fact is called from rules.manual. Over an enum a pinned literal is
+the MEMBER'S NAME, checked against the members you declared.
+
+any is OR, all is the AND nested inside one (the top-level list is already an
+AND), and not negates what is under it — several nodes ANDed first, so
+"neither of these" is a not around an any.
+
+A UNIQUE PRE-CHECK is the one fact this vocabulary is closed to: exists filtered
+by exactly the index's columns, each compared for equality. The index answers "is
+this exact tuple present", and a pre-check that ranged or ORed would ask a
+different question and report its answer under the other's notification.
+
 A fact may also ask about ONE ENTRY of a collection: filters: [<collection>.<field>]
 — emits a method taking that entry field's type, asked once per entry. Only on
 kind: manual: a computed fact is a query over this entity's own table, and the
@@ -272,10 +365,14 @@ func explainOwnership() string {
 	return `Which files the generator owns
 ==============================
 
-  owned         written in full by the generator and hashed. If you edit one, the
-                next run REFUSES it and leaves your edit alone — it never
-                overwrites your work. Use --force=<path> to deliberately discard
-                an edit, one path at a time.
+  owned         written in full by the generator and hashed. Editing one is
+                NORMAL — it is your file, in your repository, and "Code
+                generated ... DO NOT EDIT." is the Go convention that makes
+                linters skip it, not a rule against changing it. The hash exists
+                so the generator NOTICES: the next run refuses rather than
+                overwriting, and your edit is never lost. Tell it with
+                "adopt <path>" and regeneration keeps the edit; use
+                --force=<path> to deliberately discard one instead.
 
   hook          written once when missing, then never touched and never hashed —
                 which is what keeps regeneration routine. Everything named
@@ -326,8 +423,9 @@ them (and the lock records for files already deleted by hand, which is why docto
 keeps reporting "is gone"), and removes them with -apply. A migration is never a
 candidate: its effect outlived the file the moment it ran.
 
-When an owned file has to carry a hand edit — a framework newer than this build,
-or something this generator simply does not cover — run
+When an owned file carries a hand edit — a framework newer than this build, or
+something this generator simply does not cover, which is ordinary rather than
+exceptional — ask whoever owns the service, and then run
 "omnicore-gen adopt <path> -why '<what the spec could not express>'". The edit is
 then recorded and survives regeneration instead of resurfacing as an unexplained
 refusal.

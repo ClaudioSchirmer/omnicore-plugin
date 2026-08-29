@@ -1032,6 +1032,98 @@ service:
         number. Excludes the row being updated, so an update never collides
         with itself.
 
+    # `filters` is the fact's WHERE, and it is the framework's own criteria tree
+    # rather than a list of equalities. A bare name is an `eq` whose value the
+    # caller passes — which is what every filter above is, and what a filter
+    # meant before the block form existed. The block form names the operator.
+    #
+    # `values` PINS the comparison here instead of taking it as a parameter, and
+    # that is the point of this fact: the bucket "on the way out" is defined in
+    # the spec, once, beside the question it belongs to. Declared at the call
+    # site instead, it is repeated by every caller and a sixth status means
+    # editing each of them — and a fact with no parameter of its own is one a
+    # rules.list factRange entry can still read, because a declarative rule
+    # fills a fact's arguments from the entity and has nothing to fill a
+    # constant with.
+    - name: EndingOnCampus
+      kind: count
+      description: >-
+        How many enrolments on this campus are on their way out. Over an enum
+        the pinned literal is the MEMBER'S NAME, checked against the members
+        declared above; the generator writes its stored value into the query.
+      filters:
+        - CampusID
+        - {field: Status, op: in, values: [Withdrawing, Dropped]}
+        # isnull/notnull ask about the COLUMN being empty, so they take neither
+        # a parameter nor a pinned value — and they are refused on a field that
+        # is not nullable, where the answer would be the same for every row.
+        - {field: GraduatedAt, op: isnull}
+      activeOnly: true
+
+    # The connectives. `any` is an OR, `all` is an AND nested inside one (the
+    # top-level list is already an AND, so `all` is only ever useful in here),
+    # and `not` negates what is under it — several nodes ANDed first, which is
+    # why "neither of these" is written as a not around an any.
+    #
+    # `as` names the parameter a leaf contributes. The default is the field's
+    # own name, and it stops working the moment one field is compared twice: two
+    # parameters of one name do not compile, so the spec is refused and the
+    # author picks the words instead of the generator inventing a suffix.
+    - name: LookalikesOnCampus
+      kind: count
+      description: >-
+        How many OTHER enrolments on this campus could be mistaken for this one
+        — the same name, or an enrollment number in the same series from someone
+        at least as far along — never counting one that has already graduated,
+        however that ending was recorded.
+      filters:
+        - CampusID
+        - any:
+            - {field: Name, op: eq, as: exactName}
+            - all:
+                - {field: EnrollmentNumber, op: startswith, as: numberSeries}
+                - {field: Grade, op: gte, as: minGrade}
+        - not:
+            - any:
+                - {field: Status, op: eq, value: Graduated}
+                - {field: GraduatedAt, op: notnull}
+      excludeSelf: true
+      activeOnly: true
+
+    # `aggregates` asks SEVERAL numbers of the same rows in ONE query, which is
+    # what the framework's aggregate loader takes. Asked as one fact each, these
+    # three would be three queries over identical criteria — and two answers a
+    # rule compares would never have been guaranteed to be about the same
+    # instant. The answer becomes a STRUCT: one field per entry, named by `as`,
+    # plus the grouping keys. `as` is required rather than derived because a min
+    # and a max of ONE column have no distinct name to derive from the field.
+    #
+    # A rule bounds ONE of them, and says which: fact: CampusStandingByStatus.AverageGrade
+    # (see rules.list[].kind: factRange). Naming the fact bare is refused — a
+    # range compares a number, and this fact answers three.
+    #
+    # CreatedAt is not declared under fields[] and never will be: the framework
+    # stamps it and resolves the name itself, exactly as read.managed relies on.
+    # The three stamped columns (CreatedAt, UpdatedAt, DeletedAt) are addressable
+    # in a fact's filters whenever storage.managed declares them, which is what
+    # makes "since when" and "among the archived" askable at all. Filters only —
+    # aggregating a timestamp has no carrier, and grouping BY one would be one
+    # group per row unless it were truncated, which this language cannot say.
+    - name: CampusStandingByStatus
+      aggregates:
+        - {kind: count, as: Enrolments}
+        - {kind: avg, field: Grade, as: AverageGrade}
+        - {kind: max, field: Grade, as: TopGrade}
+      groupBy: [Status]
+      filters:
+        - CampusID
+        - {field: CreatedAt, op: gte, as: since}
+      description: >-
+        How many enrolments this campus has had per status since a given
+        instant, and how they scored — counted, averaged and topped by the
+        database in a single pass.
+      activeOnly: true
+
 read:
   # relational: the read is served straight from the tables, which makes it its
   # own KIND of read model rather than a flag on the projected one. Nothing is

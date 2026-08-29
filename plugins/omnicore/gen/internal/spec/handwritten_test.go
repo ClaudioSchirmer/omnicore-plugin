@@ -103,7 +103,7 @@ func TestWrittenManualIsRefusedOnAScalar(t *testing.T) {
 func TestFactNamesACompositePart(t *testing.T) {
 	s := withComposite("manual")
 	s.Service = &Service{Required: true, Facts: []Fact{{
-		Name: "KeyTaken", Kind: "exists", Filters: []string{"KeyResource", "KeyAction"},
+		Name: "KeyTaken", Kind: "exists", Filters: eqFilters("KeyResource", "KeyAction"),
 		ExcludeSelf: true, Description: "Se outra linha ja tem este par.",
 	}}}
 	if ps := Validate(s, Options{}); ps.HasBlockers() {
@@ -117,7 +117,7 @@ func TestFactNamesACompositePart(t *testing.T) {
 func TestFactNamingTheCompositeItselfSaysWhichPartsExist(t *testing.T) {
 	s := withComposite("manual")
 	s.Service = &Service{Required: true, Facts: []Fact{{
-		Name: "KeyTaken", Kind: "exists", Filters: []string{"Key"},
+		Name: "KeyTaken", Kind: "exists", Filters: eqFilters("Key"),
 		Description: "Se outra linha ja tem esta chave.",
 	}}}
 

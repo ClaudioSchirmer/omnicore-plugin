@@ -786,6 +786,11 @@ func stubResult(f ir.Fact) string {
 		// is what an empty table really answers.
 		return "nil"
 	}
+	if f.Multi {
+		// The zero struct: every number zero and every Found false, which is
+		// what an empty table answers for all of them at once.
+		return f.ResultType + "{}"
+	}
 	if f.ReturnsFound {
 		return stubZero(f.ReturnType) + ", false"
 	}

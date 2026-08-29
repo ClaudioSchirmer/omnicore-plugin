@@ -171,6 +171,33 @@ var (
 	// to grow a keyword per case it failed to anticipate.
 	FactKinds = set("exists", "count", "sum", "avg", "min", "max", "manual")
 
+	// AggregateKinds is what ONE entry of service.facts[].aggregates computes.
+	//
+	// It is FactKinds minus the two answers that are not aggregates: `exists` is
+	// a different question and a different call on the loader (a probe, not a
+	// scalar), and `manual` is the ELSE, whose body nobody generates — there is
+	// nothing to combine into a query with the others.
+	AggregateKinds = set("count", "sum", "avg", "min", "max")
+
+	// FactFilterOps is the comparison vocabulary a fact's filter may use, and it
+	// is the framework's own: every criteria builder that takes a field, minus
+	// the two families the language answers differently.
+	//
+	// like/ilike are out because they take a RAW pattern — the caller supplies
+	// the % and the escaping, and a spec that admitted them would be handing an
+	// author a footgun the framework already wrapped: contains, startswith and
+	// endswith are those builders with the escaping done, which is why they are
+	// the ones exposed here.
+	//
+	// between is out because it IS gte + lte, and writing it as one key would
+	// mint two parameters nobody named. Two leaves under the same fact say the
+	// same thing, in the author's own words (`as: minAge`, `as: maxAge`).
+	FactFilterOps = set(
+		"eq", "ne", "gt", "gte", "lt", "lte",
+		"in", "nin", "isnull", "notnull",
+		"contains", "startswith", "endswith",
+	)
+
 	// FactReturns is the closed set a manual fact may declare. The domain port
 	// returns pure values and never an error, so the set stays narrow on purpose.
 	FactReturns = set("bool", "int64", "float64", "string")
@@ -403,6 +430,17 @@ func Vocabularies() []Vocabulary {
 			"how the fact is answered; manual means you write it in the hook file."},
 		{"service.facts[].returns", FactReturns,
 			"the Go type the fact answers with."},
+		{"service.facts[].aggregates[].kind", AggregateKinds,
+			"what ONE of the numbers a fact answers is. The list asks several of them " +
+				"in ONE query, which is what the framework's aggregate loader takes; " +
+				"`exists` and `manual` are absent because neither is an aggregate — ask " +
+				"those as facts of their own."},
+		{"service.facts[].filters[].op", FactFilterOps,
+			"the comparison a fact's filter makes. Absent = eq, which is what a bare " +
+				"field name means. It also decides HOW the value arrives: one value for " +
+				"eq/ne/gt/gte/lt/lte, a SET for in/nin (the method takes a slice, or the " +
+				"spec pins the whole list under values), and NONE for isnull/notnull, " +
+				"which ask about the column being empty."},
 		{"joins[].fields[].type", JoinFieldTypes,
 			"the type a joined value lands in. Derived from the TARGET's own declaration " +
 				"when omitted, which is the spelling to prefer; stated only for a target " +

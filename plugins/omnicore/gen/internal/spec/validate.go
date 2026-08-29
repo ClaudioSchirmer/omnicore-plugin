@@ -2701,15 +2701,39 @@ func validateFactRange(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 			"add service.required: true with the fact this rule names")
 		return
 	}
+	// A fact answering SEVERAL numbers is addressed one number at a time —
+	// `<Fact>.<As>` — the same dotted spelling every other key of this language
+	// uses to reach inside something. A rule bounds ONE number, so the choice
+	// cannot be left implicit: which of them is not something a generator may
+	// pick.
+	factName, slotName, dotted := strings.Cut(r.Fact, ".")
 	var found *Fact
 	for i := range s.Service.Facts {
-		if s.Service.Facts[i].Name == r.Fact {
+		if s.Service.Facts[i].Name == factName {
 			found = &s.Service.Facts[i]
 			break
 		}
 	}
 	if found == nil {
-		ps.Blockerf(w+".fact", "%q does not name a fact of this entity's service", r.Fact)
+		ps.Blockerf(w+".fact", "%q does not name a fact of this entity's service", factName)
+		return
+	}
+	switch {
+	case dotted && len(found.Aggregates) == 0:
+		ps.BlockerFix(w+".fact",
+			fmt.Sprintf("%s answers ONE number, so there is nothing to reach inside", factName),
+			fmt.Sprintf("name it plainly: fact: %s", factName))
+		return
+	case dotted && FindFactAggregate(*found, slotName) == nil:
+		ps.BlockerFix(w+".fact",
+			fmt.Sprintf("%s answers no number called %q", factName, slotName),
+			"one of: "+strings.Join(factAggregateNames(*found), ", "))
+		return
+	case !dotted && len(found.Aggregates) > 0:
+		ps.BlockerFix(w+".fact",
+			fmt.Sprintf("%s answers several numbers and a range bounds one", factName),
+			fmt.Sprintf("say which: fact: %s.<one of %s>", factName,
+				strings.Join(factAggregateNames(*found), ", ")))
 		return
 	}
 	if found.Kind == "exists" {
@@ -2729,7 +2753,7 @@ func validateFactRange(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 	// there is no zero to pass that would not silently change the query the fact
 	// runs. The service method is still generated and still callable — from
 	// rules.manual, where the absent case is a branch someone writes on purpose.
-	for _, fl := range append(append([]string{}, found.Filters...), found.Field) {
+	for _, fl := range append(FactFilterFields(found.Filters), found.Field) {
 		if fl == "" {
 			continue
 		}
@@ -2739,10 +2763,64 @@ func validateFactRange(s *Spec, r Rule, scopeFields []Field, w string, ps *Probl
 		}
 		ps.BlockerFix(w+".fact",
 			fmt.Sprintf("%s filters on %q, a part of the OPTIONAL composite value object "+
-				"%q — when it is absent there is no value for this rule to pass", r.Fact, fl, owner.Name),
+				"%q — when it is absent there is no value for this rule to pass", factName, fl, owner.Name),
 			"call the fact from rules.manual, where the absent case is a branch you "+
 				"write — or make the value object mandatory")
 	}
+	// And the same argument, one step further: an `in` asks about a SET, and the
+	// entity carries one value per field. There is no honest way to fill that
+	// parameter from the row being written — passing the single value would turn
+	// the set into an equality and answer a question nobody asked.
+	//
+	// A set the SPEC pins is a different matter and stays legal here: it puts no
+	// parameter in the signature, so there is nothing for this rule to fill.
+	WalkFactFilters(found.Filters, "", func(n FactFilter, _ string) {
+		if _, _, isGroup := n.Group(); isGroup || n.Pinned() || !TakesValue(n.Operator()) {
+			return
+		}
+		if TakesSet(n.Operator()) {
+			ps.BlockerFix(w+".fact",
+				fmt.Sprintf("%s takes the SET %q compares against, and this rule fills a "+
+					"fact's arguments from the entity, which carries one value per field",
+					factName, n.Field),
+				fmt.Sprintf("pin the set in the fact (values: [...] on that filter) and the "+
+					"rule has nothing to pass — or call %s from rules.manual, where the set "+
+					"is yours to build", factName))
+			return
+		}
+		// The stamped columns are the framework's, not the entity's: nothing
+		// declares a field for them and the aggregate carries none, so there is
+		// no `e.CreatedAt` for this rule to pass. Left unrefused it generated
+		// exactly that and the tree did not build.
+		if factField(s, n.Field) == nil && ManagedFilterField(s, n.Field) != nil {
+			ps.BlockerFix(w+".fact",
+				fmt.Sprintf("%s is narrowed by %s, which the framework stamps — this rule "+
+					"fills a fact's arguments from the entity, and the entity carries no "+
+					"such field", factName, n.Field),
+				fmt.Sprintf("call %s from rules.manual, where the instant is yours to "+
+					"choose — or drop that filter, which the query only needs when a "+
+					"caller decides the window", factName))
+		}
+	})
+}
+
+// FindFactAggregate resolves one of a fact's numbers by the name it answers
+// under.
+func FindFactAggregate(f Fact, as string) *FactAggregate {
+	for i := range f.Aggregates {
+		if f.Aggregates[i].As == as {
+			return &f.Aggregates[i]
+		}
+	}
+	return nil
+}
+
+func factAggregateNames(f Fact) []string {
+	out := make([]string, 0, len(f.Aggregates))
+	for _, a := range f.Aggregates {
+		out = append(out, a.As)
+	}
+	return out
 }
 
 func validateRuleNotification(s *Spec, r Rule, w string, ps *Problems) {
@@ -3185,10 +3263,29 @@ func validateService(s *Spec, ps *Problems) {
 		} else {
 			seen[f.Name] = true
 		}
+		// A fact answers in ONE shape: a single number (kind) or a named set of
+		// them (aggregates). Both together is an author asking for two answers
+		// from one method, and picking one silently would generate a signature
+		// they did not write.
+		if len(f.Aggregates) > 0 {
+			if f.Kind != "" {
+				ps.BlockerFix(where,
+					fmt.Sprintf("the fact declares kind: %s AND aggregates, which are two "+
+						"different answers", f.Kind),
+					"one or the other — `kind` answers one number, `aggregates` answers "+
+						"several in one query")
+				continue
+			}
+			validateFactAggregates(s, f, where, ps)
+			validateFactFilters(s, f, where, ps)
+			validateGroupedFact(s, f, where, ps)
+			continue
+		}
 		if !FactKinds.Has(f.Kind) {
 			ps.BlockerFix(where+".kind",
 				fmt.Sprintf("%q is not a fact kind", f.Kind),
-				"one of: "+FactKinds.String())
+				"one of: "+FactKinds.String()+" — or declare `aggregates` instead, "+
+					"which asks several numbers of the same rows in one query")
 		}
 		if f.Kind == "manual" {
 			validateManualFact(f, where, ps)
@@ -3226,9 +3323,13 @@ func validateGroupedFact(s *Spec, f Fact, where string, ps *Problems) {
 	if len(f.GroupBy) == 0 {
 		return
 	}
-	switch f.Kind {
-	case "count", "sum", "avg", "min", "max":
-	case "exists":
+	switch {
+	case len(f.Aggregates) > 0:
+		// Every entry of an aggregates list is already one of the groupable
+		// kinds — exists and manual are not in that vocabulary at all — so
+		// there is nothing left to refuse about the KIND here.
+	case f.Kind == "count" || f.Kind == "sum" || f.Kind == "avg" || f.Kind == "min" || f.Kind == "max":
+	case f.Kind == "exists":
 		ps.BlockerFix(where+".groupBy",
 			"exists answers yes or no, so there is nothing to report per group",
 			"use count with the same groupBy — the number of matching rows per key")
@@ -3276,7 +3377,15 @@ func validateAggregatedField(s *Spec, f Fact, where string, ps *Problems) {
 	if f.Field == "" || f.Kind == "exists" || f.Kind == "count" || f.Kind == "manual" {
 		return
 	}
-	fld := factField(s, f.Field)
+	validateAggregandType(s, f.Kind, f.Field, where+".field", ps)
+}
+
+// validateAggregandType is the check itself, reached from both shapes: a fact
+// declaring one kind, and one entry of an aggregates list. Written once because
+// the refusal is about the pair (what is computed, over what) and nothing else,
+// and two copies of it would drift the day a carrier is added.
+func validateAggregandType(s *Spec, kind, field, at string, ps *Problems) {
+	fld := factField(s, field)
 	if fld == nil {
 		return // already reported as an unknown field
 	}
@@ -3284,11 +3393,96 @@ func validateAggregatedField(s *Spec, f Fact, where string, ps *Problems) {
 	case "int", "int64", "float64":
 		return
 	}
-	ps.BlockerFix(where+".field",
-		fmt.Sprintf("%s cannot aggregate %s, which is %s", f.Kind, f.Field, fld.Type),
+	ps.BlockerFix(at,
+		fmt.Sprintf("%s cannot aggregate %s, which is %s", kind, field, fld.Type),
 		"aggregate a numeric field (int, int64, float64) — the database computes "+
 			"these and the framework carries the answer as an exact integer or a float; "+
 			"for anything else, make it a manual fact and write the query you mean")
+}
+
+// validateFactAggregates holds a multi-answer fact to the same bar as a
+// single-answer one, plus the two things only a SET of answers can get wrong:
+// two entries that reach the struct under one name, and an entry whose name
+// collides with a grouping key sitting in the same struct.
+func validateFactAggregates(s *Spec, f Fact, where string, ps *Problems) {
+	if f.Returns != "" {
+		ps.BlockerFix(where+".returns",
+			"an aggregating fact already determines what it returns",
+			"returns is only declared for a manual fact, where the generator has "+
+				"no way to infer the signature")
+	}
+	if f.Field != "" {
+		ps.BlockerFix(where+".field",
+			"each entry of aggregates names the field IT aggregates",
+			"move the field onto the entry that computes over it — the fact as a "+
+				"whole aggregates nothing")
+	}
+	if len(f.Aggregates) == 1 {
+		ps.BlockerFix(where+".aggregates",
+			"the list holds ONE aggregate, which is what kind: says",
+			"write kind: <"+f.Aggregates[0].Kind+"> (with field:, where it takes one) — "+
+				"the list is for asking SEVERAL numbers of the same rows in one query")
+		return
+	}
+	// The grouping keys share the answer's struct with the aggregates, so they
+	// take part in the name check rather than colliding with it afterwards.
+	names := map[string]string{}
+	for _, g := range f.GroupBy {
+		names[g] = "the grouping key " + g
+	}
+	for j, a := range f.Aggregates {
+		at := fmt.Sprintf("%s.aggregates[%d]", where, j)
+		if !AggregateKinds.Has(a.Kind) {
+			ps.BlockerFix(at+".kind",
+				fmt.Sprintf("%q is not something this list can compute", a.Kind),
+				"one of: "+AggregateKinds.String()+" — exists is a probe rather than "+
+					"an aggregate and manual has no generated query, so neither can share "+
+					"a query with the others; ask those as facts of their own")
+			continue
+		}
+		switch {
+		case a.As == "":
+			ps.BlockerFix(at+".as",
+				"the entry has no name, and it becomes a field of the fact's answer",
+				"set as: <PascalCase> — it is also what a factRange rule names to bound "+
+					"this number (fact: "+orUnnamed(f.Name)+".<As>)")
+			continue
+		case !goIdentRe.MatchString(a.As):
+			ps.BlockerFix(at+".as",
+				fmt.Sprintf("%q cannot be a field of the generated answer", a.As),
+				"PascalCase, letters and digits — it is a Go struct field, so it starts "+
+					"with a capital or nothing downstream can read it")
+			continue
+		}
+		if prev, clash := names[a.As]; clash {
+			ps.BlockerFix(at+".as",
+				fmt.Sprintf("%s already answers under the name %q", prev, a.As),
+				"name this one something else — the answer is one struct, and two "+
+					"fields of one name do not compile")
+			continue
+		}
+		names[a.As] = "the aggregate " + a.As
+		if a.Kind == "count" {
+			if a.Field != "" {
+				ps.BlockerFix(at+".field",
+					"count counts ROWS, so there is no column for it to read",
+					"drop the field — for \"how many have a value\", filter on that "+
+						"column being present and count the rows that survive")
+			}
+			continue
+		}
+		if a.Field == "" {
+			ps.BlockerFix(at+".field",
+				fmt.Sprintf("%s needs the field it aggregates", a.Kind),
+				"set field: <field>")
+			continue
+		}
+		if factField(s, a.Field) == nil {
+			reportUnknownFactField(s, a.Field, at+".field", ps)
+			continue
+		}
+		validateAggregandType(s, a.Kind, a.Field, at+".field", ps)
+	}
 }
 
 // validateManualFact keeps the ELSE honest.
@@ -3319,48 +3513,406 @@ func validateFactFilters(s *Spec, f Fact, where string, ps *Problems) {
 	if f.ExcludeSelf {
 		params["selfID"] = "excludeSelf"
 	}
-	for i, fl := range f.Filters {
-		at := fmt.Sprintf("%s.filters[%d]", where, i)
-		if strings.TrimSpace(fl) == "" {
-			ps.BlockerFix(at, "the filter is empty", "name a field, or drop the entry")
-			continue
-		}
-		var resolved *Field
-		switch coll, fld, dotted := ChildFactField(s, fl); {
-		case dotted && (coll == nil || fld == nil):
-			reportUnknownFactField(s, fl, at, ps)
-			continue
-		case dotted && f.Kind != "manual":
-			// A computed fact IS a query this generator writes, and it writes it
-			// against the entity's own table. The collection's field is on
-			// another one, so there is no criteria this build could emit — and
-			// inventing a join here would be a query shape nothing else in the
-			// language can express or index.
-			ps.BlockerFix(at,
-				fmt.Sprintf("a %s fact is a query over this entity's own table, and %q "+
-					"is a column of the collection's table", f.Kind, fl),
-				"ask it as kind: manual, whose body you write — or filter by a root "+
-					"field, which the generated query can reach")
-			continue
-		case dotted:
-			resolved = fld
+	validateFactFilterNodes(s, f, f.Filters, where+".filters", params, ps)
+}
+
+// validateFactFilterNodes walks one level of a fact's criteria tree.
+//
+// A node is a LEAF or a GROUP and the two are checked apart, because almost
+// nothing they can get wrong is the same mistake: a leaf's failures are about
+// the column and the operator, a group's are about what it contains.
+func validateFactFilterNodes(s *Spec, f Fact, nodes []FactFilter, at string, params map[string]string, ps *Problems) {
+	for i, n := range nodes {
+		w := fmt.Sprintf("%s[%d]", at, i)
+		switch groups := n.DeclaredGroups(); {
+		case len(groups) > 1:
+			ps.BlockerFix(w,
+				fmt.Sprintf("the node declares %s at once, and they are different questions",
+					strings.Join(groups, " and ")),
+				"one connective per node — nest the second one inside the first")
+		case len(groups) == 1:
+			validateFactFilterGroup(s, f, n, groups[0], w, params, ps)
 		default:
-			if resolved = factField(s, fl); resolved == nil {
-				reportUnknownFactField(s, fl, at, ps)
-				continue
-			}
+			validateFactFilterLeaf(s, f, n, w, params, ps)
 		}
-		name := naming.Camel(resolved.Name)
-		if prev, clash := params[name]; clash {
-			ps.BlockerFix(at,
-				fmt.Sprintf("%s and %s both reach the method as the parameter %q",
-					prev, fl, name),
-				"two parameters of one name do not compile; drop one, or ask the two "+
-					"questions as two facts")
-			continue
-		}
-		params[name] = fl
 	}
+}
+
+// validateFactFilterGroup checks a node that combines other nodes.
+//
+// Everything it refuses is a group pretending to be a leaf, or a group with
+// nothing in it. Both would emit silently: an empty criteria.Or() is a
+// condition that matches nothing, and a `field` beside an `any` is a comparison
+// the emitter never reaches — the author would read their own spec and see a
+// narrowing that is not in the query.
+func validateFactFilterGroup(s *Spec, f Fact, n FactFilter, group, w string, params map[string]string, ps *Problems) {
+	if f.Kind == "manual" {
+		ps.BlockerFix(w,
+			"a manual fact has no generated query, so there is nothing to combine",
+			"list the filters flat — they become the method's parameters, and how the "+
+				"hand-written body combines them is its own decision")
+		return
+	}
+	var leafKeys []string
+	if n.Field != "" {
+		leafKeys = append(leafKeys, "field")
+	}
+	if n.Op != "" {
+		leafKeys = append(leafKeys, "op")
+	}
+	if n.As != "" {
+		leafKeys = append(leafKeys, "as")
+	}
+	if n.Value != nil {
+		leafKeys = append(leafKeys, "value")
+	}
+	if n.Values != nil {
+		leafKeys = append(leafKeys, "values")
+	}
+	if len(leafKeys) > 0 {
+		ps.BlockerFix(w,
+			fmt.Sprintf("a %s node combines other conditions, so %s says nothing here",
+				group, strings.Join(leafKeys, " and ")),
+			fmt.Sprintf("move the comparison INTO the %s, as one more entry", group))
+		return
+	}
+	_, kids, _ := n.Group()
+	if len(kids) == 0 {
+		ps.BlockerFix(w,
+			fmt.Sprintf("the %s node holds no condition", group),
+			"give it the conditions it combines, or drop the node — an empty group "+
+				"narrows by nothing and would ship as a query nobody wrote")
+		return
+	}
+	if len(kids) == 1 && group != "not" {
+		ps.BlockerFix(w,
+			fmt.Sprintf("the %s node holds ONE condition, so it combines nothing", group),
+			fmt.Sprintf("write that condition directly where the %s is", group))
+		return
+	}
+	validateFactFilterNodes(s, f, kids, w+"."+group, params, ps)
+}
+
+// validateFactFilterLeaf checks one comparison: the field it names, the
+// operator, and how the value reaches the query.
+func validateFactFilterLeaf(s *Spec, f Fact, n FactFilter, w string, params map[string]string, ps *Problems) {
+	if strings.TrimSpace(n.Field) == "" {
+		ps.BlockerFix(w, "the filter names no field",
+			"name a field, or drop the entry — a node is either a comparison or a "+
+				"group (all/any/not)")
+		return
+	}
+	op := n.Operator()
+	if !FactFilterOps.Has(op) {
+		ps.BlockerFix(w+".op",
+			fmt.Sprintf("%q is not a comparison a filter may make", n.Op),
+			"one of: "+FactFilterOps.String())
+		return
+	}
+	resolved, ok := resolveFactFilterField(s, f, n.Field, w, ps)
+	if !ok {
+		return
+	}
+	if !validateFactFilterOperand(s, f, n, *resolved, op, w, ps) {
+		return
+	}
+	if !TakesValue(op) || n.Pinned() {
+		// Nothing reaches the signature, so there is no parameter to collide.
+		return
+	}
+	name := n.ParamName()
+	if !goIdentRe.MatchString(naming.Pascal(name)) {
+		ps.BlockerFix(w+".as",
+			fmt.Sprintf("%q is not usable as a parameter name", name),
+			"a parameter is a Go identifier — letters and digits, starting with a letter")
+		return
+	}
+	if prev, clash := params[name]; clash {
+		ps.BlockerFix(w,
+			fmt.Sprintf("%s and %s both reach the method as the parameter %q",
+				prev, n.Field, name),
+			"two parameters of one name do not compile; name one with `as:`, drop one, "+
+				"or ask the two questions as two facts")
+		return
+	}
+	params[name] = n.Field
+}
+
+// resolveFactFilterField finds the column a leaf names, in either spelling: a
+// field of this entity (a composite's part included), or `<Collection>.<Field>`
+// for a fact asked once per entry of a collection.
+func resolveFactFilterField(s *Spec, f Fact, name, at string, ps *Problems) (*Field, bool) {
+	switch coll, fld, dotted := ChildFactField(s, name); {
+	case dotted && (coll == nil || fld == nil):
+		reportUnknownFactField(s, name, at, ps)
+		return nil, false
+	case dotted && f.Kind != "manual":
+		// A computed fact IS a query this generator writes, and it writes it
+		// against the entity's own table. The collection's field is on
+		// another one, so there is no criteria this build could emit — and
+		// inventing a join here would be a query shape nothing else in the
+		// language can express or index.
+		ps.BlockerFix(at,
+			fmt.Sprintf("a %s fact is a query over this entity's own table, and %q "+
+				"is a column of the collection's table", f.Kind, name),
+			"ask it as kind: manual, whose body you write — or filter by a root "+
+				"field, which the generated query can reach")
+		return nil, false
+	case dotted:
+		return fld, true
+	}
+	if resolved := factField(s, name); resolved != nil {
+		return resolved, true
+	}
+	// The entity's own fields answer FIRST, so nothing that resolved before
+	// resolves differently now: a spec that happens to declare a field called
+	// CreatedAt keeps whatever answer it had.
+	if managed := ManagedFilterField(s, name); managed != nil {
+		return managed, true
+	}
+	reportUnknownFactField(s, name, at, ps)
+	return nil, false
+}
+
+// validateFactFilterOperand holds the operator and the column to the same
+// question, and decides whether the value arrives as a parameter or as a
+// constant written here.
+//
+// It is where "the spec is green and the query means nothing" is caught. Every
+// refusal below produced code that compiled: `max` over a name did, and so does
+// `isnull` on a NOT NULL column (a condition that is always false), `contains`
+// over an integer (a LIKE against a number), and `in` with one value under a
+// key called `value`.
+func validateFactFilterOperand(s *Spec, f Fact, n FactFilter, fld Field, op, w string, ps *Problems) bool {
+	if f.Kind == "manual" {
+		// A manual fact emits no query: its filters exist only to shape the
+		// method the author is being asked to write. So an operator that puts
+		// nothing in the signature, and a constant that would live in a query
+		// nobody generates, are both declarations with no effect — and the
+		// shape this language refuses hardest is the one that looks like it did
+		// something.
+		switch {
+		case !TakesValue(op):
+			ps.BlockerFix(w+".op",
+				fmt.Sprintf("%s asks about the column being empty, and a manual fact "+
+					"writes no query for it to ask", op),
+				"drop the filter — the hand-written body decides what it considers; "+
+					"a filter here exists to put a value in the method's signature")
+			return false
+		case n.Pinned():
+			ps.BlockerFix(w,
+				"a constant belongs to a query, and a manual fact has none",
+				"drop it — the value the hand-written body compares against is its own; "+
+					"a filter here declares a PARAMETER the caller passes")
+			return false
+		}
+	}
+	// The archived scope and a condition on DeletedAt are two ways to say the
+	// same thing, and under activeOnly they say opposite things. Both readings
+	// ship a query that runs: one answers about nothing at all, the other
+	// repeats a gate the translator already appended.
+	if n.Field == "DeletedAt" && f.ActiveOnly {
+		if op == "isnull" {
+			ps.BlockerFix(w,
+				"activeOnly already limits the query to rows that are not archived, "+
+					"so this asks it a second time",
+				"drop the filter — the scope is the shorter way to say it")
+			return false
+		}
+		ps.BlockerFix(w,
+			fmt.Sprintf("activeOnly removes every archived row, and %s on DeletedAt is "+
+				"only ever true of one — together they match nothing", op),
+			"drop activeOnly to ask about archived rows, or drop this condition")
+		return false
+	}
+	switch op {
+	case "isnull", "notnull":
+		if !fld.Nullable {
+			ps.BlockerFix(w+".op",
+				fmt.Sprintf("%q is not nullable, so %s is the same answer for every row",
+					n.Field, op),
+				"drop the condition, or ask it of a nullable field — for \"is this row "+
+					"archived\", activeOnly is the key that says so")
+			return false
+		}
+		if n.As != "" {
+			ps.BlockerFix(w+".as",
+				fmt.Sprintf("%s takes no value, so there is no parameter to name", op),
+				"drop `as`")
+			return false
+		}
+	case "contains", "startswith", "endswith":
+		if fld.Type != "string" {
+			ps.BlockerFix(w+".op",
+				fmt.Sprintf("%s matches TEXT and %q is %s", op, n.Field, fld.Type),
+				"compare it with eq, ne or a range — a pattern match over a number is a "+
+					"comparison against the value's rendering, which is not what any "+
+					"engine indexes")
+			return false
+		}
+	case "gt", "gte", "lt", "lte":
+		switch fld.Type {
+		case "bool":
+			ps.BlockerFix(w+".op",
+				fmt.Sprintf("%q is true/false, and there is no order between them", n.Field),
+				"compare it with eq or ne")
+			return false
+		case "id":
+			ps.BlockerFix(w+".op",
+				fmt.Sprintf("%q is an identity, and one identity is not greater than "+
+					"another", n.Field),
+				"compare it with eq, ne or in — for \"everything written after this "+
+					"one\", range over a timestamp instead")
+			return false
+		}
+	}
+	return validateFactFilterConstant(s, n, fld, op, w, ps)
+}
+
+// validateFactFilterConstant checks the value a leaf pins, when it pins one.
+//
+// The two keys are not interchangeable and are not made so here: `value` is one
+// value, `values` is the set an `in` compares against. A single key covering
+// both would have to guess whether a one-item list means a set of one or a
+// scalar someone over-punctuated, and the generated signature differs.
+func validateFactFilterConstant(s *Spec, n FactFilter, fld Field, op, w string, ps *Problems) bool {
+	switch {
+	case n.Value != nil && n.Values != nil:
+		ps.BlockerFix(w,
+			"the filter pins both a value and a set of values",
+			"one or the other: `value` for a single comparison, `values` for in/nin")
+		return false
+	case !n.Pinned():
+		return true
+	case !TakesValue(op):
+		ps.BlockerFix(w,
+			fmt.Sprintf("%s compares against nothing, so there is no value to pin", op),
+			"drop it")
+		return false
+	case n.As != "":
+		ps.BlockerFix(w+".as",
+			"the value is pinned in the spec, so no parameter carries it",
+			"drop `as`, or drop the pinned value and let the caller pass one")
+		return false
+	case TakesSet(op) && n.Values == nil:
+		ps.BlockerFix(w+".value",
+			fmt.Sprintf("%s compares against a SET and `value` is one value", op),
+			"write values: [a, b] — or use eq/ne, which take one")
+		return false
+	case !TakesSet(op) && n.Values != nil:
+		ps.BlockerFix(w+".values",
+			fmt.Sprintf("%s compares against ONE value and `values` is a set", op),
+			"write value: <the value> — or use in/nin, which take a set")
+		return false
+	case n.Values != nil && len(n.Values) == 0:
+		ps.BlockerFix(w+".values",
+			fmt.Sprintf("the set is empty, so %s is the same answer for every row", op),
+			"name the values the question is about, or drop the condition")
+		return false
+	}
+	literals := n.Values
+	if n.Value != nil {
+		literals = []any{n.Value}
+	}
+	ok := true
+	for _, lit := range literals {
+		if !validateFactFilterLiteral(s, lit, fld, w, ps) {
+			ok = false
+		}
+	}
+	return ok
+}
+
+// validateFactFilterLiteral holds one pinned value to the column it compares
+// against, so a typo is a refusal here rather than a query that quietly matches
+// nothing.
+//
+// Over an ENUM the literal is the member's NAME, not its stored value: a spec
+// that named the wire value would be spelling the same member twice in one
+// project and would drift the day the storage value changes, which is exactly
+// the freedom declaring an enum buys.
+func validateFactFilterLiteral(s *Spec, lit any, fld Field, w string, ps *Problems) bool {
+	if vo := factFilterEnum(s, fld); vo != nil {
+		name, isText := lit.(string)
+		if !isText || FindEnumMember(vo, name) == nil {
+			ps.BlockerFix(w,
+				fmt.Sprintf("%v is not a member of %s", lit, vo.Name),
+				"name one of: "+strings.Join(enumMemberNames(vo), ", ")+
+					" — the member's NAME; the generator writes its stored value into "+
+					"the query")
+			return false
+		}
+		return true
+	}
+	switch fld.Type {
+	case "string":
+		if _, ok := lit.(string); !ok {
+			ps.Blockerf(w, "%q is text, and %v is not", fld.Name, lit)
+			return false
+		}
+	case "int", "int64":
+		if _, ok := lit.(int); !ok {
+			ps.Blockerf(w, "%q is a whole number, and %v is not", fld.Name, lit)
+			return false
+		}
+	case "float64":
+		switch lit.(type) {
+		case int, float64:
+		default:
+			ps.Blockerf(w, "%q is a number, and %v is not", fld.Name, lit)
+			return false
+		}
+	case "bool":
+		if _, ok := lit.(bool); !ok {
+			ps.Blockerf(w, "%q is true/false, and %v is not", fld.Name, lit)
+			return false
+		}
+	case "time":
+		ps.BlockerFix(w,
+			fmt.Sprintf("%q is a timestamp, and a timestamp written into a spec is a "+
+				"query that ages", fld.Name),
+			"let the caller pass it — drop the pinned value, and the method takes the "+
+				"instant the rule is asking about")
+		return false
+	case "id":
+		ps.BlockerFix(w,
+			fmt.Sprintf("%q is an identity, and one pinned in a spec is a row someone "+
+				"pasted", fld.Name),
+			"let the caller pass it — drop the pinned value")
+		return false
+	}
+	return true
+}
+
+// factFilterEnum answers whether the column a filter names is backed by a
+// declared enum, which is what decides how a pinned literal is read.
+func factFilterEnum(s *Spec, fld Field) *ValueObject {
+	if fld.VO == nil || fld.VO.Ref == "" {
+		return nil
+	}
+	vo := findVO(s.ValueObjects, fld.VO.Ref)
+	if vo == nil || vo.Kind != "enum" {
+		return nil
+	}
+	return vo
+}
+
+// FindEnumMember resolves a member by the Go name the spec declares it under.
+func FindEnumMember(vo *ValueObject, name string) *EnumMember {
+	for i := range vo.Members {
+		if vo.Members[i].Name == name {
+			return &vo.Members[i]
+		}
+	}
+	return nil
+}
+
+func enumMemberNames(vo *ValueObject) []string {
+	out := make([]string, 0, len(vo.Members))
+	for _, m := range vo.Members {
+		out = append(out, m.Name)
+	}
+	return out
 }
 
 func validateManualFact(f Fact, where string, ps *Problems) {
@@ -4724,12 +5276,20 @@ func uniqueFilterSet(f Field) []string {
 // global index: the domain said the handle was free, the database said it was
 // taken, and the caller was told the handle was taken in a tenant where it was
 // not.
+//
+// And exactly in SHAPE too: the columns have to be compared for EQUALITY, one
+// parameter each. A unique index answers "is this exact tuple present"; a
+// pre-check that ranged, ORed, or pinned half the tuple in the spec would be
+// the same disagreement wearing an operator instead of a missing column.
 func hasExistsFactFor(s *Spec, want []string) bool {
 	if s.Service == nil {
 		return false
 	}
 	for _, fa := range s.Service.Facts {
-		if fa.Kind == "exists" && sameNameSet(fa.Filters, want) {
+		if fa.Kind != "exists" {
+			continue
+		}
+		if got, plain := PlainEqFilters(fa.Filters); plain && sameNameSet(got, want) {
 			return true
 		}
 	}
@@ -4752,9 +5312,9 @@ func sameNameSet(a, b []string) bool {
 }
 
 // reportPrecheckMismatch refuses a pre-check whose filters are not the index's
-// columns, and says which of the three things went wrong: no fact at all, a
-// fact that is missing the scope, or a fact that filters by more than the index
-// covers.
+// columns, and says which of the four things went wrong: no fact at all, a fact
+// that is missing the scope, a fact that filters by more than the index covers,
+// or a fact that compares the right columns the wrong WAY.
 func reportPrecheckMismatch(s *Spec, f Field, want []string, where string, ps *Problems) {
 	list := strings.Join(want, ", ")
 	// The closest candidate: an exists fact that at least mentions the value.
@@ -4764,7 +5324,7 @@ func reportPrecheckMismatch(s *Spec, f Field, want []string, where string, ps *P
 	if s.Service != nil {
 		for i := range s.Service.Facts {
 			fa := &s.Service.Facts[i]
-			if fa.Kind == "exists" && contains(fa.Filters, value) {
+			if fa.Kind == "exists" && contains(FactFilterFields(fa.Filters), value) {
 				near = fa
 				break
 			}
@@ -4779,14 +5339,30 @@ func reportPrecheckMismatch(s *Spec, f Field, want []string, where string, ps *P
 				"excludeSelf: true}, or use enforce: constraint-only", list))
 		return
 	}
+	got, plain := PlainEqFilters(near.Filters)
+	if !plain {
+		// The columns may well be the right ones; the QUESTION is not. A unique
+		// index answers "is this exact tuple present", so the pre-check that
+		// stands in front of it has to ask exactly that — one equality per
+		// column, each carrying a value the write is holding.
+		ps.BlockerFix(where+".unique.enforce",
+			fmt.Sprintf("the precheck %q narrows by more than equality, and the unique "+
+				"index it stands in front of only knows how to answer \"is this exact "+
+				"tuple present\" — the domain and the database would be asking two "+
+				"different questions and reporting one under the other's notification",
+				near.Name),
+			fmt.Sprintf("give that fact plain filters: [%s] — an operator, an OR or a "+
+				"pinned value belongs to a fact of its own, which a rule reads", list))
+		return
+	}
 	var extra, missing []string
-	for _, x := range near.Filters {
+	for _, x := range got {
 		if !contains(want, x) {
 			extra = append(extra, x)
 		}
 	}
 	for _, x := range want {
-		if !contains(near.Filters, x) {
+		if !contains(got, x) {
 			missing = append(missing, x)
 		}
 	}
@@ -4797,7 +5373,7 @@ func reportPrecheckMismatch(s *Spec, f Field, want []string, where string, ps *P
 			fmt.Sprintf("the precheck %q narrows by %s, and the unique index would not "+
 				"cover %s — the domain would accept a value the database then refuses, "+
 				"reported as though the value were taken",
-				near.Name, strings.Join(near.Filters, ", "), strings.Join(extra, ", ")),
+				near.Name, strings.Join(got, ", "), strings.Join(extra, ", ")),
 			fmt.Sprintf("say what the uniqueness is scoped by: within: [%s]",
 				strings.Join(extra, ", ")))
 		return

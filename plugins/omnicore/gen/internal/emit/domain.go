@@ -1793,16 +1793,50 @@ func emitFactRange(s *src, m *ir.Model, rule ir.Rule) {
 	// someone typed into a catalog and has to keep in step by hand.
 	notif := notifLiteralFor(rule, m)
 
+	// WHICH number: the fact's only one, or the slot the rule named. Reading a
+	// struct's field instead of a bare value is the whole difference between the
+	// two shapes, so it is decided once, here.
+	slot := rule.FactSlot
+	read := "v"
+	if f.Multi && slot != nil {
+		read = "v." + slot.Name
+	}
+	groupRead := "g.Value"
+	if slot != nil {
+		groupRead = "g." + slot.Name
+	}
+
 	switch {
 	case f.Grouped():
 		s.L("\t\t// One group at a time: the database already reduced the table to one")
 		s.L("\t\t// row per key, so the loop compares answers rather than counting rows.")
 		s.L("\t\tfor _, g := range %s {", call)
-		s.L("\t\t\tif %s {", factBoundCond("g.Value", rule))
+		if slot != nil && slot.Found {
+			// The aggregated column is nullable, so a group can exist and still
+			// have nothing to compare: every row of it left the column null.
+			// Comparing the zero would refuse a write for a number nobody
+			// computed.
+			s.L("\t\t\t// A group whose rows all left the column null has no %s to", slot.Kind)
+			s.L("\t\t\t// compare, and its zero is not one.")
+			s.L("\t\t\tif %sFound && %s {", groupRead, factBoundCond(groupRead, rule))
+		} else {
+			s.L("\t\t\tif %s {", factBoundCond(groupRead, rule))
+		}
 		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(rule.AttachTo), notif, echoOf(rule, "g.Value"))
+			quote(rule.AttachTo), notif, echoOf(rule, groupRead))
 		s.L("\t\t\t\tbreak")
 		s.L("\t\t\t}")
+		s.L("\t\t}")
+	case f.Multi:
+		if slot != nil && slot.Found {
+			s.L("\t\t// Nothing to %s means there is no number to compare — the rule", slot.Kind)
+			s.L("\t\t// stands down rather than treating the zero as an answer.")
+			s.L("\t\tif v := %s; v.%sFound && %s {", call, slot.Name, factBoundCond(read, rule))
+		} else {
+			s.L("\t\tif v := %s; %s {", call, factBoundCond(read, rule))
+		}
+		s.L("\t\t\tr.AddNotification(%s, %s%s)",
+			quote(rule.AttachTo), notif, echoOf(rule, read))
 		s.L("\t\t}")
 	case f.ReturnsFound:
 		s.L("\t\t// No matching row means there is no %s to compare — the rule stands", f.Kind)
@@ -1890,6 +1924,11 @@ func factBoundCond(v string, rule ir.Rule) string {
 // int64 count against 5.0 does not compile, and comparing a float64 average
 // against 5 loses the point of declaring a fraction.
 func factNumberType(rule ir.Rule) string {
+	// The slot first: a fact answering several numbers has no single return
+	// type, and comparing an int64 count against 5.0 does not compile.
+	if rule.FactSlot != nil {
+		return rule.FactSlot.ReturnType
+	}
 	if rule.Fact != nil {
 		return rule.Fact.ReturnType
 	}

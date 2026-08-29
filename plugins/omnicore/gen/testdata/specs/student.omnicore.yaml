@@ -307,6 +307,32 @@ rules:
         da coleção inteira, sem agrupamento e sem restrição.
       notification: TooManyGuardiansNotification
 
+    # factRange over ONE of the numbers a multi-aggregate fact answers. It is
+    # here rather than in the matrix because this fixture BOOTS: the POST the
+    # runtime lane makes is what actually executes the query, so the aggregate
+    # loader really is handed several specs at once, against a real engine.
+    #
+    # The bound is deliberately unreachable — this lane proves the query RUNS,
+    # not that the rule refuses.
+    - id: campus-dentro-da-capacidade
+      kind: factRange
+      scope: [insert]
+      fact: CargaDoCampus.Matriculas
+      max: 1000000
+      attachTo: CampusID
+      notification: CampusOverCapacityNotification
+    # And the slot that carries Found. On the first student of a campus nothing
+    # matches, so SQL answers NULL and the rule STANDS DOWN — which is the
+    # branch that used to read a zero as a real average.
+    - id: media-do-campus-plausivel
+      kind: factRange
+      scope: [insert]
+      fact: CargaDoCampus.NotaMedia
+      min: 0
+      max: 10
+      attachTo: Grade
+      notification: GradeOutOfRangeNotification
+
     # valueObject — pull the framework's own value-object check forward, so a
     # value object can be the premise of what follows. It emits a DIFFERENT call
     # per kind, and picking the wrong one does not compile — which is why this
@@ -421,6 +447,18 @@ notifications:
   # the number into the sentence is what an author does when the variable comes
   # back empty, and it is a copy of the cap that no regeneration keeps in step:
   # raising `cap:` to 5 would leave seven catalogs still saying 4.
+  - name: CampusOverCapacityNotification
+    semantic: validation
+    tvars: [max]
+    text:
+      ptbr: O campus já atingiu o limite de {max} matrículas.
+      eng: The campus has reached its limit of {max} enrolments.
+      esp: El campus alcanzó el límite de {max} matrículas.
+      fra: Le campus a atteint sa limite de {max} inscriptions.
+      deu: Der Campus hat sein Limit von {max} Einschreibungen erreicht.
+      ita: Il campus ha raggiunto il limite di {max} iscrizioni.
+      nld: De campus heeft de limiet van {max} inschrijvingen bereikt.
+
   - name: TooManyGuardiansNotification
     semantic: validation
     tvars: [max]
@@ -724,6 +762,27 @@ service:
         Reports whether another ACTIVE student already holds this enrollment
         number. Excludes the row being updated, so an update never collides
         with itself.
+
+    # SEVERAL numbers of the same rows, in ONE query — what the framework's
+    # aggregate loader takes, and what asking them as one fact each throws away.
+    # The answer is a struct: one field per entry, named by `as`.
+    #
+    # DeletedAt is a column the FRAMEWORK stamps: no fields[] entry declares it,
+    # the aggregate carries no Go field for it, and the framework's own resolver
+    # answers for the name. With no activeOnly the scope admits both, so this
+    # condition is what narrows to the living rows — and it takes no parameter,
+    # which is why a declarative rule can still read this fact.
+    - name: CargaDoCampus
+      aggregates:
+        - {kind: count, as: Matriculas}
+        - {kind: avg, field: Grade, as: NotaMedia}
+        - {kind: max, field: Grade, as: MelhorNota}
+      filters:
+        - CampusID
+        - {field: DeletedAt, op: isnull}
+      description: >-
+        Quantas matrículas vivas este campus tem e como elas foram avaliadas —
+        contadas, somadas e maximizadas pelo banco numa passada só.
 
     # A per-group fact: one SELECT with GROUP BY, one entry per status. The
     # alternative it exists to replace is loading the students and bucketing

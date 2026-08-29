@@ -7,6 +7,138 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-08-28
+
+A consumer service needed a fact about a SET — "how many claims admit one of
+THESE subjects" — and the language could not ask it. `service.facts[].filters`
+was a list of field names, each turned into a `criteria.Eq` inside one `And`, so
+the question had to be asked as one fact per member and folded back together in a
+rule: three queries where two would do, the definition of the bucket living
+outside the fact named for it, and a fourth member of the enum meaning an edit to
+the rule rather than to the spec.
+
+Pulling that thread found the same shape one layer down. The framework's
+aggregate loader takes as many specs as it is handed — `Aggregate(ctx, q, total,
+cents)` computes both in ONE pass — and the generator emitted exactly one per
+fact, so "how many and how much, per category" was two queries over identical
+criteria and two answers a rule compared that were never guaranteed to be about
+the same instant.
+
+Neither limit was ever the store's. This release closes both, and the three
+defects that came out from under them once queries were actually RUN against an
+engine rather than merely compiled.
+
+### Added
+
+- **`service.facts[].filters` is the framework's criteria tree.** A bare field
+  name is still an `eq` whose value the caller passes — every spec written before
+  this says exactly what it said — and a filter may now be a block:
+  `{field, op, as, value: / values: [...]}`, or a connective holding more nodes
+  (`all:`, `any:`, `not:`). The top-level list is the implicit `AND` it always was.
+  - **The operator set is the framework's own** (`service.facts[].filters[].op`):
+    `eq ne gt gte lt lte in nin isnull notnull contains startswith endswith` —
+    every `criteria` builder that takes a field, minus raw `like`/`ilike` (whose
+    pattern escaping the three text operators already do for you) and `between`
+    (which IS `gte` + `lte`: two leaves, whose parameters you name). The operator
+    also decides how the value arrives: one value, a SET (the method takes a
+    slice), or none at all for the two that ask whether a column is empty.
+  - **`values:` pins the comparison in the spec** instead of taking it as a
+    parameter — which puts the definition of a bucket beside the question named
+    for it (a fifth member of the enum is one line in the spec, not an edit in
+    every rule that asks), and keeps such a fact readable by a declarative
+    `factRange` rule, which fills arguments from the entity and has nothing to
+    fill a constant with. Over an enum the literal is the **member's NAME**,
+    checked against the declared members; the generator writes its stored value.
+    A timestamp and an identity are refused — a date typed into a spec is a query
+    that ages, and an id is a row someone pasted.
+  - **`as:` names the parameter a leaf contributes**, for the case the default
+    cannot cover: one field compared twice is two parameters, and two of one name
+    do not compile.
+- **`service.facts[].aggregates` — several numbers, one query.** `kind` widened
+  from a single answer to a named set of them: `{kind, field, as}` per entry, over
+  `count sum avg min max`, with or without `groupBy`. The answer becomes a struct
+  — one field per entry, plus the grouping keys — and the implementation issues
+  ONE `Aggregate`/`AggregateBy` carrying every spec. `as` is required rather than
+  derived, because a min and a max of one column have no distinct name to derive;
+  a single entry is refused, because that is what `kind` says.
+  - **A rule bounds ONE of them and says which: `fact: <Fact>.<As>`.** Naming a
+    multi-answer fact bare is refused — picking a number for the author would be
+    the generator enforcing a rule nobody wrote — and reaching inside a
+    single-answer fact is refused too.
+  - **`<Name>Found` rides exactly where zero could lie.** `min`, `max` and `avg`
+    carry it; `count` and `sum` never do, because zero IS the count and the empty
+    sum. Per GROUP the question narrows — see the fix below.
+- **The three framework-stamped columns are filterable by their fixed logical
+  names**: `CreatedAt`, `UpdatedAt`, `DeletedAt`, whenever `storage.managed`
+  declares them. No `fields[]` entry declares one and the aggregate carries no Go
+  field; the framework's own resolver answers for the name, exactly as
+  `read.managed` already relies on. That makes "how many since this instant" and
+  "how many are archived" askable at all. Filters only: aggregating a timestamp
+  has no carrier, and grouping BY one is one group per row unless truncated,
+  which this language cannot state.
+- **The gen-report names two things a reviewer cannot otherwise see**: the values
+  a fact compares against that were fixed in the spec (invisible in the port's
+  signature, and shown as the STORED value), and the numbers whose zero is not an
+  answer, with the `…Found` to read first.
+- **The gate now RUNS the queries it generates.** Every lane before this one
+  stopped at "it compiles" for the query side, which is precisely how the three
+  defects below shipped. Two things changed:
+  - matrix cases `41` and `42` carry a hand-written test beside the spec, laid
+    into the generated tree by the existing `.hand` mechanism, which seeds a real
+    SQLite database — real rows, real NULLs, real archived rows — and asserts
+    what each fact answers: every operator, both connectives (including `not`
+    over several nodes, which negates their CONJUNCTION), a set as a parameter
+    and as a pinned constant, an empty `IN` and an empty `NOT IN`, `excludeSelf`,
+    and the per-group NULL that used to read as zero;
+  - a `postgres` lane runs the same assertions against the bench, because SQLite
+    stores a timestamp as TEXT and an identity as text — so a `TIMESTAMPTZ`
+    compared against a bound `time.Time`, and a native `UUID`, are covered
+    nowhere else. It reports how many assertions actually RAN: a skipped test
+    exits 0, and a lane that cannot tell "passed" from "never executed" proves
+    nothing.
+
+### Fixed
+
+- **A grouped `min`, `max` or `avg` over a NULLABLE column reported "nothing to
+  measure" as zero.** A group exists because a row matched, so the generator
+  dropped the `Found` flag for every grouped fact — but a group whose aggregated
+  column is null in *every* one of its rows answers NULL, which the carrier
+  reports as `Found=false` with a zero `Value`. The flag is now emitted per slot,
+  for exactly that case, and the generated `factRange` reads it before comparing.
+- **A fact with no filters panicked the first time a rule asked it.** The body
+  emitted `criteria.Where(criteria.And(conds...))` with an empty slice, and
+  `criteria.And()` with no operands is refused by the framework at run time
+  rather than read as "match everything". Such a fact now carries no predicate at
+  all — `criteria.Where(nil)`, which the loader has always accepted.
+- **A fact filtered by a `time` field generated a tree that did not build.** The
+  parameter is a `time.Time` and the emitter never added the import that names
+  it, so the port, the implementation and the hand-written stub each named a
+  package nothing imported. The import is emitted and pruned for the services
+  that take no instant.
+
+### Changed
+
+- **A `factRange` rule is refused over a fact it cannot fill.** It fills a fact's
+  arguments from the ENTITY, so a parameter that is a SET (the entity carries one
+  value per field) or a framework-stamped column (the entity carries no such
+  field) is now a blocker naming the two ways out — pin the set with `values:`,
+  or call the fact from `rules.manual`.
+- **A unique pre-check must keep comparing the index's columns for plain
+  equality.** The index only answers "is this exact tuple present", so a
+  pre-check that ranged, ORed or pinned half the tuple would ask a different
+  question and report its answer under the index's notification.
+- **A `manual` fact takes parameters and nothing else.** It emits no query, so a
+  connective, a pinned constant and `isnull`/`notnull` (which put nothing in the
+  signature) are declarations with no effect, and are refused rather than
+  accepted as decoration.
+- **`activeOnly` and a condition on `DeletedAt` are refused together** — the
+  scope already removed every archived row, so `notnull` beside it matches
+  nothing and `isnull` says the same thing twice.
+- `explain rules`, `explain keys`, `explain vocabulary` and the flat
+  `explain example` all carry the new vocabulary; the key reference no longer
+  walks a self-nesting block back into itself, which a filter tree would have
+  listed a few hundred times.
+
 ## [0.49.0] — 2026-08-28
 
 A consumer service reported an entry of a collection it could not edit honestly. The

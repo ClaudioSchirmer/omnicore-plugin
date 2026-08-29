@@ -1448,6 +1448,10 @@ type Fact struct {
 	// so the compiler refuses to build until a human writes it. That is the whole
 	// point: a missing method fails loudly, whereas a query against the wrong
 	// store compiles, returns, and means nothing.
+	//
+	// It answers ONE question. A fact that must answer several numbers over the
+	// same rows declares `aggregates` instead — the two are mutually exclusive,
+	// because a fact answers in one shape or the other and never in both.
 	Kind string `yaml:"kind"` // exists | count | sum | avg | min | max | manual
 	// Returns is required for a manual fact: the generator has to know the
 	// signature it is declaring, and for the other kinds it follows from the kind.
@@ -1458,7 +1462,8 @@ type Fact struct {
 	// set SQL says NULL, and a zero returned alone reads as a real result.
 	Returns string `yaml:"returns"` // bool | int64 | float64 | string
 	// Field is the field the fact aggregates — required for sum, avg, min and
-	// max; refused for manual, whose body is hand-written.
+	// max; refused for manual, whose body is hand-written, and refused beside
+	// `aggregates`, where each entry names its own.
 	//
 	// It must be numeric (int, int64, float64). The database computes the
 	// aggregate and the framework carries it back as an exact integer or a
@@ -1481,9 +1486,32 @@ type Fact struct {
 	// belongs to no group, and counting the nulls together, apart, or not at all
 	// are three different rules the spec has not chosen between.
 	GroupBy []string `yaml:"groupBy"`
-	// Filters names the fields the query narrows by; each becomes a parameter
-	// of the generated method.
-	Filters []string `yaml:"filters"`
+	// Aggregates asks SEVERAL numbers of the same rows, in ONE query.
+	//
+	// It is `kind` widened from a single answer to a named set of them, and it
+	// exists because the store never had the one-at-a-time limit: the framework's
+	// aggregate loader takes as many specs as you pass — `Aggregate(ctx, q, total,
+	// cents)`, `AggregateBy(ctx, q, by, total, cents)` — and computes them in one
+	// SELECT. Asked as one fact each, the same question costs one query per
+	// number over identical criteria, and a rule that needs two of them reads
+	// two answers that were never guaranteed to be about the same instant.
+	//
+	// The answer becomes a STRUCT: one field per entry, named by `as`, plus the
+	// grouping keys when there are any. That is why `as` is required rather than
+	// derived — two aggregates over one column (a min and a max of the same
+	// field) have no distinct name to derive, and the fields of a generated
+	// struct are what a rule reads by name.
+	//
+	// Declaring one entry is refused: one aggregate is what `kind` says.
+	Aggregates []FactAggregate `yaml:"aggregates"`
+	// Filters is what the query narrows by — the fact's WHERE, written as the
+	// framework's own criteria tree rather than as a list of equalities.
+	//
+	// The entries are ANDed, which is what `filters` meant when it was a list of
+	// field names, so every spec written before this key grew a shape still says
+	// exactly what it said. A bare name is `eq` against a parameter; the block
+	// form names the operator, and a group node (all/any/not) nests.
+	Filters []FactFilter `yaml:"filters"`
 	// ExcludeSelf leaves the record being written out of the answer, so an
 	// update never collides with itself.
 	ExcludeSelf bool `yaml:"excludeSelf"`
@@ -1493,6 +1521,105 @@ type Fact struct {
 	// Description says what the answer means. Required for a manual fact — it
 	// is what the generated stub and the report tell the implementer to write.
 	Description string `yaml:"description"`
+}
+
+// FactAggregate is ONE of the numbers a fact answers, when it answers several.
+//
+// Every entry becomes a field of the fact's answer and one aggregate spec in a
+// single query. The vocabulary is `kind` minus the two answers that are not
+// aggregates at all: `exists` is a different question (and a different call on
+// the loader), and `manual` is the ELSE, whose body nobody generates.
+type FactAggregate struct {
+	// Kind is what is computed: count | sum | avg | min | max.
+	Kind string `yaml:"kind"`
+	// Field is the column aggregated — required for sum, avg, min and max, and
+	// refused for count, which counts rows rather than values.
+	Field string `yaml:"field"`
+	// As is the entry's name in the answer, PascalCase: a field of the generated
+	// struct, and what a factRange rule names to bound this number
+	// (`fact: <Fact>.<As>`).
+	//
+	// Required, and deliberately not derived from the field: a min and a max of
+	// one column are two entries with one field name between them, and the two
+	// numbers a rule wants to tell apart would arrive under the same word.
+	As string `yaml:"as"`
+}
+
+// FactFilter is ONE node of a fact's narrowing: a leaf comparison, or a
+// boolean group of nodes.
+//
+// It used to be a bare field name and nothing else, and every name became a
+// criteria.Eq inside one And. That is a fraction of what the store can be
+// asked: the framework's criteria package offers the whole comparison set and
+// both connectives, the generator already emits a non-eq comparison of its own
+// (excludeSelf writes criteria.Ne on the identity), and the READ side has
+// spoken this vocabulary since it existed — read.byParams.filters[].ops names
+// the operators a listing admits. The write side was the half still limited to
+// equality, so a question as ordinary as "how many rows are in one of THESE
+// states" had to be asked as one fact per state and folded back together in a
+// rule, with the definition of the set living outside the fact that is named
+// for it.
+//
+// A node is either a LEAF (field, plus op/as/value/values) or a GROUP (all,
+// any or not) — never both, and never neither. The bare-string spelling
+// survives untouched and means `eq` against a parameter, so a spec written
+// before this shape still says what it said.
+type FactFilter struct {
+	// Field is what the comparison is about — a field of this entity, a part of
+	// a composite value object, or `<Collection>.<Field>` for a fact asked once
+	// per entry of a collection.
+	//
+	// It is the leaf half of the node and is required there; a group node
+	// (all/any/not) names no field of its own.
+	Field string `yaml:"field"`
+	// Op is the comparison, from the framework's criteria vocabulary. Absent
+	// means eq, which is what a bare field name has always meant.
+	//
+	// What the operator decides, beyond the SQL: how the value reaches the
+	// query. eq/ne/gt/gte/lt/lte take ONE value, in/nin take a SET (the method
+	// takes a slice), and isnull/notnull take NONE — the condition is about the
+	// column being empty, so there is nothing for a caller to pass.
+	Op string `yaml:"op"`
+	// As names the method parameter this leaf contributes, when the default
+	// would not do.
+	//
+	// The default is the field's own name, lower-camelled, which is unambiguous
+	// until one field is compared twice: a floor and a ceiling over the same
+	// column are two parameters, and two parameters of one name do not compile.
+	// Naming them is the author's call — `minAge`/`maxAge` says what the caller
+	// is passing, and an invented suffix would not.
+	As string `yaml:"as"`
+	// Value pins this leaf to a CONSTANT instead of a parameter: the query
+	// carries the literal and the method does not take it.
+	//
+	// It is what puts a definition INSIDE the fact that is named for it. A
+	// bucket declared at the call site is a bucket every caller has to repeat
+	// and every new member of the enum has to be added to by hand, in a rule
+	// rather than in the spec — and a fact whose parameters are all pinned is
+	// one a declarative rule can still read, because factRange fills arguments
+	// from the entity and has nothing to fill a constant with.
+	//
+	// Over an enum value object the literal is a MEMBER NAME, checked against
+	// the declared members; over anything else it is the value itself, in the
+	// field's own type. A timestamp and an identity are refused: a date typed
+	// into a spec is a query that silently ages, and an id pinned in one is a
+	// row someone pasted.
+	Value any `yaml:"value"`
+	// Values is Value for the set operators — the whole IN list, as constants.
+	Values []any `yaml:"values"`
+	// All is an AND of the nodes under it. The top-level `filters` list is
+	// already one, so this is for an AND nested inside an `any`.
+	All []FactFilter `yaml:"all"`
+	// Any is an OR of the nodes under it.
+	Any []FactFilter `yaml:"any"`
+	// Not negates what is under it. Several nodes are ANDed first, exactly as
+	// the top-level list is, so `not: [A, B]` is "not (A and B)" — which is NOT
+	// the same as "neither A nor B". For that, negate an `any`.
+	//
+	// Spelled out because the reading is the one an author is most likely to
+	// assume backwards, and both queries are perfectly valid: nothing downstream
+	// would refuse the one they did not mean.
+	Not []FactFilter `yaml:"not"`
 }
 
 // ---------------------------------------------------------------- read side

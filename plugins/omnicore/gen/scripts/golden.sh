@@ -1137,6 +1137,51 @@ for spec in "$MATRIX_DIR"/[0-9]*.yaml; do
   ok "$name"
 done
 
+# ── the fact queries, RUN against postgres ───────────────────────────────────
+#
+# Every other lane stops at "it compiles" for the query side, and that is
+# exactly how three defects shipped: a fact with no filters panicking on an
+# empty conjunction, a grouped average over a nullable column reading NULL as
+# zero, and a fact filtered by an instant naming a package nothing imported.
+#
+# The matrix's own sqlite runtime tests cover the semantics. This lane covers
+# what sqlite cannot: a real TIMESTAMPTZ compared against a bound time.Time, and
+# an identity stored as a native UUID — on the three columns the FRAMEWORK
+# stamps, which its own per-dialect tests never name.
+#
+# It reuses the tree case 42 already generated, so it costs one `go test`.
+echo "── fact queries against postgres"
+PG_RUNTIME_WORK="$MATRIX_WORK/42-fatos-multi-agregado"
+PG_RUNTIME_PORT="${PG_RUNTIME_PORT:-15432}"
+if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "$PG_CONTAINER"; then
+  skipf "the fact queries on postgres" "container not running"
+elif [[ ! -d "$PG_RUNTIME_WORK/internal/infra" ]]; then
+  skipf "the fact queries on postgres" "case 42 did not generate"
+else
+  docker exec -i "$PG_CONTAINER" psql -U omnicore -d postgres -q \
+    -c "CREATE DATABASE $DDL_DB" >/dev/null 2>&1
+  PG_RUNTIME_LOG="$PG_RUNTIME_WORK/pg-runtime.log"
+  (cd "$PG_RUNTIME_WORK" && \
+    PROBE_PG_DSN="postgres://omnicore:omnicore@127.0.0.1:$PG_RUNTIME_PORT/$DDL_DB?sslmode=disable" \
+    GOWORK=off go test -tags postgres ./internal/infra/ -v -run TestPG) >"$PG_RUNTIME_LOG" 2>&1
+  # A skipped test exits 0, so the lane asserts the assertions RAN. A lane that
+  # cannot tell "passed" from "never executed" is the failure this whole
+  # section exists to close.
+  # grep -c PRINTS 0 and EXITS 1 when nothing matches, so `|| echo 0` appends a
+  # second line and the numeric test below errors out — which lands in the else
+  # and reports a lane that never ran as green. That is the exact failure this
+  # guard exists to catch, so it is spelled without the fallback.
+  RAN=$(grep -c -- "--- PASS: TestPG" "$PG_RUNTIME_LOG" 2>/dev/null)
+  RAN=${RAN:-0}
+  if grep -q -- "--- FAIL" "$PG_RUNTIME_LOG" 2>/dev/null; then
+    bad "the fact queries on postgres — $(grep -A2 -- '--- FAIL' "$PG_RUNTIME_LOG" | head -3 | tr '\n' ' ')"
+  elif [[ "$RAN" -lt 3 ]]; then
+    bad "the fact queries on postgres: only $RAN assertion(s) ran — $(tail -3 "$PG_RUNTIME_LOG" | tr '\n' ' ')"
+  else
+    ok "the fact queries answer correctly on postgres ($RAN checks: timestamptz, native uuid, per-group NULL)"
+  fi
+fi
+
 # A second role over an identity the first role created. It is its own lane
 # because it is the only case whose input is another case's OUTPUT: reuse: true
 # means the base schema is expected to be there already.

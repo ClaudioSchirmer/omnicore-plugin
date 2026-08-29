@@ -197,11 +197,28 @@ func ownedHeader(c string, m Meta, checksum string) string {
 	fmt.Fprintf(&b, "%s%s\n", checksumPrefixFor(c), checksum)
 	b.WriteString(c + "\n")
 	for _, line := range wrapComment(
-		"The checksum covers this file with the checksum line itself blanked. The "+
-			"generator recomputes it before every write: if it does not match, the file "+
-			"was changed by hand and the run REFUSES it — your change is neither "+
-			"overwritten nor updated. Change the spec and regenerate instead; to keep a "+
-			"deliberate edit, run omnicore-gen adopt on this path.", 74) {
+		"The line above is the Go convention that tells linters to skip this file. It "+
+			"is NOT a rule that the code may not change: this file is yours, in your "+
+			"repository, and improving it is ordinary work. What the generator asks is "+
+			"only that it be told.", 74) {
+		b.WriteString(c + " " + line + "\n")
+	}
+	b.WriteString(c + "\n")
+	for _, line := range wrapComment(
+		"Changing the SPEC and regenerating is the cheaper of the two edits — it "+
+			"survives every later run. When the spec cannot say what you need and the "+
+			"framework can, edit this file: ask whoever owns the service first, and then "+
+			"run `omnicore-gen adopt <this path> -why '<what the spec could not express>'`. "+
+			"Adopting re-hashes the file as it now stands, so regeneration KEEPS your "+
+			"edit — and every later run prints the file as adopted, so it stays visible "+
+			"instead of becoming a surprise.", 74) {
+		b.WriteString(c + " " + line + "\n")
+	}
+	b.WriteString(c + "\n")
+	for _, line := range wrapComment(
+		"Without that adopt, the next run notices the checksum no longer matches and "+
+			"REFUSES rather than overwriting — your work is never lost, but the run "+
+			"stops for whoever meets it.", 74) {
 		b.WriteString(c + " " + line + "\n")
 	}
 	b.WriteString("\n")

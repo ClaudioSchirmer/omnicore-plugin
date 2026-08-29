@@ -1,0 +1,184 @@
+# Eixo: fatos narrados pelo criteria INTEIRO — todo operador que o framework
+# expõe, os dois conectivos, a negação, o valor fixado no spec (uma constante,
+# sem parâmetro) e o conjunto que chega como parâmetro (uma slice).
+#
+# Antes disto `filters` era uma lista de nomes e cada nome virava um Eq dentro
+# de um And. Uma pergunta tão comum quanto "quantos estão em UM DESTES estados"
+# só podia ser feita como um fato por estado, somados de volta numa regra — com
+# a definição do balde morando fora do fato que leva o nome dele.
+specVersion: 1
+entity: Chamado
+plural: Chamados
+language: pt-BR
+storage:
+  kind: flat
+  table: chamados
+  description: Chamados de atendimento.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 30, livesOn: root, example: "CH-2026-001", description: Código do chamado.}
+  - {name: Titulo, type: string, column: titulo, length: 120, livesOn: root, example: Impressora sem tinta, description: Título do chamado.}
+  - name: Situacao
+    type: string
+    column: situacao
+    length: 20
+    livesOn: root
+    vo: {kind: enum, ref: SituacaoChamado}
+    example: aberto
+    description: Situação do chamado.
+  - {name: Prioridade, type: int, column: prioridade, livesOn: root, example: "2", description: "Prioridade, de 1 a 5."}
+  - {name: Nota, type: float64, column: nota, livesOn: root, example: "7.5", description: Nota da avaliação do atendimento.}
+  - {name: FilaID, type: id, column: fila_id, livesOn: root, example: 6f0f6f2a-6f9f-4a6a-9f9f-2b7a9c5f21d4, description: Fila a que o chamado pertence.}
+  - {name: FechadoEm, type: time, column: fechado_em, livesOn: root, nullable: true, example: "2026-03-01T10:00:00Z", description: "Quando foi fechado, se já foi."}
+valueObjects:
+  - name: SituacaoChamado
+    kind: enum
+    backing: string
+    description: Situação em que o chamado se encontra.
+    unknownNotification: SituacaoDesconhecidaNotification
+    members:
+      - name: Aberto
+        value: aberto
+        text: {ptbr: Aberto, eng: Open, esp: Abierto, fra: Ouvert, deu: Offen, ita: Aperto, nld: Open}
+      - name: EmAnalise
+        value: em-analise
+        text: {ptbr: Em análise, eng: Under review, esp: En análisis, fra: En analyse, deu: In Prüfung, ita: In analisi, nld: In behandeling}
+      - name: Resolvido
+        value: resolvido
+        text: {ptbr: Resolvido, eng: Resolved, esp: Resuelto, fra: Résolu, deu: Gelöst, ita: Risolto, nld: Opgelost}
+      - name: Cancelado
+        value: cancelado
+        text: {ptbr: Cancelado, eng: Cancelled, esp: Cancelado, fra: Annulé, deu: Storniert, ita: Annullato, nld: Geannuleerd}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: patch}
+delete: {root: soft}
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    # A outra metade do fato A, e a razão de o balde ser FIXADO lá em vez de
+    # viajar como parâmetro: uma regra declarativa preenche os argumentos de um
+    # fato a partir da ENTIDADE, e a entidade não carrega um conjunto. Com o
+    # conjunto no spec o fato fica sem parâmetro nenhum além da fila, e esta
+    # regra consegue lê-lo.
+    - id: teto-de-encerrados-na-fila
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: EncerradosNaFila
+      max: 500
+      attachTo: FilaID
+      notification: FilaCheiaNotification
+      echoValue: true
+notifications:
+  - name: FilaCheiaNotification
+    semantic: validation
+    tvars: [max]
+    text: {ptbr: "A fila já atingiu o limite de {max} chamados encerrados.", eng: "The queue has reached its limit of {max} closed tickets.", esp: "La cola alcanzó el límite de {max} tickets cerrados.", fra: "La file a atteint la limite de {max} tickets clos.", deu: "Die Warteschlange hat das Limit von {max} geschlossenen Tickets erreicht.", ita: "La coda ha raggiunto il limite di {max} ticket chiusi.", nld: "De wachtrij heeft de limiet van {max} gesloten tickets bereikt."}
+  - name: SituacaoDesconhecidaNotification
+    package: vos
+    semantic: validation
+    text: {ptbr: Situação de chamado desconhecida., eng: Unknown ticket status., esp: Estado de ticket desconocido., fra: Statut de ticket inconnu., deu: Unbekannter Ticketstatus., ita: Stato del ticket sconosciuto., nld: Onbekende ticketstatus.}
+read:
+  backing: relational
+  view: {name: chamados}
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, contains]}
+      - {field: Situacao, ops: [eq, in]}
+    controls: {pagination: true, includeArchived: true}
+surfaces: {rest: true}
+authz:
+  resource: chamado
+  dataAccess: anyone-with-permission
+  permissions: {insert: "chamado:escrever", patch: "chamado:escrever", archive: "chamado:arquivar", unarchive: "chamado:arquivar", read: "chamado:ler"}
+service:
+  required: true
+  facts:
+    # A. o balde FIXADO no spec: `values` escreve as constantes na query e o
+    #    método não recebe nada por elas. Sobre um enum a constante é o NOME do
+    #    membro — o gerador escreve o valor armazenado dele.
+    #    Um quinto membro é uma linha aqui, não uma edição na regra.
+    - name: EncerradosNaFila
+      kind: count
+      description: Quantos chamados desta fila já se encerraram, de um jeito ou de outro.
+      filters:
+        - FilaID
+        - {field: Situacao, op: in, values: [Resolvido, Cancelado]}
+        # isnull/notnull perguntam pela COLUNA estar vazia: não levam parâmetro
+        # nem valor fixado, e são recusados sobre um campo não-nullable.
+        - {field: FechadoEm, op: notnull}
+      activeOnly: true
+
+    # B. os conectivos. `any` é OR, `all` é o AND aninhado dentro de um OR (a
+    #    lista de cima já é um AND, então `all` só serve aqui dentro) e `not`
+    #    nega o que está sob ele — vários nós são ANDados antes, e é por isso
+    #    que "nenhum destes" se escreve como um not em volta de um any.
+    - name: ParecidosNaFila
+      kind: count
+      description: Quantos outros chamados vivos desta fila podem ser o mesmo problema.
+      filters:
+        - FilaID
+        - any:
+            - {field: Titulo, op: eq, as: tituloExato}
+            - all:
+                - {field: Titulo, op: contains, as: trechoDoTitulo}
+                - {field: Prioridade, op: gte, as: prioridadeMinima}
+        - not:
+            - any:
+                - {field: Situacao, op: eq, value: Cancelado}
+                - {field: FechadoEm, op: notnull}
+      excludeSelf: true
+      activeOnly: true
+
+    # C. o conjunto como PARÂMETRO: `in` sem values emite uma slice na
+    #    assinatura, e quem chama decide o balde. Um conjunto vazio é resposta
+    #    legítima e não erro — o framework o traduz para o predicado que não
+    #    casa com nada.
+    - name: AbertosNasSituacoes
+      kind: count
+      description: Quantos chamados desta fila estão em alguma das situações perguntadas.
+      filters:
+        - FilaID
+        - {field: Situacao, op: in}
+        - {field: FechadoEm, op: isnull}
+      activeOnly: true
+
+    # D. o resto do vocabulário, e a razão de `as` existir: Prioridade é
+    #    comparada duas vezes, e dois parâmetros de um nome só não compilam.
+    # E. `not` com VARIOS nos. Eles sao ANDados antes da negacao, entao isto e
+    #    "nao (aberto E prioridade alta)" — e NAO "nem aberto nem prioritario",
+    #    que se escreveria como um not em volta de um any. As duas leituras
+    #    geram queries validas, e e por isso que a chave documenta qual e.
+    - name: ForaDoFocoNaFila
+      kind: count
+      description: Quantos NAO sao, ao mesmo tempo, abertos e de prioridade alta.
+      filters:
+        - FilaID
+        - not:
+            - {field: Situacao, op: eq, value: Aberto}
+            - {field: Prioridade, op: gte, as: prioridadeAlta}
+      activeOnly: true
+
+    # F. `nin` como PARAMETRO: quem chama decide o conjunto excluido. Sobre um
+    #    conjunto vazio o framework le NOT IN () como "casa com tudo" — o
+    #    espelho de IN (), que nao casa com nada.
+    - name: ForaDasSituacoes
+      kind: count
+      description: Quantos nao estao em nenhuma das situacoes perguntadas.
+      filters:
+        - FilaID
+        - {field: Situacao, op: nin}
+      activeOnly: true
+
+    - name: VizinhosDoCodigo
+      kind: count
+      description: Quantos chamados cercam este código na mesma faixa de prioridade e nota.
+      filters:
+        - {field: Codigo, op: startswith, as: prefixoDoCodigo}
+        - {field: Codigo, op: endswith, as: sufixoDoCodigo}
+        - {field: Codigo, op: ne, as: codigoIgnorado}
+        - {field: Prioridade, op: gt, as: prioridadeAcimaDe}
+        - {field: Prioridade, op: lt, as: prioridadeAbaixoDe}
+        - {field: Nota, op: lte, as: notaMaxima}
+        - {field: Situacao, op: nin, values: [Cancelado]}
+      activeOnly: true

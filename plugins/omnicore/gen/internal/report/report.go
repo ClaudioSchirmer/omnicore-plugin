@@ -1118,6 +1118,38 @@ func renderCheck(b *strings.Builder, in Input) {
 
 	b.WriteString("## What to check\n\n")
 
+	// FIRST, and unconditional: the duty to review what was just written. It
+	// leads the section because the failure it addresses is not a subtle one —
+	// a reader who takes the tree as finished builds AROUND it, and the
+	// workaround (N queries folded in Go beside a generated fact, a second
+	// finder next to a generated one) is worse than the thing it avoided
+	// touching.
+	b.WriteString("### Read what was generated — it is a first draft, not a verdict\n\n")
+	b.WriteString("This tree is ordinary Go in your repository. **`// Code generated … DO " +
+		"NOT EDIT.` is the Go convention that tells linters to skip a file — it is not a " +
+		"rule that the code may not change.** Review it the way you would review a " +
+		"colleague's: for logic, and for the QUESTION each query asks.\n\n")
+	b.WriteString("Measure it against what the FRAMEWORK offers, not against what the spec " +
+		"language can say — the language is a subset of the framework and always will be, " +
+		"so \"the generator does not emit that\" is a fact about the generator and never a " +
+		"reason for the service to do the worse thing. If something here should be a " +
+		"single pass over the table instead of several, or a primitive the framework " +
+		"ships and this spec cannot name, that is worth changing.\n\n")
+	b.WriteString("Two ways to change it, and the only reason to prefer the first is cost:\n\n")
+	b.WriteString("1. **Change the spec and regenerate** — survives every later run and " +
+		"every upgrade, and leaves nothing to maintain. Check `omnicore-gen explain keys` " +
+		"before assuming the language cannot say it.\n")
+	b.WriteString("2. **Edit the file, then adopt it** — normal and expected when the " +
+		"framework can do it and the spec cannot say it:\n\n")
+	b.WriteString("   ```\n   omnicore-gen adopt <path> -why '<what the spec could not " +
+		"express>'\n   ```\n\n")
+	b.WriteString("   Adopting re-hashes the file as it stands, so regeneration KEEPS the " +
+		"edit; without it the next run stops rather than overwriting your work. The cost " +
+		"is real and worth saying out loud: an adopted file is PINNED — it stops " +
+		"tracking the spec, so a later framework version's improvements to it never " +
+		"arrive. Every later `generate` prints the file as adopted and `doctor` lists " +
+		"it, which is how it stays visible.\n\n")
+
 	// One line per raw value object. The generator cannot know whether a set is
 	// closed — but the question is worth asking every time, because the wrong
 	// answer is invisible: a shape check accepts every string that LOOKS right,
@@ -1135,6 +1167,38 @@ func renderCheck(b *strings.Builder, in Input) {
 			"`enum` instead: the caller gets the list in OpenAPI, the code gets named "+
 			"constants, and an out-of-set value converges to Unknown rather than being "+
 			"stored.\n\n", strings.Join(raws, ", "))
+	}
+
+	// A pinned filter is a business decision frozen into a query, and it is
+	// invisible everywhere a reviewer normally looks: the port's signature does
+	// not carry it (that is the point of pinning), the rule that reads the fact
+	// does not mention it, and the value in the emitted criteria is the STORED
+	// one, so an enum member reads as a bare string. The one place it can be
+	// seen against the intent is here.
+	// The Found flags. The generated rules read them; a hand-written one is not
+	// obliged to, and reading the value alone is the exact defect this release
+	// fixed on the generated side — silent, and indistinguishable from a real
+	// zero in every log and every payload.
+	if guarded := foundBearingSlots(m); len(guarded) > 0 {
+		b.WriteString("### Numbers whose zero is not an answer\n\n")
+		fmt.Fprintf(b, "%s\n\n", strings.Join(guarded, "\n"))
+		b.WriteString("Each of these carries a `…Found` beside it, because the scalar can " +
+			"come back NULL: nothing matched, or — per group — the aggregated column is " +
+			"null in every row of that group. **Read the flag before the value.** The " +
+			"generated `factRange` rules do; anything you write in `rules.manual` that " +
+			"reads the number alone treats \"there was nothing to measure\" as a real " +
+			"zero, which no log and no payload can tell apart afterwards.\n\n")
+	}
+
+	if pinned := pinnedFactFilters(m); len(pinned) > 0 {
+		b.WriteString("### Values a fact compares against, fixed in the spec\n\n")
+		fmt.Fprintf(b, "%s\n\n", strings.Join(pinned, "\n"))
+		b.WriteString("Each of these is part of the QUESTION rather than something a " +
+			"caller passes, which is what keeps the definition beside the fact that is " +
+			"named for it — and what lets a `factRange` rule read the fact at all, since " +
+			"a declarative rule fills arguments from the entity and has nothing to fill a " +
+			"constant with. The trade is that widening the set is a change to this spec: " +
+			"a new member of the enum is NOT admitted until it is named here.\n\n")
 	}
 
 	// The two composite decisions a reviewer cannot see from the Go code alone,
@@ -1760,6 +1824,65 @@ func presence(cond bool, yes, no string) string {
 		return yes
 	}
 	return no
+}
+
+// foundBearingSlots names every number the service answers that can come back
+// as "there was nothing to measure", one line each.
+func foundBearingSlots(m *ir.Model) []string {
+	if m.Service == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range m.Service.Facts {
+		for _, sl := range f.Slots {
+			if !sl.Found {
+				continue
+			}
+			where := "`" + f.Name + "`"
+			if f.Grouped() {
+				where += " (per group)"
+			}
+			name := sl.Name
+			if !f.Multi {
+				name = "Value"
+			}
+			out = append(out, fmt.Sprintf("- %s: `%s` — check `%sFound` first (%s over %s)",
+				where, name, name, sl.Kind, sl.Field))
+		}
+	}
+	return out
+}
+
+// pinnedFactFilters lists every comparison whose value the spec fixed, one line
+// per leaf, as the query will ask it.
+//
+// It renders the STORED value, not the member name the spec wrote, because that
+// is what the reviewer is being asked to check against the column: an enum whose
+// member is `Withdrawing` and whose value is `withdrawing` is fine, and one
+// whose value quietly changed is exactly the drift this line catches.
+func pinnedFactFilters(m *ir.Model) []string {
+	if m.Service == nil {
+		return nil
+	}
+	var out []string
+	var walk func(fact string, nodes []ir.FactCond)
+	walk = func(fact string, nodes []ir.FactCond) {
+		for _, c := range nodes {
+			if !c.Leaf() {
+				walk(fact, c.Nodes)
+				continue
+			}
+			if len(c.Literals) == 0 {
+				continue
+			}
+			out = append(out, fmt.Sprintf("- `%s`: %s %s %s", fact, c.Field, c.Op,
+				strings.Join(c.Literals, ", ")))
+		}
+	}
+	for _, f := range m.Service.Facts {
+		walk(f.Name, f.Where)
+	}
+	return out
 }
 
 func manualFacts(m *ir.Model) []ir.Fact {
