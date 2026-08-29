@@ -94,7 +94,12 @@ var deliberatelyUnread = map[string]string{
 	"ManualRule.ID": "same: it names the item in the hook file and the report",
 	"Notification.Description": "documentation for the spec reader; the emitted " +
 		"notification documents itself from its semantic and tvars",
-	"Fact.Description":        "documentation for the spec reader, rendered into the port's comment",
+	"Fact.Description": "documentation for the spec reader, rendered into the port's comment",
+	"FactFilter.As": "consumed through FactFilter.ParamName, which falls back to the " +
+		"field's own name; the resolver only ever sees the RESOLVED parameter name, " +
+		"because a signature built from two spellings of it could disagree with itself",
+	"FactFilter.Any":          readThroughFilterGroup,
+	"FactFilter.Not":          readThroughFilterGroup,
 	"Child.Description":       "rendered into the generated comment and the table comment",
 	"Sibling.Description":     "rendered into the generated comment and the table comment",
 	"ValueObject.Description": "rendered into the generated type's comment",
@@ -112,6 +117,14 @@ var deliberatelyUnread = map[string]string{
 // entries above stay a list of names rather than seven copies of a paragraph.
 // TestCatalogSetIsWrittenOnce is what proves the claim: it fails if a catalog
 // stops being reachable through Map.
+// readThroughFilterGroup is the same shape for a fact's criteria tree: the
+// connective is asked for as a WHOLE — which one, and what it holds — because
+// reading the three list fields separately is how a node ends up carrying two
+// connectives and the emitter silently honouring the first.
+const readThroughFilterGroup = "consumed through FactFilter.Group, which answers " +
+	"which connective the node is and what it combines; the resolver and the emitter " +
+	"both ask it that way and never touch the individual lists"
+
 const readThroughTextsMap = "consumed through Texts.Map, which renders the seven " +
 	"catalogs keyed by the framework's catalog codes — the shape every consumer reads " +
 	"them in, and the reason the yaml-key-to-code mapping is written once"

@@ -1,0 +1,206 @@
+# Eixo: fatos que respondem VARIOS numeros numa query so (`aggregates`), as
+# colunas GERENCIADAS como filtro, e o `Found` por grupo — que e onde a media
+# agrupada sobre coluna nullable respondia 0 para "nao havia o que medir".
+#
+# As combinacoes que este caso existe para provar, todas na mesma arvore:
+#   A  multi SEM grupo, com slots que carregam Found  -> struct Result
+#   B  multi COM grupo, sobre coluna nullable E nao-nullable no mesmo fato
+#   C  kind unico COM grupo sobre coluna nullable     -> ValueFound
+#   D  coluna gerenciada CreatedAt como janela        -> parametro time.Time
+#   E  coluna gerenciada DeletedAt notnull            -> so os arquivados
+#   F  coluna gerenciada UpdatedAt entre dois instantes
+#   e quatro regras factRange: um slot sem Found, um slot com Found, um slot
+#   agrupado com Found e um fato de kind unico agrupado com ValueFound.
+specVersion: 1
+entity: Atendimento
+plural: Atendimentos
+language: pt-BR
+storage:
+  kind: flat
+  table: atendimentos
+  description: Atendimentos prestados aos clientes.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Codigo, type: string, column: codigo, length: 30, livesOn: root, example: "AT-2026-001", description: Codigo do atendimento.}
+  - name: Setor
+    type: string
+    column: setor
+    length: 20
+    livesOn: root
+    vo: {kind: enum, ref: SetorAtendimento}
+    example: suporte
+    description: Setor responsavel.
+  - {name: Duracao, type: int, column: duracao, livesOn: root, example: "30", description: Duracao em minutos.}
+  # NULLABLE de proposito: e a coluna que faz um grupo existir sem ter o que
+  # medir, que e o caso que o Found por grupo cobre.
+  - {name: Nota, type: float64, column: nota, livesOn: root, nullable: true, example: "8.5", description: "Nota da avaliacao, quando houver."}
+  - {name: ClienteID, type: id, column: cliente_id, livesOn: root, example: 6f0f6f2a-6f9f-4a6a-9f9f-2b7a9c5f21d4, description: Cliente atendido.}
+valueObjects:
+  - name: SetorAtendimento
+    kind: enum
+    backing: string
+    description: Setor responsavel pelo atendimento.
+    unknownNotification: SetorDesconhecidoNotification
+    members:
+      - {name: Suporte, value: suporte, text: {ptbr: Suporte, eng: Support, esp: Soporte, fra: Support, deu: Support, ita: Supporto, nld: Ondersteuning}}
+      - {name: Vendas, value: vendas, text: {ptbr: Vendas, eng: Sales, esp: Ventas, fra: Ventes, deu: Vertrieb, ita: Vendite, nld: Verkoop}}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: patch}
+delete: {root: soft}
+rules:
+  list:
+    - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
+    # 1. um slot SEM Found, sem grupo: le v.MinutosTotais direto.
+    - id: teto-de-minutos
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: CargaDoCliente.MinutosTotais
+      max: 6000
+      attachTo: Duracao
+      notification: CargaExcedidaNotification
+      echoValue: true
+    # 2. um slot COM Found, sem grupo: a regra fica de fora quando nao houve o
+    #    que medir, em vez de comparar o zero.
+    - id: melhor-nota-plausivel
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: CargaDoCliente.MelhorNota
+      max: 10
+      attachTo: Nota
+      notification: NotaImplausivelNotification
+    # 3. um slot AGRUPADO com Found: dispara quando ALGUM setor estoura, e um
+    #    setor sem nenhuma nota nao e um setor com media zero.
+    - id: media-minima-por-setor
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: PorSetorDoCliente.NotaMedia
+      min: 2
+      attachTo: Nota
+      notification: NotaBaixaNotification
+      echoValue: true
+    # 4. um fato de kind UNICO, agrupado, sobre coluna nullable: mesmo Found,
+    #    sob o nome que a forma singular sempre usou.
+    - id: media-geral-por-setor
+      kind: factRange
+      scope: [insertOrUpdate]
+      fact: MediaPorSetor
+      min: 1
+      attachTo: Nota
+      notification: NotaBaixaNotification
+notifications:
+  - name: CargaExcedidaNotification
+    semantic: validation
+    tvars: [max]
+    text: {ptbr: "O cliente ja acumula mais de {max} minutos.", eng: "The client already exceeds {max} minutes.", esp: "El cliente ya supera {max} minutos.", fra: "Le client depasse deja {max} minutes.", deu: "Der Kunde ueberschreitet bereits {max} Minuten.", ita: "Il cliente supera gia {max} minuti.", nld: "De klant overschrijdt al {max} minuten."}
+  - name: NotaImplausivelNotification
+    semantic: validation
+    text: {ptbr: Nota fora da escala., eng: Score out of scale., esp: Nota fuera de escala., fra: Note hors echelle., deu: Bewertung ausserhalb der Skala., ita: Voto fuori scala., nld: Score buiten schaal.}
+  - name: NotaBaixaNotification
+    semantic: validation
+    tvars: [min]
+    text: {ptbr: "Algum setor esta abaixo de {min}.", eng: "Some sector is below {min}.", esp: "Algun sector esta por debajo de {min}.", fra: "Un secteur est en dessous de {min}.", deu: "Ein Bereich liegt unter {min}.", ita: "Un settore e sotto {min}.", nld: "Een sector ligt onder {min}."}
+  - name: SetorDesconhecidoNotification
+    package: vos
+    semantic: validation
+    text: {ptbr: Setor desconhecido., eng: Unknown sector., esp: Sector desconocido., fra: Secteur inconnu., deu: Unbekannter Bereich., ita: Settore sconosciuto., nld: Onbekende sector.}
+read:
+  backing: relational
+  view: {name: atendimentos}
+  byId: true
+  byParams:
+    filters:
+      - {field: Codigo, ops: [eq, contains]}
+      - {field: Setor, ops: [eq, in]}
+    controls: {pagination: true, includeArchived: true}
+surfaces: {rest: true}
+authz:
+  resource: atendimento
+  dataAccess: anyone-with-permission
+  permissions: {insert: "atendimento:escrever", patch: "atendimento:escrever", archive: "atendimento:arquivar", unarchive: "atendimento:arquivar", read: "atendimento:ler"}
+service:
+  required: true
+  facts:
+    # A. VARIOS numeros, UMA query, sem grupo. A resposta vira um struct: um
+    #    campo por entrada, nomeado por `as`. count e sum nao levam Found (zero
+    #    E a resposta); avg e max levam, porque sobre nenhuma linha o SQL diz
+    #    NULL e o zero passaria por resultado.
+    - name: CargaDoCliente
+      aggregates:
+        - {kind: count, as: Atendimentos}
+        - {kind: sum, field: Duracao, as: MinutosTotais}
+        - {kind: avg, field: Nota, as: NotaMedia}
+        - {kind: max, field: Nota, as: MelhorNota}
+      filters:
+        - ClienteID
+      description: Quantos atendimentos, quantos minutos e como o cliente avaliou.
+      activeOnly: true
+
+    # B. Os mesmos varios numeros, agora POR SETOR. Nota e nullable, entao um
+    #    grupo pode existir e nao ter o que medir -> NotaMedia carrega Found.
+    #    Duracao nao e nullable: um grupo existe porque uma linha casou, e essa
+    #    linha tem duracao -> MaisCurto NAO carrega Found.
+    - name: PorSetorDoCliente
+      aggregates:
+        - {kind: count, as: Atendimentos}
+        - {kind: sum, field: Duracao, as: MinutosTotais}
+        - {kind: avg, field: Nota, as: NotaMedia}
+        - {kind: min, field: Duracao, as: MaisCurto}
+      groupBy: [Setor]
+      filters:
+        - ClienteID
+      description: A mesma carga, aberta por setor.
+      activeOnly: true
+
+    # C. A forma singular, agrupada, sobre a MESMA coluna nullable: o grupo
+    #    ganha ValueFound pelo mesmo motivo. Sem isso, "nenhuma nota neste
+    #    setor" era lido como "media zero".
+    - name: MediaPorSetor
+      kind: avg
+      field: Nota
+      groupBy: [Setor]
+      description: Nota media de cada setor.
+      activeOnly: true
+
+    # D. Uma coluna que o framework carimba, endereçada pelo nome logico. Nao
+    #    ha fields[] para ela e nunca havera: o framework e dono do valor e
+    #    resolve o nome sozinho.
+    # G. excludeSelf sobre um fato de VARIOS numeros, e um min SEM grupo sobre
+    #    coluna nao-nullable: sem grupo o conjunto que casa pode ser vazio, e
+    #    entao ate o min de uma coluna obrigatoria carrega Found. E o carrier
+    #    exato (MinInt), porque Duracao e inteira.
+    - name: OutrosDoCliente
+      aggregates:
+        - {kind: count, as: Quantos}
+        - {kind: min, field: Duracao, as: MaisCurto}
+      filters:
+        - ClienteID
+      excludeSelf: true
+      description: Os outros atendimentos do cliente, sem contar este.
+      activeOnly: true
+
+    - name: AbertosDesde
+      kind: count
+      filters:
+        - {field: CreatedAt, op: gte, as: desde}
+        - {field: DeletedAt, op: isnull}
+      description: Quantos atendimentos vivos foram abertos a partir de um instante.
+
+    # E. So os ARQUIVADOS: sem activeOnly o escopo inclui os dois, e a condicao
+    #    sobre DeletedAt e o que separa. Com activeOnly: true isto e recusado —
+    #    juntos nao casam com nada.
+    - name: ArquivadosDoCliente
+      kind: count
+      filters:
+        - ClienteID
+        - {field: DeletedAt, op: notnull}
+      description: Quantos atendimentos deste cliente ja foram arquivados.
+
+    # F. Uma janela sobre a coluna de atualizacao: dois parametros time.Time
+    #    sobre a mesma coluna, que e precisamente onde `as` deixa de ser opcional.
+    - name: TocadosEntre
+      kind: count
+      filters:
+        - {field: UpdatedAt, op: gte, as: de}
+        - {field: UpdatedAt, op: lte, as: ate}
+      description: Quantos atendimentos foram escritos dentro de uma janela.
+      activeOnly: true

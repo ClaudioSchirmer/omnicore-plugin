@@ -266,12 +266,20 @@ type Rule struct {
 	// because that is what makes it positional — it lands where the rule was
 	// declared, and the rule keeps its declared position.
 	Guard bool
+	// FactSlotName is WHICH of a multi-answer fact's numbers this rule bounds,
+	// empty when the fact answers one. A rule bounds a number, and a fact may
+	// now answer several — leaving the choice implicit would have the generator
+	// pick one.
+	FactSlotName string
 	// FactName is the fact a factRange reads, by name; Fact is the resolved one,
 	// bound after the service is. Two steps because the rules are lowered before
 	// the port is, and a rule holding a copy of a fact resolved too early would
 	// silently miss the params the service adds.
 	FactName string
 	Fact     *Fact
+	// FactSlot is the resolved number the rule bounds — the fact's only one
+	// when it answers one, the named one when it answers several.
+	FactSlot *FactSlot
 	// Transitions is the allowed state machine: from → the states it may move to.
 	Transitions map[string][]string
 	// Collection names the child collection a rule reads, for the two kinds that
@@ -940,7 +948,8 @@ func resolveClauseSet(rs spec.Rules, children []spec.Child, lookup func(string) 
 			Min: r.Min, Max: r.Max, Notification: r.Notification,
 			AttachTo: r.AttachTo, EchoValue: r.Echoes(), Description: r.Description,
 			Transitions: r.Transitions, GroupBy: r.GroupBy, Cap: r.Cap,
-			SkipWhen: r.SkipWhen, FactName: r.Fact, Guard: r.Guard,
+			SkipWhen: r.SkipWhen, FactName: factNameOf(r.Fact),
+			FactSlotName: factSlotOf(r.Fact), Guard: r.Guard,
 		}
 		// The two set-wide kinds name a COLLECTION where the others name fields:
 		// they ask what the aggregate holds, not what one record says.
@@ -1493,7 +1502,19 @@ func lookupFactFilter(s *spec.Spec, m *Model, name string) (*Field, string) {
 		}
 		return nil, ""
 	}
-	return lookupField(m, name), ""
+	if fld := lookupField(m, name); fld != nil {
+		return fld, ""
+	}
+	// A framework-stamped column, addressed by the fixed logical name the
+	// framework's own resolver answers for. The entity declares no field for it
+	// and the aggregate carries no Go field — the query is the only place it is
+	// ever named, which is exactly what makes "how many since this instant" and
+	// "how many are archived" askable at all.
+	if spec.ManagedFilterField(s, name) != nil {
+		fld := managedReadField(s, m, name)
+		return &fld, ""
+	}
+	return nil, ""
 }
 
 func lookupField(m *Model, name string) *Field {
@@ -1847,7 +1868,25 @@ type Fact struct {
 	// zero is indistinguishable from a real one. Returning it alone hands a rule
 	// a number nobody computed — quietly, which is why this is in the signature
 	// rather than in a comment.
+	//
+	// It describes the FLAT single answer only. A fact answering several numbers
+	// carries the same distinction per slot, inside the struct.
 	ReturnsFound bool
+	// Slots are the numbers this fact answers, in declaration order — one for a
+	// fact declared with `kind`, several for one declared with `aggregates`,
+	// none for exists and manual.
+	//
+	// They are the single source of truth for the aggregate half: one query is
+	// built from them, and the answer's shape is read off them. A `kind` fact
+	// resolves to exactly one slot named Value, which is what keeps the flat
+	// signature and the one-key group struct the language has always emitted.
+	Slots []FactSlot
+	// Multi says the fact was declared with `aggregates`, so its answer is a
+	// STRUCT even when nothing is grouped.
+	Multi bool
+	// ResultType is the struct an ungrouped multi-answer fact answers with. It
+	// lives in the domain beside the port, for the same reason GroupType does.
+	ResultType string
 	// GroupKeys turns the fact into a per-group one. Non-empty means the answer
 	// is a slice of GroupType, one entry per distinct key combination, computed
 	// by the database in a single GROUP BY.
@@ -1859,10 +1898,99 @@ type Fact struct {
 	ActiveOnly  bool
 	Description string
 	Params      []FactParam
+	// Where is the criteria tree the query narrows by, as an implicit AND of
+	// the nodes at the top — which is what the spec's `filters` list is.
+	//
+	// It replaced a flat list of field names that the emitter turned into one
+	// criteria.Eq each. The tree exists because the STORE never had that limit:
+	// the framework's criteria package carries the whole comparison set and both
+	// connectives, and the generator was the half that could only say equals.
+	Where []FactCond
 }
+
+// FactCond is one node of a fact's criteria tree: a leaf comparison, or a group
+// that combines other nodes.
+//
+// It mirrors the framework's own Expr — a comparison and two connectives — and
+// nothing more. The emitter walks it into criteria builder calls, so a node the
+// framework has no builder for cannot be represented here, which is the point:
+// the shape refuses to carry a query the store cannot be asked.
+type FactCond struct {
+	// Group is the connective, and marks the node as a group: and | or | not.
+	// Empty means a leaf.
+	Group string
+	// Nodes are what a group combines.
+	Nodes []FactCond
+	// Op is the leaf's comparison, in the framework's own spelling.
+	Op string
+	// Field is the entity field the comparison is about — the GO field name,
+	// which is what criteria resolves against, never a column.
+	Field string
+	// Param names the method parameter carrying the value, empty when the spec
+	// pinned it or the operator takes none.
+	Param string
+	// Literals are the pinned values, already rendered as Go literals in the
+	// column's own wire type. One for a single comparison, several for a set.
+	Literals []string
+}
+
+// Leaf reports whether the node is a comparison rather than a group.
+func (c FactCond) Leaf() bool { return c.Group == "" }
 
 // Grouped reports whether this fact answers per group.
 func (f Fact) Grouped() bool { return len(f.GroupKeys) > 0 }
+
+// SlotNamed resolves one of the fact's numbers by name, falling back to the
+// only one when the rule named none — which is every fact declared with `kind`.
+func (f Fact) SlotNamed(name string) *FactSlot {
+	if name == "" {
+		if len(f.Slots) == 1 {
+			return &f.Slots[0]
+		}
+		return nil
+	}
+	for i := range f.Slots {
+		if f.Slots[i].Name == name {
+			return &f.Slots[i]
+		}
+	}
+	return nil
+}
+
+// FactSlot is ONE of the numbers a fact answers.
+//
+// It exists because the store computes several in one pass and the language now
+// says so: the framework's loader takes as many aggregate specs as it is given,
+// and every one of them lands here as a field of the answer.
+type FactSlot struct {
+	// Name is the slot's field name in the answer — "Value" for a fact that
+	// answers one number, the declared `as` for one that answers several.
+	Name string
+	// Kind is what is computed: count | sum | avg | min | max.
+	Kind string
+	// Field is the column aggregated, empty for count.
+	Field string
+	// ReturnType is decided by the kind and the aggregated field together,
+	// never by the field alone — see factReturnType.
+	ReturnType string
+	// Found says this slot carries a <Name>Found beside its value, because the
+	// scalar it reads can come back NULL and zero would pass for an answer.
+	//
+	// Ungrouped, that is min, max and avg: the matching set can be empty. Per
+	// GROUP it is narrower — a group exists BECAUSE a row matched, so the only
+	// way its scalar is NULL is the aggregated column being null in every row of
+	// it, which cannot happen over a non-nullable column. Reading the two cases
+	// as one is what shipped a grouped average over a nullable column reporting
+	// 0 for "nothing to average".
+	Found bool
+	// AggFn is the framework builder that computes it, already resolved to the
+	// exact-integer or fractional family.
+	AggFn string
+	// Var is the local the emitted body binds the carrier to. One per slot,
+	// because AggregateBy uses the spec INSTANCE as the handle to read a
+	// group's own copy back.
+	Var string
+}
 
 // FactParam is one argument the rule passes in.
 type FactParam struct {
@@ -1888,6 +2016,7 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 		fact := Fact{
 			Name: f.Name, Kind: f.Kind, Field: f.Field,
 			Manual:     f.Kind == "manual",
+			Multi:      len(f.Aggregates) > 0,
 			ActiveOnly: f.ActiveOnly, Description: f.Description,
 			ReturnType:   factReturnType(f, m),
 			ReturnsFound: factReturnsFound(f.Kind),
@@ -1905,28 +2034,18 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 				Name: fld.Name, GoType: "string", Field: fld.Name,
 			})
 		}
+		fact.Slots = resolveFactSlots(f, m, fact.Grouped())
 		if fact.Grouped() {
 			fact.GroupType = m.Entity.Pascal + f.Name + "Group"
-			// Every group EXISTS because a row matched, so there is nothing
-			// ambiguous left for Found to report: an empty set is zero groups.
+			// The METHOD answers a slice, so there is no second return for it to
+			// carry: an empty set is zero groups. Whether an individual group's
+			// scalar can be NULL is a different question, and it is answered per
+			// slot — see FactSlot.Found.
 			fact.ReturnsFound = false
+		} else if fact.Multi {
+			fact.ResultType = m.Entity.Pascal + f.Name + "Result"
 		}
-		for _, filter := range f.Filters {
-			fld, collection := lookupFactFilter(s, m, filter)
-			if fld == nil {
-				// Validation resolves every filter and refuses the ones that
-				// resolve to nothing, so reaching here is generator
-				// inconsistency. It used to be a silent `continue`, and what
-				// that shipped was a port method with no parameter — a question
-				// the rule could not ask, discovered three steps downstream.
-				panic("service fact " + f.Name + ": the filter " + filter +
-					" resolves to no field — validation should have refused this spec")
-			}
-			fact.Params = append(fact.Params, FactParam{
-				Name: naming.Camel(fld.Name), GoType: fld.BaseGoType, Field: fld.Name,
-				PerEntry: collection,
-			})
-		}
+		fact.Where = resolveFactConds(s, m, f, f.Filters, &fact.Params)
 		if f.ExcludeSelf {
 			// The row being updated must not count against itself, or every
 			// update of a unique field would report a duplicate of itself.
@@ -1939,9 +2058,253 @@ func resolveService(s *spec.Spec, m *Model) *ServiceModel {
 	return sm
 }
 
+// resolveFactConds walks the spec's filter tree into the IR's, collecting the
+// method's parameters in the order the tree is written.
+//
+// The parameters come out of the SAME walk that builds the conditions, and not
+// from a second pass over the spec, because the two have to agree exactly: a
+// leaf that contributes a parameter is a leaf whose condition reads it, and the
+// only way to keep those in step is to decide both in one place.
+func resolveFactConds(s *spec.Spec, m *Model, f spec.Fact, nodes []spec.FactFilter, params *[]FactParam) []FactCond {
+	out := make([]FactCond, 0, len(nodes))
+	for _, n := range nodes {
+		if group, kids, isGroup := n.Group(); isGroup {
+			out = append(out, FactCond{
+				Group: factGroupOp(group),
+				Nodes: resolveFactConds(s, m, f, kids, params),
+			})
+			continue
+		}
+		fld, collection := lookupFactFilter(s, m, n.Field)
+		if fld == nil {
+			// Validation resolves every filter and refuses the ones that
+			// resolve to nothing, so reaching here is generator
+			// inconsistency. It used to be a silent `continue`, and what
+			// that shipped was a port method with no parameter — a question
+			// the rule could not ask, discovered three steps downstream.
+			panic("service fact " + f.Name + ": the filter " + n.Field +
+				" resolves to no field — validation should have refused this spec")
+		}
+		op := n.Operator()
+		cond := FactCond{Op: op, Field: fld.Name}
+		switch {
+		case n.Pinned():
+			cond.Literals = factLiterals(s, n, *fld)
+		case spec.TakesValue(op):
+			param := FactParam{
+				Name: n.ParamName(), GoType: factParamType(op, fld.BaseGoType),
+				Field: fld.Name, PerEntry: collection,
+			}
+			*params = append(*params, param)
+			cond.Param = param.Name
+		}
+		out = append(out, cond)
+	}
+	return out
+}
+
+// factGroupOp translates the connective from the author's word to the
+// framework's. The spec says all/any because that is how the condition reads in
+// a file someone writes; criteria says and/or because that is how it reads in
+// the code that runs.
+func factGroupOp(group string) string {
+	switch group {
+	case "any":
+		return "or"
+	case "not":
+		return "not"
+	default:
+		return "and"
+	}
+}
+
+// factParamType is the Go type the value arrives in. A set operator takes the
+// whole set, which is the difference between "is it this one" and "is it any of
+// these" reaching the signature instead of being folded into the call site.
+func factParamType(op, base string) string {
+	if spec.TakesSet(op) {
+		return "[]" + base
+	}
+	return base
+}
+
+// factLiterals renders the values a leaf pinned, in the column's WIRE type.
+//
+// Wire, not domain: the query binds what the column holds, exactly as the
+// parameter form does — the generated method takes a string for an enum-backed
+// field and hands it to criteria as it is. Rendering the value object's Go
+// constant here would type-check and then compare a struct against a column.
+func factLiterals(s *spec.Spec, n spec.FactFilter, fld Field) []string {
+	values := n.Values
+	if n.Value != nil {
+		values = []any{n.Value}
+	}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		out = append(out, factLiteral(s, v, fld))
+	}
+	return out
+}
+
+func factLiteral(s *spec.Spec, v any, fld Field) string {
+	if vo := factEnumOf(s, fld); vo != nil {
+		if m := spec.FindEnumMember(vo, fmt.Sprint(v)); m != nil {
+			return enumLiteral(m.Value, vo.Backing)
+		}
+	}
+	switch fld.BaseGoType {
+	case "string":
+		return fmt.Sprintf("%q", fmt.Sprint(v))
+	case "bool":
+		return fmt.Sprint(v)
+	case "float64":
+		// A whole number written in yaml decodes as an int, and handing an int
+		// to a float column relies on the driver to widen it. Saying float64
+		// once here is cheaper than finding out per engine.
+		return fmt.Sprintf("float64(%v)", v)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// factEnumOf finds the enum backing a field, which is what decides whether a
+// pinned literal is a member name to resolve or a value to render as it is.
+func factEnumOf(s *spec.Spec, fld Field) *spec.ValueObject {
+	if fld.VOKind != "enum" {
+		return nil
+	}
+	for i := range s.ValueObjects {
+		if s.ValueObjects[i].Name == fld.BaseEntityType ||
+			"vos."+s.ValueObjects[i].Name == fld.BaseEntityType {
+			return &s.ValueObjects[i]
+		}
+	}
+	return nil
+}
+
+// resolveFactSlots turns a fact's declared answer into the numbers the query
+// computes — one slot for a `kind` fact, one per entry for an `aggregates` one,
+// none for exists and manual, whose answers are not aggregates at all.
+//
+// It is the one place that decides a slot's carrier, its Go type and whether it
+// needs a Found beside it, so the port, the implementation, the group struct
+// and the generated stub cannot disagree about any of the three.
+func resolveFactSlots(f spec.Fact, m *Model, grouped bool) []FactSlot {
+	if f.Kind == "exists" || f.Kind == "manual" {
+		return nil
+	}
+	if len(f.Aggregates) == 0 {
+		// The single form IS one slot, named the way the group struct has always
+		// named it. Modelling it as the same thing is what lets one emitter walk
+		// both shapes instead of two that drift.
+		// `c` for a count and `a` for the rest: the local the single form has
+		// always bound, kept so a spec that did not change does not regenerate
+		// into a diff that says nothing.
+		flat := "a"
+		if f.Kind == "count" {
+			flat = "c"
+		}
+		return []FactSlot{newFactSlot("Value", f.Kind, f.Field, m, grouped, flat, "agg")}
+	}
+	out := make([]FactSlot, 0, len(f.Aggregates))
+	for _, a := range f.Aggregates {
+		v := "agg" + a.As
+		out = append(out, newFactSlot(a.As, a.Kind, a.Field, m, grouped, v, v))
+	}
+	return out
+}
+
+func newFactSlot(name, kind, field string, m *Model, grouped bool, flatVar, groupVar string) FactSlot {
+	rt := aggregateReturnType(kind, field, m)
+	v := flatVar
+	if grouped {
+		v = groupVar
+	}
+	return FactSlot{
+		Name: name, Kind: kind, Field: field, ReturnType: rt,
+		Found: slotNeedsFound(kind, field, m, grouped),
+		AggFn: aggregateFnFor(kind, rt), Var: v,
+	}
+}
+
+// slotNeedsFound answers whether zero could pass for an answer this slot never
+// computed.
+//
+// count never: COUNT(*) is 0 over no rows and that IS the answer. sum never:
+// the empty sum is 0 by definition, which is the reading the language has
+// always taken. min, max and avg always, ungrouped — the matching set can be
+// empty and SQL says NULL.
+//
+// Per GROUP the question narrows, and getting it wrong was a real defect: a
+// group exists BECAUSE a row matched, so its scalar is NULL only when the
+// aggregated column is null in every row of that group — impossible over a
+// non-nullable column, and perfectly possible over a nullable one. Dropping
+// Found for every grouped fact reported "no rows had a value" as 0.
+func slotNeedsFound(kind, field string, m *Model, grouped bool) bool {
+	switch kind {
+	case "min", "max", "avg":
+	default:
+		return false
+	}
+	if !grouped {
+		return true
+	}
+	fld := lookupField(m, field)
+	return fld != nil && fld.Nullable
+}
+
+// aggregateReturnType is the VALUE an aggregate answers with, decided by the
+// kind and the aggregated field together and never by the field alone.
+func aggregateReturnType(kind, field string, m *Model) string {
+	switch kind {
+	case "count":
+		return "int64"
+	case "avg":
+		// An average is fractional even over an integer column, which is what
+		// the framework offers: Avg returns float64 and there is no AvgInt. The
+		// field's own width says nothing about the answer's.
+		return "float64"
+	default:
+		// sum, min, max: EXACT over any integer width, fractional otherwise.
+		// int and int64 both land on the Int carriers, whose Value is int64 —
+		// the sum of ints does not fit an int by rights, and narrowing the
+		// answer to the column's width is how a total silently wraps.
+		if fld := lookupField(m, field); fld != nil {
+			switch fld.BaseGoType {
+			case "int", "int64":
+				return "int64"
+			}
+		}
+		return "float64"
+	}
+}
+
+// aggregateFnFor names the framework helper for a kind.
+//
+// The integer and float families are SEPARATE calls (SumInt vs Sum), because a
+// sum over an integer column is exact and one over a float is not — and the
+// framework refuses to pretend otherwise. The resolved return type is what
+// decides which family answers.
+func aggregateFnFor(kind, returnType string) string {
+	if kind == "count" {
+		return "Count"
+	}
+	name := strings.ToUpper(kind[:1]) + kind[1:]
+	if returnType == "int64" {
+		return name + "Int"
+	}
+	return name
+}
+
 func factReturnType(f spec.Fact, m *Model) string {
 	if f.Kind == "manual" {
 		return f.Returns
+	}
+	if len(f.Aggregates) > 0 {
+		// A fact answering several numbers answers a STRUCT, and which struct
+		// depends on whether it groups — ResultType or GroupType, both named by
+		// the resolver. There is no scalar here to name.
+		return ""
 	}
 	switch f.Kind {
 	case "exists":
@@ -2031,6 +2394,19 @@ func appendUniqueClauses(m *Model) []Clause {
 	return append(m.Clauses, Clause{Gate: "IfInsertOrUpdate", Rules: extra})
 }
 
+// factNameOf and factSlotOf split `<Fact>.<As>` — the spelling a rule uses to
+// bound ONE of the numbers a fact answers. Validation refuses every other
+// reading of the dot, so these only have to split it.
+func factNameOf(ref string) string {
+	name, _, _ := strings.Cut(ref, ".")
+	return name
+}
+
+func factSlotOf(ref string) string {
+	_, slot, _ := strings.Cut(ref, ".")
+	return slot
+}
+
 // bindFacts resolves the fact a factRange names, now that the port exists.
 //
 // A rule whose fact cannot be found is dropped rather than emitted half-way:
@@ -2050,6 +2426,7 @@ func bindFacts(m *Model) {
 			for i := range m.Service.Facts {
 				if m.Service.Facts[i].Name == r.FactName {
 					r.Fact = &m.Service.Facts[i]
+					r.FactSlot = m.Service.Facts[i].SlotNamed(r.FactSlotName)
 					break
 				}
 			}

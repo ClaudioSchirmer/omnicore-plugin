@@ -46,6 +46,9 @@ const (
 	CapDerivedField     Capability = "server-derived fields (computed from the entity's own, kept out of every write DTO)"
 	CapMountedChild     Capability = "a shared identity's collection, exposed on a second role"
 	CapGroupedFact      Capability = "per-group facts, computed by the database (GROUP BY)"
+	CapFactCriteria     Capability = "facts narrowed by the full criteria vocabulary (a comparison other than equality, a set, an OR, or a value pinned in the spec)"
+	CapMultiAggregate   Capability = "facts answering SEVERAL numbers in one query (count, sum, avg, min and max over the same rows, in a single pass)"
+	CapStampedFilter    Capability = "facts narrowed by a framework-stamped column (CreatedAt, UpdatedAt, DeletedAt) — a time window, or the archived rows alone"
 	CapCompositeVO      Capability = "composite value objects (a value spanning several columns)"
 	CapManualVO         Capability = "hand-written value objects (declared here, written by you): a scalar with kind: manual, a composite with written: manual"
 	CapArchiveOnUpdate  Capability = "an update that finishes as an archive (CompleteAsArchive)"
@@ -73,6 +76,9 @@ var implemented = map[Capability]bool{
 	CapValueObjects:     true,
 	CapService:          true,
 	CapGroupedFact:      true,
+	CapFactCriteria:     true,
+	CapMultiAggregate:   true,
+	CapStampedFilter:    true,
 	CapChildren:         true,
 	CapSiblings:         true,
 	CapSharedBase:       true,
@@ -125,7 +131,9 @@ func AllCapabilities() []Capability {
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
 		CapOwnerAccess, CapTenantAccess, CapScopeBypass, CapScopedUnique,
 		CapChildUnique, CapPerEntryFact, CapGeneratedTests, CapPerChild, CapPerChildPatch,
-		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapCompositeVO,
+		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
+		CapMultiAggregate, CapStampedFilter,
+		CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
 		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
 		CapRedactedField, CapBodyRuntime, CapBypassMaySet, CapIdentityRuntime,
@@ -327,11 +335,25 @@ func CheckCoverage(s *Spec) *Problems {
 	}
 	if s.Service != nil {
 		for i, fa := range s.Service.Facts {
-			for _, fl := range fa.Filters {
+			for _, fl := range FactFilterFields(fa.Filters) {
 				if _, _, dotted := ChildFactField(s, fl); dotted {
 					uses(CapPerEntryFact, fmt.Sprintf("service.facts[%d].filters", i),
 						"a fact asked per entry of a collection")
 				}
+			}
+			WalkFactFilters(fa.Filters, "", func(n FactFilter, _ string) {
+				if _, _, isGroup := n.Group(); isGroup || n.Operator() != "eq" || n.Pinned() {
+					uses(CapFactCriteria, fmt.Sprintf("service.facts[%d].filters", i),
+						"a fact narrowed by more than equality")
+				}
+				if ManagedReads.Has(n.Field) && factField(s, n.Field) == nil {
+					uses(CapStampedFilter, fmt.Sprintf("service.facts[%d].filters", i),
+						"a fact narrowed by a column the framework stamps")
+				}
+			})
+			if len(fa.Aggregates) > 0 {
+				uses(CapMultiAggregate, fmt.Sprintf("service.facts[%d].aggregates", i),
+					"a fact answering several numbers in one query")
 			}
 		}
 	}

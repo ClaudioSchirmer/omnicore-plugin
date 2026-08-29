@@ -818,7 +818,10 @@ Four things to get right, because they are the ones that cost a migration later:
 - **`unique.enforce: service-precheck+constraint` is a pair, and the fact is your half.**
   The precheck asks an `exists` fact filtered by the unique field (`filters: [<Field>]`,
   `excludeSelf: true`) under `service.facts`. Declaring the enforcement without the fact is
-  refused — the build used to accept the string and silently emit only the constraint.
+  refused — the build used to accept the string and silently emit only the constraint. Its
+  filters stay PLAIN equalities: an operator, a connective or a pinned value there is
+  refused, because the index it stands in front of only answers "is this exact tuple
+  present".
   - **Unique WITHIN what? Say it, or the two halves disagree.** A natural key is almost
     never unique across the whole table: a role handle is unique per tenant, a code per
     workspace, a registration number per campus. `unique.within: [TenantID]` sizes the
@@ -884,6 +887,85 @@ Four things to get right, because they are the ones that cost a migration later:
     BARE is refused with the spelling that works — for a while it was accepted in silence
     and the method arrived with no parameter at all, uncallable, discovered while
     hand-writing the rule that needed it.
+  - **One fact may answer SEVERAL numbers, in one query.** `aggregates` is `kind`
+    widened from a single answer to a named set of them — the framework's loader takes
+    as many specs as it is handed and computes them in a single pass:
+
+    ```yaml
+    - name: CargaPorTurno
+      aggregates:
+        - {kind: count, as: Turmas}
+        - {kind: sum,   field: CreditosTotais, as: Creditos}
+        - {kind: avg,   field: NotaMedia,      as: Media}
+      groupBy: [Turno]          # optional, exactly as for kind:
+    ```
+
+    `count sum avg min max` — `exists` is a probe rather than an aggregate and `manual`
+    has no generated query, so neither can share a query with the others. **`as` is
+    required**: the entry becomes a FIELD of the answer, and a min and a max of one
+    column have no distinct name to derive. Asked as one fact each, those three numbers
+    are three queries over identical criteria — and two answers a rule compares were
+    never guaranteed to be about the same instant. One entry is refused: that is `kind`.
+  - **A rule bounds ONE number and says which: `fact: <Fact>.<As>`.** Naming a
+    multi-answer fact bare is refused — picking one for the author is the generator
+    enforcing a rule nobody wrote — and reaching inside a single-answer fact is refused
+    too.
+  - **`<Name>Found` is emitted exactly where zero could lie.** `min`, `max` and `avg`
+    carry it; `count` and `sum` never do, because zero IS the count and the empty sum.
+    Per GROUP the question narrows: a group exists BECAUSE a row matched, so its scalar
+    is null only when the aggregated column is null in EVERY row of it — possible over a
+    **nullable** column and not otherwise. Read the flag before the value; a grouped
+    average over a nullable column used to report "nothing to average" as `0`.
+  - **The three columns the framework stamps are filterable by their fixed logical
+    names** — `CreatedAt`, `UpdatedAt`, `DeletedAt` — whenever `storage.managed` declares
+    them. No `fields[]` entry declares one and the aggregate carries no Go field; the
+    framework's own resolver answers for the name, exactly as `read.managed` relies on.
+
+    ```yaml
+    - {field: CreatedAt, op: gte, as: desde}   # "quantos desde este instante"
+    - {field: DeletedAt, op: notnull}          # só os arquivados
+    - {field: DeletedAt, op: isnull}           # só os vivos
+    ```
+
+    Filters only: aggregating a timestamp has no carrier, and grouping BY one is one
+    group per row unless truncated, which this language cannot say. Beside `activeOnly`
+    they are refused (the scope already removed every archived row, so `notnull` matches
+    nothing and `isnull` says it twice), and a `factRange` rule cannot read a fact whose
+    stamped filter takes a PARAMETER — the entity carries no `CreatedAt` for it to pass.
+  - **`filters` is the fact's WHERE, and it speaks the framework's own `criteria` — not
+    a list of equalities.** A bare name is an `eq` whose value the caller passes, which is
+    what a filter has always meant and still means; the block form names the operator, and
+    the entries are ANDed:
+
+    ```yaml
+    filters:
+      - TenantID                                    # eq, value from the caller
+      - {field: AppliesTo, op: in}                  # the method takes []string
+      - {field: AppliesTo, op: in, values: [User]}  # pinned here: NO parameter
+      - {field: RevokedAt, op: isnull}              # about the column; no value
+      - {field: Age, op: gte, as: minAge}           # `as` names the parameter
+      - any: [ … ]            # OR    ·  all: [ … ]  # AND, nested inside an OR
+      - not: [ … ]            # negates what is under it
+    ```
+
+    `eq ne gt gte lt lte` take one value · `in nin` take a SET · `isnull notnull` take
+    none and require a nullable column · `contains startswith endswith` are text, with the
+    pattern escaping already done (which is why raw `like`/`ilike` are not in the set;
+    `between` is not either — it is `gte` + `lte`, two leaves whose parameters you name).
+  - **Decide WHERE the set comes from, because it decides whether a declarative rule can
+    read the fact.** `values: [...]` pins the comparison in the spec: the definition lives
+    beside the question named for it — a fifth member of the enum is one line here instead
+    of an edit in every rule that asks — and the fact keeps **no parameter** for it, so a
+    `factRange` rule can still read it. Left as a parameter, the caller decides the set and
+    the fact is called from `rules.manual`: `factRange` fills arguments from the entity, and
+    the entity carries one value per field, never a set — which is refused rather than
+    silently narrowed to an equality. Over an enum a pinned literal is the **member's
+    NAME**, checked against the members you declared; the generator writes its stored value.
+  - **The unique pre-check is the one fact this vocabulary is closed to.** It stays
+    `exists` filtered by exactly the index's columns, each compared for equality: the index
+    answers "is this exact tuple present", and a pre-check that ranged, ORed or pinned half
+    the tuple would ask a different question and report its answer under the index's
+    notification. Ask the other question as a fact of its own.
   - **name a fact for the PROBLEM, not for the healthy state.** The generated test suite
     stubs the service so every probe answers "nothing found", which is what lets the valid
     fixture through. `TenantIsUnavailable`, `WorkspaceTaken`, `PermissionKeyTaken` read

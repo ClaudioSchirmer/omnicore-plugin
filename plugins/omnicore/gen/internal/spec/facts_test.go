@@ -154,7 +154,7 @@ func TestGroupingKeyIsNotRepeated(t *testing.T) {
 // have meant emitting one and calling it something else.
 func TestExistsCannotBeGrouped(t *testing.T) {
 	ps := Validate(factSpec(Fact{
-		Name: "F", Kind: "exists", Filters: []string{"Status"},
+		Name: "F", Kind: "exists", Filters: eqFilters("Status"),
 		GroupBy: []string{"Status"}, Description: "d",
 	}), Options{})
 	if !blockerAbout(ps, "count") {
@@ -210,7 +210,7 @@ func factRangeSpec(r Rule) *Spec {
 	s.Service.Facts = append(s.Service.Facts,
 		Fact{Name: "PorSituacao", Kind: "count", GroupBy: []string{"Status"},
 			Description: "Quantas por situação."},
-		Fact{Name: "TemAlguma", Kind: "exists", Filters: []string{"Status"},
+		Fact{Name: "TemAlguma", Kind: "exists", Filters: eqFilters("Status"),
 			Description: "Existe alguma."},
 		Fact{Name: "AberturaDoCurso", Kind: "manual", Returns: "bool",
 			Description: "Respondida por outro serviço."},
@@ -315,4 +315,16 @@ func TestFactRangeWithoutAServiceIsRefused(t *testing.T) {
 	if ps := Validate(s, Options{}); !ps.HasBlockers() {
 		t.Fatal("a rule reading a fact needs the service that answers it")
 	}
+}
+
+// eqFilters is the Go spelling of `filters: [A, B]` — the bare-name form, which
+// is an equality against a parameter and is what most of these tests are about.
+// Written once here so a test that cares about the SHAPE of the tree says so by
+// building the tree itself.
+func eqFilters(names ...string) []FactFilter {
+	out := make([]FactFilter, 0, len(names))
+	for _, n := range names {
+		out = append(out, FactFilter{Field: n})
+	}
+	return out
 }

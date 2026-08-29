@@ -1137,6 +1137,38 @@ func renderCheck(b *strings.Builder, in Input) {
 			"stored.\n\n", strings.Join(raws, ", "))
 	}
 
+	// A pinned filter is a business decision frozen into a query, and it is
+	// invisible everywhere a reviewer normally looks: the port's signature does
+	// not carry it (that is the point of pinning), the rule that reads the fact
+	// does not mention it, and the value in the emitted criteria is the STORED
+	// one, so an enum member reads as a bare string. The one place it can be
+	// seen against the intent is here.
+	// The Found flags. The generated rules read them; a hand-written one is not
+	// obliged to, and reading the value alone is the exact defect this release
+	// fixed on the generated side — silent, and indistinguishable from a real
+	// zero in every log and every payload.
+	if guarded := foundBearingSlots(m); len(guarded) > 0 {
+		b.WriteString("### Numbers whose zero is not an answer\n\n")
+		fmt.Fprintf(b, "%s\n\n", strings.Join(guarded, "\n"))
+		b.WriteString("Each of these carries a `…Found` beside it, because the scalar can " +
+			"come back NULL: nothing matched, or — per group — the aggregated column is " +
+			"null in every row of that group. **Read the flag before the value.** The " +
+			"generated `factRange` rules do; anything you write in `rules.manual` that " +
+			"reads the number alone treats \"there was nothing to measure\" as a real " +
+			"zero, which no log and no payload can tell apart afterwards.\n\n")
+	}
+
+	if pinned := pinnedFactFilters(m); len(pinned) > 0 {
+		b.WriteString("### Values a fact compares against, fixed in the spec\n\n")
+		fmt.Fprintf(b, "%s\n\n", strings.Join(pinned, "\n"))
+		b.WriteString("Each of these is part of the QUESTION rather than something a " +
+			"caller passes, which is what keeps the definition beside the fact that is " +
+			"named for it — and what lets a `factRange` rule read the fact at all, since " +
+			"a declarative rule fills arguments from the entity and has nothing to fill a " +
+			"constant with. The trade is that widening the set is a change to this spec: " +
+			"a new member of the enum is NOT admitted until it is named here.\n\n")
+	}
+
 	// The two composite decisions a reviewer cannot see from the Go code alone,
 	// and that both cost something real to change afterwards: the names the parts
 	// are EXPOSED under (a wire contract, because nothing above the schema knows
@@ -1760,6 +1792,65 @@ func presence(cond bool, yes, no string) string {
 		return yes
 	}
 	return no
+}
+
+// foundBearingSlots names every number the service answers that can come back
+// as "there was nothing to measure", one line each.
+func foundBearingSlots(m *ir.Model) []string {
+	if m.Service == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range m.Service.Facts {
+		for _, sl := range f.Slots {
+			if !sl.Found {
+				continue
+			}
+			where := "`" + f.Name + "`"
+			if f.Grouped() {
+				where += " (per group)"
+			}
+			name := sl.Name
+			if !f.Multi {
+				name = "Value"
+			}
+			out = append(out, fmt.Sprintf("- %s: `%s` — check `%sFound` first (%s over %s)",
+				where, name, name, sl.Kind, sl.Field))
+		}
+	}
+	return out
+}
+
+// pinnedFactFilters lists every comparison whose value the spec fixed, one line
+// per leaf, as the query will ask it.
+//
+// It renders the STORED value, not the member name the spec wrote, because that
+// is what the reviewer is being asked to check against the column: an enum whose
+// member is `Withdrawing` and whose value is `withdrawing` is fine, and one
+// whose value quietly changed is exactly the drift this line catches.
+func pinnedFactFilters(m *ir.Model) []string {
+	if m.Service == nil {
+		return nil
+	}
+	var out []string
+	var walk func(fact string, nodes []ir.FactCond)
+	walk = func(fact string, nodes []ir.FactCond) {
+		for _, c := range nodes {
+			if !c.Leaf() {
+				walk(fact, c.Nodes)
+				continue
+			}
+			if len(c.Literals) == 0 {
+				continue
+			}
+			out = append(out, fmt.Sprintf("- `%s`: %s %s %s", fact, c.Field, c.Op,
+				strings.Join(c.Literals, ", ")))
+		}
+	}
+	for _, f := range m.Service.Facts {
+		walk(f.Name, f.Where)
+	}
+	return out
 }
 
 func manualFacts(m *ir.Model) []ir.Fact {

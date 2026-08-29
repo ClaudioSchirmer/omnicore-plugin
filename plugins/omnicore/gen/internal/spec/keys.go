@@ -57,12 +57,20 @@ func Keys() ([]Key, error) {
 
 	var out []Key
 	seen := map[string]bool{}
+	// A block that nests ITSELF — a fact's filter tree, whose all/any/not hold
+	// more filters — is walked once and not followed back into. Its keys are the
+	// same keys at every depth, so descending would list them again under a
+	// longer path, and the reference would answer "what can I configure?" with
+	// several hundred spellings of one block.
+	open := map[string]bool{}
 	var walk func(typeName, prefix string, depth int)
 	walk = func(typeName, prefix string, depth int) {
 		st, ok := structs[typeName]
-		if !ok || depth > 6 {
+		if !ok || depth > 6 || open[typeName] {
 			return
 		}
+		open[typeName] = true
+		defer delete(open, typeName)
 		for _, field := range st.Fields.List {
 			tag := yamlTagOf(field)
 			if tag == "" || tag == "-" {
@@ -135,6 +143,11 @@ func scalarName(name string) string {
 	switch name {
 	case "string", "int", "int64", "bool", "float64":
 		return name
+	case "any":
+		// A key typed `any` takes a value in the FIELD's type — a number for a
+		// number, text for text, an enum member by name. "any" would read as
+		// "anything goes", which is the one thing it does not mean.
+		return "literal"
 	}
 	return name
 }
