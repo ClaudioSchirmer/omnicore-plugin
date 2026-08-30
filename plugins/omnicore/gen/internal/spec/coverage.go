@@ -47,6 +47,7 @@ const (
 	CapPerChildPatch    Capability = "partial change of ONE collection entry (PATCH over the entry: the caller sends what moves, everything else — the business identity first — is read off what is stored)"
 	CapAssignedField    Capability = "server-assigned fields (from the caller's identity)"
 	CapDerivedField     Capability = "server-derived fields (computed from the entity's own, kept out of every write DTO)"
+	CapStampedField     Capability = "framework-stamped fields (the domain says WHEN, the framework supplies the VALUE: a nullable timestamp bound with the write's own instant, or a per-row counter incremented under the row's lock — never written from the struct, and out of every write DTO)"
 	CapMountedChild     Capability = "a shared identity's collection, exposed on a second role"
 	CapGroupedFact      Capability = "per-group facts, computed by the database (GROUP BY)"
 	CapFactCriteria     Capability = "facts narrowed by the full criteria vocabulary (a comparison other than equality, a set, an OR, or a value pinned in the spec)"
@@ -106,6 +107,7 @@ var implemented = map[Capability]bool{
 	CapPerChildPatch:    true,
 	CapAssignedField:    true,
 	CapDerivedField:     true,
+	CapStampedField:     true,
 	CapMountedChild:     true,
 	CapCompositeVO:      true,
 	CapManualVO:         true,
@@ -140,7 +142,7 @@ func AllCapabilities() []Capability {
 		CapOwnerAccess, CapTenantAccess, CapScopeBypass, CapScopedUnique,
 		CapChildUnique, CapPerEntryFact, CapBatchedFact, CapArchivedScope, CapJoinedFact,
 		CapGeneratedTests, CapPerChild, CapPerChildPatch,
-		CapAssignedField, CapDerivedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
+		CapAssignedField, CapDerivedField, CapStampedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
 		CapMultiAggregate, CapStampedFilter, CapIdentityFilter,
 		CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
@@ -211,6 +213,13 @@ func CheckCoverage(s *Spec) *Problems {
 		if IdentitySourceOf(f) != "" {
 			uses(CapIdentityRuntime, fmt.Sprintf("fields[%d].source", i),
 				"a field fed from the framework's own question about the caller")
+			break
+		}
+	}
+	for i, f := range s.Fields {
+		if f.Stamped != "" {
+			uses(CapStampedField, fmt.Sprintf("fields[%d].stamped", i),
+				"a column whose value the framework mints")
 			break
 		}
 	}

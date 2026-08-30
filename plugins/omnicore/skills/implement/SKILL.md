@@ -191,6 +191,12 @@ session." Never a gate: this run continues on the installed skills.
   else; on a match, hand off to the owner. When in doubt between "capability" and
   "entity change", the question is what the diff touches: schema/DTO/translation
   lockstep → `evolve-entity`; wiring, config, surfaces, middleware, events → here.
+  **"Record when this happened / how many times" is an entity change wearing a
+  capability's clothes** — the framework's stamped columns are a `TableSchema`
+  declaration plus a rule, so it goes to `evolve-entity`, not here. What DOES belong
+  here is the host-level half: WHICH clock those stamps are read from
+  (`relational.clock`), which is a `yaml-reference` key and a `/omnicore:configure` job
+  when it is being changed rather than declared.
 
 ## Phase 0v — Version check (delegate)
 

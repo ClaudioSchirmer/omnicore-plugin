@@ -79,6 +79,30 @@ needs its `.down.sql` (may be a no-op) or boot aborts.
   STRICT: unreadable path / missing secret ABORTS boot naming it. No recursion; a
   literal `}` needs care. Prd endpoints ship as pure `${VARS}` — no localhost
   defaults.
+- **A MANDATORY key with no default aborts boot by its ABSENCE**, which is the mirror
+  image of the strict decoding below and fails in a way nothing in Go reports: the
+  service compiles, vets and tests green, and dies on the first boot after the bump.
+  `relational.dialect` and `relational.dsn` have always been that shape; on a pin that
+  carries it, `relational.clock` (`db` | `app`) joined them — deliberately undefaulted,
+  because which clock a service's history is written against is an operator's
+  declaration and a framework that picked one silently would be choosing whose
+  timestamps to trust.
+
+  **When you ASK an operator for that value, explain why the instant is read BEFORE the
+  write — otherwise `db` reads as a gratuitous round-trip and the framework reads as
+  badly built.** The obvious-looking design, `NOW()` inside the DML, is the one the
+  framework deliberately does not use on EITHER setting: the instant is minted once per
+  operation and bound as an ordinary argument, because one write is several statements
+  (root, children, siblings, the base cascade) that must all carry the same instant, and
+  because the value has to be known in Go before `COMMIT` — the outbox payload, the audit
+  event, the lifecycle hooks and the response are built from it, and the unarchive cascade
+  tells *this* archive's children from the ones already archived by comparing exactly that
+  stamp. So the setting decides only WHOSE clock that one reading comes from: the backend
+  (one clock for the whole fleet, one extra round-trip per write TX) or the writing
+  process (no round-trip, the pod's own drift). Neither makes `updated_at` an ordering
+  token — that is `Revision`, the commit-order counter. **Which keys are mandatory is the
+  PIN's `yaml-reference`'s answer, never this file's** — read it against the project's own profiles, and check
+  EVERY profile, since the one that boots in dev is not the one that boots in prd.
 - Several yaml blocks are STRICT-DECODED (unknown key = boot abort), among them
   `mongo.rebuild`, `auth.authorization`, each `upstreamSubscriptions` entry; the
   `audit.destinations` list aborts on an unknown token or duplicate — and an ABSENT
@@ -113,6 +137,10 @@ port — or the whole process group, never the parent alone.
 
 ## Diagnosis quick-map (doctor)
 
+Boot abort naming a MISSING mandatory yaml key (the pin's `yaml-reference` says which
+are mandatory; `relational.clock` is the one that arrived most recently and the one an
+upgraded service trips on) → the key has no default ON PURPOSE — add it to EVERY
+profile with the same value, do not guess one per profile ·
 Boot abort "no relational engine registered" → missing engine build tag · reactions/
 subscriptions dead on a green service, `no transport registered` at the point of use →
 `transport:` block present but built without the transport tag · Mongo-backed views

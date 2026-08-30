@@ -24,6 +24,19 @@ var (
 	// promises to keep the field out of the write surface.
 	AssignedFrom = set("identity-subject", "identity-claim", "derived")
 
+	// StampedKinds is WHAT filling a framework-owned column means. The two
+	// members share the whole mechanism — the same marker asks for both, the
+	// value is the server's either way, and neither is ever written from the
+	// struct — and split on the shape of the value alone: `time` binds the write
+	// operation's single instant, `counter` binds 1 on the insert and
+	// `col = col + 1` afterwards.
+	//
+	// The split is a closed set rather than an inference from `type` because a
+	// timestamp and a counter are two different promises, and a spec that means
+	// one and gets the other says nothing about it: both compile, both migrate,
+	// and the difference only shows up in production data.
+	StampedKinds = set("time", "counter")
+
 	// FieldSources is where a RUNTIME-only field is fed from. Every answer keeps
 	// the field off every table: the difference is who supplies the value.
 	//
@@ -338,6 +351,17 @@ func Vocabularies() []Vocabulary {
 				"(derived) from the entity's own fields, by a rule you write. Only " +
 				"`derived` combines with nullable: your rule may leave the value unset, " +
 				"while an identity is written on every insert."},
+		{"fields[].stamped", StampedKinds,
+			"the framework owns the VALUE, the domain owns the WHEN. time = a nullable " +
+				"timestamp (*time.Time) bound with the write operation's own instant — the " +
+				"seat createdAt/updatedAt do not cover, for a FACT that just happened " +
+				"(paid, approved, cancelled) rather than for the row; counter = a " +
+				"non-nullable int64 the server increments under the row's lock, per ROW " +
+				"and never a table-wide sequence. Both leave every write surface, exactly " +
+				"as assignedFrom does, and neither is ever written from the struct. What " +
+				"ASKS for the stamp is not generated: e.Stamp(\"PaidAt\") belongs to a " +
+				"rules.manual entry you write, because no rule in this language knows the " +
+				"moment a domain calls a fact done."},
 		{"fields[].source", FieldSources,
 			"where a RUNTIME-only field is fed from. claim = the caller's token by NAME " +
 				"(the default, and it needs claim: <name>); body = the request itself — the " +
@@ -549,6 +573,15 @@ func RefusedKeys() map[string]string {
 			"own to be assigned from — the field that records who acted belongs to the root",
 		"siblings[].fields[].assignedFrom": "a facet's field is written with the facet — the " +
 			"field that records who acted belongs to the root",
+		"children[].fields[].stamped": "the framework stamps an aggregate child's column " +
+			"just as it stamps the root's, but this build does not lower it: an entry's " +
+			"fields go into the entry's input DTO whole, and there is no per-field " +
+			"\"the server owns this one\" narrowing there yet (the same gap that refuses " +
+			"children[].fields[].assignedFrom). Date the fact on the ROOT, or take the " +
+			"collection's write path by hand",
+		"siblings[].fields[].stamped": "the framework itself refuses it — a facet row is a " +
+			"1:1 slice of the OWNER's row and carries no framework-owned columns of its " +
+			"own; declare the stamped column on the owner",
 		"children[].fields[].bypassMaySet": "the row scope narrows by a field of the ROOT, " +
 			"and that field's guard is what makes a stated value safe to accept — an " +
 			"entry of a collection is not the subject of any scope",

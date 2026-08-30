@@ -148,10 +148,28 @@ func emitAggregate(m *ir.Model) (fsplan.File, error) {
 }
 
 func fieldComment(f ir.Field) string {
-	if f.Description == "" {
-		return ""
+	// A framework-owned column is the one field on this struct where the
+	// obvious move — assign it — is silently a no-op: the framework leaves the
+	// column out of the statement unless the write asked for it, so nothing
+	// errors and nothing is written. The marker goes on the field itself
+	// because that is where somebody about to assign it is looking.
+	var stamp string
+	switch f.Stamped {
+	case "time":
+		stamp = fmt.Sprintf("framework-stamped: Stamp(%q), never assign", f.Name)
+	case "counter":
+		stamp = fmt.Sprintf("framework-counted: Stamp(%q), never assign", f.Name)
 	}
-	return " // " + strings.TrimSuffix(f.Description, ".")
+	desc := strings.TrimSuffix(f.Description, ".")
+	switch {
+	case desc == "" && stamp == "":
+		return ""
+	case desc == "":
+		return " // " + stamp
+	case stamp == "":
+		return " // " + desc
+	}
+	return " // " + desc + " — " + stamp
 }
 
 func emitModes(s *src, m *ir.Model) {

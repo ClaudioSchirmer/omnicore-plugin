@@ -188,6 +188,22 @@ type Field struct {
 	// AssignedFrom names where the server reads this field's value when the
 	// client is not allowed to send it. Empty for an ordinary field.
 	AssignedFrom string
+	// Stamped says the FRAMEWORK owns this column's value: "time" for a
+	// StampedTimeField (the write operation's own instant, bound into a nullable
+	// timestamp) and "counter" for a StampedCounterField (1 on the insert,
+	// `col = col + 1` afterwards, computed under the row's lock). Empty for an
+	// ordinary field.
+	//
+	// It reaches further than AssignedFrom does. A server-assigned field is
+	// merely kept out of the write surface and then written by generated or
+	// hand-written code like any other; a stamped one is never written from the
+	// struct AT ALL — the framework leaves the column out of the statement
+	// unless something asked for it. So the emitters read this in three places
+	// and nowhere else: the schema chain (Field becomes StampedTimeField /
+	// StampedCounterField), the write surface (the field is absent from every
+	// request DTO, command and mapper), and the report (which names the
+	// rules.manual entry that owes the Stamp call).
+	Stamped string
 	// BypassMaySet says the caller who crosses the row scope may state this
 	// value instead of having it read off their own identity. Set only on the
 	// scope's SUBJECT, which is the one field the row-scope guard compares — and
@@ -856,6 +872,7 @@ func resolveField(entity string, f spec.Field) Field {
 		Permission:     f.Permission,
 		Hidden:         f.Hidden,
 		AssignedFrom:   f.AssignedFrom,
+		Stamped:        f.Stamped,
 		BypassMaySet:   f.BypassMaySet,
 		LivesOn:        f.LivesOn,
 		Redaction:      resolveRedaction(f.Redact, entity, f.Name),
@@ -3621,6 +3638,13 @@ func (m *Model) WritableFields() []Field {
 		if f.AssignedFrom != "" {
 			continue
 		}
+		// A stamped column is out for a stronger reason than a server-assigned
+		// one: nothing writes it from the struct, so a request field for it
+		// would be accepted, mapped onto the entity, and then silently dropped
+		// by the framework on its way to the statement.
+		if f.Stamped != "" {
+			continue
+		}
 		out = append(out, f)
 	}
 	// A body-sourced runtime field is written by the client and stored by
@@ -3778,7 +3802,7 @@ func (m *Model) BypassSettableField() *Field {
 func Mappable(fields []Field) []Field {
 	out := make([]Field, 0, len(fields))
 	for _, f := range fields {
-		if f.AssignedFrom != "" {
+		if f.AssignedFrom != "" || f.Stamped != "" {
 			continue
 		}
 		out = append(out, f)
@@ -3886,6 +3910,24 @@ func (m *Model) IdentityAssignedFields() []Field {
 	var out []Field
 	for _, f := range m.AssignedFields() {
 		if f.AssignedFrom == "identity-subject" || f.AssignedFrom == "identity-claim" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// StampedFields are the columns the FRAMEWORK fills, in spec order.
+//
+// They are not AssignedFields and must not be folded into them: an assigned
+// field is written by code (generated, for an identity; hand-written, for a
+// derived one), while a stamped one is written by the framework and only when
+// something asked. The one emitter that treats them alike is the write surface,
+// which leaves both out — and it reaches them through WritableFields, not
+// through this.
+func (m *Model) StampedFields() []Field {
+	var out []Field
+	for _, f := range m.AllOwnerFields() {
+		if f.Stamped != "" {
 			out = append(out, f)
 		}
 	}

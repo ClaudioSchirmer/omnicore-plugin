@@ -253,6 +253,55 @@ func renderTodo(b *strings.Builder, in Input) {
 		b.WriteString("\n")
 	}
 
+	// A STAMPED column, for the same reason and one more. The derived field
+	// above at least gets written by ordinary code; this one cannot be — the
+	// framework leaves the column out of the statement entirely unless the write
+	// ASKED for it, so assigning the Go field does nothing and produces no
+	// error. A column nobody ever asks to stamp is a column that stays empty
+	// forever, and the only evidence is the data.
+	if stamped := m.StampedFields(); len(stamped) > 0 {
+		empty = false
+		b.WriteString("### Columns the FRAMEWORK fills, which nothing here asks it to\n\n")
+		b.WriteString("These left every write request, command and OpenAPI request schema — " +
+			"no client sets them — and they are not written from the struct either: " +
+			"assigning the Go field by hand does nothing. The framework fills the column " +
+			"on the writes that ASK, and asking is `e.Stamp(\"<Field>\")` inside a " +
+			"`rules.manual` entry on the verb where the fact happens. Nothing this " +
+			"generator writes asks: the rule DSL validates, it does not mutate.\n\n")
+		for _, f := range stamped {
+			switch f.Stamped {
+			case "counter":
+				fmt.Fprintf(b, "- **`%s`** — `stamped: counter`. `e.Stamp(%q)` makes the "+
+					"column `= col + 1`, computed by the server under the row's lock, so "+
+					"two concurrent writers cannot both read the same value. The INSERT "+
+					"binds 1 with nobody asking; every later increment is a rule of "+
+					"yours. Per ROW — it counts this row's own events and never anything "+
+					"table-wide.\n", f.Name, f.Name)
+			default:
+				fmt.Fprintf(b, "- **`%s`** — `stamped: time`. `e.Stamp(%q)` binds this "+
+					"write operation's own instant, the same one `created_at` and "+
+					"`updated_at` carry on it, and writes the value back onto the entity "+
+					"so the response, the audit event and the outbox payload all agree "+
+					"with the row. Until something asks, the column is NULL — which is "+
+					"the honest answer while the fact has not happened, and "+
+					"indistinguishable from a stamp nobody wrote.\n", f.Name, f.Name)
+			}
+		}
+		b.WriteString("\nWhich write asks is the one thing to check: a stamp on the wrong " +
+			"verb dates the wrong event, and no test the generator writes can tell.\n\n")
+		b.WriteString("If asking the framework for a value looks like ceremony next to " +
+			"`e.PaidAt = time.Now()`, this is why it is not. The instant a write is dated " +
+			"with is minted ONCE per operation and reused by everything that write " +
+			"produces: one write is several statements (root, children, siblings, the " +
+			"base cascade) and they all carry the same instant; the outbox payload, the " +
+			"audit event, the lifecycle hooks and the response are built from it before " +
+			"`COMMIT`; and the framework compares against it — the unarchive cascade tells " +
+			"*this* archive's children from the ones already archived by comparing exactly " +
+			"that stamp. A `time.Now()` in a rule is a SECOND reading, off the pod's own " +
+			"drifting clock, that agrees with none of them. Which clock the one reading " +
+			"comes from is the host's declaration (`relational.clock`), not this spec's.\n\n")
+	}
+
 	for _, h := range hooks {
 		if len(h.rules) == 0 {
 			continue

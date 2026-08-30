@@ -2,6 +2,7 @@ service: omnicore-gen-golden-host
 relational:
   dialect: postgres
   dsn: "${DATABASE_URL:}"
+  clock: db          # MANDATORY since framework v0.65.0 — no default; boot aborts without it.
 migrations:
   dir: ./migrations/postgres
   autoRun: check

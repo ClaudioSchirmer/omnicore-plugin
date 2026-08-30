@@ -131,7 +131,8 @@ on the table.
   and the relational dialect (closed choice). Nothing here depends on a later answer.
 - **Round 2 — branch on the dialect answer:**
   - **SQLite →** ask ONLY the slots that still exist: the SQLite DSN (#6-SQLite),
-    surfaces (#5), cross-platform wrappers (#7). Do NOT ask transport, docker bench, or
+    surfaces (#5), cross-platform wrappers (#7), the write clock (#9). Do NOT ask
+    transport, docker bench, or
     read-side posture — the zero-infra DEFAULT resolves them (no `transport:` block ⇒ no
     transport tag / no bench / relational views) and the spec RECORDS them as defaults,
     not laws: a SQLite service may later declare `transport:` + the tag to SUBSCRIBE to
@@ -139,8 +140,8 @@ on the table.
     no CDC feed) — both via `/omnicore:configure`, no re-scaffold. No "ignored if sqlite"
     parentheticals, no answering-to-discard.
   - **Full engine (postgres|mysql|sqlserver|oracle) →** ask transport (#4), surfaces
-    (#5), docker bench (#6), cross-platform wrappers (#7), read-side posture (#8) — all
-    in this one round.
+    (#5), docker bench (#6), cross-platform wrappers (#7), read-side posture (#8), the
+    write clock (#9) — all in this one round.
 
 If the dev already named the dialect in their invocation ("scaffold a sqlite service"),
 the pivot is settled — skip Round 1's dialect slot and open directly on the right
@@ -195,6 +196,61 @@ full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
    version-exact capability answers). **On SQLite the posture is forced relational** —
    nothing to ask. Record the posture in the spec; it's handed to `scaffold-entity`
    as the DEFAULT backing per entity view (still per-entity overridable there).
+
+9. **The write clock** — WHICH clock stamps the framework's managed timestamp columns
+   (`created_at`, `updated_at`, and the archive/unarchive `deleted_at` stamp): the
+   relational backend, or the writing process. `(proposed: db)`.
+
+   **Ask it only when the pinned `yaml-reference` carries a `relational.clock` key** —
+   the same availability test every other capability gets (`shared/direct-schema.md` is
+   the pattern). Where the pin has it, it is a **key with NO default and boot ABORTS
+   without it**, exactly like `dialect` and `dsn` — so it is a slot, not a filled
+   default. Where the pin does not, there is nothing to ask and nothing to write; do not
+   invent the key.
+
+   Word it as the trade it is, from the pin's own text, and DO NOT editorialise beyond it:
+   - **`db`** — the instant is read from the relational backend, ONE reading per write
+     transaction, so every replica shares one clock. Costs one extra round-trip per write
+     TX. This is the recommendation, and the reason is not performance: the app clock is a
+     PER-POD clock, several replicas of one service each carry their own drift, and two
+     rows written seconds apart can be stamped out of order with nothing in the write path
+     able to notice. No care in the code fixes a wrong reading at the source.
+   - **`app`** — `time.Now().UTC()` in the writing process. No round-trip, and correct
+     exactly as far as the fleet's clock discipline is. A deliberate choice for a
+     single-replica service or a fleet with real NTP discipline that wants the trip back.
+
+   **Say WHY the instant is read BEFORE the write, or `db` reads as a gratuitous
+   round-trip and the framework reads as badly built.** The obvious-looking design — put
+   `NOW()` in the SQL and let the database fill the column — is the one the framework
+   deliberately does NOT use, on either setting. The instant is minted ONCE per operation
+   and BOUND as an ordinary argument, because it has to be known in Go before `COMMIT`:
+   - **one write is several statements** — root, children, siblings, the shared-base
+     cascade — and they all have to carry the SAME instant. Five `NOW()` expressions are
+     five readings;
+   - **the outbox payload, the audit event, the lifecycle hooks and the response are all
+     built from that value.** A timestamp only the row knows would mean the event says one
+     thing, the audit line another, and the caller receives a third — or a read-back after
+     every write to reconcile them;
+   - **the framework compares against it.** The unarchive cascade tells the children *this*
+     archive put to sleep from the ones already archived on their own by comparing exactly
+     that stamp; an instant nobody held in hand cannot be compared.
+
+   So the choice is not "read it early or let the DB do it" — it is only WHOSE clock that
+   one reading comes from. `db` buys one reading shared by the whole fleet for one
+   round-trip per write transaction; `app` buys no round-trip and inherits the pod's drift.
+
+   Two more things to say plainly so nobody reads more into it than is there:
+   - **On SQLite the engine is embedded, so the database clock IS the process clock.** The
+     setting is honored and buys no fleet-wide agreement. Still ASK — the key is mandatory
+     on every engine, and a SQLite MVP that later converts to Postgres via
+     `/omnicore:configure` keeps whatever was declared here.
+   - **Neither setting makes `updated_at` an ordering token.** Ordering between concurrent
+     writes is carried by `Revision`, the commit-order token; the clock decides whether
+     `updated_at` is a trustworthy DISPLAY timestamp.
+
+   Record it in the spec and write the SAME value into every profile — `dev`, `prd` and
+   any other. A service whose history is stamped by one clock in dev and another in
+   production is a service whose timestamps mean two things.
 
 **When the engine is SQLite — the zero-infra MVP posture (say all of this, calmly).**
 Picking SQLite auto-resolves the infra questions and the spec records them AS THE
@@ -300,7 +356,10 @@ applies only when any high-risk slot would otherwise be filled by you.
      entity — they are `scaffold-entity`'s job; translations on a shell with zero
      features are dead weight the entity run would have to reconcile).
 4. **`microservice.dev.yaml`** — MINIMAL, not a reference dump: `service`, `http`,
-   `relational` (the one truly mandatory infra block), plus `mongo` / `transport` per
+   `relational` — the one truly mandatory infra block, and **every key the pinned
+   `yaml-reference` marks MANDATORY inside it goes in, not just `dialect` and `dsn`**
+   (on a pin that carries it, `clock` is one of them: no default, boot aborts without it
+   — the answer from slot #9, written identically into every profile) — plus `mongo` / `transport` per
    the CHOSEN posture — each is opt-out by absence, independently (only `relational`
    is required by validation; a full engine may legally omit either), `migrations`,
    the chosen

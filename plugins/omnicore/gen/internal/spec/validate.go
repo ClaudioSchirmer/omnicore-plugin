@@ -1003,6 +1003,8 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 		}
 	}
 
+	validateStamped(s, f, where, ps, isChild, isFacet)
+
 	if f.Runtime {
 		validateRuntimeField(s, f, where, ps, isChild)
 		return
@@ -2191,6 +2193,16 @@ func validateLifecycle(s *Spec, ps *Problems) {
 		// update sees the parts and the domain sees the value object.
 		if findField(s.Fields, ex) == nil && findLogicalField(s.Fields, s, ex) == nil {
 			ps.Blockerf("update.patchExcludes", "%q does not name a field of this entity", ex)
+			continue
+		}
+		// Excluding a field no patch carries in the first place reads as a
+		// decision and is not one. A stamped column is out of every write
+		// surface already, so the line does nothing and the next reader has to
+		// go and find that out.
+		if ex := findField(s.Fields, ex); ex != nil && ex.Stamped != "" {
+			ps.WarnFix("update.patchExcludes",
+				fmt.Sprintf("%q is a stamped column, which no write request carries to begin with", ex.Name),
+				"drop the exclusion — it changes nothing")
 		}
 	}
 	// A patch with nothing left to patch accepts a body and changes nothing —
@@ -2198,7 +2210,7 @@ func validateLifecycle(s *Spec, ps *Problems) {
 	if s.Update.Shape == "patch" || s.Update.Shape == "both" {
 		patchable := 0
 		for _, f := range s.Fields {
-			if f.Runtime || f.AssignedFrom != "" || contains(s.Update.PatchExcludes, f.Name) {
+			if f.Runtime || f.AssignedFrom != "" || f.Stamped != "" || contains(s.Update.PatchExcludes, f.Name) {
 				continue
 			}
 			patchable++
@@ -6132,4 +6144,131 @@ func hasInsertManualRule(s *Spec) bool {
 // says what it will be, and the report reads it to ask for it.
 func declaredHere(kind string) bool {
 	return kind == "raw" || kind == "enum" || kind == "manual"
+}
+
+// validateStamped holds a framework-owned column to the shape the framework
+// declares for it.
+//
+// Everything here is a BLOCKER rather than a warning, because every mistake in
+// this pair compiles. A `stamped: counter` on a nullable column emits a
+// StampedCounterField over a *int64 and the framework panics at boot; a
+// `stamped: time` on a non-nullable one emits it over a time.Time and does the
+// same. Neither is a thing a reviewer sees by reading the spec.
+func validateStamped(s *Spec, f Field, where string, ps *Problems, isChild, isFacet bool) {
+	if f.Stamped == "" {
+		return
+	}
+	if !StampedKinds.Has(f.Stamped) {
+		ps.BlockerFix(where+".stamped",
+			fmt.Sprintf("%q is not a kind of stamp", f.Stamped),
+			"one of: "+StampedKinds.String())
+		return
+	}
+	// The two refusals the framework itself raises, moved to load time. A
+	// sibling carries no framework-owned columns of its own, and a runtime field
+	// has no column at all.
+	if isFacet {
+		ps.BlockerFix(where+".stamped",
+			"a facet row is a 1:1 slice of the OWNER's row and carries no framework-owned "+
+				"columns of its own — the framework refuses the declaration",
+			"move the stamped column to the owner (a root field, or one under a shared "+
+				"identity)")
+		return
+	}
+	if isChild {
+		ps.BlockerFix(where+".stamped",
+			"this build does not lower a stamped column on a collection entry",
+			"the framework stamps an aggregate child exactly as it stamps the root, but "+
+				"an entry's fields go into its input DTO whole and there is no per-field "+
+				"\"the server owns this one\" narrowing there yet — date the fact on the "+
+				"ROOT, or take the collection's write path by hand")
+		return
+	}
+	if f.Runtime {
+		ps.BlockerFix(where+".stamped",
+			"a runtime-only field has no column, and a stamp is a value written into one",
+			"drop runtime: true to persist the fact, or drop stamped — nothing the "+
+				"framework owns can live on a field it never writes")
+		return
+	}
+	if strings.HasPrefix(f.LivesOn, "sibling:") {
+		ps.BlockerFix(where+".stamped",
+			"a facet row is a 1:1 slice of the OWNER's row and carries no framework-owned "+
+				"columns of its own — the framework refuses the declaration",
+			"move the stamped column to the owner (livesOn: root, or base/role under a "+
+				"shared identity)")
+		return
+	}
+	switch f.Stamped {
+	case "time":
+		if f.Type != "time" {
+			ps.BlockerFix(where+".type",
+				fmt.Sprintf("a stamped time is a timestamp, and %q is not", f.Type),
+				"set type: time — or, if what you want is a count of events on this row, "+
+					"stamped: counter with type: int64")
+		}
+		if !f.Nullable {
+			ps.BlockerFix(where+".nullable",
+				"until something stamps it the fact has not happened, and a non-nullable "+
+					"timestamp reports year 1 instead of saying so",
+				"set nullable: true — the framework declares the Go field as *time.Time "+
+					"and refuses anything else")
+		}
+	case "counter":
+		if f.Type != "int64" {
+			ps.BlockerFix(where+".type",
+				fmt.Sprintf("a stamped counter is an int64, and %q is not", f.Type),
+				"set type: int64 — the counter is per ROW, not a table-wide sequence, so "+
+					"there is no id type behind it")
+		}
+		if f.Nullable {
+			ps.BlockerFix(where+".nullable",
+				"a counter always has a value — a row that was just created has counted "+
+					"one thing — so there is no absence for null to describe",
+				"drop nullable; the framework declares the Go field as a plain int64 and "+
+					"refuses a pointer")
+		}
+	}
+	// The four keys that say something a framework-owned value cannot be.
+	if f.AssignedFrom != "" {
+		ps.BlockerFix(where+".assignedFrom",
+			"assignedFrom says where the SERVER READS the value; a stamped column has no "+
+				"source to read — the framework mints it",
+			"drop one of the two. If the value comes from the caller's token or from the "+
+				"entity's own fields, it is assignedFrom and not a stamp")
+	}
+	if f.VO != nil && f.VO.Kind != "" && f.VO.Kind != "none" {
+		ps.BlockerFix(where+".vo",
+			"a value object validates a value the domain supplies, and nothing supplies "+
+				"this one — the column is never written from the struct",
+			"drop vo")
+	}
+	if f.Unique != nil {
+		ps.BlockerFix(where+".unique",
+			"a business key is a value someone states and the write is refused over; a "+
+				"stamped column is minted by the framework after that decision is made",
+			"drop unique — to order or window rows by the stamp, that is the read side's "+
+				"filters and indexes")
+	}
+	if f.Redact != nil {
+		ps.BlockerFix(where+".redact",
+			"redact keeps a real value in the column and masks the copies; a stamp is the "+
+				"framework's own instant and there is nothing about it to hide",
+			"drop redact")
+	}
+	if f.BypassMaySet {
+		ps.BlockerFix(where+".bypassMaySet",
+			"bypassMaySet lets a caller STATE a value the server would otherwise read off "+
+				"their identity, and no caller states a stamp",
+			"drop bypassMaySet")
+	}
+	// Same shape as the derived warning next door, and the same failure: a
+	// column nothing ever fills, silently. The rule DSL validates and does not
+	// mutate, so the Stamp call can only come from a hand-written rule.
+	if len(s.Rules.Manual) == 0 {
+		ps.WarnFix(where+".stamped",
+			"nothing in this spec asks for this stamp",
+			fmt.Sprintf("the request is e.Stamp(%q) inside a rules.manual entry you write "+
+				"— without one the column is never written and no error says so", f.Name))
+	}
 }

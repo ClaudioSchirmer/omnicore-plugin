@@ -120,6 +120,14 @@ Map what exists before proposing — this is the whole safety of the run:
 - **Engine + DSN** — `relational.dialect` and the DSN across every `microservice.*.yaml`
   (resolve `${VAR:default}`); the `migrations/<dialect>/` folders present; the build tags in the
   start wrappers.
+- **The whole `relational:` block against the pin, not just those two.** Read the pinned
+  `yaml-reference` for which keys inside it are MANDATORY and check every profile carries
+  each of them — a project that predates the pin has profiles written against an older
+  key set, and a key that gained no default is one the service will refuse to boot
+  without. On a pin that carries it, `relational.clock` (`db` | `app`) is exactly that
+  shape: no default, boot aborts. **If a profile is missing a mandatory key, say so as a
+  FINDING in Phase 0b — before proposing any conversion** — because it will surface as a
+  boot abort at the verify and read as damage this run did.
 - **Mongo** — is a `mongo:` block / `mongo.uri` present? (absent ⇒ relational-only posture;
   present WITHOUT `transport:` ⇒ collections boot but the sync consumer is skipped — see the
   anchor-postures note above.)
@@ -194,7 +202,17 @@ structural (`N/A — <why>`):
 ## Phase 2 — Execute the impact map
 
 One pass in dependency order — read the owning `/docs` section BEFORE each artifact:
-1. `microservice.*.yaml` — add/remove/edit the blocks (yaml-reference).
+1. `microservice.*.yaml` — add/remove/edit the blocks (yaml-reference). **Every profile
+   gets the same answer for a mandatory `relational` key** — a service whose history is
+   stamped by `clock: db` in dev and `clock: app` in production has timestamps that mean
+   two things. On an ENGINE SWAP the clock declaration travels unchanged: it is an
+   operator's statement about whose clock the history is written against, not a property
+   of the engine (the WHY, and what to say when the dev asks why the instant is not just
+   a `NOW()` in the SQL, is owned by `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`) —
+   with the one honest footnote that on SQLite the engine is embedded, so
+   the database clock IS the process clock and the setting buys no fleet-wide agreement
+   (converting AWAY from SQLite is where `clock: db` starts meaning something, and the
+   value that was already declared is the one that keeps applying).
 2. `devops/` — instantiate compose + Debezium relay from `scaffold-service/templates/` for the
    target dialect × transport (or delete `devops/` entirely when converting to zero-infra SQLite —
    no Docker); validate framework-facing values against `transport.html`.
@@ -248,7 +266,9 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
    an explicit dev-accepted deviation.
 1. **Mechanical, pre-boot:** yaml coherent with the target (a Mongo-backed/composed view present
    ⇒ `mongo.uri` present, else the boot aborts by design; `migrations.dir` points at the
-   target dialect's folder in every profile); build tags match the engine+transport;
+   target dialect's folder in every profile; **every key the pin marks mandatory inside
+   `relational:` present in EVERY profile, with the same value** — the prd one included,
+   which no boot here tests); build tags match the engine+transport;
    `gofmt -l` + `go vet` + `go build` (target tags) clean.
 1b. **prd static sanity** — when the conversion added/removed `mongo`/`transport`/
    `relational` blocks, the prd profile moved too: the new blocks present there as pure

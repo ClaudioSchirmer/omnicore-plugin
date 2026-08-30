@@ -88,6 +88,61 @@ is a question the developer would otherwise discover later:
 - **The multi-row verbs report a COUNT, not a status.** There is no 404/409 split beyond the
   single-row verbs' not-found.
 
+## Two verbs the design depends on, when the pin has them
+
+The door gained capability after it shipped, so the same mechanical test applies per verb —
+does the pin's `direct-schema` section describe it? — and the design changes if it does.
+
+**`Upsert` — insert-or-update on a DECLARED CONFLICT KEY, in one statement.** It is the
+answer to the shape a control table almost always has: two callers race on the same key and
+both decide the row is missing. Without it the honest options were a SELECT-then-INSERT that
+loses the race, or a unique-violation caught and retried.
+
+    w.Upsert(ctx, write.Values{
+        "Identity":        id,
+        "IdentityKind":    kind,
+        "Outcome":         "FAILURE",
+        "TotalCount":      write.Stamp,          // += 1, server-side
+        "WindowStartedAt": write.OnInsert(t0),   // set once, never revised
+        "LastAt":          write.Stamp,          // the operation's instant
+        "LastIP":          ip,                   // overwritten on conflict
+    }, write.OnConflict("Identity", "IdentityKind", "Outcome"),
+       write.KeepArchiveStateOnConflict())
+
+Every slot says what happens ON A CONFLICT, and those are the four kinds of column an upsert
+has: an ordinary value is overwritten, `write.Stamp` is filled by the framework,
+`write.OnInsert(v)` is established at creation and never revised, and the conflict key itself
+is insert-only by definition — it is the thing that matched. The key is named PER CALL, by Go
+field name, because one table legitimately has more than one way to be conflicted on.
+
+Three things belong in any proposal that reaches for it:
+
+- **MySQL is the documented exception.** `ON DUPLICATE KEY UPDATE` fires on ANY unique key the
+  row violates, not the one named. With a single unique key the behaviour is identical
+  everywhere; with more than one, MySQL may resolve a conflict the others would have let fail.
+  A table designed for upsert on MySQL wants exactly one unique key.
+- **A schema declaring the archive column MUST state which way the conflict goes** —
+  `write.UnarchiveOnConflict()` or `write.KeepArchiveStateOnConflict()`. This is the one write
+  that cannot be archive-gated: `INSERT … ON CONFLICT` has no `WHERE` for its conflict target,
+  so an archived row still holds the unique key and still absorbs the write. Both answers are
+  defensible and the framework refuses to pick; so does any proposal that offers this verb.
+- **It returns only an error, and that is deliberate.** A row count cannot mean the same on
+  every backend (MySQL reports 2 for a conflicting upsert, 1 for an inserting one; the others
+  report 1 for both). Do not design a caller that branches on "was it an insert".
+
+**`write.Stamp` — the Direct half of the stamped family.** A Direct write has no entity to
+carry a request, so the ask rides the only channel it has: a marker in the `Values` map, where
+an ordinary write puts a value.
+
+    w.Update(ctx, write.Values{"Status": "PAID", "PaidAt": write.Stamp}, q)
+
+What it may mark is what the SCHEMA declared with `StampedTimeField` / `StampedCounterField`
+(the full contract is owned by `../skills/scaffold-entity/conventions/infra.md` — a Direct
+schema declares them the same way an entity schema does). Marking a plain field, or binding a
+real value into a stamped slot, is a typed write-time error rather than a silent pass. This
+is what the refusal below means by "a framework-stamped timestamp written by hand": the
+column is asked for, never assigned.
+
 ## Refusals to design around, not into
 
 Each one fails loudly — at declaration, at construction, or before any statement runs — which

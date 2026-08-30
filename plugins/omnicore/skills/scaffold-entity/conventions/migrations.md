@@ -40,6 +40,17 @@ belt-and-suspenders (the framework stamps actively). If the entity has no Archiv
 there is no archive column — keep `Modes()` ⟺ the schema declaration ⟺ the migration in
 lockstep.
 
+**A STAMPED column's DDL follows its Go type and nothing else** — a stamped time is a
+nullable timestamp (NULL is what "the fact has not happened" is written as, and the
+framework never writes a zero time there), a stamped counter is a NOT NULL bigint. **No
+DB `DEFAULT` on either**, for the same reason the managed columns do not rely on one: the
+framework stamps actively — it binds 1 into the counter on the INSERT and computes
+`col = col + 1` server-side afterwards, so a default would only ever mask a column the
+service failed to write. The trap is on the OTHER side of the entity's life and belongs
+to `evolve-entity`: adding a NOT NULL counter to a table that already has rows fails
+unless that one ALTER carries a default — add it, backfill, then drop the default, so the
+steady-state DDL matches what a fresh CREATE writes.
+
 **A COMPOSITE value object is N columns, and its nullability is TWO questions.** Each part
 gets its own column, typed by the part's own Go type. Whether that column may be NULL is
 decided by the part's shape AND by the value object's: a part declared as a pointer inside

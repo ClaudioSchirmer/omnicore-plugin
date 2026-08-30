@@ -38,6 +38,16 @@ func schemaFieldCalls(fields []ir.Field, indent string) []string {
 				out = append(out, redactedFieldCall(f, indent))
 				continue
 			}
+			// A framework-owned column is declared by a different builder, and
+			// that declaration is the WHOLE difference: the schema is what
+			// decides the column is never written from the struct, and what
+			// filling it means. Everything above this line — the migration, the
+			// read model, the filters, the exports — treats it as an ordinary
+			// field, because it is one everywhere except here.
+			if verb := stampedVerb(f); verb != "" {
+				out = append(out, fmt.Sprintf("%s(%s, %s)", verb, quote(f.Name), quote(f.Column)))
+				continue
+			}
 			out = append(out, fmt.Sprintf("Field(%s, %s)", quote(f.Name), quote(f.Column)))
 			continue
 		}
@@ -47,6 +57,23 @@ func schemaFieldCalls(fields []ir.Field, indent string) []string {
 		out = append(out, compositeCall(compositeRun(fields, f.Composite.Owner), indent))
 	}
 	return out
+}
+
+// stampedVerb names the TableSchema builder that declares a framework-owned
+// column, and returns "" for an ordinary field.
+//
+// The two verbs take the same two arguments as Field and differ only in what
+// the framework then does with the column, which is why the mapping is a lookup
+// and not a shape: `time` binds the write operation's single instant, `counter`
+// binds 1 on the insert and `col = col + 1` after it.
+func stampedVerb(f ir.Field) string {
+	switch f.Stamped {
+	case "time":
+		return "StampedTimeField"
+	case "counter":
+		return "StampedCounterField"
+	}
+	return ""
 }
 
 // compositeRun collects the parts belonging to one composite, in declaration

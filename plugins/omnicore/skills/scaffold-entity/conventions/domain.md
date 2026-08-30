@@ -69,6 +69,33 @@ refuses the decidable cases outright.
   `json.Marshaler` on the entity is the SAME trap by another door (it hijacks that
   round-trip). Both are caught LOUDLY: boot panic at `WithSchema` naming the offender
   (`old-state.html`). Domain structs carry `labelKey` only.
+- **A field the framework STAMPS is asked for, never assigned.** Where the pin carries
+  the stamped family (`shared` availability test as always; the schema side and the full
+  contract are owned by `conventions/infra.md`), the domain's half is one call:
+
+      type Order struct {
+          domain.BaseEntity
+          Status string
+          PaidAt *time.Time     // never assigned by hand
+      }
+
+      func (o *Order) MarkPaid() {
+          o.Status = "PAID"
+          o.Stamp("PaidAt")     // ask; do not assign
+      }
+
+  `Stamp` is promoted from `domain.Managed`, so every root and every aggregate child has
+  it, and it takes the GO FIELD NAME exactly as a criteria does. A rule inside
+  `BuildRules` may stamp as freely as a method does — the request is read at write time,
+  so wherever the decision is made is where the call goes. The request belongs to ONE
+  write: it is not persisted, not part of business identity, and does not survive into
+  the `Old()` ghost.
+
+  **The failure mode to name out loud when you write one of these**: `o.PaidAt =
+  time.Now()` compiles, runs, changes the in-memory entity, and writes NOTHING — the
+  framework leaves an unasked-for stamped column out of the statement entirely. Nothing
+  errors. The only evidence is the data. So the field's comment says it, and the rule
+  that owns the moment is the one thing a reviewer has to find.
 - A **flat** entity does NOT implement `domain.AggregateRootProvider` — that is the
   children delta.
 

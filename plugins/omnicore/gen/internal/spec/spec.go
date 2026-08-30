@@ -456,6 +456,48 @@ type Field struct {
 	//     The identity sources refuse nullable, because the server always has a
 	//     subject and always has the claim it required.
 	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | derived
+	// Stamped hands the column's VALUE to the framework while leaving its WHEN
+	// to the domain. It is the seat createdAt/updatedAt do not cover: those date
+	// the ROW — written, last touched — on a schedule the framework fixes, while
+	// a stamped column dates a FACT the business decides has just happened
+	// (signed, paid, approved, cancelled) or COUNTS one (failed attempts,
+	// retries).
+	//
+	//   time    — StampedTimeField. The column is a nullable timestamp and the
+	//             Go field is *time.Time: until something stamps it, the fact
+	//             has not happened, and nil says that where a zero time would
+	//             report year 1. Requires type: time and nullable: true.
+	//   counter — StampedCounterField. The column is a non-nullable int64 the
+	//             framework fills with 1 on the insert and with `col = col + 1`
+	//             on every write that asks — computed by the server under the
+	//             row's lock, so two racing increments cannot collapse into one.
+	//             PER ROW, never a table-wide sequence. Requires type: int64 and
+	//             nullable: false.
+	//
+	// Both take the field OUT of every write surface — no request DTO, no
+	// command, no mapper, no OpenAPI request schema — for the same reason
+	// assignedFrom does, and one it does not have: the column is never written
+	// from the struct at all. Assigning it by hand does nothing, and on a write
+	// that did not ask for it the column is left out of the statement entirely,
+	// which is why an already-stamped row keeps its value with nobody having to
+	// remember to preserve it. Everything on the READ side is ordinary — it
+	// filters, sorts, projects, exports and hydrates like any field.
+	//
+	// WHO ASKS is not generated, and the report says so by name. The request is
+	// `e.Stamp("PaidAt")` on the entity, and nothing in this language knows the
+	// moment a domain calls a fact done: the rule DSL validates, it does not
+	// mutate. So a stamped field is declared here and filled by a rules.manual
+	// entry you write — the same division `assignedFrom: derived` already makes,
+	// and the same one the framework makes when it refuses to schedule the
+	// instant itself.
+	//
+	// Refused on a runtime field (no column to stamp), on a facet's field (a
+	// sibling row is a 1:1 slice of the OWNER's row and carries no
+	// framework-owned columns of its own — declare it on the owner, which is the
+	// framework's own refusal), and in combination with assignedFrom, vo, unique
+	// or redact: a value the framework mints is not read from an identity, is
+	// not a value object, is not a business key, and has nothing to mask.
+	Stamped string `yaml:"stamped"` // time | counter
 	// BypassMaySet lets the caller who crosses the ROW SCOPE state this value
 	// instead of having it read off their own identity.
 	//
