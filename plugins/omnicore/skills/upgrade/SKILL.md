@@ -153,6 +153,12 @@ tooling; say so if the dev conflates them).
    project has
    a fast unit suite, offer to run it too as a stronger check.
 
+   **A green build is not a green boot, and say so rather than implying it.** The whole
+   (a)–(d) class of Phase 2b fallout is invisible here: a yaml key that arrived
+   mandatory, an embedded migration sequence that grew, DDL the release now requires.
+   Report the build as what it is — the Go surface compiles — and route the operational
+   half through Phase 2b.
+
 ## Phase 2b — Migration gate (only when the dev chose "upgrade + migrate", or picks "fix forward WITH the skill" in Phase 3)
 
 1. **Diagnose.** Run the Phase 2 verify; collect every compile/vet error verbatim. Map
@@ -166,10 +172,25 @@ tooling; say so if the dev conflates them).
    upgrade → the plan names the rebuild step; (c) **the framework's EMBEDDED
    migration sequence grew** → the first non-dev boot after the bump ABORTS on
    pending migrations under `autoRun: check` BY DESIGN — the plan says to expect it
-   and what to run; (d) **yaml key renames/moves** (e.g. a block renamed) — no
-   compile error, boot abort on the old key (strict-decoded blocks): these are
-   MECHANICAL and auto-fixable, and the approved plan MAY touch `microservice.*.yaml`
-   for exactly this class; (e) **the framework's shared gRPC proto contract changed**
+   and what to run; (d) **yaml keys that moved, were renamed, or ARRIVED MANDATORY** — no
+   compile error, boot abort either way (strict-decoded blocks refuse the old key; a
+   new key with NO DEFAULT refuses its absence). The arriving-mandatory shape is the
+   one a green build hides best, and it is not rare: `relational.clock` (`db` | `app`)
+   became mandatory with no default, so every profile of every existing service stops
+   booting on the bump until the key is added. **A key that ARRIVED is not mechanical
+   the way a rename is** — a rename has one right answer, an arrival has a CHOICE the
+   framework deliberately refused to make for the operator, so it goes into the plan as
+   a `⚠️ OPEN:` slot with the trade stated and the dev answers it. **State the trade the
+   way `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` does, including why the value is
+   read before the write** — for the clock, `db` reads the instant from the backend once
+   per write TX so every replica shares one clock, at one extra round-trip; `app` keeps
+   `time.Now().UTC()` and is correct exactly as far as the fleet's clock discipline is;
+   and NEITHER puts a `NOW()` in the DML, because one write is several statements that
+   must carry the same instant and the outbox payload, the audit event and the response
+   are all built from it before `COMMIT`. A dev told only "there is a new mandatory key,
+   pick db or app" reads the round-trip as waste and picks against the fleet. Renames and moves stay
+   MECHANICAL and auto-fixable. Either way the approved plan MAY touch
+   `microservice.*.yaml` — **every profile, `prd` included, with the SAME value**; (e) **the framework's shared gRPC proto contract changed**
    (a message in `omnicore/v1` renamed or reshaped) — `go build` DOES catch it (the
    service's generated `.pb.go` references a framework symbol the new pin no longer
    exports), but the fix is a TOOLCHAIN step, not a Go edit: re-spell the service's

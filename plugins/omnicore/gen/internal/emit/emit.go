@@ -167,6 +167,7 @@ func childColumnsOf(m *ir.Model, c ir.Child) []TargetColumn {
 		}
 		out = append(out, TargetColumn{
 			Name: f.Column, Type: f.SpecType, Length: f.Length, Nullable: f.Nullable,
+			Note: stampedNote(f),
 		})
 	}
 	if c.ArchivedAt != "" {
@@ -182,6 +183,20 @@ func childColumnsOf(m *ir.Model, c ir.Child) []TargetColumn {
 	return out
 }
 
+// stampedNote marks a framework-owned column in the shape table, which is the
+// one place a DBA reading this report meets it. Without the note the column
+// looks like any other and the reviewer has no way to know that no INSERT
+// statement the service writes ever binds a value into it.
+func stampedNote(f ir.Field) string {
+	switch f.Stamped {
+	case "time":
+		return "stamped by the framework — the write operation's own instant, on the writes that ask"
+	case "counter":
+		return "counted by the framework — 1 on the insert, col + 1 on the writes that ask"
+	}
+	return ""
+}
+
 func roleFieldsOf(m *ir.Model) []ir.Field {
 	if m.IsRole() {
 		return m.RoleFields()
@@ -194,6 +209,7 @@ func columnsOf(fields []ir.Field, m *ir.Model, managed bool) []TargetColumn {
 	for _, f := range fields {
 		out = append(out, TargetColumn{
 			Name: f.Column, Type: f.SpecType, Length: f.Length, Nullable: f.Nullable,
+			Note: stampedNote(f),
 		})
 	}
 	if managed {

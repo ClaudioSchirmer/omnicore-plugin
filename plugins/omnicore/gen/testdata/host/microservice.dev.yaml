@@ -10,6 +10,7 @@ http:
 relational:
   dialect: "${REL_DIALECT:sqlite}"
   dsn: "${DATABASE_URL:file:./golden.db}"
+  clock: db          # MANDATORY since framework v0.65.0 — no default; boot aborts without it.
 migrations:
   dir: "${MIGRATIONS_DIR:./migrations/sqlite}"
   autoRun: true

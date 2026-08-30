@@ -1199,6 +1199,56 @@ Four things to get right, because they are the ones that cost a migration later:
     a subject and always has the claim it required, so the column is written on every
     insert. (Earlier builds refused `nullable` on every source, which is what produced the
     workarounds above; `explain keys` on the pinned build is the authority.)
+- **A column the FRAMEWORK fills: `stamped: time` / `stamped: counter`.** Read it against
+  `assignedFrom: derived` directly above, because the two look alike and divide the work
+  differently. `derived` says YOUR code owns the VALUE — it computes it and assigns it.
+  `stamped` says the framework owns the value and your code owns only the MOMENT: the rule
+  calls `e.Stamp("PaidAt")` and the framework binds the write operation's own instant, the
+  same one `created_at` and `updated_at` carry on that write. A `stamped: counter` is the
+  same ask over a different meaning — `col = col + 1`, computed by the server under the
+  row's lock, per ROW and never a table-wide sequence.
+
+  It is the seat `managed.createdAt`/`updatedAt` do not cover: those date the ROW, on a
+  schedule the framework fixes; this dates a FACT the business decides has happened
+  (signed, paid, approved, cancelled) or counts one.
+
+  **Why hand the value over at all, when `assignedFrom: derived` + `time.Now()` in a rule
+  looks simpler** — say this, or the key reads as ceremony: the instant a write is dated
+  with is minted ONCE per operation and reused by everything the write produces. One write
+  is several statements (root, children, siblings, the base cascade) and they all carry
+  the same instant; the outbox payload, the audit event, the lifecycle hooks and the
+  response are all built from it before `COMMIT`; and the framework compares against it —
+  the unarchive cascade tells *this* archive's children from the ones already archived by
+  comparing exactly that stamp. A `time.Now()` written by a rule is a SECOND reading, from
+  the pod's own drifting clock, that agrees with none of those. Which clock the one
+  reading comes from is the host's declaration (`relational.clock`), not the spec's.
+
+  What the generator does with it, and what it deliberately does not:
+  - the schema declares `StampedTimeField` / `StampedCounterField` instead of `Field`, and
+    that declaration is the whole difference — it is what tells the framework the column is
+    never written from the struct;
+  - the field leaves every write request, command, mapper and OpenAPI request schema, for
+    the same reason `assignedFrom` does and one it does not have: assigning the Go field by
+    hand does nothing at all, so a request field for it would be accepted, mapped, and then
+    dropped on the way to the statement;
+  - everything on the read side is ordinary — it filters, sorts, projects, exports and
+    hydrates like any field;
+  - **nothing generated ASKS for the stamp.** The rule DSL validates, it does not mutate,
+    so `e.Stamp(...)` belongs to a `rules.manual` entry you write on the verb where the
+    fact happens — the report lists the column until you do, exactly as it lists a derived
+    field. A stamped column nobody asks for is written never, and nothing reports it.
+  - **The shape is held to the kind and both refusals are blockers**: `time` requires
+    `type: time` with `nullable: true` (the Go field is `*time.Time`; until a rule stamps
+    it the fact has not happened, and nil says that where a zero time would report year 1),
+    `counter` requires `type: int64` with no `nullable` (a row that was just created has
+    counted one thing, so there is no absence for null to describe). Both mistakes compile
+    and panic the framework at boot, which is why `check` refuses them.
+  - **Refused on a collection entry and on a facet's field.** A facet is the framework's
+    own refusal — a sibling row is a 1:1 slice of the owner's row and carries no
+    framework-owned columns of its own. A collection entry is THIS BUILD's limit, not the
+    framework's: the framework stamps an aggregate child exactly as it stamps the root, and
+    the generator does not lower it yet. Date the fact on the root, or take the
+    collection's write path by hand.
 - **The field's LABEL is `text:`, not `description:`.** The description is a sentence about
   what the field means and becomes the column comment; the label is its short human name —
   what a 422 payload puts in `fieldLabel` and what a CSV/XLSX export puts in a column
@@ -1518,7 +1568,11 @@ Do not re-read every file. Read against the plan the dev approved and against th
 
 Anything wrong here is fixed **in the spec**, then regenerated. The only files you author
 are the `*_manual.go` hooks — the rules one, the service one, and the computed-read one
-when the spec declares derived fields.
+when the spec declares derived fields. **A `stamped:` column adds nothing to that list and
+still adds work**: the rules hook is where `e.Stamp(...)` goes, on the verb where the fact
+happens, and the report names every stamped column until somebody confirms that call
+exists. A column the framework fills and nobody asks it to fill stays empty with nothing
+reporting it.
 
 ### When the output is wrong and the spec seems unable to say so
 
@@ -1536,7 +1590,9 @@ this order — each step is cheap and most problems die at the first:
    not the one that edits the record" is `children[].permissions`,
    "a super-admin crosses the tenant" is `authz.bypass: "*:*"`,
    "the server fills this from the caller" is
-   `assignedFrom`, and a collection of the shared identity on a second role is
+   `assignedFrom`, "the framework dates this fact with the write's own instant, and no
+   caller may state it" is `stamped: time` (its counter twin is `stamped: counter`),
+   and a collection of the shared identity on a second role is
    `ownedBy: base` under `base.reuse: true`.
 
    Most of these were found AFTER someone hand-wrote the thing they express — a

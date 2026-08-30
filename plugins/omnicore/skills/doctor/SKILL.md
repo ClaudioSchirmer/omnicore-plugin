@@ -127,6 +127,17 @@ Bench-proven cause patterns to CHECK, not to assume:
   and carries the destination table. Prescribe the move; the dev applies it. Worth stating
   in the report even when the build is green and the misplacement was merely noticed:
   nothing fails at compile time in the common case, which is exactly why it accumulates.
+- **Boot abort naming a yaml key the profile does not have, right after a framework
+  bump** → a key that ARRIVED MANDATORY with no default; the build was green because
+  nothing in Go references it. Read the abort's own text for the key, then check the
+  pin's `yaml-reference` for the whole mandatory set inside that block rather than
+  fixing the one key the abort happened to reach first — the guard stops at the first
+  miss, so a second one is waiting behind it. `relational.clock` (`db` | `app`) is the
+  recent instance: no default on purpose, because which clock the service's history is
+  stamped against is the operator's declaration. **Prescribe the same value for EVERY
+  profile** — a service stamped by the backend's clock in dev and the pod's clock in
+  prd has timestamps that mean two different things. Owner:
+  `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md`.
 - **Boot abort with a migration version/dirty error after a bench "reset"** → the
   compose down kept the named volumes and the old DB is still there. Prescribe the full
   reset (volumes included) with a loud data-loss warning — the dev runs it.

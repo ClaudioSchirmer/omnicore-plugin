@@ -7,6 +7,142 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.53.0] — 2026-08-30
+
+Framework `v0.65.0` hands a service two things it could not say before: a column whose
+WHEN belongs to the domain and whose VALUE belongs to the framework, and an operator's
+declaration of WHOSE CLOCK the history is written against. The second one is breaking —
+`relational.clock` has no default and boot aborts without it — so every seat that writes
+or reads a `microservice.*.yaml` had to learn it in the same round, and the seat that
+ASKS had to learn why the value is read before the write. Otherwise the honest answer
+(`db`) reads as a gratuitous round-trip and the framework reads as badly built.
+
+### Added
+
+- **`omnicore-gen` learns the stamped family: `fields[].stamped: time | counter`.** The
+  spec language had no way to say "the framework fills this column". The nearest key,
+  `assignedFrom: derived`, says something different and was being reached for instead:
+  it takes the field out of every write surface and then leaves YOUR code to assign the
+  value — which for a timestamp means a `time.Now()` off the pod's own clock, a second
+  reading that agrees with neither the outbox payload nor the audit event nor the other
+  statements of the same write.
+
+  What the generator does with the key:
+  - the schema declares `StampedTimeField` / `StampedCounterField` instead of `Field`,
+    and that declaration is the whole difference — it is what tells the framework the
+    column is never written from the struct;
+  - the field leaves every write request DTO, command, mapper and OpenAPI request schema,
+    for the same reason `assignedFrom` does and one it does not have: assigning the Go
+    field by hand does nothing at all, so a request field for it would be accepted,
+    mapped onto the entity and then dropped on the way to the statement;
+  - everything on the read side stays ordinary — it filters, sorts, projects, exports and
+    hydrates like any field, and its DDL is its own Go type's (a nullable timestamp, or a
+    NOT NULL bigint with no default, because the framework binds 1 on the insert);
+  - the aggregate's field carries `Stamp("X"), never assign` in its comment, the shape
+    table marks the column, and the gen-report gets a section of its own naming every
+    stamped column until somebody confirms the `e.Stamp(...)` call exists.
+
+  **The shape is held to the kind, and both mistakes are blockers rather than warnings**,
+  because both COMPILE: a counter declared nullable emits `StampedCounterField` over a
+  `*int64` and the framework panics at boot; a time declared non-nullable does the same.
+  `check` refuses them, along with `assignedFrom`, `vo`, `unique`, `redact` and
+  `bypassMaySet` on a stamped field — each says something a value the framework mints
+  cannot be.
+
+  **What it does NOT generate, stated where it will be read**: nothing asks for the
+  stamp. The rule DSL validates and does not mutate, so `e.Stamp("PaidAt")` belongs to a
+  `rules.manual` entry on the verb where the fact happens — the same division
+  `assignedFrom: derived` already makes. A spec with no manual rule gets a warning; the
+  report lists the column; and a stamped column nobody asks for is written never, with
+  nothing reporting it.
+
+  **Two seats are refused, and the two refusals are not the same thing.** A facet's field
+  is the FRAMEWORK's refusal — a sibling row is a 1:1 slice of the owner's row and
+  carries no framework-owned columns of its own. A collection entry is THIS BUILD's
+  limit: the framework stamps an aggregate child exactly as it stamps the root, and the
+  generator does not lower it yet, because an entry's fields go into its input DTO whole
+  and there is no per-field "the server owns this one" narrowing there (the same gap that
+  already refuses `children[].fields[].assignedFrom`). Both are listed in `RefusedKeys()`
+  so `explain keys` marks them, and the message for each says which kind of refusal it is
+  — a refusal that reads like the framework's would send the author to the wrong docs.
+
+  Proven, not assumed: a new coverage-matrix case (`43-carimbos.yaml`) declaring both
+  kinds generates, gofmts, builds, vets and passes its generated tests against the real
+  `v0.65.0` framework; the printed flat example carries both keys with the reasoning
+  beside them, which is what the language-coverage test requires.
+
+- **`shared/direct-schema.md` gains the two verbs the design depends on.** `Upsert` —
+  insert-or-update on a conflict key named per call, with the four slot kinds
+  (`write.Stamp`, `write.OnInsert`, an ordinary overwrite, and the key itself), MySQL's
+  documented `ON DUPLICATE KEY` exception, the mandatory archive-conflict answer on a
+  schema declaring the archive column, and why it returns only an error. And
+  `write.Stamp` — the Direct half of the stamped family, which is how a door with no
+  entity asks for a value it must not supply.
+
+### Changed
+
+- **`omnicore-gen` now targets framework `v0.65.0`** (`compat.Supported`, and the
+  `relational.clock` key added to all five vendored host profiles so the gate's boot
+  lanes survive it). **The bump is required, not cosmetic, and it cuts both ways**: a
+  spec declaring `stamped:` emits methods `v0.64.0`'s `TableSchema` does not have, so the
+  generated tree does not compile there; and a `v0.65` host aborts boot without
+  `relational.clock`, which an older one has no key for. A project on `v0.64.0` or older
+  reads **Behind** and is refused by default, with `--force-unsupported` still the escape
+  hatch for a spec that uses neither.
+
+- **`relational.clock` reaches every seat that writes, reads or bumps a
+  `microservice.*.yaml`.** It is a MANDATORY key with NO default — boot aborts on its
+  absence — which is a failure shape nothing in Go reports: the service compiles, vets
+  and tests green and dies on the first boot after the upgrade.
+  - `scaffold-service` asks it as a high-risk slot (`db` proposed), gated on the pinned
+    `yaml-reference` carrying the key at all, and writes the same answer into every
+    profile;
+  - `configure` reads the whole mandatory set of the `relational:` block against the pin
+    in Phase 0b and reports a missing key as a FINDING before proposing anything — it
+    would otherwise surface as a boot abort at the verify and read as damage the run did;
+  - `upgrade`'s operational-fallout class (d) widened from "yaml key renames/moves" to
+    include keys that ARRIVED MANDATORY, and says why the two are handled differently: a
+    rename has one right answer and is auto-fixable, an arrival carries a CHOICE the
+    framework deliberately refused to make, so it becomes a `⚠️ OPEN:` slot the dev
+    answers. Phase 2 also now states out loud that a green build is not a green boot;
+  - `doctor` gains the signature — a boot abort naming a yaml key right after a bump —
+    with the instruction to check the pin's whole mandatory set rather than the one key
+    the guard happened to reach first, since the guard stops at the first miss;
+  - `shared/boot-contract.md` owns the pair: mandatory-by-absence beside the strict
+    decoding it mirrors, and the quick-map entry.
+
+- **Every seat that ASKS about the clock now explains why the instant is read BEFORE the
+  write.** This is the entry that exists because of a review, not a defect: told only
+  "new mandatory key, pick `db` or `app`", a developer reads the round-trip as waste,
+  picks against the fleet, and concludes the framework is badly built. The answer they
+  are owed is that the obvious-looking design — `NOW()` inside the DML — is the one the
+  framework deliberately does not use on EITHER setting, because one write is several
+  statements (root, children, siblings, base cascade) that must all carry the same
+  instant, because the outbox payload, the audit event, the lifecycle hooks and the
+  response are all built from that value before `COMMIT`, and because the framework
+  compares against it (the unarchive cascade tells *this* archive's children from the
+  ones already archived by comparing exactly that stamp). So the setting decides only
+  WHOSE clock the one reading comes from. `shared/boot-contract.md` owns the wording;
+  `scaffold-service` (the gateway that asks), `upgrade` (the `⚠️ OPEN` slot) and
+  `configure` route to it, and the generator says the same thing in its own two teaching
+  seats — the printed example and the gen-report's stamped section — where the
+  comparison being made is against `time.Now()` in a rule.
+
+- **The stamped family reaches the entity skills.**
+  `scaffold-entity/conventions/infra.md` owns the contract (the two builders, the
+  never-written-from-the-struct rule, the write-back, the non-negotiable Go types, where
+  it may be declared and the two refusals); `conventions/domain.md` owns the ask
+  (`e.Stamp("PaidAt")`, promoted from `domain.Managed`, and the silent no-op that
+  assigning the field is); `conventions/migrations.md` owns the DDL, including the trap
+  that belongs to an evolution — a NOT NULL counter added to a table with rows needs a
+  default on that one ALTER, backfilled, then dropped. `evolve-entity` gains a spec-gate
+  section for the three things that only exist on an evolution: the write surface
+  SHRINKS (a contract break if callers were sending the value), the counter's temporary
+  default, and the fact that adding the column changes no behaviour at all until a rule
+  asks. `implement` and `shared/capabilities.md` route "record when this happened / how
+  many times" to `evolve-entity` rather than answering it as a capability, and route the
+  host-level half (`relational.clock`) to `yaml-reference` and `configure`.
+
 ## [0.52.0] — 2026-08-29
 
 Framework `v0.64.0` opens a SECOND door into the relational engine — one anchored on a

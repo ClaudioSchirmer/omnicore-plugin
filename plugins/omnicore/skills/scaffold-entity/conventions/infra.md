@@ -28,6 +28,49 @@ root; the domain-service implementation in its own file here.
   All three are OPTIONAL: undeclared ⇒ never mentioned in any SQL.
 - Boot checks the docs route you past: field-exists, column bijection, PK single-column,
   **`Modes()` ⟺ archive-column** agreement.
+- **A STAMPED column is a fourth kind of declaration, and the schema is where it is
+  decided.** Where the pin's `table-schema` section carries them (`StampedTimeField`,
+  `StampedCounterField` — availability is tested, never assumed), they name a column
+  whose WHEN belongs to the domain and whose VALUE belongs to the framework:
+
+      StampedTimeField("PaidAt", "paid_at")            // *time.Time — the write's own instant
+      StampedCounterField("Attempts", "attempts")      // int64 — 1 on insert, col + 1 after
+
+  This is the seat `CreatedAt`/`UpdatedAt` do not cover. Those date the ROW — written,
+  last touched — on a schedule the framework fixes. A stamped field dates a FACT the
+  business decides has just happened (signed, paid, approved, cancelled) or counts one.
+  Nothing but a rule knows when that is, and nothing but the framework should choose the
+  instant: a timestamp read from the writing process is a per-replica clock reading that
+  drifts, which is the same question `relational.clock` answers for the managed columns.
+
+  What follows from the declaration, and why each half matters:
+  - **The column is NEVER written from the struct.** Assigning `e.PaidAt` by hand does
+    nothing and reports nothing. On a write that did not ask, the column is left out of
+    the statement entirely — not bound, not set, not nulled — which is also why an
+    already-stamped row keeps its value with nobody remembering to preserve it.
+  - **The ask is `e.Stamp("PaidAt")`**, by GO FIELD NAME, from the rule that knows the
+    moment (`conventions/domain.md` owns that side). Requesting twice is requesting once;
+    the emitted columns follow DECLARATION order, so the SQL is stable however the rules
+    fired. A `Stamp` naming a field this schema did not declare stamped is a typed
+    write-time error, not a silent no-op — the domain cannot see the schema, so there is
+    no boot moment to catch it at.
+  - **The value is written back onto the entity**, so the audit event, the outbox payload,
+    the response and the caller's in-memory entity all agree with the row — the same move
+    the framework already makes with a minted child id. A counter is the exception and
+    says so: the new value is the server's, the framework does not read it back, so it is
+    absent from the outbox payload and from the write-back. The projection is unaffected
+    (the SyncEngine re-reads the row).
+  - **The Go types are not negotiable.** A stamped time is `*time.Time` — until a rule
+    stamps it the fact has not happened, and nil says that where a zero time would report
+    year 1. A counter is a plain `int64`, never a pointer — a row that was just created
+    has counted one thing. Anything else is a boot panic.
+  - **Where it may be declared**: an entity root, an aggregate child, a shared-base role
+    and the shared base itself. REFUSED on a sibling (a facet row is a 1:1 slice of the
+    owner's row and carries no framework-owned columns of its own — declare it on the
+    owner) and on an external schema (it never writes).
+  - **Everything else is ordinary.** It joins the bijection, filters, orders, projects,
+    exports and hydrates like any `Field`, and its DDL is its own Go type's: a nullable
+    timestamp column, or a NOT NULL bigint.
 - **A COMPOSITE value object is NOT a `Field` — it is decomposed here, and this schema is the
   only place that knows it is stored across several columns.** A struct VO passed to
   `Field(...)` is a boot panic naming the fix, because its value has no single column to be.

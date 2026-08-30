@@ -192,6 +192,27 @@ of deletion):
    `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md`'s elicitation contract (relational serves
    no `DeleteOnArchive()`); never a silent default — the scaffold side asks this at
    birth, adding the mode later doesn't get to skip it.
+3b. **Is the new field one the FRAMEWORK fills?** When what the change adds is a date
+   for a business FACT (signed, paid, approved, cancelled) or a count of events on the
+   row, and the pin carries the stamped family, it is a `StampedTimeField` /
+   `StampedCounterField` rather than an ordinary column — the full contract is owned by
+   `../scaffold-entity/conventions/infra.md`, and the domain's half by
+   `../scaffold-entity/conventions/domain.md`. Three things belong in THIS spec because
+   they only exist on an evolution:
+   - **The write surface SHRINKS.** The field is absent from every request DTO, command,
+     mapper and OpenAPI request schema. If callers were already sending a value for a
+     column being converted to stamped, that is a CONTRACT BREAK on the request side and
+     the spec says so rather than discovering it at the verify.
+   - **The DDL for a counter needs a default it will not keep.** `NOT NULL` on a table
+     that already has rows fails; the ALTER carries a default, backfills, then drops it,
+     so the steady state matches what a fresh CREATE writes. A stamped TIME column is
+     nullable and needs none — every existing row honestly has no such fact yet.
+   - **Nothing asks for the stamp until a rule does.** Adding the column and the schema
+     declaration changes no behaviour at all: the framework leaves an unasked-for stamped
+     column out of every statement. The rule that calls `e.Stamp("<Field>")` is part of
+     this change, on the verb where the fact happens, or the column is added and stays
+     empty with nothing reporting it.
+
 4b. **Is the "new field" a COLUMN at all?** If what the change adds is a value that
    belongs to ANOTHER aggregate this entity already holds a foreign key to, the answer is
    a READ JOIN on the repository, not a column: no migration, no data to backfill, nothing

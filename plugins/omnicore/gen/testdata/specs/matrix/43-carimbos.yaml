@@ -1,0 +1,56 @@
+# Eixo: colunas carimbadas pelo framework — o domínio diz QUANDO, o framework
+# diz QUAL VALOR. As duas formas na mesma entidade:
+#   stamped: time     -> StampedTimeField  (timestamp anulável, o instante da escrita)
+#   stamped: counter  -> StampedCounterField (int64 por LINHA, col = col + 1)
+#
+# O que este caso prova além de compilar: nenhuma das duas colunas aparece no
+# request DTO, no comando nem no mapper — só no Result/Response e na migração —
+# e o pedido do carimbo cai na regra manual, porque o DSL de regras valida e não
+# muta.
+specVersion: 1
+entity: Assinatura
+plural: Assinaturas
+language: pt-BR
+storage:
+  kind: flat
+  table: assinaturas
+  description: Assinaturas de um plano.
+  managed: {createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at, revision: revision}
+fields:
+  - {name: Titular, type: string, column: titular, length: 120, livesOn: root, example: "Alice Reid", description: Nome do titular.}
+  - {name: Situacao, type: string, column: situacao, length: 20, livesOn: root, example: "ativa", description: Situação corrente da assinatura.}
+  - name: CanceladaEm
+    type: time
+    column: cancelada_em
+    livesOn: root
+    nullable: true
+    stamped: time
+    example: "2029-03-02T14:31:07Z"
+    description: Quando a assinatura foi cancelada; ausente enquanto não foi.
+  - name: TotalDeCobrancas
+    type: int64
+    column: total_de_cobrancas
+    livesOn: root
+    stamped: counter
+    example: "3"
+    description: Quantas cobranças esta assinatura já sofreu.
+modes: [display, insert, update, archive]
+update: {shape: both}
+rules:
+  manual:
+    - id: carimbo-de-cancelamento
+      description: >-
+        Quando a atualização levar Situacao para "cancelada", chamar
+        e.Stamp("CanceladaEm") e e.Stamp("TotalDeCobrancas"). Pedir, nunca
+        atribuir: o framework preenche a data com o instante desta escrita e
+        incrementa o contador sob o lock da linha.
+      scope: [update]
+read:
+  backing: relational
+  view: {name: assinaturas}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: assinatura
+  dataAccess: anyone-with-permission
+  permissions: {insert: "assinatura:escrever", update: "assinatura:escrever", patch: "assinatura:escrever", archive: "assinatura:arquivar", read: "assinatura:ler"}

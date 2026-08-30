@@ -7,7 +7,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.64.0" {
+	if Supported != "v0.65.0" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,21 +18,21 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.64.0", false, Exact, false},
-		{"same line, later patch", "v0.64.9", false, Exact, false},
-		{"framework moved ahead", "v0.65.0", false, Ahead, false},
-		// One line older. It reads Behind and blocks, and the reason is NOT the
-		// emitters this time: nothing generated here needs v0.64.0 (its feature
-		// — the Direct schema — is a door this generator does not emit, and the
-		// criteria compiler's move was internal to the framework). What the
-		// block enforces is the posture the package header states: floor ==
-		// ceiling, ONE proven line, and the golden gate proves exactly this one.
-		// A v0.63 project is refused by default and generates fine with
-		// --force-unsupported, which is the honest shape of "untested, not
-		// broken". There is no "same line, earlier patch" case while the
-		// supported line is a .0 — the patch comparison is exercised by the
-		// later-patch row.
-		{"project is one line older", "v0.63.0", false, Behind, true},
+		{"the supported line", "v0.65.0", false, Exact, false},
+		{"same line, later patch", "v0.65.9", false, Exact, false},
+		{"framework moved ahead", "v0.66.0", false, Ahead, false},
+		// One line older. It reads Behind and blocks, and this time the block is
+		// the emitters' own: a spec declaring `stamped:` emits
+		// StampedTimeField / StampedCounterField, which are methods v0.64.0's
+		// TableSchema does not have, so the generated tree does not compile
+		// there. `relational.clock` cuts the same way from the other side — a
+		// v0.65 host aborts boot without the key, and an older one has no such
+		// key at all. Floor == ceiling, ONE proven line, and the golden gate
+		// proves exactly this one; --force-unsupported stays the escape hatch
+		// for a spec that uses neither. There is no "same line, earlier patch"
+		// case while the supported line is a .0 — the patch comparison is
+		// exercised by the later-patch row.
+		{"project is one line older", "v0.64.0", false, Behind, true},
 		{"project is older", "v0.49.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},
 		{"devel", "(devel)", false, Unknown, false},

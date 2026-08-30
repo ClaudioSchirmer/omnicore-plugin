@@ -105,4 +105,9 @@ inbound surfaces → `grpc` / `graphql` · cache → `cache-subsystem` · permis
 audit → `audit` · tracing → `tracing` · logs → `logs` · hooks → `lifecycle-hooks` ·
 exports/OpenAPI → `openapi` · config keys → `yaml-reference` · one table with no aggregate
 → `direct-schema` (under Infrastructure, beside `table-schema`; its ABSENCE from the pin's
-nav is the availability test — see `../direct-schema.md`).
+nav is the availability test — see `../direct-schema.md`) · a column dating a business FACT
+or counting one, filled by the framework and settable by no caller → `table-schema` (the
+stamped family; the decision is an ENTITY change, so it belongs to `scaffold-entity` /
+`evolve-entity`, whose `conventions/infra.md` owns it) · WHICH clock stamps the managed
+timestamp columns → `yaml-reference` (`relational.clock`; on a pin that carries it the key
+is mandatory with no default, so its absence is a boot abort — `../boot-contract.md`).

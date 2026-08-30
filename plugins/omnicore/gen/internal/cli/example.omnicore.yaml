@@ -265,6 +265,68 @@ fields:
     description: When the student graduated; absent while they have not.
     labelKey: StudentGraduatedAtField
 
+  # stamped: time — read this against GraduatedAt directly above, because the two
+  # look alike and divide the work differently. `assignedFrom: derived` says YOUR
+  # code owns the VALUE: it computes it and assigns it. `stamped` says the
+  # framework owns the value and your code owns only the MOMENT — the rule calls
+  # e.Stamp("SuspendedAt") and the framework binds the write operation's own
+  # instant, the same one created_at and updated_at carry on that write.
+  #
+  # Why that split exists, and why asking is not ceremony: the instant a write
+  # is dated with is minted ONCE per operation and reused by everything that
+  # write produces. One write is several statements — root, children, siblings,
+  # the shared-base cascade — and they all carry the same instant; the outbox
+  # payload, the audit event, the lifecycle hooks and the response are all built
+  # from it before COMMIT; and the framework compares against it (the unarchive
+  # cascade tells THIS archive's children from the ones already archived by
+  # comparing exactly that stamp). A time.Now() written by a rule is a SECOND
+  # reading, off the pod's own clock, that agrees with none of them — and pods
+  # drift, so two rows written seconds apart can be stamped out of order with
+  # nothing in the write path able to notice. The host says which clock that one
+  # reading comes from (relational.clock: db | app); this field says the fact is
+  # dated by it.
+  #
+  # The column is NEVER written from the struct — assigning e.SuspendedAt by
+  # hand does nothing — and on a write that did not ask for the stamp the column
+  # is left out of the statement entirely, which is why a row already suspended
+  # keeps its date with nobody having to remember to preserve it. It is out of
+  # every write DTO and OpenAPI request schema for the same reason `derived` is,
+  # and ordinary everywhere else: it filters, sorts, projects and exports.
+  #
+  # nullable: true is MANDATORY here. Until the rule stamps it the fact has not
+  # happened, and nil says that where a zero time would report year 1.
+  - name: SuspendedAt
+    type: time
+    column: suspended_at
+    livesOn: root
+    nullable: true
+    stamped: time
+    example: "2029-03-02T14:31:07Z"
+    description: When the enrollment was last suspended; absent while it never was.
+    labelKey: StudentSuspendedAtField
+
+  # stamped: counter — the second member of the same family, asked for with the
+  # same call and differing only in what filling the column MEANS: `time` binds
+  # the instant, `counter` binds 1 on the insert and `col = col + 1` afterwards,
+  # computed by the server under the row's lock so two concurrent suspensions
+  # cannot both read 3 and both write 4.
+  #
+  # PER ROW, never a sequence. This row counts its own suspensions; another row
+  # counts its own, and the two never interact. A number unique across the whole
+  # table (an invoice number) is a different problem and needs a SEQUENCE object
+  # two of the five engines do not have.
+  #
+  # nullable is REFUSED: a counter always has a value — a row that was just
+  # created has counted one thing — so there is no absence for null to describe.
+  - name: SuspensionCount
+    type: int64
+    column: suspension_count
+    livesOn: root
+    stamped: counter
+    example: "2"
+    description: How many times this enrollment has been suspended.
+    labelKey: StudentSuspensionCountField
+
   # A FOREIGN KEY to another aggregate is an ordinary column of this entity.
   # Nothing about it is special here — what makes it reachable in a QUERY is the
   # joins: block further down, which is a separate statement on purpose.
@@ -664,6 +726,15 @@ rules:
         this rule the response hands the guardian an empty code and no error
         says so.
       scope: [insert]
+    - id: suspension-stamp
+      description: >-
+        When the update moves the enrollment into the suspended state, call
+        e.Stamp("SuspendedAt") and e.Stamp("SuspensionCount") — ask, do not
+        assign. The framework fills the date with this write's own instant and
+        raises the counter under the row's lock. Nothing this generator writes
+        asks for either stamp: the rule DSL validates, it does not mutate, so
+        this rule is the only thing that ever fills those two columns.
+      scope: [update]
     - id: graduation-date
       description: >-
         Set GraduatedAt when the update carries the state that ends the
