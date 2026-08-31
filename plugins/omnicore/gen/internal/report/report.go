@@ -271,12 +271,12 @@ func renderTodo(b *strings.Builder, in Input) {
 		for _, f := range stamped {
 			switch f.Stamped {
 			case "counter":
-				fmt.Fprintf(b, "- **`%s`** — `stamped: counter`. `e.Stamp(%q)` makes the "+
+				fmt.Fprintf(b, "- **`%s`** — `stamped: counter`%s. `e.Stamp(%q)` makes the "+
 					"column `= col + 1`, computed by the server under the row's lock, so "+
 					"two concurrent writers cannot both read the same value. The INSERT "+
 					"binds 1 with nobody asking; every later increment is a rule of "+
 					"yours. Per ROW — it counts this row's own events and never anything "+
-					"table-wide.\n", f.Name, f.Name)
+					"table-wide.\n", f.Name, counterShape(f), f.Name)
 			default:
 				fmt.Fprintf(b, "- **`%s`** — `stamped: time`. `e.Stamp(%q)` binds this "+
 					"write operation's own instant, the same one `created_at` and "+
@@ -289,6 +289,18 @@ func renderTodo(b *strings.Builder, in Input) {
 		}
 		b.WriteString("\nWhich write asks is the one thing to check: a stamp on the wrong " +
 			"verb dates the wrong event, and no test the generator writes can tell.\n\n")
+		b.WriteString("**A fact can also UN-happen**, and the same `rules.manual` entry is " +
+			"where that is said. `e.StampNull(\"<Field>\")` writes an ABSENCE and " +
+			"`e.StampEmpty(\"<Field>\")` writes the declared type's ZERO — 0 for a " +
+			"counter, the zero instant for a time — which are two different statements: a " +
+			"counter that has no count is not a counter that counted nothing. StampNull " +
+			"needs a field that can hold the absence, so it reaches a stamped time always " +
+			"and a stamped counter only where the spec declared it `nullable: true` " +
+			"(*int64); asking it of a plain int64 is refused by the write, naming " +
+			"StampEmpty. Both are requests exactly as `Stamp` is: a column no verb named " +
+			"is left out of the statement, so nothing is cleared by omission, and naming " +
+			"one field twice with different verbs is one request where the LAST one " +
+			"wins.\n\n")
 		b.WriteString("If asking the framework for a value looks like ceremony next to " +
 			"`e.PaidAt = time.Now()`, this is why it is not. The instant a write is dated " +
 			"with is minted ONCE per operation and reused by everything that write " +
@@ -661,6 +673,18 @@ func renderTodo(b *strings.Builder, in Input) {
 // field asks about the caller, and WHICH framework accessor answers it. They are
 // separate because a reviewer chasing a value in the generated code searches for
 // the accessor, and a reviewer chasing a policy reads the question.
+// counterShape names what a NULLABLE stamped counter buys, which is one thing
+// and not the usual one. The pointer adds nothing to the increment — that is the
+// server's either way — so a reader who knows what nullable normally means would
+// read it as "the value may be unknown" and be wrong. It is somewhere for
+// StampNull to land, and nothing else.
+func counterShape(f ir.Field) string {
+	if !f.Nullable {
+		return ""
+	}
+	return ", declared `nullable` (`*int64`), which is the only shape `StampNull` can land in"
+}
+
 func identityQuestion(f ir.Field) string {
 	switch f.IdentitySource {
 	case "subject":

@@ -6150,10 +6150,11 @@ func declaredHere(kind string) bool {
 // declares for it.
 //
 // Everything here is a BLOCKER rather than a warning, because every mistake in
-// this pair compiles. A `stamped: counter` on a nullable column emits a
-// StampedCounterField over a *int64 and the framework panics at boot; a
-// `stamped: time` on a non-nullable one emits it over a time.Time and does the
-// same. Neither is a thing a reviewer sees by reading the spec.
+// this pair compiles. A `stamped: time` on a non-nullable column emits a
+// StampedTimeField over a time.Time and the framework panics at boot, which is
+// not a thing a reviewer sees by reading the spec. A counter is the one place
+// where BOTH nullabilities are honest declarations rather than a mistake: int64
+// counts, *int64 counts and can also say it has no count — see the case below.
 func validateStamped(s *Spec, f Field, where string, ps *Problems, isChild, isFacet bool) {
 	if f.Stamped == "" {
 		return
@@ -6221,13 +6222,12 @@ func validateStamped(s *Spec, f Field, where string, ps *Problems, isChild, isFa
 				"set type: int64 — the counter is per ROW, not a table-wide sequence, so "+
 					"there is no id type behind it")
 		}
-		if f.Nullable {
-			ps.BlockerFix(where+".nullable",
-				"a counter always has a value — a row that was just created has counted "+
-					"one thing — so there is no absence for null to describe",
-				"drop nullable; the framework declares the Go field as a plain int64 and "+
-					"refuses a pointer")
-		}
+		// nullable is ALLOWED here, and it is the one stamped shape whose
+		// nullability is not about the value being unknown. A plain int64
+		// counter has no absence to write, so StampNull is refused on it by the
+		// write; declaring the column nullable emits the counter over *int64,
+		// which is the only shape that verb can land in. The increment is the
+		// server's either way, so the pointer costs nothing else.
 	}
 	// The four keys that say something a framework-owned value cannot be.
 	if f.AssignedFrom != "" {

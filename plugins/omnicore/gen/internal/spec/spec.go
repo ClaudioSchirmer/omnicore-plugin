@@ -467,12 +467,15 @@ type Field struct {
 	//             Go field is *time.Time: until something stamps it, the fact
 	//             has not happened, and nil says that where a zero time would
 	//             report year 1. Requires type: time and nullable: true.
-	//   counter — StampedCounterField. The column is a non-nullable int64 the
-	//             framework fills with 1 on the insert and with `col = col + 1`
-	//             on every write that asks — computed by the server under the
-	//             row's lock, so two racing increments cannot collapse into one.
-	//             PER ROW, never a table-wide sequence. Requires type: int64 and
-	//             nullable: false.
+	//   counter — StampedCounterField. The column is an int64 the framework
+	//             fills with 1 on the insert and with `col = col + 1` on every
+	//             write that asks — computed by the server under the row's lock,
+	//             so two racing increments cannot collapse into one. PER ROW,
+	//             never a table-wide sequence. Requires type: int64; nullable is
+	//             the author's call and means one thing only — a nullable
+	//             counter is emitted over *int64, which is the only shape
+	//             `e.StampNull(...)` can land in. The increment is the server's
+	//             on both.
 	//
 	// Both take the field OUT of every write surface — no request DTO, no
 	// command, no mapper, no OpenAPI request schema — for the same reason
@@ -489,7 +492,14 @@ type Field struct {
 	// mutate. So a stamped field is declared here and filled by a rules.manual
 	// entry you write — the same division `assignedFrom: derived` already makes,
 	// and the same one the framework makes when it refuses to schedule the
-	// instant itself.
+	// instant itself. The same entry is where a fact that UN-happens is written:
+	// `e.StampNull("PaidAt")` clears the column (an ABSENCE, so it needs a field
+	// that can hold one — a stamped time always can, a counter only when
+	// declared nullable) and `e.StampEmpty("PaidAt")` writes the declared type's
+	// ZERO (0 for a counter, the zero instant for a time), which is the only
+	// reset a NOT NULL column has. Both are requests, exactly like Stamp: a
+	// column nothing named is left out of the statement, so nothing is cleared
+	// by omission.
 	//
 	// Refused on a runtime field (no column to stamp), on a facet's field (a
 	// sibling row is a 1:1 slice of the OWNER's row and carries no

@@ -295,6 +295,12 @@ fields:
   #
   # nullable: true is MANDATORY here. Until the rule stamps it the fact has not
   # happened, and nil says that where a zero time would report year 1.
+  #
+  # A fact can also UN-happen, and the same rule is where that is said:
+  # e.StampNull("SuspendedAt") clears the column (the suspension was lifted) and
+  # e.StampEmpty("SuspendedAt") writes the zero instant. Both are requests
+  # exactly as Stamp is — a column no verb names is left out of the statement,
+  # so nothing is cleared by omission.
   - name: SuspendedAt
     type: time
     column: suspended_at
@@ -316,8 +322,15 @@ fields:
   # table (an invoice number) is a different problem and needs a SEQUENCE object
   # two of the five engines do not have.
   #
-  # nullable is REFUSED: a counter always has a value — a row that was just
-  # created has counted one thing — so there is no absence for null to describe.
+  # nullable is a CHOICE here, and it decides one thing only. A plain int64
+  # counts, and e.StampEmpty("SuspensionCount") resets it to 0 — "counted
+  # nothing". Declaring it nullable emits the counter over *int64, which is the
+  # only shape e.StampNull("SuspensionCount") can land in — "has no count at
+  # all", which is a different statement. The increment is the server's on both,
+  # so the pointer buys nothing else; asking StampNull of a plain int64 is
+  # refused by the write, naming StampEmpty. Left plain here: an enrollment that
+  # was never suspended has been suspended zero times, and there is no absence
+  # to describe.
   - name: SuspensionCount
     type: int64
     column: suspension_count

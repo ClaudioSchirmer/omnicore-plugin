@@ -1236,13 +1236,24 @@ Four things to get right, because they are the ones that cost a migration later:
   - **nothing generated ASKS for the stamp.** The rule DSL validates, it does not mutate,
     so `e.Stamp(...)` belongs to a `rules.manual` entry you write on the verb where the
     fact happens — the report lists the column until you do, exactly as it lists a derived
-    field. A stamped column nobody asks for is written never, and nothing reports it.
-  - **The shape is held to the kind and both refusals are blockers**: `time` requires
-    `type: time` with `nullable: true` (the Go field is `*time.Time`; until a rule stamps
-    it the fact has not happened, and nil says that where a zero time would report year 1),
-    `counter` requires `type: int64` with no `nullable` (a row that was just created has
-    counted one thing, so there is no absence for null to describe). Both mistakes compile
-    and panic the framework at boot, which is why `check` refuses them.
+    field. A stamped column nobody asks for is written never, and nothing reports it. The
+    same entry is where a fact that UN-happens is said: `e.StampNull("PaidAt")` writes an
+    ABSENCE and `e.StampEmpty("PaidAt")` writes the declared type's ZERO (0 for a counter,
+    the zero instant for a time). They are not two spellings of one thing — a zero is a
+    value, so it reaches a NOT NULL column where an absence cannot go, and on a counter
+    "counted nothing" is not "has no count". Both are requests exactly as `Stamp` is: a
+    column no verb named is left out of the statement, so nothing is cleared by omission.
+  - **The shape is held to the kind, and one of the two nullabilities is a CHOICE.**
+    `time` requires `type: time` with `nullable: true` — the Go field is `*time.Time`;
+    until a rule stamps it the fact has not happened, and nil says that where a zero time
+    would report year 1. That mistake compiles and panics the framework at boot, which is
+    why `check` refuses it. `counter` requires `type: int64`, and there `nullable` decides
+    one thing only: a plain `int64` counts and is reset with `StampEmpty`; a nullable one
+    is emitted over `*int64`, which is the only shape `StampNull` can land in ("has no
+    count at all"). The increment is the server's on both, so the pointer buys nothing
+    else — and asking `StampNull` of a plain `int64` is a typed write-time error naming
+    `StampEmpty`. Declare it nullable when the column must be able to say there is no
+    count; leave it plain otherwise.
   - **Refused on a collection entry and on a facet's field.** A facet is the framework's
     own refusal — a sibling row is a 1:1 slice of the owner's row and carries no
     framework-owned columns of its own. A collection entry is THIS BUILD's limit, not the
@@ -1569,10 +1580,11 @@ Do not re-read every file. Read against the plan the dev approved and against th
 Anything wrong here is fixed **in the spec**, then regenerated. The only files you author
 are the `*_manual.go` hooks — the rules one, the service one, and the computed-read one
 when the spec declares derived fields. **A `stamped:` column adds nothing to that list and
-still adds work**: the rules hook is where `e.Stamp(...)` goes, on the verb where the fact
-happens, and the report names every stamped column until somebody confirms that call
-exists. A column the framework fills and nobody asks it to fill stays empty with nothing
-reporting it.
+still adds work**: the rules hook is where `e.Stamp(...)` goes — and `e.StampNull(...)` /
+`e.StampEmpty(...)` where the fact un-happens — on the verb where each of those is true,
+and the report names every stamped column until somebody confirms that call exists. A
+column the framework fills and nobody asks it to fill stays empty with nothing reporting
+it.
 
 ### When the output is wrong and the spec seems unable to say so
 

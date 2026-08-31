@@ -7,7 +7,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.65.0" {
+	if Supported != "v0.67.0" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,21 +18,25 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.65.0", false, Exact, false},
-		{"same line, later patch", "v0.65.9", false, Exact, false},
-		{"framework moved ahead", "v0.66.0", false, Ahead, false},
-		// One line older. It reads Behind and blocks, and this time the block is
-		// the emitters' own: a spec declaring `stamped:` emits
-		// StampedTimeField / StampedCounterField, which are methods v0.64.0's
-		// TableSchema does not have, so the generated tree does not compile
-		// there. `relational.clock` cuts the same way from the other side — a
-		// v0.65 host aborts boot without the key, and an older one has no such
-		// key at all. Floor == ceiling, ONE proven line, and the golden gate
-		// proves exactly this one; --force-unsupported stays the escape hatch
-		// for a spec that uses neither. There is no "same line, earlier patch"
-		// case while the supported line is a .0 — the patch comparison is
-		// exercised by the later-patch row.
-		{"project is one line older", "v0.64.0", false, Behind, true},
+		{"the supported line", "v0.67.0", false, Exact, false},
+		{"same line, later patch", "v0.67.9", false, Exact, false},
+		{"framework moved ahead", "v0.68.0", false, Ahead, false},
+		// One line older. It reads Behind and blocks, and here the block is the
+		// posture rather than a missing symbol: v0.67.0 added only the Direct
+		// write's upsert scoping (write.OnUpdate, a stamp verb inside a
+		// wrapper), which the generator does not emit — so code emitted today
+		// still compiles on v0.66.0. Floor == ceiling anyway, because the golden
+		// gate proves ONE line and a second supported one is a second shape to
+		// keep proven; --force-unsupported is the escape hatch, and on this
+		// particular gap it is the cheap one. Older lines break for real:
+		// v0.65.0's TableSchema panics at boot on the StampedCounterField over
+		// *int64 a nullable `stamped: counter` emits, and v0.64.0 has no
+		// StampedTimeField / StampedCounterField at all and no
+		// `relational.clock` key. There is no "same line, earlier patch" case
+		// while the supported line is a .0 — the patch comparison is exercised
+		// by the later-patch row.
+		{"project is one line older", "v0.66.0", false, Behind, true},
+		{"project is two lines older", "v0.65.0", false, Behind, true},
 		{"project is older", "v0.49.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},
 		{"devel", "(devel)", false, Unknown, false},

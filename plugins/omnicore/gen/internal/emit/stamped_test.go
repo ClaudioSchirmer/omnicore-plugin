@@ -51,6 +51,7 @@ func TestTheSchemaDeclaresTheStampedBuilders(t *testing.T) {
 	for _, want := range []string{
 		`StampedTimeField("CanceladaEm", "cancelada_em")`,
 		`StampedCounterField("TotalDeCobrancas", "total_de_cobrancas")`,
+		`StampedCounterField("FalhasSeguidas", "falhas_seguidas")`,
 	} {
 		if !strings.Contains(schema, want) {
 			t.Errorf("the schema does not declare %s:\n%s", want, schema)
@@ -89,8 +90,8 @@ func TestNoWriteSurfaceCarriesAStampedField(t *testing.T) {
 				"does nothing, so the generated line would be a silent no-op", f.Name)
 		}
 	}
-	if got := len(m.StampedFields()); got != 2 {
-		t.Fatalf("the matrix case declares two stamped columns, StampedFields returned %d", got)
+	if got := len(m.StampedFields()); got != 3 {
+		t.Fatalf("the matrix case declares three stamped columns, StampedFields returned %d", got)
 	}
 }
 
@@ -106,7 +107,7 @@ func TestTheStampedColumnsAreStillOrdinaryEverywhereElse(t *testing.T) {
 			migration = string(f.Content)
 		}
 	}
-	for _, want := range []string{"cancelada_em", "total_de_cobrancas"} {
+	for _, want := range []string{"cancelada_em", "total_de_cobrancas", "falhas_seguidas"} {
 		if !strings.Contains(migration, want) {
 			t.Errorf("the migration does not create %q — a stamped column is an ordinary "+
 				"column of the table:\n%s", want, migration)
@@ -136,12 +137,20 @@ func TestTheAggregateFieldSaysItIsNotAssignable(t *testing.T) {
 	if aggregate == "" {
 		t.Fatal("the aggregate file was not emitted")
 	}
+	// The verb list is part of the warning and not decoration: StampNull is
+	// listed on the two fields that can hold an absence and left off the plain
+	// int64 counter, which has none — asking it there is refused by the write.
 	for _, want := range []string{
-		`Stamp("CanceladaEm"), never assign`,
-		`Stamp("TotalDeCobrancas"), never assign`,
+		`Stamp/StampNull/StampEmpty("CanceladaEm"), never assign`,
+		`Stamp/StampEmpty("TotalDeCobrancas"), never assign`,
+		`Stamp/StampNull/StampEmpty("FalhasSeguidas"), never assign`,
 	} {
 		if !strings.Contains(aggregate, want) {
 			t.Errorf("the aggregate does not warn about %s:\n%s", want, aggregate)
 		}
+	}
+	if strings.Contains(aggregate, `StampNull/StampEmpty("TotalDeCobrancas")`) {
+		t.Errorf("the plain int64 counter offers StampNull, which the write refuses "+
+			"— it has no absence to hold:\n%s", aggregate)
 	}
 }

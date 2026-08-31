@@ -84,6 +84,11 @@ refuses the decidable cases outright.
           o.Stamp("PaidAt")     // ask; do not assign
       }
 
+  Where the pin carries them, the same seat has the two verbs that CLEAR a stamp —
+  `o.StampNull("PaidAt")` when the fact un-happened (an absence) and
+  `o.StampEmpty("PaidAt")` when it is reset (the declared type's zero: 0 for a counter,
+  the zero instant for a time). `conventions/infra.md` owns which field can hold which.
+
   `Stamp` is promoted from `domain.Managed`, so every root and every aggregate child has
   it, and it takes the GO FIELD NAME exactly as a criteria does. A rule inside
   `BuildRules` may stamp as freely as a method does — the request is read at write time,

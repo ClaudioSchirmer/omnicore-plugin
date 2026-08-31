@@ -7,9 +7,11 @@ import (
 )
 
 // A framework-owned column is the one field shape where every mistake COMPILES.
-// A counter declared nullable emits StampedCounterField over a *int64 and the
-// framework panics at boot; a time declared non-nullable does the same. Neither
-// is visible to a reviewer reading the spec, so each one is a blocker here.
+// A time declared non-nullable emits StampedTimeField over a time.Time and the
+// framework panics at boot, which is not visible to a reviewer reading the
+// spec — so it is a blocker here. A counter is the one shape where nullability
+// is a CHOICE and not a mistake: int64 counts, *int64 counts and can also hold
+// the absence StampNull writes.
 
 // The base is a flat entity that already carries a rules.manual entry, because a
 // stamped column with nothing to ask for it is a WARNING of its own and would
@@ -97,13 +99,20 @@ func TestTheShapeOfTheValueIsHeldToTheKind(t *testing.T) {
 			`  - {name: TotalDeCobrancas, type: int, column: total_de_cobrancas, livesOn: root, stamped: counter, example: "3", description: Quantas.}`,
 			"a stamped counter is an int64",
 		},
-		{
-			"a counter that may be absent",
-			`  - {name: TotalDeCobrancas, type: int64, column: total_de_cobrancas, livesOn: root, nullable: true, stamped: counter, example: "3", description: Quantas.}`,
-			"a counter always has a value",
-		},
 	} {
 		t.Run(c.name, func(t *testing.T) { mustBlock(t, stampedProblems(t, c.field), c.want) })
+	}
+}
+
+// TestANullableCounterIsAccepted. The pointer form is what StampNull needs — a
+// plain int64 has no absence to write, and the framework's write refuses the
+// request naming StampEmpty instead. So a nullable counter is a deliberate
+// declaration ("this row may have NO count", which is not "it counted zero"),
+// and the generator lowers it to *int64 rather than refusing it.
+func TestANullableCounterIsAccepted(t *testing.T) {
+	ps := stampedProblems(t, `  - {name: TotalDeCobrancas, type: int64, column: total_de_cobrancas, livesOn: root, nullable: true, stamped: counter, example: "3", description: Quantas.}`)
+	if ps.HasBlockers() {
+		t.Fatalf("a clearable counter was refused:\n%v", ps.Error())
 	}
 }
 

@@ -1,9 +1,15 @@
 # Eixo: colunas carimbadas pelo framework — o domínio diz QUANDO, o framework
-# diz QUAL VALOR. As duas formas na mesma entidade:
-#   stamped: time     -> StampedTimeField  (timestamp anulável, o instante da escrita)
-#   stamped: counter  -> StampedCounterField (int64 por LINHA, col = col + 1)
+# diz QUAL VALOR. As três formas na mesma entidade:
+#   stamped: time                    -> StampedTimeField    (timestamp anulável, o instante da escrita)
+#   stamped: counter                 -> StampedCounterField (int64 por LINHA, col = col + 1)
+#   stamped: counter + nullable      -> StampedCounterField sobre *int64
 #
-# O que este caso prova além de compilar: nenhuma das duas colunas aparece no
+# A terceira não é um contador "que pode ser desconhecido": o ponteiro não muda
+# em nada o incremento (ele é do servidor nas duas formas) e serve para UMA
+# coisa só — é a única forma em que StampNull pousa. Num int64 simples a escrita
+# recusa o pedido e nomeia StampEmpty, que escreve o ZERO do tipo declarado.
+#
+# O que este caso prova além de compilar: nenhuma das três colunas aparece no
 # request DTO, no comando nem no mapper — só no Result/Response e na migração —
 # e o pedido do carimbo cai na regra manual, porque o DSL de regras valida e não
 # muta.
@@ -34,6 +40,16 @@ fields:
     stamped: counter
     example: "3"
     description: Quantas cobranças esta assinatura já sofreu.
+  - name: FalhasSeguidas
+    type: int64
+    column: falhas_seguidas
+    livesOn: root
+    nullable: true
+    stamped: counter
+    example: "2"
+    description: >-
+      Quantas cobranças seguidas falharam; ausente enquanto nenhuma cobrança
+      foi tentada — o que não é o mesmo que zero falhas.
 modes: [display, insert, update, archive]
 update: {shape: both}
 rules:
@@ -44,6 +60,15 @@ rules:
         e.Stamp("CanceladaEm") e e.Stamp("TotalDeCobrancas"). Pedir, nunca
         atribuir: o framework preenche a data com o instante desta escrita e
         incrementa o contador sob o lock da linha.
+      scope: [update]
+    - id: reativacao-limpa-o-carimbo
+      description: >-
+        Quando a atualização levar Situacao de "cancelada" de volta para
+        "ativa", chamar e.StampNull("CanceladaEm") — o fato DESaconteceu, e a
+        ausência é o que diz isso — e e.StampEmpty("FalhasSeguidas"), que zera
+        o contador de falhas (contou nada, e não "não tem contagem"). Os dois
+        são pedidos como o Stamp: a coluna que nenhum verbo nomear fica fora da
+        instrução, então nada é limpo por omissão.
       scope: [update]
 read:
   backing: relational
