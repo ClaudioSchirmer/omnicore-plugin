@@ -7,15 +7,29 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
-## [0.53.0] — 2026-08-30
+## [0.53.0] — 2026-08-31
 
-Framework `v0.65.0` hands a service two things it could not say before: a column whose
-WHEN belongs to the domain and whose VALUE belongs to the framework, and an operator's
-declaration of WHOSE CLOCK the history is written against. The second one is breaking —
-`relational.clock` has no default and boot aborts without it — so every seat that writes
-or reads a `microservice.*.yaml` had to learn it in the same round, and the seat that
-ASKS had to learn why the value is read before the write. Otherwise the honest answer
-(`db`) reads as a gratuitous round-trip and the framework reads as badly built.
+Three framework releases land in this one, and they are the same story told in three
+steps: a column whose WHEN belongs to the domain and whose VALUE belongs to the
+framework.
+
+`v0.65.0` opens it — the stamped family plus an operator's declaration of WHOSE CLOCK the
+history is written against. The second half is breaking — `relational.clock` has no
+default and boot aborts without it — so every seat that writes or reads a
+`microservice.*.yaml` had to learn it in the same round, and the seat that ASKS had to
+learn why the value is read before the write. Otherwise the honest answer (`db`) reads as
+a gratuitous round-trip and the framework reads as badly built.
+
+`v0.66.0` completes the family: `Stamp` only ever wrote forward, and now `StampNull` and
+`StampEmpty` can clear a stamped column. Almost none of that is the generator's to emit —
+the verbs live in a `rules.manual` entry, because the rule DSL validates and does not
+mutate — but one half of it is a DECLARATION, and the generator was refusing the only
+shape that can hold it.
+
+`v0.67.0` finishes the OTHER door, the Direct one: an upsert can now scope a slot — and a
+stamp verb — to the row it creates or the row it finds. Nothing there is the generator's
+at all (it emits no Direct schema and no `write.Values`), so that half is entirely
+knowledge: the shared file that owns the door learns the verbs, and the floor moves.
 
 ### Added
 
@@ -68,27 +82,79 @@ ASKS had to learn why the value is read before the write. Otherwise the honest a
 
   Proven, not assumed: a new coverage-matrix case (`43-carimbos.yaml`) declaring both
   kinds generates, gofmts, builds, vets and passes its generated tests against the real
-  `v0.65.0` framework; the printed flat example carries both keys with the reasoning
+  `v0.67.0` framework; the printed flat example carries both keys with the reasoning
   beside them, which is what the language-coverage test requires.
 
-- **`shared/direct-schema.md` gains the two verbs the design depends on.** `Upsert` —
-  insert-or-update on a conflict key named per call, with the four slot kinds
-  (`write.Stamp`, `write.OnInsert`, an ordinary overwrite, and the key itself), MySQL's
+- **`shared/direct-schema.md` gains the verbs the design depends on.** `Upsert` —
+  insert-or-update on a conflict key named per call, with its slot kinds, MySQL's
   documented `ON DUPLICATE KEY` exception, the mandatory archive-conflict answer on a
   schema declaring the archive column, and why it returns only an error. And
   `write.Stamp` — the Direct half of the stamped family, which is how a door with no
   entity asks for a value it must not supply.
 
+- **`stamped: counter` accepts `nullable: true`, emitted over `*int64`.** It used to be a
+  blocker ("a counter always has a value"), which was true of the framework until v0.66.0
+  and is not any more: `StampedCounterField` takes the pointer form, and that is the ONLY
+  shape `StampNull` can land in — a plain `int64` has no absence to write, and the write
+  refuses the request naming `StampEmpty` instead. So a clearable counter was a thing the
+  spec language could not say and the author could only reach by hand-editing generated
+  code, which is exactly the failure this repo keeps having.
+
+  Nullability on a counter is now a CHOICE with one meaning, and the guidance says which:
+  `int64` counts and is reset to 0 with `StampEmpty` ("counted nothing"); `*int64` counts
+  and can also say it has NO count. The increment is the server's on both, so the pointer
+  buys nothing else. Everything downstream was already generic — the entity field is
+  `*int64`, the DDL is `NULL`, the read DTOs project it — so the change is the refusal
+  coming out, plus the texts that were teaching the old rule.
+
+- **The clearing verbs are documented everywhere a stamped column is explained**, because
+  a verb nobody is told about is a verb nobody uses: `explain keys` (the `stamped` doc
+  comment), `explain vocab`, `explain example flat`, `explain coverage`, the gen-report's
+  "columns the framework fills" section — which also now marks a nullable counter as the
+  clearable one — the generated aggregate's own field comment, and the three skill
+  conventions that own the contract (`scaffold-entity/conventions/infra.md`, its
+  `domain.md`, and `evolve-entity`, where making an existing counter clearable is itself
+  an evolution: an ALTER dropping NOT NULL, a Go type change and a view `Version` bump).
+
+  The field comment lists the verbs the FIELD accepts, not the family: a plain `int64`
+  counter reads `Stamp/StampEmpty("Attempts")`, and only a `*int64` one offers StampNull.
+
+- **`shared/direct-schema.md` learns the upsert's two scoping wrappers** — framework
+  `v0.67.0`, named there the way the file already names `v0.64.0` for the door itself: as
+  the fact that places the feature in time, while the decision stays the mechanical test
+  against the project's own pin. `write.OnUpdate(v)` binds only when the row was already
+  there, and BOTH wrappers now take a stamp verb, which is the only way to write one half
+  of the statement with the framework's own instant — under `relational.clock: db` that
+  instant is read from the very transaction the statement runs in, so a caller has nothing
+  to compute it from. So the file's upsert slots are named as a list that grew rather than
+  the fixed four they were drafted as, the worked example dates its creation with `write.OnInsert(write.Stamp)` and its collision
+  with `write.OnUpdate(write.Stamp)`, and two things a proposal has to settle at design
+  time are stated: an `OnUpdate` column is absent from the proposed row, so `NOT NULL` with
+  no `DEFAULT` fails the creating path (the migration's business), and the scoping is
+  refused outside an `Upsert`, nested, or on a conflict key — which is now in the file's
+  refusal list, where the design reads it before writing the table rather than after.
+
+  Nothing in the generator moved for this: it emits no Direct schema and no `write.Values`,
+  and `omnicore-gen doctor` has nothing to say about a door it does not open.
+
 ### Changed
 
-- **`omnicore-gen` now targets framework `v0.65.0`** (`compat.Supported`, and the
-  `relational.clock` key added to all five vendored host profiles so the gate's boot
-  lanes survive it). **The bump is required, not cosmetic, and it cuts both ways**: a
-  spec declaring `stamped:` emits methods `v0.64.0`'s `TableSchema` does not have, so the
-  generated tree does not compile there; and a `v0.65` host aborts boot without
-  `relational.clock`, which an older one has no key for. A project on `v0.64.0` or older
-  reads **Behind** and is refused by default, with `--force-unsupported` still the escape
-  hatch for a spec that uses neither.
+- **breaking** — **`omnicore-gen` now targets framework `v0.67.0`** (`compat.Supported`,
+  the vendored golden-gate host beside it, and the `relational.clock` key added to all
+  five vendored host profiles so the gate's boot lanes survive it). Floor == ceiling, ONE
+  proven line, because branching emitters per framework version is the largest drift
+  source a generator can have — so a project pinning anything older reads **Behind** and
+  generation stops absent `--force-unsupported`.
+
+  **The steps of that move are not equally hard, and the difference is what the escape
+  hatch is for.** Against `v0.64.0` and older the refusal is absolute: a spec declaring
+  `stamped:` emits methods that `TableSchema` does not have, so the generated tree does
+  not compile, and the host aborts boot without `relational.clock`, which those lines have
+  no key for. Against `v0.65.0` it is still the emitters': a nullable `stamped: counter`
+  emits `StampedCounterField` over a `*int64`, which its `TableSchema` panics on at boot.
+  Against `v0.66.0` it is the POSTURE and nothing else — `v0.67.0` added only the Direct
+  write's upsert scoping, which the generator never emits, so code emitted today still
+  compiles there. That last gap is exactly what `--force-unsupported` exists for.
 
 - **`relational.clock` reaches every seat that writes, reads or bumps a
   `microservice.*.yaml`.** It is a MANDATORY key with NO default — boot aborts on its
@@ -142,6 +208,15 @@ ASKS had to learn why the value is read before the write. Otherwise the honest a
   asks. `implement` and `shared/capabilities.md` route "record when this happened / how
   many times" to `evolve-entity` rather than answering it as a capability, and route the
   host-level half (`relational.clock`) to `yaml-reference` and `configure`.
+
+### Fixed
+
+- **`shared/capabilities.md` pointed one directory too far up at three of its siblings.**
+  `read-side.md`, `direct-schema.md` and `boot-contract.md` live beside it in `shared/`,
+  and were referenced as `../` — a path that resolves to the plugin root, where none of
+  them is. A route that names the wrong file is the same as no route: the reader either
+  answers the question locally, which is exactly what these files exist to prevent, or
+  hunts for the owner by hand.
 
 ## [0.52.0] — 2026-08-29
 

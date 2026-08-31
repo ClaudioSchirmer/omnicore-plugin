@@ -35,6 +35,7 @@ root; the domain-service implementation in its own file here.
 
       StampedTimeField("PaidAt", "paid_at")            // *time.Time — the write's own instant
       StampedCounterField("Attempts", "attempts")      // int64 — 1 on insert, col + 1 after
+      StampedCounterField("Failures", "failures")      // *int64 — the same count, clearable
 
   This is the seat `CreatedAt`/`UpdatedAt` do not cover. Those date the ROW — written,
   last touched — on a schedule the framework fixes. A stamped field dates a FACT the
@@ -60,17 +61,32 @@ root; the domain-service implementation in its own file here.
     says so: the new value is the server's, the framework does not read it back, so it is
     absent from the outbox payload and from the write-back. The projection is unaffected
     (the SyncEngine re-reads the row).
-  - **The Go types are not negotiable.** A stamped time is `*time.Time` — until a rule
-    stamps it the fact has not happened, and nil says that where a zero time would report
-    year 1. A counter is a plain `int64`, never a pointer — a row that was just created
-    has counted one thing. Anything else is a boot panic.
+  - **The Go types are not negotiable, with ONE choice inside them.** A stamped time is
+    `*time.Time` — until a rule stamps it the fact has not happened, and nil says that
+    where a zero time would report year 1. A counter is `int64`, or `*int64` where the pin
+    accepts the pointer form (test it, as always): the pointer changes nothing about the
+    increment — that is the server's either way — and buys exactly one thing, somewhere for
+    a CLEAR to land. Anything else is a boot panic.
+  - **A fact can UN-happen, where the pin carries the verbs that say so.** `Stamp` only
+    ever writes forward. Where the pin's `table-schema` section documents them,
+    `e.StampNull("PaidAt")` writes an ABSENCE and `e.StampEmpty("PaidAt")` writes the
+    declared type's ZERO — 0 for a counter, the zero instant for a time — and they are not
+    two spellings of one thing: a zero is a value, so it reaches a NOT NULL column where an
+    absence cannot go, and on a counter "counted nothing" is not "has no count". StampNull
+    needs a field that can hold the absence, which is a stamped time always and a stamped
+    counter only when declared `*int64`; asked of a plain `int64` it is a typed write-time
+    error naming StampEmpty. Both are requests exactly as `Stamp` is — a column no verb
+    named is left out of the statement, so nothing is cleared by omission — and naming one
+    field with two verbs is one request where the LAST one wins. Unlike a counter's
+    increment, a cleared or reset value IS written back onto the entity and into the outbox
+    payload: it is the framework's own value, known before the statement runs.
   - **Where it may be declared**: an entity root, an aggregate child, a shared-base role
     and the shared base itself. REFUSED on a sibling (a facet row is a 1:1 slice of the
     owner's row and carries no framework-owned columns of its own — declare it on the
     owner) and on an external schema (it never writes).
   - **Everything else is ordinary.** It joins the bijection, filters, orders, projects,
     exports and hydrates like any `Field`, and its DDL is its own Go type's: a nullable
-    timestamp column, or a NOT NULL bigint.
+    timestamp column, or a bigint — NOT NULL for `int64`, nullable for `*int64`.
 - **A COMPOSITE value object is NOT a `Field` — it is decomposed here, and this schema is the
   only place that knows it is stored across several columns.** A struct VO passed to
   `Field(...)` is a boot panic naming the fix, because its value has no single column to be.

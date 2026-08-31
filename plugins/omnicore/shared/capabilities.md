@@ -8,7 +8,7 @@ the PIN's docs — if this file ever disagrees with them, the docs win.
 
 ## Availability under the infra posture — three independent axes, BOTH directions
 
-The posture is not one switch but THREE independent opt-outs (`../read-side.md` owns
+The posture is not one switch but THREE independent opt-outs (`read-side.md` owns
 the view side): **Mongo** (document read side), **broker + transport build tag**
 (messaging), **CDC relay over a tailable engine** (change capture). Legal postures
 include Mongo-with-no-broker and broker-with-no-Mongo — gate by the axis the
@@ -28,7 +28,7 @@ capability actually needs; never refuse what the posture doesn't gate:
   cache (both slots), gRPC and GraphQL surfaces, exports, auth/authz, audit, tracing,
   lifecycle hooks, domain events (in-process), the whole write side, and the **Direct
   schema/repository** door (one table, no aggregate — gated by the PIN and by nothing in
-  the posture; `../direct-schema.md` owns it). The mirror-image failure — refusing an
+  the posture; `direct-schema.md` owns it). The mirror-image failure — refusing an
   available capability "because it's an MVP" — is as wrong as offering an unavailable one.
   - The one posture-shaped consequence to state whenever Direct is offered: a Direct write
     emits **no outbox row**, so it never feeds a Mongo-projected view on ANY posture. That
@@ -36,7 +36,7 @@ capability actually needs; never refuse what the posture doesn't gate:
 - **The transport BUILD TAG is part of enabling messaging.** A consumer or upstream
   subscription wired into a service that builds without the tag passes every
   compile-and-boot gate and dies at the point of use — an enable plan must carry the
-  new build/run commands, not just yaml (`../boot-contract.md`, Build tags).
+  new build/run commands, not just yaml (`boot-contract.md`, Build tags).
 
 ## Service-to-service — the decision matrix
 
@@ -87,7 +87,7 @@ Things `implement` must NOT "wire" because they're already on:
 - **Structured JSON logs** — the always-on stdout channel, zero framework config
   ("add JSON logging" is already done).
 - **Probes** — `/livez` and `/readyz` are framework-registered on every service
-  (`../boot-contract.md` owns their semantics).
+  (`boot-contract.md` owns their semantics).
 - **Per-request correlation** — the `AppContext` UUID rides every request already;
   "add request ids" is a where-to-see-it answer.
 - The honest answer to "add X" is sometimes "X is already on — here's where to see
@@ -105,9 +105,9 @@ inbound surfaces → `grpc` / `graphql` · cache → `cache-subsystem` · permis
 audit → `audit` · tracing → `tracing` · logs → `logs` · hooks → `lifecycle-hooks` ·
 exports/OpenAPI → `openapi` · config keys → `yaml-reference` · one table with no aggregate
 → `direct-schema` (under Infrastructure, beside `table-schema`; its ABSENCE from the pin's
-nav is the availability test — see `../direct-schema.md`) · a column dating a business FACT
+nav is the availability test — see `direct-schema.md`) · a column dating a business FACT
 or counting one, filled by the framework and settable by no caller → `table-schema` (the
 stamped family; the decision is an ENTITY change, so it belongs to `scaffold-entity` /
 `evolve-entity`, whose `conventions/infra.md` owns it) · WHICH clock stamps the managed
 timestamp columns → `yaml-reference` (`relational.clock`; on a pin that carries it the key
-is mandatory with no default, so its absence is a boot abort — `../boot-contract.md`).
+is mandatory with no default, so its absence is a boot abort — `boot-contract.md`).

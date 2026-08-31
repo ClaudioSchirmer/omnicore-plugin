@@ -355,13 +355,17 @@ func Vocabularies() []Vocabulary {
 			"the framework owns the VALUE, the domain owns the WHEN. time = a nullable " +
 				"timestamp (*time.Time) bound with the write operation's own instant — the " +
 				"seat createdAt/updatedAt do not cover, for a FACT that just happened " +
-				"(paid, approved, cancelled) rather than for the row; counter = a " +
-				"non-nullable int64 the server increments under the row's lock, per ROW " +
-				"and never a table-wide sequence. Both leave every write surface, exactly " +
+				"(paid, approved, cancelled) rather than for the row; counter = an int64 " +
+				"the server increments under the row's lock, per ROW and never a " +
+				"table-wide sequence — declare it nullable (*int64) when the column must " +
+				"also be able to say NO COUNT AT ALL, which is the only shape StampNull " +
+				"can land in. Both leave every write surface, exactly " +
 				"as assignedFrom does, and neither is ever written from the struct. What " +
 				"ASKS for the stamp is not generated: e.Stamp(\"PaidAt\") belongs to a " +
 				"rules.manual entry you write, because no rule in this language knows the " +
-				"moment a domain calls a fact done."},
+				"moment a domain calls a fact done — and so do the two verbs that CLEAR " +
+				"one, e.StampNull(\"PaidAt\") (an absence) and e.StampEmpty(\"PaidAt\") " +
+				"(the declared type's zero: 0 for a counter, the zero instant for a time)."},
 		{"fields[].source", FieldSources,
 			"where a RUNTIME-only field is fed from. claim = the caller's token by NAME " +
 				"(the default, and it needs claim: <name>); body = the request itself — the " +

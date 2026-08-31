@@ -153,12 +153,19 @@ func fieldComment(f ir.Field) string {
 	// column out of the statement unless the write asked for it, so nothing
 	// errors and nothing is written. The marker goes on the field itself
 	// because that is where somebody about to assign it is looking.
+	//
+	// The verbs are listed because the family is not just Stamp: StampNull
+	// clears the column and StampEmpty writes the declared type's zero. StampNull
+	// is left off a PLAIN int64 counter on purpose — that field has no absence to
+	// hold, and the write refuses the request naming StampEmpty instead.
 	var stamp string
-	switch f.Stamped {
-	case "time":
-		stamp = fmt.Sprintf("framework-stamped: Stamp(%q), never assign", f.Name)
-	case "counter":
-		stamp = fmt.Sprintf("framework-counted: Stamp(%q), never assign", f.Name)
+	switch {
+	case f.Stamped == "time":
+		stamp = fmt.Sprintf("framework-stamped: Stamp/StampNull/StampEmpty(%q), never assign", f.Name)
+	case f.Stamped == "counter" && f.Nullable:
+		stamp = fmt.Sprintf("framework-counted: Stamp/StampNull/StampEmpty(%q), never assign", f.Name)
+	case f.Stamped == "counter":
+		stamp = fmt.Sprintf("framework-counted: Stamp/StampEmpty(%q), never assign", f.Name)
 	}
 	desc := strings.TrimSuffix(f.Description, ".")
 	switch {

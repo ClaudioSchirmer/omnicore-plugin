@@ -203,15 +203,25 @@ of deletion):
      mapper and OpenAPI request schema. If callers were already sending a value for a
      column being converted to stamped, that is a CONTRACT BREAK on the request side and
      the spec says so rather than discovering it at the verify.
-   - **The DDL for a counter needs a default it will not keep.** `NOT NULL` on a table
-     that already has rows fails; the ALTER carries a default, backfills, then drops it,
-     so the steady state matches what a fresh CREATE writes. A stamped TIME column is
-     nullable and needs none — every existing row honestly has no such fact yet.
+   - **The DDL for a NOT NULL counter needs a default it will not keep.** `NOT NULL` on a
+     table that already has rows fails; the ALTER carries a default, backfills, then drops
+     it, so the steady state matches what a fresh CREATE writes. A stamped TIME column is
+     nullable and needs none — every existing row honestly has no such fact yet — and
+     neither does a counter declared `*int64`, where the existing rows honestly have no
+     count.
    - **Nothing asks for the stamp until a rule does.** Adding the column and the schema
      declaration changes no behaviour at all: the framework leaves an unasked-for stamped
      column out of every statement. The rule that calls `e.Stamp("<Field>")` is part of
      this change, on the verb where the fact happens, or the column is added and stays
-     empty with nothing reporting it.
+     empty with nothing reporting it. Where the pin carries the clearing verbs, the verb
+     that UN-does the fact is part of the same change and is easy to forget: a rule that
+     stamps `PaidAt` and no rule that calls `e.StampNull("PaidAt")` leaves an order that
+     stops being paid still dated.
+   - **Making an existing counter clearable is itself an evolution.** `int64` → `*int64`
+     is what `e.StampNull(...)` needs on a counter; it is an ALTER dropping NOT NULL, a Go
+     type change on the entity and on every read DTO that projects it, and a view
+     `Version` bump. Nothing about the increment changes — that is the server's on both
+     shapes.
 
 4b. **Is the "new field" a COLUMN at all?** If what the change adds is a value that
    belongs to ANOTHER aggregate this entity already holds a foreign key to, the answer is

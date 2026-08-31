@@ -102,18 +102,34 @@ loses the race, or a unique-violation caught and retried.
         "Identity":        id,
         "IdentityKind":    kind,
         "Outcome":         "FAILURE",
-        "TotalCount":      write.Stamp,          // += 1, server-side
-        "WindowStartedAt": write.OnInsert(t0),   // set once, never revised
-        "LastAt":          write.Stamp,          // the operation's instant
-        "LastIP":          ip,                   // overwritten on conflict
+        "TotalCount":      write.Stamp,                   // += 1, server-side
+        "WindowStartedAt": write.OnInsert(write.Stamp),   // dated once, never re-dated
+        "RepeatedAt":      write.OnUpdate(write.Stamp),   // only a SECOND arrival has one
+        "LastAt":          write.Stamp,                   // the operation's instant
+        "LastIP":          ip,                            // overwritten on conflict
     }, write.OnConflict("Identity", "IdentityKind", "Outcome"),
        write.KeepArchiveStateOnConflict())
 
-Every slot says what happens ON A CONFLICT, and those are the four kinds of column an upsert
-has: an ordinary value is overwritten, `write.Stamp` is filled by the framework,
-`write.OnInsert(v)` is established at creation and never revised, and the conflict key itself
-is insert-only by definition — it is the thing that matched. The key is named PER CALL, by Go
-field name, because one table legitimately has more than one way to be conflicted on.
+Every slot says what happens ON A CONFLICT, and the slots are the kinds of column an upsert
+has: an ordinary value is overwritten, `write.Stamp` is filled by the framework on BOTH paths,
+`write.OnInsert(v)` is established at creation and never revised, `write.OnUpdate(v)` binds
+only when the row was already there, and the conflict key itself is insert-only by definition
+— it is the thing that matched. The key is named PER CALL, by Go field name, because one table
+legitimately has more than one way to be conflicted on.
+
+**Both wrappers take a stamp verb, not only a value — pin ≥ v0.67.0, same mechanical test**
+(does the pin's `direct-schema` section show `write.OnUpdate`, and a `write.Stamp` inside a
+wrapper?). `write.OnInsert(write.Stamp)` dates a creation and never re-dates it,
+`write.OnUpdate(write.Stamp)` dates only the collision, and `write.StampNull` /
+`write.StampEmpty` scope the same way. That pairing is the ONLY way to write one half of the
+statement with the framework's OWN instant, and the reason it cannot be done by binding a
+value is `relational.clock: db`: the instant is read from the very transaction the statement
+runs in, so the caller has nothing to compute it from. On a pin without the wrapped form, a
+column dated once is a constraint to state — never a hand-computed `time.Now()` smuggled in.
+
+`OnUpdate` also shapes the TABLE, so the migration settles it at design time: the column is
+left out of the proposed row ENTIRELY, so the creating path takes its DEFAULT, and `NOT NULL`
+with no `DEFAULT` makes that path fail.
 
 Three things belong in any proposal that reaches for it:
 
@@ -162,6 +178,10 @@ is good, and it is still cheaper to know them at design time:
 - **a write with an empty predicate** — a criteria assembled conditionally that came out empty
   would become a full-table sweep with nothing at the call site showing it. The deliberate
   sweep has its own verb, so the call site says it;
+- **`write.OnInsert` / `write.OnUpdate` outside an `Upsert`, nested in each other, or on a
+  conflict-key field** — an `Insert` is insert-only already, an `Update` has no insert path,
+  and the key is written once by definition (the MERGE dialects reject assigning a join
+  column). All three are raised before a transaction is opened;
 - a second match where exactly one row was expected;
 - joins into a child — there is no child; the reach here is horizontal only.
 
