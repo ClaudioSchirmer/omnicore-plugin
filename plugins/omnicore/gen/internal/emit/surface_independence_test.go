@@ -95,8 +95,8 @@ func TestPerEntryVerbsReachGraphQL(t *testing.T) {
 		"addPapelPermissao", requests.AddPapelPermissaoResponse{}.FromResult,`,
 		`fwgraphql.MutationWithBodyID[requests.ChangePapelPermissaoGraphQLRequest](
 		"changePapelPermissao", requests.ChangePapelPermissaoResponse{}.FromResult,`,
-		`fwgraphql.MutationWithBodyID[requests.RemovePapelPermissaoGraphQLRequest](
-		"removePapelPermissao", requests.RemovePapelPermissaoGraphQLResponse{}.FromResult,`,
+		`fwgraphql.MutationWithBodyID[requests.ArchivePapelPermissaoGraphQLRequest](
+		"archivePapelPermissao", requests.ArchivePapelPermissaoGraphQLResponse{}.FromResult,`,
 	} {
 		if !strings.Contains(gql, want) {
 			t.Errorf("the collection verb is missing from the schema:\n%s\nwanted:\n%s", gql, want)
@@ -109,7 +109,7 @@ func TestPerEntryVerbsReachGraphQL(t *testing.T) {
 		!strings.Contains(gql[strings.Index(gql, `"addPapelPermissao"`):], `RequirePermission("papel:conceder")`) {
 		t.Errorf("the add mutation lost the collection's own permission:\n%s", gql)
 	}
-	if !strings.Contains(gql[strings.Index(gql, `"removePapelPermissao"`):], `RequirePermission("papel:escrever")`) {
+	if !strings.Contains(gql[strings.Index(gql, `"archivePapelPermissao"`):], `RequirePermission("papel:escrever")`) {
 		t.Errorf("the remove mutation did not inherit the root's update permission:\n%s", gql)
 	}
 }
@@ -119,8 +119,10 @@ func TestPerEntryVerbsReachGraphQL(t *testing.T) {
 // field, so a Request that names the entry through the path would reach the
 // command with an empty id and replace nothing.
 func TestGraphQLPerEntryRequestsCarryTheEntryIDInTheInput(t *testing.T) {
-	got := fileNamed(t, surfaceModel(t, "", bothSurfaces),
-		"internal/web/requests/papel_permissao_requests.go")
+	m := surfaceModel(t, "", bothSurfaces)
+	change := fileNamed(t, m, "internal/web/requests/change_papel_permissao.go")
+	archive := fileNamed(t, m, "internal/web/requests/archive_papel_permissao.go")
+	got := change + archive
 
 	// REST keeps the path segment.
 	if !strings.Contains(got, "PapelPermissaoID string `path:\"papelPermissaoId\"`") {
@@ -129,10 +131,10 @@ func TestGraphQLPerEntryRequestsCarryTheEntryIDInTheInput(t *testing.T) {
 	// GraphQL carries the same name as a body field.
 	for _, want := range []string{
 		"type ChangePapelPermissaoGraphQLRequest struct",
-		"type RemovePapelPermissaoGraphQLRequest struct",
+		"type ArchivePapelPermissaoGraphQLRequest struct",
 		"PapelPermissaoID string `json:\"papelPermissaoId\"`",
-		"type RemovePapelPermissaoGraphQLResponse struct",
-		"return RemovePapelPermissaoGraphQLResponse{Success: true}",
+		"type ArchivePapelPermissaoGraphQLResponse struct",
+		"return ArchivePapelPermissaoGraphQLResponse{Success: true}",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the GraphQL wire pair is incomplete, missing %q:\n%s", want, got)
@@ -154,7 +156,7 @@ func TestGraphQLOnlyKeepsTheCollectionVerbs(t *testing.T) {
 	if strings.Contains(routes, "app.Group(") || strings.Contains(routes, "fwopenapi.Mount(") {
 		t.Errorf("surfaces.rest is false and HTTP routes were mounted anyway:\n%s", routes)
 	}
-	for _, want := range []string{"addPapelPermissao", "changePapelPermissao", "removePapelPermissao"} {
+	for _, want := range []string{"addPapelPermissao", "changePapelPermissao", "archivePapelPermissao"} {
 		if !strings.Contains(routes, `"`+want+`"`) {
 			t.Errorf("%s did not survive a GraphQL-only surface:\n%s", want, routes)
 		}
@@ -217,7 +219,7 @@ func TestNarrowingTakesOneVerbOffOneSurface(t *testing.T) {
 	if !strings.Contains(gql, `"createPapel"`) {
 		t.Errorf("the listed mutation is missing:\n%s", gql)
 	}
-	for _, unwanted := range []string{`"patchPapel"`, `"archivePapel"`, `"changePapelPermissao"`, `"removePapelPermissao"`} {
+	for _, unwanted := range []string{`"patchPapel"`, `"archivePapel"`, `"changePapelPermissao"`, `"archivePapelPermissao"`} {
 		if strings.Contains(gql, unwanted) {
 			t.Errorf("%s was exposed even though the spec narrowed it away:\n%s", unwanted, gql)
 		}
@@ -230,7 +232,8 @@ func TestNarrowingTakesOneVerbOffOneSurface(t *testing.T) {
 		t.Errorf("narrowing the schema took the REST route away too:\n%s", routes)
 	}
 	// And nothing writes a wire pair for a verb that is not on the schema.
-	reqs := fileNamed(t, m, "internal/web/requests/papel_permissao_requests.go")
+	reqs := fileNamed(t, m, "internal/web/requests/change_papel_permissao.go") +
+		fileNamed(t, m, "internal/web/requests/archive_papel_permissao.go")
 	if strings.Contains(reqs, "GraphQLRequest struct") {
 		t.Errorf("a GraphQL-shaped request was written for a collection that has none:\n%s", reqs)
 	}
@@ -252,7 +255,7 @@ func TestACollectionOffRESTKeepsItsSchemaSeat(t *testing.T) {
 	if !strings.Contains(routes, `fiber.MethodPost, "/"`) {
 		t.Errorf("taking one collection off REST took the entity with it:\n%s", routes)
 	}
-	cmds := fileNamed(t, m, "internal/application/commands/papel_permissao_commands.go")
+	cmds := fileNamed(t, m, "internal/application/commands/add_papel_permissao_command.go")
 	if !strings.Contains(cmds, "type AddPapelPermissaoCommand struct") {
 		t.Errorf("a surface decision deleted the command behind it:\n%s", cmds)
 	}

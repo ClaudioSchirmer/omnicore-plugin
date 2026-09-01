@@ -103,7 +103,7 @@ func TestChildRowResultImportsTheTimeItNames(t *testing.T) {
 	files := emitAll(t, childJoinTimeModel(t))
 	got := ""
 	for _, f := range files {
-		if strings.HasSuffix(f.Path, "internal/application/queries/papel_row_results.go") {
+		if strings.HasSuffix(f.Path, "internal/application/queries/dtos/papel_permissao_row_result.go") {
 			got = string(f.Content)
 		}
 	}

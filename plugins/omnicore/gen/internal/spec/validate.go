@@ -1052,6 +1052,18 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 				"set type: string, or type: id when the claim names one and the column "+
 					"should be the engine's own id type")
 		}
+		// The origin is an ADDRESS, and the framework hands it over as text —
+		// `AppContext.ClientIP()` returns a string. `id` is refused along with
+		// everything else, and deliberately: an IP is not this service's key for
+		// anything, so borrowing the engine's id type for it would promise a
+		// foreign key that has nothing to point at, and would fail to parse the
+		// moment the value is the empty string.
+		if f.AssignedFrom == "client-ip" && f.Type != "string" {
+			ps.BlockerFix(where+".type",
+				fmt.Sprintf("the request's origin arrives as text, and %q is not", f.Type),
+				"set type: string — the address is a value to record and compare, never "+
+					"a key this service resolves")
+		}
 		// "No caller may set this" and "this may have no value" are independent
 		// statements, and only the identity ones imply each other: the server
 		// always has a subject and always has the claim it required, so a column

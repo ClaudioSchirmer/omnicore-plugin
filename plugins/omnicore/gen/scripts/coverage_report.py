@@ -22,6 +22,14 @@ import sys
 # the web framework.
 EXEMPT = ("_repository.go", "_service.go", "_service_manual.go", "_routes.go")
 
+# The seven language catalogs. They are literal maps with one constructor each,
+# shared by every entity of the project rather than owned by any of them, and
+# there is no per-entity source in that package to hang a test off — which is
+# why the generator stopped writing one. What the test used to prove is proved
+# earlier and better: a catalog entry the spec left out is reported by name
+# after every run, and the boot lane resolves the catalogs for real.
+EXEMPT_DIRS = ("/internal/application/translations/",)
+
 TARGET = 80.0
 
 
@@ -48,6 +56,8 @@ def main(path):
         if "/internal/" not in filename or not statements:
             continue
         if filename.endswith(EXEMPT):
+            continue
+        if any(d in filename for d in EXEMPT_DIRS):
             continue
         pct = 100.0 * covered / statements
         if pct < TARGET:

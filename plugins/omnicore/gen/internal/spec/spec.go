@@ -185,7 +185,7 @@ type Field struct {
 	//
 	// It is about the VALUE, not about who supplies it, and the two questions
 	// are independent: a field the server assigns may still have no value. It
-	// combines with assignedFrom: derived for exactly that — a verification
+	// combines with assignedFrom:AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | client-ip | derived for exactly that — a verification
 	// timestamp no caller may set and no row has until it is verified. The one
 	// pairing refused is with the identity sources, where the server always has
 	// the value it writes.
@@ -443,6 +443,23 @@ type Field struct {
 	//     token, and the generator writes the assignment. Written on insert and
 	//     left alone afterwards, which is what makes "who created this row" a
 	//     fact rather than a claim.
+	//   - client-ip — the request's network origin, as the framework resolved
+	//     it (AppContext.ClientIP()). It is NOT in the token, so it is read
+	//     straight off the context and is written whether or not a caller is
+	//     authenticated. Written on insert and left alone afterwards, like the
+	//     identity sources: it records where the row CAME FROM, not where the
+	//     last edit came from. Always type: string.
+	//
+	//     It is the one assigned source whose value can legitimately be absent
+	//     while the write succeeds: a consumer handler, a background job or a
+	//     test fixture has no inbound request. Declare the field nullable to
+	//     record that as NULL; leave it non-nullable to record it as the empty
+	//     string. Either is honest — the choice is what your reader should see.
+	//
+	//     What the value is WORTH is a deployment question this spec cannot
+	//     answer: behind a reverse proxy the framework reads the socket peer
+	//     (the balancer) until `http.trustProxy` is declared. A network control
+	//     built on this column depends on that block, not on this key.
 	//   - derived — the value comes from the entity's OWN fields, like a public
 	//     key computed from an immutable handle. The generator writes no
 	//     assignment for it: what computes it is a rules.manual entry scoped to
@@ -455,7 +472,7 @@ type Field struct {
 	//     a non-nullable column rendering the zero time in every response.
 	//     The identity sources refuse nullable, because the server always has a
 	//     subject and always has the claim it required.
-	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | derived
+	AssignedFrom string `yaml:"assignedFrom"` // identity-subject | identity-claim | client-ip | derived
 	// Stamped hands the column's VALUE to the framework while leaving its WHEN
 	// to the domain. It is the seat createdAt/updatedAt do not cover: those date
 	// the ROW — written, last touched — on a schedule the framework fixes, while

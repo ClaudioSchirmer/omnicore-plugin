@@ -46,6 +46,7 @@ const (
 	CapPerChild         Capability = "per-entry child operations"
 	CapPerChildPatch    Capability = "partial change of ONE collection entry (PATCH over the entry: the caller sends what moves, everything else — the business identity first — is read off what is stored)"
 	CapAssignedField    Capability = "server-assigned fields (from the caller's identity)"
+	CapClientIPField    Capability = "server-assigned fields from the REQUEST'S ORIGIN (the network address the framework resolved, written on insert, out of every write DTO — and empty for a write that did not come from an inbound request)"
 	CapDerivedField     Capability = "server-derived fields (computed from the entity's own, kept out of every write DTO)"
 	CapStampedField     Capability = "framework-stamped fields (the domain says WHEN, the framework supplies the VALUE: a nullable timestamp bound with the write's own instant, or a per-row counter incremented under the row's lock — never written from the struct, and out of every write DTO; a counter declared nullable is emitted over *int64, the one shape StampNull can clear)"
 	CapMountedChild     Capability = "a shared identity's collection, exposed on a second role"
@@ -107,6 +108,7 @@ var implemented = map[Capability]bool{
 	CapPerChild:         true,
 	CapPerChildPatch:    true,
 	CapAssignedField:    true,
+	CapClientIPField:    true,
 	CapDerivedField:     true,
 	CapStampedField:     true,
 	CapMountedChild:     true,
@@ -144,7 +146,7 @@ func AllCapabilities() []Capability {
 		CapOwnerAccess, CapTenantAccess, CapScopeBypass, CapScopedUnique,
 		CapChildUnique, CapPerEntryFact, CapBatchedFact, CapArchivedScope, CapJoinedFact,
 		CapGeneratedTests, CapPerChild, CapPerChildPatch,
-		CapAssignedField, CapDerivedField, CapStampedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
+		CapAssignedField, CapClientIPField, CapDerivedField, CapStampedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
 		CapMultiAggregate, CapStampedFilter, CapIdentityFilter,
 		CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,

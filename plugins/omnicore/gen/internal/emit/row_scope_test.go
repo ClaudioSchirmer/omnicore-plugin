@@ -249,7 +249,7 @@ func TestWildcardBypassIsAskedWithoutPanicking(t *testing.T) {
 	// The generated proof. The domain's own bypass test sets the flag by hand,
 	// so it cannot see whether anything ever raises it — and for the wildcard
 	// that is the whole question.
-	qt := fileNamed(t, m, "internal/application/queries/papel_queries_test.go")
+	qt := fileNamed(t, m, "internal/application/queries/find_papeis_by_params_query_test.go")
 	if !strings.Contains(qt, "func TestPapelBypassCrossesTheReadScope(t *testing.T) {") {
 		t.Errorf("nothing proves the question answers for a real wildcard claim:\n%s", qt)
 	}
@@ -261,7 +261,18 @@ func TestWildcardBypassIsAskedWithoutPanicking(t *testing.T) {
 	// concrete one — it is not a custom claim named after the grant. Feeding the
 	// mappers' test identity a `"*:*": "true"` entry proves nothing and reads as
 	// though the framework looked the wildcard up by that name.
-	ct := fileNamed(t, m, "internal/application/commands/papel_commands_test.go")
+	// Every command test file: the identity fixture is written into each one,
+	// so the mistake could land in any of them.
+	var ct string
+	for path, body := range goSources(emitAll(t, m)) {
+		if strings.HasPrefix(path, "internal/application/commands/") &&
+			strings.HasSuffix(path, "_test.go") {
+			ct += body
+		}
+	}
+	if ct == "" {
+		t.Fatal("no command test was emitted at all")
+	}
 	if strings.Contains(ct, `"*:*":`) {
 		t.Errorf("the generated mapper test invents a claim named after the wildcard:\n%s", ct)
 	}

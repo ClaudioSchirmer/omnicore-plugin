@@ -36,7 +36,7 @@ func emitTests(m *ir.Model) ([]fsplan.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, cmd)
+		out = append(out, cmd...)
 	}
 	// Only the value objects the generator WROTE can be asserted about. When
 	// every one of them is hand-written the file would carry a header claiming
@@ -47,52 +47,54 @@ func emitTests(m *ir.Model) ([]fsplan.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, vo)
+		out = append(out, vo...)
 	}
 	sch, err := emitSchemaTests(m)
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, sch)
+	out = append(out, sch...)
 	if len(m.Children) > 0 {
 		ch, err := emitChildTests(m)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ch)
+		out = append(out, ch...)
 
 		if m.HasOwnedChildren() {
 			dto, err := emitChildInputTests(m)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, dto)
+			out = append(out, dto...)
 		}
 	}
-	if len(m.Notifications) > 0 {
-		tr, err := emitTranslationTests(m)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, tr)
-	}
+	// No translation test. It is the one generated test that could not sit beside
+	// a source: `internal/application/translations/` holds the seven catalogs and
+	// nothing per entity, so the file paired with nothing and every entity wrote
+	// another unpaired one. What it asserted is covered anyway — a catalog entry
+	// the spec left out is already reported by name after every run, and the
+	// language a catalog answers is one fact per PROJECT that N entities were
+	// each re-asserting.
 	if len(m.WriteOps()) > 0 {
 		rq, err := emitRequestTests(m)
 		if err != nil {
 			return nil, err
 		}
-		if rq.Path != "" {
-			out = append(out, rq)
-		}
+		out = append(out, rq...)
 	}
-	for _, fn := range []func(*ir.Model) (fsplan.File, error){emitQueryTests, emitViewTests} {
-		f, err := fn(m)
-		if err != nil {
-			return nil, err
-		}
-		if f.Path != "" {
-			out = append(out, f)
-		}
+	qry, err := emitQueryTests(m)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, qry...)
+
+	view, err := emitViewTests(m)
+	if err != nil {
+		return nil, err
+	}
+	if view.Path != "" {
+		out = append(out, view)
 	}
 	return out, nil
 }
@@ -948,33 +950,33 @@ func emitBoundCase(s *src, m *ir.Model, rule ir.Rule, f ir.Field, side, value st
 	s.Blank()
 }
 
-func emitCommandTests(m *ir.Model) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package commands")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("testing"))
-	s.L("\t%s", quote("time"))
-	s.L("\t%s", quote(fwImport("application/configuration")))
-	s.L("\t%s", quote(fwImport("domain")))
-	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
-	if len(m.Children) > 0 {
-		s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
-		// The removal test reads the collection back to prove the entry left it,
-		// and that reads it as the aggregate's own type. Pruned when no
-		// collection is edited one entry at a time.
-		s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
-	}
-	// entitySample renders a value object as vos.T("…"), so the package is needed
-	// the moment any field of the entity has one.
-	if m.UsesVOs() {
-		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
-	}
-	s.L(")")
-	s.Blank()
+func emitCommandTests(m *ir.Model) ([]fsplan.File, error) {
+	tf := newTestFiles("internal/application/commands", func(s *src) {
+		s.L("package commands")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("testing"))
+		s.L("\t%s", quote("time"))
+		s.L("\t%s", quote(fwImport("application/configuration")))
+		s.L("\t%s", quote(fwImport("domain")))
+		s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
+		if len(m.Children) > 0 {
+			s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
+			// The removal test reads the collection back to prove the entry left
+			// it, and that reads it as the aggregate's own type. Pruned when no
+			// collection is edited one entry at a time.
+			s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
+		}
+		// entitySample renders a value object as vos.T("…"), so the package is
+		// needed the moment any field of the entity has one.
+		if m.UsesVOs() {
+			s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+		}
+		s.L(")")
+	})
 
 	if op := m.Op("insert"); op != nil {
+		s := tf.at(fileNameFor(*op, m))
 		s.Doc("The insert mapper must carry every field through.",
 			"",
 			"A field silently dropped here is the quietest bug in the stack: the write "+
@@ -1034,6 +1036,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 	// twin case below still covers the other half of the contract.
 	patchWitness := firstPlain(ir.DropBodyRuntime(m.CommandFields("patch")))
 	if op := m.Op("patch"); op != nil && patchWitness != nil {
+		s := tf.at(fileNameFor(*op, m))
 		s.Doc("A partial update must leave absent fields alone.",
 			"",
 			"This is the whole contract of the verb: sending nothing must not blank "+
@@ -1094,6 +1097,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		if op.Verb == "insert" || op.Verb == "patch" {
 			continue // covered above, field by field
 		}
+		s := tf.at(fileNameFor(op, m))
 		s.Doc(
 			fmt.Sprintf("%s must apply cleanly to a well-formed entity.", op.CommandType),
 			"",
@@ -1130,6 +1134,7 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 	// which is precisely the kind of thing a later edit breaks silently.
 	if m.Surfaces.GraphQL {
 		for _, sib := range m.SiblingsOn("") {
+			s := tf.at("clear_" + naming.Snake(sib.Name) + "_command")
 			s.Doc(
 				fmt.Sprintf("Clear%sCommand empties the facet and touches nothing else.", sib.Name),
 				"",
@@ -1182,27 +1187,27 @@ func emitCommandTests(m *ir.Model) (fsplan.File, error) {
 		}
 	}
 
-	emitPerChildOpTests(s, m)
+	emitPerChildOpTests(tf, m)
 
-	return goFile("internal/application/commands/"+m.Entity.Snake+"_commands_test.go",
-		fsplan.Owned, "tests for the command mappers", s)
+	return tf.files(func(base string) string {
+		return "tests for " + base + ".go"
+	})
 }
 
-func emitVOTests(m *ir.Model) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package vos")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("strings"))
-	// A composite's parts may be instants, and a comparison rule's case is built
-	// from two of them. The import is pruned when nothing here uses it.
-	s.L("\t%s", quote("time"))
-	s.L("\t%s", quote("testing"))
-	s.Blank()
-	s.L("\t%s", quote(fwImport("domain")))
-	s.L(")")
-	s.Blank()
+func emitVOTests(m *ir.Model) ([]fsplan.File, error) {
+	tf := newTestFiles("internal/domain/vos", func(s *src) {
+		s.L("package vos")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("strings"))
+		// A composite's parts may be instants, and a comparison rule's case is
+		// built from two of them. The import is pruned when nothing uses it.
+		s.L("\t%s", quote("time"))
+		s.L("\t%s", quote("testing"))
+		s.Blank()
+		s.L("\t%s", quote(fwImport("domain")))
+		s.L(")")
+	})
 
 	for _, vo := range m.ValueObjects {
 		// A hand-written value object gets no generated test: the generator does
@@ -1213,6 +1218,7 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 		if vo.HandWritten() {
 			continue
 		}
+		s := tf.at(naming.Snake(vo.Name))
 		if vo.Kind == "composite" {
 			emitCompositeVOTests(s, m, vo)
 			continue
@@ -1332,8 +1338,9 @@ func emitVOTests(m *ir.Model) (fsplan.File, error) {
 		s.Blank()
 	}
 
-	return goFile("internal/domain/vos/"+m.Entity.Snake+"_vos_test.go", fsplan.Owned,
-		fmt.Sprintf("tests for %d value object(s)", m.GeneratedValueObjects()), s)
+	return tf.files(func(base string) string {
+		return "tests for the " + base + " value object"
+	})
 }
 
 // ── sample values ──────────────────────────────────────────────────────────
@@ -1638,86 +1645,88 @@ func pointerize(f ir.Field, literal string) string {
 // field — and those panics land at boot, which means the feedback costs a
 // service start. Calling the builders in a unit test moves every one of them to
 // `go test`.
-func emitSchemaTests(m *ir.Model) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package schemas")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("testing"))
-	s.Blank()
-	s.L("\t%s", quote(fwImport("infra/db/core")))
-	if len(m.Children) > 0 {
-		s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
-	}
-	s.L(")")
-	s.Blank()
+func emitSchemaTests(m *ir.Model) ([]fsplan.File, error) {
+	tf := newTestFiles("internal/infra/schemas", func(s *src) {
+		s.L("package schemas")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("testing"))
+		s.Blank()
+		s.L("\t%s", quote(fwImport("infra/db/core")))
+		if len(m.Children) > 0 {
+			s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
+		}
+		s.L(")")
+	})
 
-	s.Doc(
-		"The builders must not panic, and must map a table.",
-		"",
-		"The framework validates a schema AS IT IS DECLARED, by panicking: a child "+
-			"carrying a revision, a facet carrying a lifecycle, a collection whose name "+
-			"is not spellable as a Go field. Every one of those aborts the boot. Calling "+
-			"the builders here turns a failed start into a failed test.")
-	s.L("func Test%sSchemasBuild(t *testing.T) {", m.Entity.Pascal)
-	s.L("\tfor name, build := range map[string]func() *core.TableSchema{")
-	s.L("\t\t%s: %sSchema,", quote(m.Entity.Pascal), m.Entity.Pascal)
-	if m.IsRole() && !m.Base.Reuse {
-		s.L("\t\t%s: %s,", quote(m.Base.FuncName), m.Base.FuncName)
+	// buildCase is the assertion every schema file gets: the builder runs and
+	// maps a table.
+	//
+	// The framework validates a schema AS IT IS DECLARED, by panicking — a child
+	// carrying a revision, a facet carrying a lifecycle, a collection whose name
+	// is not spellable as a Go field. Every one of those aborts the boot, so
+	// CALLING the builder is the assertion: it turns a failed start into a
+	// failed test, in the file of the schema that would have caused it.
+	buildCase := func(s *src, label, builder string) {
+		s.Doc(
+			fmt.Sprintf("%s must build without panicking, and must map a table.", builder),
+			"",
+			"The framework validates a schema as it is declared, by panicking, and that "+
+				"panic aborts the boot. Calling the builder here turns a failed start into "+
+				"a failed test.")
+		s.L("func Test%sBuilds(t *testing.T) {", label)
+		s.L("\tschema := %s()", builder)
+		s.L("\tif schema == nil {")
+		s.L("\t\tt.Fatal(%s)", quote(builder+" built a nil schema"))
+		s.L("\t}")
+		s.L("\tif schema.Table() == \"\" {")
+		s.L("\t\tt.Error(%s)", quote(builder+" built a schema with no table"))
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
 	}
-	for _, c := range m.Children {
-		s.L("\t\t%s: %sSchema,", quote(c.Name), c.Name)
-	}
-	s.L("\t} {")
-	s.L("\t\tschema := build()")
-	s.L("\t\tif schema == nil {")
-	s.L("\t\t\tt.Fatalf(%s, name)", quote("%s built a nil schema"))
-	s.L("\t\t}")
-	s.L("\t\tif schema.Table() == \"\" {")
-	s.L("\t\t\tt.Errorf(%s, name)", quote("%s built a schema with no table"))
-	s.L("\t\t}")
-	s.L("\t}")
-	s.L("}")
-	s.Blank()
 
-	s.Doc(
+	root := tf.at(m.Entity.Snake + "_schema")
+	buildCase(root, m.Entity.Pascal, m.Entity.Pascal+"Schema")
+	root.Doc(
 		fmt.Sprintf("%s must map the table the spec names.", m.Entity.Pascal),
 		"",
 		"The table is the one thing a schema cannot get wrong quietly: pointed at "+
 			"another table it still compiles, still boots, and reads someone else's rows.")
-	s.L("func Test%sSchemaMapsTheDeclaredTable(t *testing.T) {", m.Entity.Pascal)
-	s.L("\tif got := %sSchema().Table(); got != %s {", m.Entity.Pascal, quote(m.Table))
-	s.L("\t\tt.Errorf(%s, got, %s)", quote("the schema maps %q, the spec says %q"), quote(m.Table))
-	s.L("\t}")
-	s.L("}")
+	root.L("func Test%sSchemaMapsTheDeclaredTable(t *testing.T) {", m.Entity.Pascal)
+	root.L("\tif got := %sSchema().Table(); got != %s {", m.Entity.Pascal, quote(m.Table))
+	root.L("\t\tt.Errorf(%s, got, %s)", quote("the schema maps %q, the spec says %q"), quote(m.Table))
+	root.L("\t}")
+	root.L("}")
 
-	if len(m.Children) > 0 {
-		s.Blank()
+	if m.IsRole() && !m.Base.Reuse {
+		buildCase(tf.at(m.Base.Table+"_base_schema"), m.Base.FuncName, m.Base.FuncName)
+	}
+
+	for _, c := range m.Children {
+		if c.Mounted {
+			// The schema is the identity owner's file; this role generates none,
+			// so a test here would sit beside no source.
+			continue
+		}
+		s := tf.at(naming.Snake(c.Name) + "_schema")
+		buildCase(s, c.Name, c.Name+"Schema")
 		s.Doc(
-			"Each collection answers the name the spec declared.",
+			fmt.Sprintf("%s answers the collection name the spec declared.", c.Name),
 			"",
 			"That name is a PERSISTED key — the segment the projection nests the "+
 				"collection under and the field a read DTO must carry — so a change here "+
 				"changes the document shape rather than a label.")
-		s.L("func Test%sCollectionsKeepTheirNames(t *testing.T) {", m.Entity.Pascal)
-		// A slice, not a map keyed by the answered name: two collections that
-		// wrongly answered the SAME name would collapse into one entry and the
-		// collision would pass.
-		s.L("\tfor _, tc := range []struct{ got, want string }{")
-		for _, c := range m.Children {
-			s.L("\t\t{aggregatevos.%s{}.CollectionName(), %s},", c.Name, quote(c.Plural))
-		}
-		s.L("\t} {")
-		s.L("\t\tif tc.got != tc.want {")
-		s.L("\t\t\tt.Errorf(%s, tc.got, tc.want)", quote("a collection answers %q, the spec says %q"))
-		s.L("\t\t}")
+		s.L("func Test%sKeepsItsCollectionName(t *testing.T) {", c.Name)
+		s.L("\tif got := (aggregatevos.%s{}).CollectionName(); got != %s {", c.Name, quote(c.Plural))
+		s.L("\t\tt.Errorf(%s, got, %s)", quote("the collection answers %q, the spec says %q"), quote(c.Plural))
 		s.L("\t}")
 		s.L("}")
 	}
 
-	return goFile("internal/infra/schemas/"+m.Entity.Snake+"_schemas_test.go", fsplan.Owned,
-		"the schema builder tests — they run the builders, so a boot panic is a test failure", s)
+	return tf.files(func(base string) string {
+		return "the builder tests for " + base + ".go — they RUN the builder, so a boot panic is a test failure"
+	})
 }
 
 // emitChildTests covers the collection types.
@@ -1725,26 +1734,34 @@ func emitSchemaTests(m *ir.Model) (fsplan.File, error) {
 // A child carries its own rules and its own definition of sameness, and both
 // run on every write of the owner — so a break here is a break of the whole
 // aggregate, reported against a type nobody tests by hand.
-func emitChildTests(m *ir.Model) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package aggregatevos")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("reflect"))
-	s.L("\t%s", quote("testing"))
-	s.L("\t%s", quote("time"))
-	s.Blank()
-	s.L("\t%s", quote(fwImport("domain")))
-	if m.UsesVOsInChildren() {
-		s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
-	}
-	s.L(")")
-	s.Blank()
+func emitChildTests(m *ir.Model) ([]fsplan.File, error) {
+	tf := newTestFiles("internal/domain/aggregatevos", func(s *src) {
+		s.L("package aggregatevos")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("reflect"))
+		s.L("\t%s", quote("testing"))
+		s.L("\t%s", quote("time"))
+		s.Blank()
+		s.L("\t%s", quote(fwImport("domain")))
+		if m.UsesVOsInChildren() {
+			s.L("\t%s", quote(m.ImportPath("internal/domain/vos")))
+		}
+		s.L(")")
+	})
 
-	emitChildRuleSeat(s, m)
-
+	seated := false
 	for _, c := range m.Children {
+		s := tf.at(naming.Snake(c.Name))
+		if !seated {
+			// The stand-in root every entry is validated through. It is one
+			// declaration for the whole entity, and aggregatevos has no file
+			// named after the entity to put it beside — so it rides the first
+			// collection's test file rather than inventing a source with no
+			// code behind it.
+			emitChildRuleSeat(s, m)
+			seated = true
+		}
 		s.Doc(
 			fmt.Sprintf("rulesFor%s runs one entry through the framework's own seat.", c.Name),
 			"",
@@ -1844,8 +1861,9 @@ func emitChildTests(m *ir.Model) (fsplan.File, error) {
 		}
 	}
 
-	return goFile("internal/domain/aggregatevos/"+m.Entity.Snake+"_children_test.go",
-		fsplan.Owned, "tests for the collection types", s)
+	return tf.files(func(base string) string {
+		return "tests for the " + base + " collection type"
+	})
 }
 
 // emitChildRuleSeat writes the stand-in root the entry tests validate through.
@@ -1909,81 +1927,12 @@ func emitValidChildBuilder(s *src, m *ir.Model, c ir.Child) {
 	s.Blank()
 }
 
-// emitTranslationTests proves every notification can be rendered in every
-// language.
-//
-// A key the catalog does not know renders as the key itself — the message the
-// caller sees becomes "InvalidStateNotification", which reads as a crash and is
-// not one. Nothing else in the build catches it: the catalogs are maps, and a
-// missing entry is not a compile error.
-func emitTranslationTests(m *ir.Model) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package translations")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("testing"))
-	s.Blank()
-	s.L("\t%s", quote(fwImport("application/configuration")))
-	s.L("\t%s", quote(fwImport("application/translation")))
-	s.L(")")
-	s.Blank()
-
-	s.Doc(
-		"Each of the seven catalogs answers every notification this entity raises.",
-		"",
-		"A missing entry is not a compile error and not a crash: the caller simply "+
-			"receives the key instead of a sentence, in one language, usually the one "+
-			"nobody on the team reads.")
-	s.L("func Test%sNotificationsAreTranslated(t *testing.T) {", m.Entity.Pascal)
-	s.L("\tkeys := []string{")
-	for _, n := range m.Notifications {
-		s.L("\t\t%s,", quote(n.Name))
-	}
-	s.L("\t}")
-	s.L("\tcatalogs := map[string]map[string]string{")
-	for _, c := range catalogs {
-		s.L("\t\t%s: %s{}.Translations(),", quote(c.Code), c.Type)
-	}
-	s.L("\t}")
-	s.L("\tfor lang, catalog := range catalogs {")
-	s.L("\t\tfor _, key := range keys {")
-	s.L("\t\t\tif text, ok := catalog[key]; !ok || text == \"\" {")
-	s.L("\t\t\t\tt.Errorf(%s, key, lang)", quote("%s has no text in %s"))
-	s.L("\t\t\t}")
-	s.L("\t\t}")
-	s.L("\t}")
-	s.L("}")
-	s.Blank()
-
-	s.Doc(
-		"Each catalog is registered as the language it claims.",
-		"",
-		"The framework picks a catalog by the constant the module answers, and the "+
-			"constants are not spelled like the files (esp/ES, fra/FR, deu/DE, ita/IT, "+
-			"nld/NL) — a pairing that is easy to write once and wrong forever.")
-	s.L("func Test%sCatalogsAnswerTheirOwnLanguage(t *testing.T) {", m.Entity.Pascal)
-	s.L("	for want, module := range map[configuration.Language]translation.Module{")
-	for _, c := range catalogs {
-		s.L("\t\tconfiguration.%s: %s(),", c.LangConst, c.Ctor)
-	}
-	s.L("	} {")
-	s.L("\t\tif got := module.Language(); got != want {")
-	s.L("\t\t\tt.Errorf(%s, got, want)", quote("a catalog answers %v, it is registered as %v"))
-	s.L("\t\t}")
-	s.L("\t}")
-	s.L("}")
-
-	return goFile("internal/application/translations/"+m.Entity.Snake+"_translations_test.go",
-		fsplan.Owned, "the translation coverage test — every notification must be translatable in every catalog", s)
-}
-
 // emitRequestTests covers the wire→command mapping.
 //
 // It is the layer where a dropped field is quietest: the request parses, the
 // command runs, the write succeeds, and the value the caller sent is simply not
 // in the row.
-func emitRequestTests(m *ir.Model) (fsplan.File, error) {
+func emitRequestTests(m *ir.Model) ([]fsplan.File, error) {
 	var ops []ir.Operation
 	for _, op := range m.WriteOps() {
 		if !op.Bodyless {
@@ -1991,28 +1940,34 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 		}
 	}
 	if len(ops) == 0 && !m.HasPerChildOps() {
-		return fsplan.File{}, nil
+		return nil, nil
 	}
 
-	s := &src{}
-	s.Blank()
-	s.L("package requests")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("testing"))
-	s.L("\t%s", quote("time"))
-	s.Blank()
-	s.L("\t%s", quote(fwImport("domain")))
-	s.L("\tfwqueries %s", quote(fwImport("application/queries")))
-	// For the GraphQL removal's acknowledgement, which projects from the
-	// framework's None. Pruned when no collection exposes that verb there.
-	s.L("\tfwresults %s", quote(fwImport("application/results")))
-	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
-	s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
-	s.L(")")
-	s.Blank()
+	tf := newTestFiles("internal/web/requests", func(s *src) {
+		s.L("package requests")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("testing"))
+		s.L("\t%s", quote("time"))
+		s.Blank()
+		s.L("\t%s", quote(fwImport("domain")))
+		s.L("\tfwqueries %s", quote(fwImport("application/queries")))
+		// For the GraphQL removal's acknowledgement, which projects from the
+		// framework's None. Pruned when no collection exposes that verb there.
+		s.L("\tfwresults %s", quote(fwImport("application/results")))
+		s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
+		s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
+		// A response case is built from a Result carrying the entry's write
+		// shape, and the wire cases from the entry's own Request. Both are
+		// shared types with a package of their own; pruned for an entity with
+		// no collections.
+		s.L("\t%s %s", cmdDTOAlias, quote(m.ImportPath(cmdDTOPkg)))
+		s.L("\t%s %s", webDTOAlias, quote(m.ImportPath(webDTOPkg)))
+		s.L(")")
+	})
 
 	for _, op := range ops {
+		s := tf.at(op.Verb + "_" + m.Entity.Snake)
 		s.Doc(
 			fmt.Sprintf("%s must carry every field into the command.", op.RequestType),
 			"",
@@ -2026,7 +1981,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 		s.L("\t}")
 		if len(m.Children) > 0 && op.Verb != "patch" {
 			for _, c := range m.Children {
-				s.L("\tr.%s = []%sRequest{{", c.GoPlural, c.Name)
+				s.L("\tr.%s = []%s{{", c.GoPlural, childWireRequest(c))
 				for _, f := range c.Fields {
 					if f.Nullable {
 						continue
@@ -2074,6 +2029,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 	}
 
 	if m.Read.ByID {
+		s := tf.at("find_" + m.Entity.Snake + "_by_id")
 		s.Doc(
 			"The by-id request maps onto the query it stands for.",
 			"",
@@ -2096,6 +2052,7 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 	}
 
 	if m.Read.ByParams {
+		s := tf.at("find_" + m.Entity.PluralSnake + "_by_params")
 		s.Doc(
 			"The listing request maps onto the query it stands for.",
 			"",
@@ -2110,12 +2067,13 @@ func emitRequestTests(m *ir.Model) (fsplan.File, error) {
 		s.Blank()
 	}
 
-	emitReadMappingTests(s, m)
+	emitReadMappingTests(tf, m)
 
-	emitPerChildRequestTests(s, m)
+	emitPerChildRequestTests(tf, m)
 
-	return goFile("internal/web/requests/"+m.Entity.Snake+"_requests_test.go",
-		fsplan.Owned, "the request mapper tests", s)
+	return tf.files(func(base string) string {
+		return "the wire mapper tests for " + base + ".go"
+	})
 }
 
 // requestSample renders a value for a wire DTO field.
@@ -2147,46 +2105,86 @@ func requestSample(f ir.Field, op ir.Operation) string {
 //
 // A query that builds the wrong criteria answers 200 with the wrong rows, which
 // no status code and no log line will ever tell anyone about.
-func emitQueryTests(m *ir.Model) (fsplan.File, error) {
+func emitQueryTests(m *ir.Model) ([]fsplan.File, error) {
 	if !m.Read.Enabled || (!m.Read.ByID && !m.Read.ByParams) {
-		return fsplan.File{}, nil
+		return nil, nil
 	}
-	// The BODY first, the header after: this file's imports are decided from
-	// what it actually writes, and it writes values it did not used to. A
-	// derivation whose source is an `id` builds a domain.ID; one whose source is
-	// a timestamp builds a time.Date. Either under a hard-coded import block is
-	// `undefined: domain` in a file the author did not write.
-	s := &src{}
+	// The imports are decided from what the file actually WRITES, and it writes
+	// values a hard-coded block would not predict. A derivation whose source is
+	// an `id` builds a domain.ID; one whose source is a timestamp builds a
+	// time.Date. Either under a fixed import block is `undefined: domain` in a
+	// file the author did not write. Every file opens with the same block and
+	// gofile prunes what each one does not reach.
+	tf := newTestFiles("internal/application/queries", func(s *src) {
+		s.L("package queries")
+		s.Blank()
+		queryTestImports(s, queryTestTypeNames(m), childDTOImport(m))
+	})
 
-	s.Doc(
-		"The criteria mappers must not fail on a well-formed query.",
-		"",
-		"A mapper that errors here turns a legitimate read into a 400, and a mapper "+
-			"that silently drops a restriction turns it into someone else's rows — so "+
-			"the mapping is exercised rather than assumed.")
-	s.L("func Test%sCriteriaBuild(t *testing.T) {", m.Entity.Pascal)
-	s.L("\t// No identity attached: the anonymous path, which is the one that")
-	s.L("\t// applies every restriction rather than skipping them.")
-	s.L("\tctx := &configuration.AppContext{}")
-	if m.Read.ByID {
-		s.L("\tif _, err := (%s{}).ToCriteria(ctx); err != nil {", m.Read.QueryByID)
-		s.L("\t\tt.Errorf(%s, err)", quote("the by-id criteria failed: %v"))
+	byID := "find_" + m.Entity.Snake + "_by_id_query"
+	byParams := "find_" + m.Entity.PluralSnake + "_by_params_query"
+
+	criteria := func(s *src, query, label string) {
+		s.Doc(
+			fmt.Sprintf("%s's criteria mapper must not fail on a well-formed query.", query),
+			"",
+			"A mapper that errors here turns a legitimate read into a 400, and a mapper "+
+				"that silently drops a restriction turns it into someone else's rows — so "+
+				"the mapping is exercised rather than assumed.")
+		s.L("func Test%sCriteriaBuilds(t *testing.T) {", query)
+		s.L("\t// No identity attached: the anonymous path, which is the one that")
+		s.L("\t// applies every restriction rather than skipping them.")
+		s.L("\tctx := &configuration.AppContext{}")
+		s.L("\tif _, err := (%s{}).ToCriteria(ctx); err != nil {", query)
+		s.L("\t\tt.Errorf(%s, err)", quote("the "+label+" criteria failed: %v"))
 		s.L("\t}")
+		s.L("}")
+		s.Blank()
+	}
+
+	emptyResult := func(s *src, query, result, label string) {
+		s.Doc(
+			fmt.Sprintf("%s's derivation seat must survive a Result with nothing in it.", query),
+			"",
+			"FromQueryResult runs once per document on every read, so an error out of it "+
+				"is not a missing field — it is the endpoint answering 500. An empty Result "+
+				"is the real case, not a contrived one: a ?fields= selection that named none "+
+				"of a computed field's sources produces exactly this.")
+		s.L("func Test%sSurvivesAnEmptyResult(t *testing.T) {", query)
+		s.L("\tctx := &configuration.AppContext{}")
+		s.L("\tif _, err := (%s{}).FromQueryResult(ctx, %s{}); err != nil {", query, result)
+		s.L("\t\tt.Errorf(%s, err)", quote("the "+label+" derivation failed: %v"))
+		s.L("\t}")
+		s.L("}")
+		s.Blank()
+	}
+
+	if m.Read.ByID {
+		s := tf.at(byID)
+		criteria(s, m.Read.QueryByID, "by-id")
+		emptyResult(s, m.Read.QueryByID, m.Read.ResultByID, "by-id")
 	}
 	if m.Read.ByParams {
-		s.L("\tif _, err := (%s{}).ToCriteria(ctx); err != nil {", m.Read.QueryList)
-		s.L("\t\tt.Errorf(%s, err)", quote("the listing criteria failed: %v"))
-		s.L("\t}")
+		s := tf.at(byParams)
+		criteria(s, m.Read.QueryList, "listing")
+		emptyResult(s, m.Read.QueryList, m.Read.ResultList, "listing")
 	}
-	s.L("}")
-	s.Blank()
 
-	emitFromQueryResultTest(s, m)
-	emitScopeIsForcedTest(s, m)
-	emitBypassCrossesTheReadTest(s, m)
+	// The read-WIDE properties. They are not about one query: the row scope, the
+	// bypass and the context name are the same answer on both, and asserting
+	// them twice would be one fact with two ways to disagree. They ride the
+	// listing, which is where every one of them is observable — and the by-id
+	// file when the entity serves no listing at all.
+	wide := tf.at(byParams)
+	if !m.Read.ByParams {
+		wide = tf.at(byID)
+	}
+	emitDerivationRunsTest(wide, m)
+	emitScopeIsForcedTest(wide, m)
+	emitBypassCrossesTheReadTest(wide, m)
 
 	if m.Read.ByParams && len(m.Read.FieldRestrict) > 0 {
-		s.Blank()
+		s := tf.at(byParams)
 		s.Doc(
 			"Naming a restricted field is an ERROR, not a silent omission.",
 			"",
@@ -2204,39 +2202,31 @@ func emitQueryTests(m *ir.Model) (fsplan.File, error) {
 			quote(m.Read.FieldRestrict[0].Field))
 		s.L("\t}")
 		s.L("}")
+		s.Blank()
 	}
-	s.Blank()
 
-	s.Doc(
-		"Both queries report the same context name.",
-		"",
-		"It is the name every notification of this read is grouped under, so two "+
-			"spellings split one entity's errors into two piles for whoever reads them.")
-	s.L("func Test%sQueriesShareAContext(t *testing.T) {", m.Entity.Pascal)
-	s.L("\tfor _, got := range []string{")
-	if m.Read.ByID {
+	if m.Read.ByID && m.Read.ByParams {
+		s := tf.at(byParams)
+		s.Doc(
+			"Both queries report the same context name.",
+			"",
+			"It is the name every notification of this read is grouped under, so two "+
+				"spellings split one entity's errors into two piles for whoever reads them.")
+		s.L("func Test%sQueriesShareAContext(t *testing.T) {", m.Entity.Pascal)
+		s.L("\tfor _, got := range []string{")
 		s.L("\t\t%s{}.ContextName(),", m.Read.QueryByID)
-	}
-	if m.Read.ByParams {
 		s.L("\t\t%s{}.ContextName(),", m.Read.QueryList)
+		s.L("\t} {")
+		s.L("\t\tif got != %s {", quote(m.Entity.Pascal))
+		s.L("\t\t\tt.Errorf(%s, got, %s)", quote("a query reports the context %q, the entity is %q"), quote(m.Entity.Pascal))
+		s.L("\t\t}")
+		s.L("\t}")
+		s.L("}")
 	}
-	s.L("\t} {")
-	s.L("\t\tif got != %s {", quote(m.Entity.Pascal))
-	s.L("\t\t\tt.Errorf(%s, got, %s)", quote("a query reports the context %q, the entity is %q"), quote(m.Entity.Pascal))
-	s.L("\t\t}")
-	s.L("\t}")
-	s.L("}")
 
-	out := &src{}
-	out.Blank()
-	out.L("package queries")
-	out.Blank()
-	queryTestImports(out, queryTestTypeNames(m))
-	out.Blank()
-	out.Write(s.Bytes())
-
-	return goFile("internal/application/queries/"+m.Entity.Snake+"_queries_test.go",
-		fsplan.Owned, "the read criteria tests", out)
+	return tf.files(func(base string) string {
+		return "the read tests for " + base + ".go"
+	})
 }
 
 // queryTestTypeNames is every type this test file NAMES beyond the builtins.
@@ -2260,7 +2250,12 @@ func queryTestTypeNames(m *ir.Model) []string {
 
 // queryTestImports writes the block, adding `time` and `domain` only when a type
 // above names them — an import Go does not need is as fatal as one it does.
-func queryTestImports(s *src, types []string) {
+//
+// childDTOs is the queries/dtos path, offered unconditionally rather than
+// derived: the derivation case fills a collection's row shape, and deciding
+// per-file whether it does means re-deriving here what the emitters already
+// know. gofile prunes it from every file that does not reach one.
+func queryTestImports(s *src, types []string, childDTOs string) {
 	joined := strings.Join(types, " ")
 	needTime := strings.Contains(joined, "time.")
 	needDomain := strings.Contains(joined, "domain.")
@@ -2273,6 +2268,10 @@ func queryTestImports(s *src, types []string) {
 	s.L("\t%s", quote(fwImport("application/configuration")))
 	if needDomain {
 		s.L("\t%s", quote(fwImport("domain")))
+	}
+	if childDTOs != "" {
+		s.Blank()
+		s.L("\t%s %s", queryDTOAlias, quote(childDTOs))
 	}
 	s.L(")")
 }
@@ -2698,31 +2697,34 @@ func notificationRef(m *ir.Model, n ir.Notification) string {
 // per-entry collection is edited through — sat at zero. Two consecutive real
 // runs closed it by hand, writing the same four shapes each time. That is the
 // definition of something a generator should be writing.
-// It writes into the command-test file the generator already owns, and declares
+// Each case lands in the test file of the COMMAND it covers, and declares
 // NOTHING at package scope — no fixture constant, no helper function. A project
 // that closed this gap by hand before the generator learned to (both real runs
 // did) would otherwise stop compiling on the upgrade, over a name nobody chose
 // deliberately. Test function names can still coincide; that one the compiler
 // reports honestly, and the answer is to delete the now-redundant file.
-func emitPerChildOpTests(s *src, m *ir.Model) {
+func emitPerChildOpTests(tf *testFiles, m *ir.Model) {
 	for _, c := range m.Children {
 		if !c.PerChild {
 			continue
+		}
+		file := func(verb string) *src {
+			return tf.at(verb + "_" + naming.Snake(c.OpBase) + "_command")
 		}
 		// One test per verb the collection actually mounts. A test for a command
 		// that was not generated does not compile, which is the loudest possible
 		// way to discover a spec key — and the wrong one.
 		if c.MountsAdd {
-			emitAddChildOpTest(s, m, c)
+			emitAddChildOpTest(file("add"), m, c)
 		}
 		if c.ChangesByPut() {
-			emitChangeChildOpTest(s, m, c)
+			emitChangeChildOpTest(file("change"), m, c)
 		}
 		if c.ChangesByPatch() {
-			emitPatchChildOpTest(s, m, c)
+			emitPatchChildOpTest(file("patch"), m, c)
 		}
 		if c.MountsRemove {
-			emitRemoveChildOpTest(s, m, c)
+			emitRemoveChildOpTest(file(c.RemoveVerb()), m, c)
 		}
 	}
 }
@@ -2950,13 +2952,13 @@ func emitPatchChildOpTest(s *src, m *ir.Model, c ir.Child) {
 
 func emitRemoveChildOpTest(s *src, m *ir.Model, c ir.Child) {
 	s.Doc(
-		fmt.Sprintf("Remove%sCommand takes the named entry out of the collection.", c.OpBase),
+		fmt.Sprintf("%s%sCommand takes the named entry out of the collection.", c.RemoveVerbPascal(), c.OpBase),
 		"",
 		"It projects NOTHING — the endpoint answers 204 — so the only thing worth "+
 			"asserting is the effect: the entry the caller addressed is no longer "+
 			"among the current items. A command that silently matched nothing would "+
 			"still answer 204, and this is what tells the two apart.")
-	s.L("func TestRemove%sCommand_TakesTheEntryOut(t *testing.T) {", c.OpBase)
+	s.L("func Test%s%sCommand_TakesTheEntryOut(t *testing.T) {", c.RemoveVerbPascal(), c.OpBase)
 	s.L("\tctx := &configuration.AppContext{}")
 	emitTestIdentity(s, m, "\t")
 	ownerFixture(s, m)
@@ -2966,7 +2968,7 @@ func emitRemoveChildOpTest(s *src, m *ir.Model, c ir.Child) {
 	s.L("\t)")
 	s.L("\te.AggregateConstructor([]domain.AggregateValueObject{seeded})")
 	s.Blank()
-	s.L("\tcmd := &Remove%sCommand{%sID: %s}", c.OpBase, c.Name, quote(seededEntryID))
+	s.L("\tcmd := &%s%sCommand{%sID: %s}", c.RemoveVerbPascal(), c.OpBase, c.Name, quote(seededEntryID))
 	s.L("\tif err := cmd.ApplyTo(ctx, e); err != nil {")
 	s.L("\t\tt.Fatalf(%s, err)", quote("ApplyTo: %v"))
 	s.L("\t}")
@@ -3141,26 +3143,25 @@ func emitFromEntityTest(s *src, m *ir.Model, op *ir.Operation) {
 // What it asserts is the thing that goes wrong silently: a field added to the
 // collection and forgotten in the mapper. The entry is accepted, the write
 // succeeds, and the value is simply not there.
-func emitChildInputTests(m *ir.Model) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package dtos")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("testing"))
-	// Same reason as the DTO this covers: a `type: id` entry field samples as
-	// domain.NewID(...), so the package is needed here too. Unconditional, and
-	// pruned when unused.
-	s.L("\t%s", quote(fwImport("domain")))
-	// And `time`, on the same terms. It used to be gated on the collection
-	// carrying a VALUE OBJECT, which is the wrong question: a plain `type: time`
-	// entry field samples as time.Date(...) too, so a collection with a date and
-	// no value object emitted a test file that named time and imported nothing
-	// providing it — a package that does not compile, in an OWNED file, from a
-	// run that reported success.
-	s.L("\t%s", quote("time"))
-	s.L(")")
-	s.Blank()
+func emitChildInputTests(m *ir.Model) ([]fsplan.File, error) {
+	tf := newTestFiles("internal/application/dtos", func(s *src) {
+		s.L("package dtos")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("testing"))
+		// Same reason as the DTO this covers: a `type: id` entry field samples as
+		// domain.NewID(...), so the package is needed here too. Unconditional, and
+		// pruned when unused.
+		s.L("\t%s", quote(fwImport("domain")))
+		// And `time`, on the same terms. It used to be gated on the collection
+		// carrying a VALUE OBJECT, which is the wrong question: a plain `type: time`
+		// entry field samples as time.Date(...) too, so a collection with a date and
+		// no value object emitted a test file that named time and imported nothing
+		// providing it — a package that does not compile, in an OWNED file, from a
+		// run that reported success.
+		s.L("\t%s", quote("time"))
+		s.L(")")
+	})
 
 	for _, c := range m.Children {
 		if c.Mounted {
@@ -3170,6 +3171,7 @@ func emitChildInputTests(m *ir.Model) (fsplan.File, error) {
 			// once per role — and neither copy would be testing this spec's code.
 			continue
 		}
+		s := tf.at(naming.Snake(c.Name) + "_input")
 		s.Doc(
 			fmt.Sprintf("A %s entry carries every field it was sent with.", c.Name),
 			"",
@@ -3197,8 +3199,9 @@ func emitChildInputTests(m *ir.Model) (fsplan.File, error) {
 		s.Blank()
 	}
 
-	return goFile("internal/application/dtos/"+m.Entity.Snake+"_dtos_test.go", fsplan.Owned,
-		fmt.Sprintf("tests for the %d collection input mapper(s)", len(m.Children)), s)
+	return tf.files(func(base string) string {
+		return "tests for the " + base + " mapper"
+	})
 }
 
 // emitPartialResultTest is the result half for a command that MUTATES an entity
@@ -3254,7 +3257,7 @@ func emitPartialResultTest(s *src, m *ir.Model, op *ir.Operation) {
 // made the gap invisible: the operation looked covered while the layer that
 // feeds it was not, and a field dropped HERE is a request that parses, a
 // command that runs and an entry saved without it.
-func emitPerChildRequestTests(s *src, m *ir.Model) {
+func emitPerChildRequestTests(tf *testFiles, m *ir.Model) {
 	for _, c := range m.Children {
 		if !c.PerChild {
 			continue
@@ -3264,42 +3267,37 @@ func emitPerChildRequestTests(s *src, m *ir.Model) {
 		if len(fields) == 0 {
 			continue
 		}
+		file := func(verb string) *src { return tf.at(verb + "_" + naming.Snake(op)) }
 
 		// A verb the collection does not mount has no wire types to assert
 		// about, and a test naming them would not compile.
 		if c.MountsAdd {
-			emitAddChildRequestTest(s, c, op, fields)
+			emitAddChildRequestTest(file("add"), c, op, fields)
+			emitAddChildResponseTest(file("add"), m, c, op, fields)
 		}
 		if c.ChangesByPut() {
-			emitChangeChildRequestTest(s, c, op, fields)
+			emitChangeChildRequestTest(file("change"), c, op, fields)
+			emitChangeChildResponseTest(file("change"), m, c, op, fields)
 		}
 		if c.ChangesByPatch() {
-			emitPatchChildRequestTest(s, c, op, patchableChildFields(c))
-		}
-		if c.MountsAdd {
-			emitAddChildResponseTest(s, m, c, op, fields)
-		}
-		if c.ChangesByPut() {
-			emitChangeChildResponseTest(s, m, c, op, fields)
-		}
-		if c.ChangesByPatch() {
-			emitPatchChildResponseTest(s, m, c, op, fields)
+			emitPatchChildRequestTest(file("patch"), c, op, patchableChildFields(c))
+			emitPatchChildResponseTest(file("patch"), m, c, op, fields)
 		}
 		if c.MountsRemove {
-			emitRemoveChildWireTest(s, c, op)
+			emitRemoveChildWireTest(file(c.RemoveVerb()), c, op)
 		}
 		// The GraphQL-shaped halves are a second wire type each, with a mapper
 		// of their own — so they are a second way for the entry id to go
 		// missing, and the failure is silent in exactly the same way: a mutation
 		// that answers 200 and replaced nothing.
 		if c.ChangesByPut() && c.OnGQL("change") {
-			emitChangeChildGraphQLRequestTest(s, c, op, fields)
+			emitChangeChildGraphQLRequestTest(file("change"), c, op, fields)
 		}
 		if c.ChangesByPatch() && c.OnGQL("patch") {
-			emitPatchChildGraphQLRequestTest(s, c, op, patchableChildFields(c))
+			emitPatchChildGraphQLRequestTest(file("patch"), c, op, patchableChildFields(c))
 		}
 		if c.MountsRemove && c.OnGQL("remove") {
-			emitRemoveChildGraphQLWireTest(s, c, op)
+			emitRemoveChildGraphQLWireTest(file(c.RemoveVerb()), c, op)
 		}
 	}
 }
@@ -3317,8 +3315,8 @@ func emitChangeChildGraphQLRequestTest(s *src, c ir.Child, op string, fields []i
 		"Same command as its REST twin; the difference is where the id comes from, "+
 			"and that difference is the reason this type exists at all.")
 	s.L("func TestChange%sGraphQLRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
-	s.L("\tr := Change%sGraphQLRequest{%sID: %s, %sRequest: %sRequest{", op, c.Name,
-		quote("01890000-0000-7000-8000-000000000000"), c.Name, c.Name)
+	s.L("\tr := Change%sGraphQLRequest{%sID: %s, %s: %s{", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"), childWireRequestField(c), childWireRequest(c))
 	for _, f := range fields {
 		s.L("\t\t%s: %s,", f.Name, wireSample(f))
 	}
@@ -3338,9 +3336,10 @@ func emitChangeChildGraphQLRequestTest(s *src, c ir.Child, op string, fields []i
 
 // emitRemoveChildGraphQLWireTest covers the one wire pair with no REST twin.
 func emitRemoveChildGraphQLWireTest(s *src, c ir.Child, op string) {
-	s.Doc(fmt.Sprintf("Remove%sGraphQLRequest names the entry through its input.", op))
-	s.L("func TestRemove%sGraphQLRequest_NamesTheEntry(t *testing.T) {", op)
-	s.L("\tr := Remove%sGraphQLRequest{%sID: %s}", op, c.Name,
+	verb := c.RemoveVerbPascal()
+	s.Doc(fmt.Sprintf("%s%sGraphQLRequest names the entry through its input.", verb, op))
+	s.L("func Test%s%sGraphQLRequest_NamesTheEntry(t *testing.T) {", verb, op)
+	s.L("\tr := %s%sGraphQLRequest{%sID: %s}", verb, op, c.Name,
 		quote("01890000-0000-7000-8000-000000000000"))
 	s.L("\tif r.ToCommand().%sID != %s {", c.Name,
 		quote("01890000-0000-7000-8000-000000000000"))
@@ -3350,13 +3349,13 @@ func emitRemoveChildGraphQLWireTest(s *src, c ir.Child, op string) {
 	s.Blank()
 
 	s.Doc(
-		fmt.Sprintf("Remove%sGraphQLResponse acknowledges, since a mutation must answer something.", op),
+		fmt.Sprintf("%s%sGraphQLResponse acknowledges, since a mutation must answer something.", verb, op),
 		"",
 		"Its REST twin answers 204 with no body at all. This one is the only "+
 			"projection in the collection's wire types that is not the generic mapper, "+
 			"which is exactly why it is asserted rather than assumed.")
-	s.L("func TestRemove%sGraphQLResponse_Acknowledges(t *testing.T) {", op)
-	s.L("\tif !(Remove%sGraphQLResponse{}).FromResult(fwresults.None{}).Success {", op)
+	s.L("func Test%s%sGraphQLResponse_Acknowledges(t *testing.T) {", verb, op)
+	s.L("\tif !(%s%sGraphQLResponse{}).FromResult(fwresults.None{}).Success {", verb, op)
 	s.L("\t\tt.Error(\"a successful removal answered success: false\")")
 	s.L("\t}")
 	s.L("}")
@@ -3371,7 +3370,7 @@ func emitAddChildRequestTest(s *src, c ir.Child, op string, fields []ir.Field) {
 		"The body is the same entry shape the root's own body carries, so a field "+
 			"forgotten here is saved as missing on a request that answered 201.")
 	s.L("func TestAdd%sRequest_CarriesEveryField(t *testing.T) {", op)
-	s.L("\tr := Add%sRequest{%sRequest: %sRequest{", op, c.Name, c.Name)
+	s.L("\tr := Add%sRequest{%s: %s{", op, childWireRequestField(c), childWireRequest(c))
 	for _, f := range fields {
 		s.L("\t\t%s: %s,", f.Name, wireSample(f))
 	}
@@ -3396,8 +3395,8 @@ func emitChangeChildRequestTest(s *src, c ir.Child, op string, fields []ir.Field
 			"halves have to arrive: an id that does not reach the command changes the "+
 			"wrong entry, or none.")
 	s.L("func TestChange%sRequest_CarriesTheEntryAndItsID(t *testing.T) {", op)
-	s.L("\tr := Change%sRequest{%sID: %s, %sRequest: %sRequest{", op, c.Name,
-		quote("01890000-0000-7000-8000-000000000000"), c.Name, c.Name)
+	s.L("\tr := Change%sRequest{%sID: %s, %s: %s{", op, c.Name,
+		quote("01890000-0000-7000-8000-000000000000"), childWireRequestField(c), childWireRequest(c))
 	for _, f := range fields {
 		s.L("\t\t%s: %s,", f.Name, wireSample(f))
 	}
@@ -3435,7 +3434,7 @@ func emitAddChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fields
 	// operation name: for a collection mounted from a shared identity, the
 	// entry type belongs to the spec that declares the identity, and
 	// `<Entity><Child>Result` names a type nothing declares.
-	s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+	s.L("		%s: %s{ID: entryID,", c.Name, childResultType(c))
 	for _, f := range fields {
 		s.L("			%s: %s,", f.Name, wireSample(f))
 	}
@@ -3474,7 +3473,7 @@ func emitChangeChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fie
 	s.L("	entryID := domain.NewRandomID()")
 	s.L("	res := Change%sResponse{}.FromResult(commands.Change%sResult{", op, op)
 	s.L("		%sID: ownerID,", m.Entity.Pascal)
-	s.L("		%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+	s.L("		%s: %s{ID: entryID,", c.Name, childResultType(c))
 	for _, f := range fields {
 		s.L("			%s: %s,", f.Name, wireSample(f))
 	}
@@ -3574,7 +3573,7 @@ func emitPatchChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fiel
 	s.L("\tentryID := domain.NewRandomID()")
 	s.L("\tres := Patch%sResponse{}.FromResult(commands.Patch%sResult{", op, op)
 	s.L("\t\t%sID: ownerID,", m.Entity.Pascal)
-	s.L("\t\t%s: commands.%sResult{ID: entryID,", c.Name, c.Name)
+	s.L("\t\t%s: %s{ID: entryID,", c.Name, childResultType(c))
 	for _, f := range fields {
 		s.L("\t\t\t%s: %s,", f.Name, wireSample(f))
 	}
@@ -3600,9 +3599,10 @@ func emitPatchChildResponseTest(s *src, m *ir.Model, c ir.Child, op string, fiel
 // it has is the one that carries the addressed entry into the command — and
 // that one decides WHICH entry is taken away.
 func emitRemoveChildWireTest(s *src, c ir.Child, op string) {
-	s.Doc(fmt.Sprintf("Remove%sRequest carries the addressed entry into its command.", op))
-	s.L("func TestRemove%sRequest_NamesTheEntry(t *testing.T) {", op)
-	s.L("	r := Remove%sRequest{%sID: %s}", op, c.Name,
+	verb := c.RemoveVerbPascal()
+	s.Doc(fmt.Sprintf("%s%sRequest carries the addressed entry into its command.", verb, op))
+	s.L("func Test%s%sRequest_NamesTheEntry(t *testing.T) {", verb, op)
+	s.L("	r := %s%sRequest{%sID: %s}", verb, op, c.Name,
 		quote("01890000-0000-7000-8000-000000000000"))
 	s.L("	if r.ToCommand().%sID != %s {", c.Name,
 		quote("01890000-0000-7000-8000-000000000000"))

@@ -7,6 +7,119 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.56.0] — 2026-09-01
+
+omnicore-gen now writes the layout it tells everyone else to write. `service-layout.html`
+is normative for a generator — "produce exactly this shape unless the developer instructs
+otherwise" — and seven places did not. It also gains the one thing the framework's new
+request-origin resolution left undeclarable.
+
+### ⚠️ Requires framework v0.69.0
+
+`compat.Supported` moves from `v0.68.0` to `v0.69.0`, so a project pinning an older line is
+refused (overridably) rather than handed a tree that does not compile: a field declared
+`assignedFrom: client-ip` emits `ctx.ClientIP()`, and `AppContext` does not answer it
+before v0.69.0.
+
+### Added
+
+- **`assignedFrom: client-ip` — record the request's network origin on the row.** The
+  framework resolves the caller's address in its own HTTP middleware and hands it over as
+  `AppContext.ClientIP()`, and the spec had no way to say "put that in a column". The three
+  sources it did have all read the TOKEN, so the honest workaround was to drop
+  `assignedFrom` entirely — which puts the field in the write DTO and lets a caller state
+  its own origin — or to hand-write the mapper. It is now its own source, with the
+  behaviour that follows from where the value comes from:
+  - The assignment is written **outside** the identity check. The origin is not in the
+    token, so an anonymous route and a bench with authentication off record it just the
+    same; reading it inside `if id := ctx.Identity()` would drop it on exactly those
+    requests, silently.
+  - **Insert only**, like the identity sources: the column says where the row came from,
+    never where the last edit came from.
+  - `type: string` is required — an address is a value to record and compare, never a key
+    this service resolves, and `type: id` would fail to parse the empty string.
+  - It is the second source that accepts `nullable: true`, for a reason the identity ones
+    do not have: a write off the inbound request path (a consumer handler, a job, a test
+    fixture) genuinely has no origin, and `ClientIP()` answers `""` there. Nullable records
+    that absence as `NULL`; non-nullable records it as the empty string.
+  - Like every `assignedFrom`, it is absent from every write request, command and OpenAPI
+    request schema, and is refused on a collection entry and on a facet.
+
+  What the value is WORTH stays a deployment question the spec cannot answer: behind a
+  reverse proxy the framework reads the socket peer — the balancer — until `http.trustProxy`
+  is declared. The generated mapper says so where a reader meets it.
+
+### ⚠️ Upgrading: delete the generated files before regenerating
+
+This release RENAMES and SPLITS files the generator owns. It does not remove what an
+earlier version wrote, so a regeneration on top of an existing tree leaves both — the old
+`<entity>_child_results.go` beside the new `commands/dtos/<child>_result.go`, the old
+`<collection>_commands.go` beside the new per-verb files — and the package stops compiling
+on `redeclared in this block`.
+
+Before regenerating, delete the generated files of every entity you are about to
+regenerate (`omnicore-gen prune -apply` removes what the lock still recognises; anything it
+reports as edited or unknown is yours to decide about), then run `generate` again. Hook
+files — `*_manual.go` and the migrations — are untouched by all of this and must be kept.
+
+### Changed
+
+- **Per-child commands are one file per verb.** `<collection>_commands.go` carried Add,
+  Change, Patch and Remove together — the one place the write side stopped obeying its own
+  rule, so a reader looking for the verb that archives an entry had to know it was filed
+  under the collection. Now `add_<child>_command.go`, `change_<child>_command.go`,
+  `patch_<child>_command.go` and the removal, each with its Result co-located.
+- **Per-child wire types are one file per operation.** Same split on the web side:
+  `add_<child>.go`, `change_<child>.go`, `patch_<child>.go` and the removal, request and
+  response co-located. A verb's GraphQL variant stays WITH that verb — it is the same
+  operation on another surface, and splitting it would put one endpoint's wire surface in
+  two places.
+- **Shapes several operations share got their own seat, split by what they are.** A child
+  entry's shapes are read by the root's insert, its update, both reads and each per-entry
+  verb, so there is no operation they belong beside. Structures go to `dtos/` under their
+  layer, functions to `utils/`:
+  `application/commands/dtos/<child>_result.go`,
+  `application/commands/utils/<entity>_<child>_projection.go`,
+  `application/queries/dtos/<child>_row_result.go`,
+  `web/requests/dtos/<child>.go` — replacing `<entity>_child_results.go`,
+  `<entity>_row_results.go` and `<entity>_children.go`. The projectors are EXPORTED now
+  (`ProjectUserAddresses`, `ProjectOneAddress`): a function that left its package has to
+  be reachable from outside it. Every one of these packages is imported under an alias
+  naming its layer — `cmddtos`, `cmdutils`, `qrydtos`, `webdtos` — because
+  `internal/application/dtos` is a fourth package called `dtos`.
+- **A domain-service port's answer types moved out of its file.** `<Fact>Entry`,
+  `<Fact>Group` and `<Fact>Result` rode along inside `<entity>_service.go`, which made it
+  the one domain file a reader could not name from its contents. Each is a domain type and
+  now has a file of its own, `internal/domain/<type>.go`, beside the port.
+- **The per-child removal is named for what it MOUNTS.** `children[].operations` keeps one
+  word — `remove` — and `children[].softRemove` decides the outcome; the generated file and
+  type now say which it is: `archive_<child>_command.go` / `Archive<Child>Command` over
+  `PATCH …/archive`, `delete_<child>_command.go` / `Delete<Child>Command` over `DELETE`.
+  A file called `archive_…` over a route that hard-deletes told the reader the opposite of
+  what the endpoint does. **No spec changes**: `operations`, `permissions` and
+  `surfaces.graphql.mutations` are still keyed on `remove`. The GraphQL mutation field
+  follows the type, so `removeUserRole` is now `archiveUserRole` or `deleteUserRole`.
+- **Generated tests sit beside their source.** One `<entity>_commands_test.go`,
+  `<entity>_requests_test.go`, `<entity>_queries_test.go`, `<entity>_vos_test.go`,
+  `<entity>_schemas_test.go`, `<entity>_children_test.go` and `<entity>_dtos_test.go` per
+  entity meant a file per LAYER holding the cases for a dozen sources: a failing test named
+  a package rather than the thing that broke, and no `<file>.go` ⇄ `<file>_test.go` pairing
+  for an IDE to nest. Every generated test now lands in the test file of the source it
+  covers, and every generated `_test.go` has a source of the same name beside it.
+
+### Removed
+
+- **The per-entity translation test.** `internal/application/translations/` holds the seven
+  catalogs and nothing per entity, so `<entity>_translations_test.go` was the one generated
+  test with no source to pair with — and every entity added another. What it asserted is
+  covered earlier and better: a catalog entry the spec left out is reported by name after
+  every run, and the language each catalog answers is one fact per PROJECT that N entities
+  were each re-asserting. Delete the file on your next regeneration; the catalogs
+  themselves are untouched.
+- **A feature file is named for its aggregate, singular.** `bootstrap/<entity>_feature.go`,
+  not the plural: one feature per aggregate, and the plural belongs to the route group and
+  to the identity feature, which is a read surface over many of them.
+
 ## [0.55.0] — 2026-09-01
 
 One story, told in the eight files that were telling half of it: the Direct door is a

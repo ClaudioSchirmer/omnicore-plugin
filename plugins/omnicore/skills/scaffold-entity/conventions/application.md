@@ -18,9 +18,23 @@ Dispatch / ScopedRepository → `command-handler.html` · query handlers + contr
 Per `service-layout.html`: one Command per verb (`insert_`/`update_`=PUT/`patch_`=PATCH/
 `delete_`/`archive_`/`unarchive_`), Result co-located with its Command; queries by-id
 SINGULAR / by-params PLURAL, one type per file, each with its Result co-located — the read
-side mirrors the write's Command+Result pairing; `dtos/` exists only for child-collection
-inputs. **NO handler files** — the Auto handlers are framework generics instantiated at
-the web layer, never written here.
+side mirrors the write's Command+Result pairing; `internal/application/dtos/` exists only
+for child-collection inputs. **NO handler files** — the Auto handlers are framework
+generics instantiated at the web layer, never written here.
+
+**A shape SEVERAL operations read has no Command to sit beside.** A child entry's write
+Result is read by the root's insert, its update and each per-entry verb; its row Result by
+both reads. Co-location cannot answer that, so those get their own seat under the layer,
+split by kind — structures in `dtos/`, functions in `utils/`:
+
+- `internal/application/commands/dtos/<child>_result.go` — the entry as stored
+- `internal/application/commands/utils/<entity>_<child>_projection.go` — the projectors
+  (`Project<Entity><Children>`, `ProjectOne<Child>`), EXPORTED because they left the package
+- `internal/application/queries/dtos/<child>_row_result.go` — the entry as a read returns it
+
+Import them aliased — `cmddtos`, `cmdutils`, `qrydtos` — since `internal/application/dtos`
+is a third package named `dtos` and a command file names two of them. This is what
+omnicore-gen emits; hand-writing a different shape puts two authorities in one tree.
 
 ## The verbs — process notes on top of the docs
 

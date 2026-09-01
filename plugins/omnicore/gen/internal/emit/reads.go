@@ -59,13 +59,6 @@ func (sh readShape) idType() string {
 // declares `?fields=`. The by-id read never declares it, so it is never sparse.
 func listShape(m *ir.Model) readShape { return readShape{sparse: m.Read.Controls.Fields} }
 
-// childRowResult is the Result twin of the wire's <Child>Row.
-//
-// One type serves both reads, exactly like the Row it mirrors: the mapper is
-// name-based and recurses through slices of structs, so the two shapes line up
-// field by field without either side naming the other.
-func childRowResult(c ir.Child) string { return c.Name + "RowResult" }
-
 func emitQueries(m *ir.Model) ([]fsplan.File, error) {
 	var out []fsplan.File
 
@@ -84,11 +77,11 @@ func emitQueries(m *ir.Model) ([]fsplan.File, error) {
 		out = append(out, f)
 	}
 	if hasReadRows(m) {
-		f, err := emitChildRowResults(m)
+		files, err := emitChildRowResults(m)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, f)
+		out = append(out, files...)
 	}
 	if hasDerivations(m) {
 		f, err := emitComputedHook(m)
@@ -185,7 +178,7 @@ func emitByIDQuery(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package queries")
 	s.Blank()
-	queryImports(s, resultTypeNames(m, sh), true)
+	queryImports(s, resultTypeNames(m, sh), true, childDTOImport(m))
 	s.Blank()
 
 	s.Doc(
@@ -242,7 +235,7 @@ func emitListQuery(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package queries")
 	s.Blank()
-	queryImports(s, resultTypeNames(m, sh), true)
+	queryImports(s, resultTypeNames(m, sh), true, childDTOImport(m))
 	s.Blank()
 
 	s.Doc(
@@ -361,26 +354,30 @@ func emitResultStruct(s *src, m *ir.Model, name string, sh readShape) {
 	s.L("}")
 }
 
-// emitChildRowResults holds the collections' Result shapes in ONE place.
+// emitChildRowResults writes each collection's read shape — ONE FILE PER
+// COLLECTION, under queries/dtos.
 //
 // Both reads project the same rows, so both consume the same type — the read
-// twin of the single <Child>Row the two Responses already share.
-func emitChildRowResults(m *ir.Model) (fsplan.File, error) {
+// twin of the single <Child>Row the two Responses already share. That is
+// exactly what keeps it out of either query's file: a Result belongs beside its
+// Query, and a type BOTH queries name belongs beside neither.
+func emitChildRowResults(m *ir.Model) ([]fsplan.File, error) {
 	sh := listShape(m)
-	s := &src{}
-	s.Blank()
-	s.L("package queries")
-	s.Blank()
-	queryImports(s, childRowTypeNames(m, sh), false)
-	s.Blank()
-
+	var out []fsplan.File
 	for _, c := range m.Children {
 		if c.Mounted {
 			continue // declared, with this shape, by the role that owns the identity
 		}
+		s := &src{}
+		s.Blank()
+		s.L("package dtos")
+		s.Blank()
+		queryImports(s, childRowTypeNames(m, sh), false, "")
+		s.Blank()
+
 		doc := []string{
 			fmt.Sprintf("%s is one entry of the %s collection as the application reads it.",
-				childRowResult(c), c.Segment),
+				childRowResultName(c), c.Segment),
 		}
 		if sh.sparse {
 			doc = append(doc, "",
@@ -388,7 +385,7 @@ func emitChildRowResults(m *ir.Model) (fsplan.File, error) {
 					"?fields=, and the sparse-fill contract is enforced recursively.")
 		}
 		s.Doc(doc...)
-		s.L("type %s struct {", childRowResult(c))
+		s.L("type %s struct {", childRowResultName(c))
 		s.L("\tID %s", sh.idType())
 		for _, f := range c.Fields {
 			s.L("\t%s %s", f.Name, sh.resultType(f))
@@ -409,12 +406,16 @@ func emitChildRowResults(m *ir.Model) (fsplan.File, error) {
 			s.L("\t%s %s", cf.Name, sh.computedType(cf))
 		}
 		s.L("}")
-		s.Blank()
-	}
 
-	return goFile("internal/application/queries/"+m.Entity.Snake+"_row_results.go",
-		fsplan.Owned,
-		fmt.Sprintf("the read shapes for %d child collection(s)", len(m.Children)), s)
+		f, err := goFile(queryDTOPkg+"/"+naming.Snake(c.Name)+"_row_result.go",
+			fsplan.Owned,
+			fmt.Sprintf("the read shape of one %s entry", c.Name), s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 // hasReadRows reports whether this entity declares a collection shape of its
@@ -824,18 +825,21 @@ func childRowTypeNames(m *ir.Model, sh readShape) []string {
 // sentinel (`var _ = time.Time{}`) would work too, but it puts a line in every
 // generated file whose only job is to excuse an import that did not have to be
 // there.
-func queryImports(s *src, types []string, carriesQuery bool) {
+// childDTOs is the queries/dtos import path when the file names a collection's
+// read shape, and empty when it does not — the shapes' own package passes
+// nothing, since a package cannot import itself.
+func queryImports(s *src, types []string, carriesQuery bool, childDTOs string) {
 	joined := strings.Join(types, " ")
 	needTime := strings.Contains(joined, "time.")
 	needDomain := strings.Contains(joined, "domain.")
-	if !needTime && !needDomain && !carriesQuery {
+	if !needTime && !needDomain && !carriesQuery && childDTOs == "" {
 		return // a file of plain shapes over builtin types imports nothing
 	}
 
 	s.L("import (")
 	if needTime {
 		s.L("\t%s", quote("time"))
-		if needDomain || carriesQuery {
+		if needDomain || carriesQuery || childDTOs != "" {
 			s.Blank()
 		}
 	}
@@ -848,7 +852,22 @@ func queryImports(s *src, types []string, carriesQuery bool) {
 	if carriesQuery {
 		s.L("\tfwqueries %s", quote(fwImport("application/queries")))
 	}
+	if childDTOs != "" {
+		s.Blank()
+		s.L("\t%s %s", queryDTOAlias, quote(childDTOs))
+	}
 	s.L(")")
+}
+
+// childDTOImport is the queries/dtos path when this entity's reads name a
+// collection at all, and empty otherwise. A read with no collections names no
+// shape from there, and gofile would prune the line anyway — deciding it here
+// keeps the emitted import block honest rather than merely harmless.
+func childDTOImport(m *ir.Model) string {
+	if len(m.Children) == 0 {
+		return ""
+	}
+	return m.ImportPath(queryDTOPkg)
 }
 
 // ─── the read side, web half ────────────────────────────────────────────────
@@ -983,15 +1002,17 @@ func graphQLByIDHandler(m *ir.Model) string {
 // is a guard nobody sees in a pull request. This runs in `go test`: it fills
 // the Result the read declares and checks the value came out the other side
 // under the Response's own type.
-func emitReadMappingTests(s *src, m *ir.Model) {
+func emitReadMappingTests(tf *testFiles, m *ir.Model) {
 	if !m.Read.Enabled {
 		return
 	}
 	if m.Read.ByID {
-		emitOneReadMappingTest(s, m, m.Op("byId").ResponseType, m.Read.ResultByID, readShape{})
+		emitOneReadMappingTest(tf.at("find_"+m.Entity.Snake+"_by_id"), m,
+			m.Op("byId").ResponseType, m.Read.ResultByID, readShape{})
 	}
 	if m.Read.ByParams {
-		emitOneReadMappingTest(s, m, m.Op("byParams").ResponseType, m.Read.ResultList, listShape(m))
+		emitOneReadMappingTest(tf.at("find_"+m.Entity.PluralSnake+"_by_params"), m,
+			m.Op("byParams").ResponseType, m.Read.ResultList, listShape(m))
 	}
 }
 
@@ -1023,46 +1044,9 @@ func emitOneReadMappingTest(s *src, m *ir.Model, response, result string, sh rea
 // message. Any string would do; a uuid-shaped one reads like real data.
 const readProbeID = "7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51"
 
-// emitFromQueryResultTest exercises the read's derivation seat.
-//
-// FromQueryResult is mandatory and runs on EVERY document of every read, so a
-// version of it that errors takes the whole endpoint down rather than one
-// field. The empty Result is the interesting input, not a degenerate one: it is
-// what a `?fields=` selection that skipped every source actually produces, and
-// a derivation that dereferences a source without checking fails exactly there.
-func emitFromQueryResultTest(s *src, m *ir.Model) {
-	if !m.Read.Enabled {
-		return
-	}
-	s.Doc(
-		"The derivation seat must survive a Result with nothing in it.",
-		"",
-		"FromQueryResult runs once per document on every read, so an error out of it "+
-			"is not a missing field — it is the endpoint answering 500. An empty Result "+
-			"is the real case, not a contrived one: a ?fields= selection that named none "+
-			"of a computed field's sources produces exactly this.")
-	s.L("func Test%sReadsSurviveAnEmptyResult(t *testing.T) {", m.Entity.Pascal)
-	s.L("\tctx := &configuration.AppContext{}")
-	if m.Read.ByID {
-		s.L("\tif _, err := (%s{}).FromQueryResult(ctx, %s{}); err != nil {",
-			m.Read.QueryByID, m.Read.ResultByID)
-		s.L("\t\tt.Errorf(%s, err)", quote("the by-id derivation failed: %v"))
-		s.L("\t}")
-	}
-	if m.Read.ByParams {
-		s.L("\tif _, err := (%s{}).FromQueryResult(ctx, %s{}); err != nil {",
-			m.Read.QueryList, m.Read.ResultList)
-		s.L("\t\tt.Errorf(%s, err)", quote("the listing derivation failed: %v"))
-		s.L("\t}")
-	}
-	s.L("}")
-	s.Blank()
-
-	emitDerivationRunsTest(s, m)
-}
-
-// emitDerivationRunsTest is the other half of the seat's coverage: the empty
-// Result above proves the derivation SURVIVES nothing, and this proves it RUNS.
+// emitDerivationRunsTest is the other half of the seat's coverage: the
+// empty-Result case each query's test file carries proves the derivation
+// SURVIVES nothing, and this proves it RUNS.
 //
 // The two are different code paths, not two spellings of one. The generator
 // guards each source the listing may not have selected, so an empty Result

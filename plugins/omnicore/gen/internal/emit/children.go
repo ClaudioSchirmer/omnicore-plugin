@@ -54,14 +54,14 @@ func emitChildren(m *ir.Model) ([]fsplan.File, error) {
 		if !c.PerChild {
 			continue
 		}
-		for _, fn := range []func(*ir.Model, ir.Child) (fsplan.File, error){
+		for _, fn := range []func(*ir.Model, ir.Child) ([]fsplan.File, error){
 			emitPerChildCommands, emitPerChildRequests,
 		} {
-			f, err := fn(m, c)
+			files, err := fn(m, c)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, f)
+			out = append(out, files...)
 		}
 	}
 	return out, nil
@@ -403,17 +403,55 @@ func parentColumn(c ir.Child) string { return c.ParentColumn }
 // the second one is refused with a 409 and has to reload and reapply. Addressing
 // one entry is a different operation: it touches its own row, and it needs its
 // own not-found answer.
-func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
+// ONE FILE PER VERB, like every other command in the service. The four used to
+// share one <collection>_commands.go, which is the one place the write side
+// stopped obeying its own rule — a reader looking for the verb that archives an
+// entry had to know it was filed under the collection.
+func emitPerChildCommands(m *ir.Model, c ir.Child) ([]fsplan.File, error) {
 	entity := m.Entity.Pascal
 	// op is what THIS spec's command types are called. It differs from the
 	// collection's own name only when the collection is mounted from a shared
 	// identity: the other role generated AddPhotoCommand into the same package
 	// already, and it is bound to ITS aggregate.
 	op := c.OpBase
-	s := &src{}
-	s.Blank()
-	s.L("package commands")
-	s.Blank()
+
+	verbs := []struct {
+		mounts bool
+		file   string
+		write  func(*src)
+	}{
+		{c.MountsAdd, "add", func(s *src) { emitAddChildCommand(s, m, c, entity, op) }},
+		{c.ChangesByPut(), "change", func(s *src) { emitChangeChildCommand(s, m, c, entity, op) }},
+		{c.ChangesByPatch(), "patch", func(s *src) { emitPatchChildCommand(s, m, c, entity, op) }},
+		{c.MountsRemove, c.RemoveVerb(), func(s *src) { emitRemoveChildCommand(s, m, c, entity, op) }},
+	}
+
+	var out []fsplan.File
+	for _, v := range verbs {
+		if !v.mounts {
+			continue
+		}
+		s := &src{}
+		s.Blank()
+		s.L("package commands")
+		s.Blank()
+		perChildCommandImports(s, m)
+		s.Blank()
+		v.write(s)
+
+		f, err := goFile(fmt.Sprintf("internal/application/commands/%s_%s_command.go",
+			v.file, naming.Snake(op)),
+			fsplan.Owned,
+			fmt.Sprintf("the %s command for one %s entry", v.file, c.Table), s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
+func perChildCommandImports(s *src, m *ir.Model) {
 	s.L("import (")
 	s.L("\t%s", quote(fwImport("application/configuration")))
 	s.L("\t%s", quote(fwImport("application/pipeline")))
@@ -430,49 +468,30 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
 	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
 	s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
+	s.L("\t%s %s", cmdDTOAlias, quote(m.ImportPath(cmdDTOPkg)))
+	s.L("\t%s %s", cmdUtilAlias, quote(m.ImportPath(cmdUtilPkg)))
 	s.L(")")
-	s.Blank()
+}
 
-	if c.MountsAdd {
-		emitAddChildCommand(s, m, c, entity, op)
-	}
-	if c.ChangesByPut() {
-		emitChangeChildCommand(s, m, c, entity, op)
-	}
-	if c.ChangesByPatch() {
-		emitPatchChildCommand(s, m, c, entity, op)
-	}
-	if c.MountsRemove {
-		emitRemoveChildCommand(s, m, c, entity, op)
-	}
-
-	if c.Mounted {
-		// The projector belongs to the spec that declares the entry type, and it
-		// is the same function for every role over the identity.
-		return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",
-			fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
-	}
-
-	// Only the verbs that ANSWER with the entry call it. A collection that
-	// mounts removal alone projects nothing back — the entry it named is gone —
-	// so the function would sit there unused, and the reader would have to work
-	// out that nothing was missing.
-	if !c.MountsAdd && !c.MountsChange {
-		return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",
-			fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
-	}
-
+// emitChildEntryProjector writes the function that renders ONE stored entry.
+//
+// Its plural twin projects the whole collection for the root's own verbs; this
+// one exists because a per-entry verb answers with the entry it touched, not
+// with everything around it. Three verbs call it, so it sits in commands/utils
+// with the other projector rather than in whichever verb's file came first.
+func emitChildEntryProjector(s *src, c ir.Child) {
+	result := childResultType(c)
 	s.Doc(
-		fmt.Sprintf("projectOne%s renders one stored entry.", c.Name),
+		fmt.Sprintf("%s renders one stored entry.", childOneProjectorName(c)),
 		"",
 		"Its plural twin projects the whole collection for the root's own verbs; "+
 			"this one exists because a per-entry verb answers with the entry it "+
 			"touched, not with everything around it.")
-	s.L("func projectOne%s(item aggregatevos.%s) %sResult {", c.Name, c.Name, c.Name)
+	s.L("func %s(item aggregatevos.%s) %s {", childOneProjectorName(c), c.Name, result)
 	plain, groups := ir.PlainAndComposites(c.Fields)
-	head, tail := "\treturn "+c.Name+"Result{", "\t}"
+	head, tail := "\treturn "+result+"{", "\t}"
 	if len(groups) > 0 {
-		head = "\tout := " + c.Name + "Result{"
+		head = "\tout := " + result + "{"
 	}
 	s.L("%s", head)
 	s.L("\t\tID: item.GetID(),")
@@ -487,9 +506,14 @@ func emitPerChildCommands(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		s.L("\treturn out")
 	}
 	s.L("}")
+}
 
-	return goFile("internal/application/commands/"+naming.Snake(op)+"_commands.go",
-		fsplan.Owned, fmt.Sprintf("the per-entry commands for %s", c.Table), s)
+// wantsEntryProjector reports whether THIS spec declares the one-entry
+// projector. Only the verbs that ANSWER with the entry call it — a collection
+// that mounts removal alone projects nothing back, since the entry it named is
+// gone — and a MOUNTED collection's belongs to the role that owns the identity.
+func wantsEntryProjector(c ir.Child) bool {
+	return !c.Mounted && c.PerChild && (c.MountsAdd || c.MountsChange)
 }
 
 // emitAddChildCommand writes the verb that appends ONE entry.
@@ -520,7 +544,7 @@ func emitAddChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	s.L("\t// The entry as STORED, which is the last one the aggregate holds — the")
 	s.L("\t// domain may have normalised a value the caller sent.")
 	s.L("\tif len(items) > 0 {")
-	s.L("\t\tout.%s = projectOne%s(items[len(items)-1])", c.Name, c.Name)
+	s.L("\t\tout.%s = %s(items[len(items)-1])", c.Name, childOneProjector(c))
 	s.L("\t}")
 	s.L("\treturn out, nil")
 	s.L("}")
@@ -557,7 +581,7 @@ func emitChangeChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) 
 	s.L("\tout := Change%sResult{%sID: *e.GetID()}", op, entity)
 	s.L("\tfor _, item := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 	s.L("\t\tif item.GetID().Value() == cmd.%sID {", c.Name)
-	s.L("\t\t\tout.%s = projectOne%s(item)", c.Name, c.Name)
+	s.L("\t\t\tout.%s = %s(item)", c.Name, childOneProjector(c))
 	s.L("\t\t\tbreak")
 	s.L("\t\t}")
 	s.L("\t}")
@@ -612,7 +636,7 @@ func emitPatchChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	s.L("\t\tif current.GetID().Value() != cmd.%sID {", c.Name)
 	s.L("\t\t\tcontinue")
 	s.L("\t\t}")
-	s.L("\t\tstored := projectOne%s(current)", c.Name)
+	s.L("\t\tstored := %s(current)", childOneProjector(c))
 	s.L("\t\tentry = dtos.%s{", c.InputType)
 	for _, f := range c.Fields {
 		s.L("\t\t\t%s: stored.%s,", f.Name, f.Name)
@@ -648,7 +672,7 @@ func emitPatchChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	s.L("\tout := Patch%sResult{%sID: *e.GetID()}", op, entity)
 	s.L("\tfor _, item := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 	s.L("\t\tif item.GetID().Value() == cmd.%sID {", c.Name)
-	s.L("\t\t\tout.%s = projectOne%s(item)", c.Name, c.Name)
+	s.L("\t\t\tout.%s = %s(item)", c.Name, childOneProjector(c))
 	s.L("\t\t\tbreak")
 	s.L("\t\t}")
 	s.L("\t}")
@@ -669,26 +693,27 @@ func emitPatchChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 // another tenant's aggregate is the same write, in the other direction.
 func emitRemoveChildCommand(s *src, m *ir.Model, c ir.Child, entity, op string) {
 	s.Doc(
-		fmt.Sprintf("Remove%sCommand takes ONE entry out of the collection.", op),
+		fmt.Sprintf("%s%sCommand takes ONE entry out of the collection.", c.RemoveVerbPascal(), op),
 		"",
-		"There is no body: the entry is named by the path. Whether the row is "+
-			"archived or deleted follows the child's own declaration, not this verb.")
-	s.L("type Remove%sCommand struct {", op)
+		"There is no body: the entry is named by the path. The verb's NAME says "+
+			"which of the two removals this collection declared — archived, keeping "+
+			"the row, or purged.")
+	s.L("type %s%sCommand struct {", c.RemoveVerbPascal(), op)
 	s.L("\tpipeline.CommandWithBodyIDBase")
 	s.L("\t%sID string", c.Name)
 	s.L("}")
 	s.Blank()
-	s.L("func (cmd *Remove%sCommand) ApplyTo(%s *configuration.AppContext, e *appdomain.%s) error {",
-		op, identityParam(m), entity)
+	s.L("func (cmd *%s%sCommand) ApplyTo(%s *configuration.AppContext, e *appdomain.%s) error {",
+		c.RemoveVerbPascal(), op, identityParam(m), entity)
 	s.L("\te.%s(cmd.%sID)", c.RemoveMethod, c.Name)
 	emitIdentityFeed(s, m)
 	s.L("\treturn nil")
 	s.L("}")
 	s.Blank()
-	s.Doc(fmt.Sprintf("FromEntity projects nothing: the entry Remove%sCommand named is", op),
+	s.Doc(fmt.Sprintf("FromEntity projects nothing: the entry %s%sCommand named is", c.RemoveVerbPascal(), op),
 		"gone, so the endpoint answers 204 — and the framework's NoBody projection",
 		"is paired with a None on this side.")
-	s.L("func (cmd *Remove%sCommand) FromEntity(_ *configuration.AppContext, _ *appdomain.%s) (fwresults.None, error) {", op, entity)
+	s.L("func (cmd *%s%sCommand) FromEntity(_ *configuration.AppContext, _ *appdomain.%s) (fwresults.None, error) {", c.RemoveVerbPascal(), op, entity)
 	s.L("\treturn fwresults.None{}, nil")
 	s.L("}")
 	s.Blank()
@@ -698,26 +723,79 @@ func emitPerChildResult(s *src, m *ir.Model, c ir.Child, verb string) {
 	s.Doc(fmt.Sprintf("%s%sResult is the owner plus the entry as stored.", verb, c.OpBase))
 	s.L("type %s%sResult struct {", verb, c.OpBase)
 	s.L("\t%sID domain.ID", m.Entity.Pascal)
-	s.L("\t%s %sResult", c.Name, c.Name)
+	s.L("\t%s %s", c.Name, childResultType(c))
 	s.L("}")
 	s.Blank()
 }
 
-// emitPerChildRequests writes the wire types for the per-entry endpoints.
+// emitPerChildRequests writes the wire types for the per-entry endpoints —
+// ONE FILE PER OPERATION, which is the web layer's rule for every other verb.
+//
+// The GraphQL variant of an operation stays WITH that operation: it is the same
+// verb reached through another surface, and splitting the two would put one
+// endpoint's wire surface in two places — the opposite of what the rule is for.
 //
 // They reuse the collection's own Request/Response types rather than declaring
 // a second pair: the entry a caller POSTs to the collection and the entry they
 // send inside the root's body are the same thing, and two shapes for one
-// concept drift apart the first time a field is added.
-func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
+// concept drift apart the first time a field is added. Those shared types are
+// what requests/dtos holds.
+func emitPerChildRequests(m *ir.Model, c ir.Child) ([]fsplan.File, error) {
 	entity := m.Entity.Pascal
 	op := c.OpBase
 	idParam := naming.Camel(c.Name) + "Id"
 
-	s := &src{}
-	s.Blank()
-	s.L("package requests")
-	s.Blank()
+	ops := []struct {
+		mounts bool
+		file   string
+		write  func(*src)
+	}{
+		{c.MountsAdd, "add", func(s *src) { emitAddChildRequest(s, m, c, entity, op) }},
+		{c.ChangesByPut(), "change", func(s *src) {
+			emitChangeChildRequest(s, m, c, op, idParam)
+			if c.OnGQL("change") {
+				emitChangeChildGraphQLRequest(s, c, op, idParam)
+			}
+		}},
+		{c.ChangesByPatch(), "patch", func(s *src) {
+			emitPatchChildRequest(s, m, c, op, idParam)
+			if c.OnGQL("patch") {
+				emitPatchChildGraphQLRequest(s, c, op, idParam)
+			}
+		}},
+		{c.MountsRemove, c.RemoveVerb(), func(s *src) {
+			emitRemoveChildRequest(s, c, op, idParam)
+			if c.OnGQL("remove") {
+				emitRemoveChildGraphQLPair(s, c, op, idParam)
+			}
+		}},
+	}
+
+	var out []fsplan.File
+	for _, o := range ops {
+		if !o.mounts {
+			continue
+		}
+		s := &src{}
+		s.Blank()
+		s.L("package requests")
+		s.Blank()
+		perChildRequestImports(s, m)
+		s.Blank()
+		o.write(s)
+
+		f, err := goFile(fmt.Sprintf("internal/web/requests/%s_%s.go", o.file, naming.Snake(op)),
+			fsplan.Owned,
+			fmt.Sprintf("the %s wire pair for one %s entry", o.file, c.Table), s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
+func perChildRequestImports(s *src, m *ir.Model) {
 	s.L("import (")
 	s.L("\t%s", quote(fwImport("domain")))
 	// The partial change declares the entry's fields itself, one pointer each,
@@ -731,33 +809,8 @@ func emitPerChildRequests(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	// None. Pruned when the collection does not expose that verb there.
 	s.L("\tfwresults %s", quote(fwImport("application/results")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
+	s.L("\t%s %s", webDTOAlias, quote(m.ImportPath(webDTOPkg)))
 	s.L(")")
-	s.Blank()
-
-	if c.MountsAdd {
-		emitAddChildRequest(s, m, c, entity, op)
-	}
-	if c.ChangesByPut() {
-		emitChangeChildRequest(s, m, c, op, idParam)
-		if c.OnGQL("change") {
-			emitChangeChildGraphQLRequest(s, c, op, idParam)
-		}
-	}
-	if c.ChangesByPatch() {
-		emitPatchChildRequest(s, m, c, op, idParam)
-		if c.OnGQL("patch") {
-			emitPatchChildGraphQLRequest(s, c, op, idParam)
-		}
-	}
-	if c.MountsRemove {
-		emitRemoveChildRequest(s, c, op, idParam)
-		if c.OnGQL("remove") {
-			emitRemoveChildGraphQLPair(s, c, op, idParam)
-		}
-	}
-
-	return goFile("internal/web/requests/"+naming.Snake(op)+"_requests.go",
-		fsplan.Owned, fmt.Sprintf("the per-entry wire types for %s", c.Table), s)
 }
 
 // emitAddChildRequest writes the wire pair of the verb that appends one entry.
@@ -769,7 +822,7 @@ func emitAddChildRequest(s *src, m *ir.Model, c ir.Child, entity, op string) {
 			"has inside the root's own body.")
 	s.L("type Add%sRequest struct {", op)
 	s.L("\t%s", autoRequestEmbed)
-	s.L("\t%sRequest", c.Name)
+	s.L("\t%s", childWireRequest(c))
 	s.L("}")
 	s.Blank()
 	emitAutoToCommand(s, "Add"+op+"Request", "Add"+op+"Command")
@@ -789,7 +842,7 @@ func emitChangeChildRequest(s *src, m *ir.Model, c ir.Child, op, idParam string)
 	s.L("type Change%sRequest struct {", op)
 	s.L("\t%s", autoRequestEmbed)
 	s.L("\t%sID string `path:%s`", c.Name, quote(idParam))
-	s.L("\t%sRequest", c.Name)
+	s.L("\t%s", childWireRequest(c))
 	s.L("}")
 	s.Blank()
 	emitAutoToCommand(s, "Change"+op+"Request", "Change"+op+"Command")
@@ -871,17 +924,17 @@ func emitPatchChildFields(s *src, c ir.Child) {
 // never answer.
 func emitRemoveChildRequest(s *src, c ir.Child, op, idParam string) {
 	s.Doc(
-		fmt.Sprintf("Remove%sRequest names the entry to take out.", op),
+		fmt.Sprintf("%s%sRequest names the entry to take out.", c.RemoveVerbPascal(), op),
 		"",
 		"There is no body: everything the verb needs is in the path. Nothing comes "+
 			"back either — the endpoint answers 204.")
-	s.L("type Remove%sRequest struct {", op)
+	s.L("type %s%sRequest struct {", c.RemoveVerbPascal(), op)
 	s.L("\t%s", autoRequestEmbed)
 	s.Blank()
 	s.L("\t%sID string `path:%s`", c.Name, quote(idParam))
 	s.L("}")
 	s.Blank()
-	emitAutoToCommand(s, "Remove"+op+"Request", "Remove"+op+"Command")
+	emitAutoToCommand(s, c.RemoveVerbPascal()+op+"Request", c.RemoveVerbPascal()+op+"Command")
 }
 
 // emitChangeChildGraphQLRequest writes the same request with the entry's id in
@@ -906,7 +959,7 @@ func emitChangeChildGraphQLRequest(s *src, c ir.Child, op, idParam string) {
 	s.L("type Change%sGraphQLRequest struct {", op)
 	s.L("\t%s", autoRequestEmbed)
 	s.L("\t%sID string `json:%s`", c.Name, quote(idParam))
-	s.L("\t%sRequest", c.Name)
+	s.L("\t%s", childWireRequest(c))
 	s.L("}")
 	s.Blank()
 	emitAutoToCommand(s, "Change"+op+"GraphQLRequest", "Change"+op+"Command")
@@ -928,22 +981,22 @@ func emitChangeChildGraphQLRequest(s *src, c ir.Child, op, idParam string) {
 // Result field behind it to map from, only the framework's None.
 func emitRemoveChildGraphQLPair(s *src, c ir.Child, op, idParam string) {
 	s.Doc(
-		fmt.Sprintf("Remove%sGraphQLRequest names the entry to take out.", op),
+		fmt.Sprintf("%s%sGraphQLRequest names the entry to take out.", c.RemoveVerbPascal(), op),
 		"",
 		"The entry id is an input field rather than a path segment: GraphQL has no "+
 			"path, and the framework's decoder skips a path-tagged field instead of "+
 			"inventing a value for it.")
-	s.L("type Remove%sGraphQLRequest struct {", op)
+	s.L("type %s%sGraphQLRequest struct {", c.RemoveVerbPascal(), op)
 	s.L("\t%s", autoRequestEmbed)
 	s.Blank()
 	s.L("\t%sID string `json:%s`", c.Name, quote(idParam))
 	s.L("}")
 	s.Blank()
-	emitAutoToCommand(s, "Remove"+op+"GraphQLRequest", "Remove"+op+"Command")
+	emitAutoToCommand(s, c.RemoveVerbPascal()+op+"GraphQLRequest", c.RemoveVerbPascal()+op+"Command")
 	s.Blank()
 
 	s.Doc(
-		fmt.Sprintf("Remove%sGraphQLResponse acknowledges the removal, and says nothing else.", op),
+		fmt.Sprintf("%s%sGraphQLResponse acknowledges the removal, and says nothing else.", c.RemoveVerbPascal(), op),
 		"",
 		"The REST verb answers 204 with no body. A GraphQL field cannot: it must "+
 			"resolve to a type, and a payload with no fields is not publishable. So "+
@@ -952,13 +1005,13 @@ func emitRemoveChildGraphQLPair(s *src, c ir.Child, op, idParam string) {
 		"",
 		"No generic mapper here, and it is not an oversight: the command projects the "+
 			"framework's None, so there is no Result field for a mapped one to read.")
-	s.L("type Remove%sGraphQLResponse struct {", op)
+	s.L("type %s%sGraphQLResponse struct {", c.RemoveVerbPascal(), op)
 	s.L("\tSuccess bool `json:\"success\"`")
 	s.L("}")
 	s.Blank()
 	s.Doc(fmt.Sprintf("FromResult answers true: the pipeline only projects a result it succeeded with."))
-	s.L("func (Remove%sGraphQLResponse) FromResult(fwresults.None) Remove%sGraphQLResponse {", op, op)
-	s.L("\treturn Remove%sGraphQLResponse{Success: true}", op)
+	s.L("func (%s%sGraphQLResponse) FromResult(fwresults.None) %s%sGraphQLResponse {", c.RemoveVerbPascal(), op, c.RemoveVerbPascal(), op)
+	s.L("\treturn %s%sGraphQLResponse{Success: true}", c.RemoveVerbPascal(), op)
 	s.L("}")
 	s.Blank()
 }
@@ -970,7 +1023,7 @@ func emitPerChildResponse(s *src, m *ir.Model, c ir.Child, verb string) {
 	s.L("\t%s", autoResponseEmbed)
 	s.Blank()
 	s.L("\t%sID domain.ID `json:%s`", entity, quote(m.Entity.Camel+"Id"))
-	s.L("\t%s %sResponse `json:%s`", c.Name, c.Name, quote(naming.Camel(c.Name)))
+	s.L("\t%s %s `json:%s`", c.Name, childWireResponse(c), quote(naming.Camel(c.Name)))
 	s.L("}")
 	s.Blank()
 	emitAutoFromResult(s, verb+c.OpBase+"Response", "commands."+verb+c.OpBase+"Result")

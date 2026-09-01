@@ -1,0 +1,72 @@
+# Eixo: a ORIGEM DE REDE da requisição gravada na linha, nas duas formas.
+#
+# `assignedFrom: client-ip` é a única fonte atribuída pelo servidor que não vem
+# do token: o framework resolve o endereço no seu próprio middleware HTTP e o
+# entrega em AppContext.ClientIP(). Isso decide onde a atribuição é escrita — do
+# lado de FORA do `if id := ctx.Identity()`, porque uma rota anônima e um bench
+# com autenticação desligada têm origem do mesmo jeito.
+#
+# Os dois campos abaixo existem para provar as duas formas do mesmo valor
+# ausente. Fora do caminho da requisição de entrada — um handler de consumidor,
+# um job, um fixture de teste — ClientIP() responde "". A coluna anulável grava
+# essa ausência como NULL e não é tocada; a não-anulável grava como string
+# vazia. As duas são honestas, e o spec escolhe qual o leitor deve ver.
+#
+# Nenhuma das duas está em write DTO nenhum: como toda `assignedFrom`, saem do
+# request, do command e do schema do OpenAPI. Só o insert escreve — é de onde a
+# linha VEIO, não de onde veio a última edição.
+specVersion: 1
+entity: Acesso
+plural: Acessos
+language: pt-BR
+storage:
+  kind: flat
+  table: acessos
+  description: Registro de acessos, com a origem de rede de quem os criou.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: Recurso, type: string, column: recurso, length: 120, livesOn: root, example: /relatorios/mensal, description: O recurso acessado.}
+  - name: DonoId
+    type: string
+    column: dono_id
+    length: 64
+    livesOn: root
+    assignedFrom: identity-subject
+    example: usr-1
+    description: Quem registrou o acesso. O servidor preenche no insert.
+  # Não-anulável: a ausência de origem é gravada como string vazia.
+  - name: OrigemRede
+    type: string
+    column: origem_rede
+    length: 45
+    livesOn: root
+    assignedFrom: client-ip
+    example: 203.0.113.7
+    description: Endereço de rede de onde o registro veio, como o framework resolveu.
+  # Anulável: a mesma ausência, dita como NULL na coluna e na resposta.
+  - name: OrigemProxy
+    type: string
+    column: origem_proxy
+    length: 45
+    livesOn: root
+    nullable: true
+    assignedFrom: client-ip
+    example: 198.51.100.4
+    description: A mesma origem, gravada como NULL quando a escrita não veio de uma requisição.
+modes: [display, insert, update]
+update: {shape: put}
+read:
+  backing: relational
+  view: {name: acessos}
+  byId: true
+  byParams:
+    filters: [{field: Recurso, ops: [eq, contains]}]
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: acesso
+  dataAccess: anyone-with-permission
+  permissions:
+    insert: "acesso:escrever"
+    update: "acesso:escrever"
+    read: "acesso:ler"

@@ -2796,6 +2796,10 @@ type Child struct {
 	// It takes the owner's type, so unlike the entry shapes it cannot be shared
 	// between two roles over one identity — it is qualified for the same reason
 	// OpBase is.
+	//
+	// EXPORTED: several commands call it, so it lives in commands/utils rather
+	// than in whichever verb's file happened to declare it first, and a function
+	// that left its package has to be reachable from outside it.
 	Projector string
 
 	DuplicateNotification string
@@ -2923,7 +2927,7 @@ func resolveChildren(s *spec.Spec, m *Model) []Child {
 		// this block`. The per-entry projector beside it was already qualified
 		// (projectOneUserRole), so the collision was the collection projector
 		// alone, and only until a second entity reused a plural.
-		ch.Projector = "project" + m.Entity.Pascal + ch.GoPlural
+		ch.Projector = "Project" + m.Entity.Pascal + ch.GoPlural
 		if ch.Mounted {
 			ch.OpBase = m.Entity.Pascal + c.Name
 		}
@@ -3470,6 +3474,35 @@ func (c Child) Serves(verb string) bool {
 	return c.MountsOp(verb)
 }
 
+// RemoveVerb is what the removal operation is CALLED in generated code, as
+// opposed to `remove`, which is what the spec calls it.
+//
+// The two differ because one word covers two outcomes. `children[].operations`
+// says the collection lets a caller take one entry out; `softRemove` says how —
+// archived, keeping the row and its history, or purged. The route already
+// follows that split (PATCH …/archive against DELETE, per PerEntryRoute), and
+// the generated names now follow it too: a file called archive_… over a route
+// that hard-deletes tells the reader the opposite of what the endpoint does.
+//
+// It reads ArchivedAt rather than SoftRemove because that is the field the
+// route reads, and two predicates for one decision drift. Validation already
+// refuses the combinations where they would disagree.
+func (c Child) RemoveVerb() string {
+	if c.ArchivedAt != "" {
+		return "archive"
+	}
+	return "delete"
+}
+
+// RemoveVerbPascal is RemoveVerb as a type-name prefix: Archive<Op>Command or
+// Delete<Op>Command.
+func (c Child) RemoveVerbPascal() string {
+	if c.ArchivedAt != "" {
+		return "Archive"
+	}
+	return "Delete"
+}
+
 // ChangesByPut and ChangesByPatch read the resolved shape. They are the pair
 // every emitter branches on, and they are methods rather than two more fields
 // because the shape is one decision and three copies of it drift.
@@ -3925,6 +3958,24 @@ func (m *Model) IdentityAssignedFields() []Field {
 	var out []Field
 	for _, f := range m.AssignedFields() {
 		if f.AssignedFrom == "identity-subject" || f.AssignedFrom == "identity-claim" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// ClientIPAssignedFields are the columns filled from the request's ORIGIN.
+//
+// They are assigned by the generator like the identity ones and are separate
+// from them for one reason that decides where the assignment goes: the origin
+// is not in the token. It is resolved by the framework's own middleware and
+// read straight off the AppContext, so it is written whether or not a caller
+// authenticated — folding these into the identity block would drop the value on
+// every anonymous route and on a bench with authentication off.
+func (m *Model) ClientIPAssignedFields() []Field {
+	var out []Field
+	for _, f := range m.AssignedFields() {
+		if f.AssignedFrom == "client-ip" {
 			out = append(out, f)
 		}
 	}

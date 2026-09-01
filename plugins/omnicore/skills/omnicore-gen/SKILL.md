@@ -73,6 +73,33 @@ what you do:
 - **It owns whole files.** Never hand-edit a generated file. Change the spec and
   regenerate. The escape hatches are named, declared and permanent (below).
 
+## The shape it writes — `service-layout.html`, and the one thing that page does not decide
+
+The emitted tree IS the layout page: one Command per verb with its Result co-located, one
+wire file per OPERATION with request and response together, one domain type per file, one
+schema function per file, tests **beside their source** (`<file>.go` ⇄ `<file>_test.go`,
+nothing else — that pairing is what lets an IDE nest them).
+
+That rule answers everything except the leftovers: a child collection's shapes are read by
+the root's insert, by its update, by both reads and by each of the entry's own verbs, so
+there is no single operation they belong beside. Those get their own seat, split by WHAT
+they are:
+
+| Kind | Where | Example |
+|---|---|---|
+| shared **structures** | `dtos/` under the layer that owns them | `application/commands/dtos/<child>_result.go` · `application/queries/dtos/<child>_row_result.go` · `web/requests/dtos/<child>.go` |
+| shared **functions** | `utils/` under the same layer | `application/commands/utils/<entity>_<child>_projection.go` |
+
+They are always imported under an alias naming the layer — `cmddtos`, `qrydtos`,
+`webdtos`, `cmdutils` — because `internal/application/dtos` (the child INPUT DTOs the page
+has always had) is a fourth package called `dtos` and a file may name two of them.
+
+**The removal verb is named for what it MOUNTS.** `children[].operations` keeps one word,
+`remove`, and `children[].softRemove` decides the outcome; the generated file and type say
+which it is — `archive_<child>_command.go` / `Archive<Child>Command` over `PATCH …/archive`,
+`delete_<child>_command.go` / `Delete<Child>Command` over `DELETE`. Permissions stay keyed
+on `remove`, the spec's word.
+
 ## Step 0 — the command
 
 `omnicore-gen` is on PATH: the plugin ships it in `bin/`, which Claude Code adds to the
@@ -1195,6 +1222,24 @@ Four things to get right, because they are the ones that cost a migration later:
   an `owner-only` policy then reads; letting the body carry it means anyone can create a
   row owned by someone else. Do not describe it in `rules.manual` and hand-write the
   mapper: it is a key.
+- **The request's network origin: `assignedFrom: client-ip`.** Same exclusion, and the
+  one source that is NOT in the token: the framework resolves the address in its own HTTP
+  middleware and hands it over on the `AppContext`, so the generator reads it OUTSIDE the
+  identity check and an anonymous route records it just the same. Written on insert and
+  left alone afterwards, like the identity sources — the column says where the row came
+  from, never where the last edit came from. Always `type: string` (an address is a value
+  to record and compare, never a key this service resolves).
+  - **It is the other source that takes `nullable: true`, and for a reason the identity
+    ones do not have.** A write off the inbound request path — a consumer handler, a
+    background job, a test fixture — genuinely HAS no origin, and `ClientIP()` answers `""`
+    there. Nullable records that absence as `NULL` and the column is left untouched;
+    non-nullable records it as the empty string. Both are honest; pick what your reader
+    should see.
+  - **What the value is WORTH is a deployment question, not a spec one.** Behind a reverse
+    proxy the framework reads the socket peer — the balancer, on every request — until
+    `http.trustProxy` is declared. A network control built on this column depends on that
+    block being right, and this key cannot make an undeclared topology trustworthy. Say so
+    when you propose the field.
 - **A field the SERVER computes from another one: `assignedFrom: derived`.** Same
   exclusion, different source: a public key derived from an immutable handle is never
   proposed by a caller, so it leaves every write request, command and OpenAPI request
@@ -1215,8 +1260,9 @@ Four things to get right, because they are the ones that cost a migration later:
     a `rules.manual` entry scoped to that verb, not necessarily to `insert`.
     `identity-subject` and `identity-claim` still refuse `nullable`: the server always has
     a subject and always has the claim it required, so the column is written on every
-    insert. (Earlier builds refused `nullable` on every source, which is what produced the
-    workarounds above; `explain keys` on the pinned build is the authority.)
+    insert. `client-ip` accepts it, for its own reason — a write off the request path has
+    no origin at all. (Earlier builds refused `nullable` on every source, which is what
+    produced the workarounds above; `explain keys` on the pinned build is the authority.)
 - **A column the FRAMEWORK fills: `stamped: time` / `stamped: counter`.** Read it against
   `assignedFrom: derived` directly above, because the two look alike and divide the work
   differently. `derived` says YOUR code owns the VALUE — it computes it and assigns it.

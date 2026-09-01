@@ -6,6 +6,7 @@ import (
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 func emitWeb(m *ir.Model) ([]fsplan.File, error) {
@@ -36,11 +37,11 @@ func emitWeb(m *ir.Model) ([]fsplan.File, error) {
 		out = append(out, f)
 	}
 	if len(m.Children) > 0 {
-		f, err := emitChildDTOs(m)
+		files, err := emitChildDTOs(m)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, f)
+		out = append(out, files...)
 	}
 	f, err := emitRoutes(m)
 	if err != nil {
@@ -63,6 +64,9 @@ func requestImports(s *src, m *ir.Model, needQueries bool) {
 	s.L("\tfwresponses %s", quote(fwImport("web/responses")))
 	s.L("\t%s", quote(m.ImportPath("internal/application/commands")))
 	s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
+	// The entry shapes every operation carrying a collection names. Pruned for
+	// an entity with no children.
+	s.L("\t%s %s", webDTOAlias, quote(m.ImportPath(webDTOPkg)))
 	s.L(")")
 	s.Blank()
 }
@@ -91,7 +95,7 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 	}
 	if !partial {
 		for _, c := range m.Children {
-			s.L("\t%s []%sRequest `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
+			s.L("\t%s []%s `json:%s`", c.GoPlural, childWireRequest(c), quote(c.Segment))
 		}
 	}
 	s.L("}")
@@ -126,7 +130,7 @@ func emitWriteDTO(m *ir.Model, op ir.Operation) (fsplan.File, error) {
 			quote(c.JSONName), quote(strings.Join(c.Sources, ",")), quote(c.Example))
 	}
 	for _, c := range m.Children {
-		s.L("\t%s []%sResponse `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
+		s.L("\t%s []%s `json:%s`", c.GoPlural, childWireResponse(c), quote(c.Segment))
 	}
 	s.L("}")
 	s.Blank()
@@ -234,7 +238,7 @@ func emitByIDDTO(m *ir.Model) (fsplan.File, error) {
 	}
 	emitComputedResponseFields(s, m, false)
 	for _, c := range m.Children {
-		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment))
+		s.L("\t%s []%s `json:%s`", c.GoPlural, childWireRow(c), quote(c.Segment))
 	}
 	s.L("}")
 	s.Blank()
@@ -340,7 +344,7 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 	}
 	emitComputedResponseFields(s, m, pointered)
 	for _, c := range m.Children {
-		s.L("\t%s []%sRow `json:%s`", c.GoPlural, c.Name, quote(c.Segment+",omitempty"))
+		s.L("\t%s []%s `json:%s`", c.GoPlural, childWireRow(c), quote(c.Segment+",omitempty"))
 	}
 	s.L("}")
 	s.Blank()
@@ -609,37 +613,46 @@ func serviceField(m *ir.Model) string {
 	return " Service: svc,"
 }
 
-// emitChildDTOs writes the wire shapes for the collections.
+// emitChildDTOs writes the wire shapes for the collections — ONE FILE PER
+// COLLECTION, under requests/dtos.
+//
+// The three types here are read by every operation that carries the collection:
+// the root's insert and update, both reads, and each of the entry's own verbs.
+// That is what keeps them out of any single operation's file — the web layer
+// files by operation, and a shape belonging to six of them belongs beside none.
 //
 // The request carries no id: on a create the server mints it, and accepting one
 // from the caller would let them choose a key they have no business choosing.
 // The response does carry it, because that is how the caller addresses the entry
 // afterwards.
-func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package requests")
-	s.Blank()
-	s.L("import (")
-	s.L("\t%s", quote("time"))
-	s.L("\t%s", quote(fwImport("domain")))
-	s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
-	s.L(")")
-	s.Blank()
+func emitChildDTOs(m *ir.Model) ([]fsplan.File, error) {
+	var out []fsplan.File
+	for _, c := range m.Children {
+		if c.Mounted {
+			// The entry's wire shape is the collection's, not this role's: it is
+			// declared once, by the spec that owns the identity, and both roles
+			// send and return the same JSON for the same row.
+			continue
+		}
+		s := &src{}
+		s.Blank()
+		s.L("package dtos")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("time"))
+		s.L("\t%s", quote(fwImport("domain")))
+		s.L(")")
+		s.Blank()
 
-	// The nested row BOTH reads return. One type, so a caller that walks the
-	// listing and then opens one record does not meet two shapes for one thing.
-	//
-	// Pointer-and-omitempty throughout, RECURSIVELY, when the listing serves
-	// ?fields=: partial projection has to be able to leave a field out, and the
-	// framework refuses to build that endpoint otherwise — at boot, not at
-	// compile time.
-	if m.Read.Enabled {
-		pointered := m.Read.Controls.Fields
-		for _, c := range m.Children {
-			if c.Mounted {
-				continue // one shape, declared by the role that owns the identity
-			}
+		// The nested row BOTH reads return. One type, so a caller that walks the
+		// listing and then opens one record does not meet two shapes for one thing.
+		//
+		// Pointer-and-omitempty throughout, RECURSIVELY, when the listing serves
+		// ?fields=: partial projection has to be able to leave a field out, and the
+		// framework refuses to build that endpoint otherwise — at boot, not at
+		// compile time.
+		if m.Read.Enabled {
+			pointered := m.Read.Controls.Fields
 			s.Doc(fmt.Sprintf("%sRow is one entry of the %s collection as a read returns it.",
 				c.Name, c.Segment))
 			s.L("type %sRow struct {", c.Name)
@@ -673,15 +686,7 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 			s.L("}")
 			s.Blank()
 		}
-	}
 
-	for _, c := range m.Children {
-		if c.Mounted {
-			// The entry's wire shape is the collection's, not this role's: it is
-			// declared once, by the spec that owns the identity, and both roles
-			// send and return the same JSON for the same row.
-			continue
-		}
 		s.Doc(fmt.Sprintf("%sRequest is one entry sent in the %s collection.", c.Name, c.Segment),
 			"",
 			"It carries no id: the server mints one.",
@@ -707,11 +712,15 @@ func emitChildDTOs(m *ir.Model) (fsplan.File, error) {
 				quote(jsonTag(f, false)), quote(f.Example))
 		}
 		s.L("}")
-		s.Blank()
-	}
 
-	return goFile("internal/web/requests/"+m.Entity.Snake+"_children.go", fsplan.Owned,
-		fmt.Sprintf("the wire types for %d child collection(s)", len(m.Children)), s)
+		f, err := goFile(webDTOPkg+"/"+naming.Snake(c.Name)+".go", fsplan.Owned,
+			fmt.Sprintf("the wire shapes of one %s entry", c.Name), s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 // emitPerChildRoutes mounts the verbs that address ONE entry — up to three of
@@ -746,7 +755,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		var ops []perChildOp
 		if c.MountsAdd {
 			ops = append(ops, perChildOp{
-				verb: "Add", method: fiberMethod(c, "add"), path: pathOf(c, "add"),
+				verb: "Add", permKey: "add", method: fiberMethod(c, "add"), path: pathOf(c, "add"),
 				request: "Add" + opName + "Request", response: "Add" + opName + "Response",
 				result: "commands.Add" + opName + "Result", status: "fiber.StatusCreated",
 				summary: fmt.Sprintf("Add one %s to %s %s", c.Name, articleFor(human), human),
@@ -759,7 +768,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		}
 		if c.ChangesByPut() {
 			ops = append(ops, perChildOp{
-				verb: "Change", method: fiberMethod(c, "change"), path: pathOf(c, "change"),
+				verb: "Change", permKey: "change", method: fiberMethod(c, "change"), path: pathOf(c, "change"),
 				request: "Change" + opName + "Request", response: "Change" + opName + "Response",
 				result: "commands.Change" + opName + "Result", status: "fiber.StatusOK",
 				summary: fmt.Sprintf("Replace one %s of %s %s", c.Name, articleFor(human), human),
@@ -774,7 +783,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 		// permission is the change's — one verb asked twice is not two jobs.
 		if c.ChangesByPatch() {
 			ops = append(ops, perChildOp{
-				verb: "Patch", method: fiberMethod(c, "patch"), path: pathOf(c, "patch"),
+				verb: "Patch", permKey: "patch", method: fiberMethod(c, "patch"), path: pathOf(c, "patch"),
 				request: "Patch" + opName + "Request", response: "Patch" + opName + "Response",
 				result: "commands.Patch" + opName + "Result", status: "fiber.StatusOK",
 				handler: "handlers.PartialUpdateCommandHandler",
@@ -822,7 +831,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			// resolved both cases into one map, so this position never repeats
 			// the fallback and never disagrees with the report.
 			s.L("\t\tfwopenapi.RequirePermission(%s))",
-				quote(c.Permissions[strings.ToLower(op.verb)]))
+				quote(c.Permissions[op.permKey]))
 			s.Blank()
 		}
 	}
@@ -854,8 +863,8 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 // the server minted.
 func removeOp(c ir.Child, entity, opName string) perChildOp {
 	op := perChildOp{
-		verb: "Remove", method: fiberMethod(c, "remove"), path: pathOf(c, "remove"),
-		request:  "Remove" + opName + "Request",
+		verb: c.RemoveVerbPascal(), permKey: "remove", method: fiberMethod(c, "remove"), path: pathOf(c, "remove"),
+		request:  c.RemoveVerbPascal() + opName + "Request",
 		result:   "fwresults.None",
 		status:   "fiber.StatusNoContent",
 		bodyless: true,
@@ -905,6 +914,13 @@ type perChildOp struct {
 	verb, method, path, request, response, result, summary, doc string
 	status                                                      string
 	bodyless                                                    bool
+	// permKey is the SPEC's word for this operation, which is what
+	// children[].permissions is keyed by. It parts company with verb on the
+	// removal alone: the generated names say archive or delete, because that is
+	// what the route does, while the spec keeps one word for the operation and
+	// lets softRemove decide the outcome. Lower-casing verb would look for a
+	// permission called "archive" that no spec declares.
+	permKey string
 	// handler is the framework handler this verb runs through, and it is empty
 	// for all but one of them. Every per-entry verb is an UPDATE of the owner, so
 	// the full-body handler is the answer everywhere except the PARTIAL change:
