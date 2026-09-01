@@ -433,7 +433,15 @@ func TestEveryScopedEntityProvesItsScope(t *testing.T) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
-			src := goSources(emitAll(t, m))["internal/application/queries/"+m.Entity.Snake+"_queries_test.go"]
+			// The read-wide proofs ride whichever query file the entity has;
+			// read them all rather than guessing which one.
+			var src string
+			for path, body := range goSources(emitAll(t, m)) {
+				if strings.HasPrefix(path, "internal/application/queries/find_") &&
+					strings.HasSuffix(path, "_query_test.go") {
+					src += body
+				}
+			}
 			if src == "" {
 				t.Fatal("a scoped entity emitted no query tests at all")
 			}

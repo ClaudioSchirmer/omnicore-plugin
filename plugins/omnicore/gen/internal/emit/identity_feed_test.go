@@ -168,13 +168,20 @@ func identityFeedModel(t *testing.T, dataAccess string) *ir.Model {
 // the routes that grant and revoke.
 func TestPerEntryChildVerbsCarryTheIdentity(t *testing.T) {
 	m := identityFeedModel(t, "tenant")
-	got := fileNamed(t, m, "internal/application/commands/perfil_permissao_commands.go")
-	for _, verb := range []string{"AddPerfilPermissao", "ChangePerfilPermissao", "RemovePerfilPermissao"} {
+	var all strings.Builder
+	for file, verb := range map[string]string{
+		"add_perfil_permissao_command.go":     "AddPerfilPermissao",
+		"change_perfil_permissao_command.go":  "ChangePerfilPermissao",
+		"archive_perfil_permissao_command.go": "ArchivePerfilPermissao",
+	} {
+		got := fileNamed(t, m, "internal/application/commands/"+file)
+		all.WriteString(got)
 		sig := fmt.Sprintf("func (cmd *%sCommand) ApplyTo(ctx *configuration.AppContext", verb)
 		if !strings.Contains(got, sig) {
 			t.Errorf("%s discards the AppContext, so the write guard reads zeroed fields:\n%s", verb, got)
 		}
 	}
+	got := all.String()
 	if n := strings.Count(got, "e.RequestingTenant = id.TenantID()"); n != 3 {
 		t.Errorf("the caller reaches %d of the 3 per-entry mappers:\n%s", n, got)
 	}
@@ -202,7 +209,9 @@ func TestFacetClearVerbCarriesTheIdentity(t *testing.T) {
 // parameter they never read.
 func TestUnscopedEntityLeavesTheContextUnnamed(t *testing.T) {
 	m := identityFeedModel(t, "anyone-with-permission")
-	got := fileNamed(t, m, "internal/application/commands/perfil_permissao_commands.go")
+	got := fileNamed(t, m, "internal/application/commands/add_perfil_permissao_command.go") +
+		fileNamed(t, m, "internal/application/commands/change_perfil_permissao_command.go") +
+		fileNamed(t, m, "internal/application/commands/archive_perfil_permissao_command.go")
 	if strings.Contains(got, "ApplyTo(ctx *configuration.AppContext") {
 		t.Errorf("a mapper with nothing to carry names the context anyway:\n%s", got)
 	}

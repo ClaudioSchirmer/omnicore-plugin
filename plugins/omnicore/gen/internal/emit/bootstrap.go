@@ -109,7 +109,11 @@ func emitBootstrap(m *ir.Model) ([]fsplan.File, error) {
 		s.L("}")
 	}
 
-	f, err := goFile("bootstrap/"+m.Entity.PluralSnake+"_feature.go", fsplan.Owned,
+	// Named for the AGGREGATE, singular. One feature per aggregate, so the file
+	// is named after the thing it assembles — the plural belongs to the route
+	// group and to the identity feature, which is a read surface over MANY of
+	// them rather than one aggregate's wiring.
+	f, err := goFile("bootstrap/"+m.Entity.Snake+"_feature.go", fsplan.Owned,
 		fmt.Sprintf("the %s feature (repository + view + mount)", m.Entity.PluralCamel), s)
 	if err != nil {
 		return nil, err

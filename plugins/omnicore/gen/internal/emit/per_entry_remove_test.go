@@ -44,10 +44,13 @@ func hardRemoveModel(t *testing.T) *ir.Model {
 
 // removeMount is the mounted block of the per-entry removal, which is the only
 // place the status, the projection and the documented text can be read together.
-func removeMount(t *testing.T, m *ir.Model) string {
+//
+// verb is Archive or Delete: the generated names say which of the two removals
+// the collection declared, because that is what the route does.
+func removeMount(t *testing.T, m *ir.Model, verb string) string {
 	t.Helper()
 	routes := fileNamed(t, m, "internal/web/papel_routes.go")
-	const head = "hRemovePapelPermissao, sRemovePapelPermissao := "
+	head := "h" + verb + "PapelPermissao, s" + verb + "PapelPermissao := "
 	i := strings.Index(routes, head)
 	if i < 0 {
 		t.Fatalf("the removal verb is not mounted:\n%s", routes)
@@ -72,19 +75,20 @@ func TestPerEntryRemoveAnswersNoContent(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		model func(*testing.T) *ir.Model
+		verb  string
 		route string
 	}{
-		{"archive", func(t *testing.T) *ir.Model { return childOpsModel(t, "") },
+		{"archive", func(t *testing.T) *ir.Model { return childOpsModel(t, "") }, "Archive",
 			`fiber.MethodPatch, "/:id/permissoes/:papelPermissaoId/archive"`},
-		{"delete", hardRemoveModel,
+		{"delete", hardRemoveModel, "Delete",
 			`fiber.MethodDelete, "/:id/permissoes/:papelPermissaoId"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.model(t)
-			mount := removeMount(t, m)
+			mount := removeMount(t, m, tc.verb)
 			for _, want := range []string{
 				"fwresponses.NoBody,",
-				"commands.RemovePapelPermissaoCommand, fwresults.None]",
+				"commands." + tc.verb + "PapelPermissaoCommand, fwresults.None]",
 				"fiber.StatusNoContent)",
 				tc.route,
 			} {
@@ -95,7 +99,7 @@ func TestPerEntryRemoveAnswersNoContent(t *testing.T) {
 			if strings.Contains(mount, "fiber.StatusOK") {
 				t.Errorf("the removal still answers 200:\n%s", mount)
 			}
-			if strings.Contains(mount, "RemovePapelPermissaoResponse") {
+			if strings.Contains(mount, tc.verb+"PapelPermissaoResponse") {
 				t.Errorf("the removal still projects a response:\n%s", mount)
 			}
 		})
@@ -114,28 +118,29 @@ func TestPerEntryRemoveEmitsNoResultOrResponseType(t *testing.T) {
 	for _, f := range emitAll(t, m) {
 		body := string(f.Content)
 		for _, gone := range []string{
-			"type RemovePapelPermissaoResult struct",
-			"type RemovePapelPermissaoResponse struct",
+			"type ArchivePapelPermissaoResult struct",
+			"type ArchivePapelPermissaoResponse struct",
 		} {
 			if strings.Contains(body, gone) {
 				t.Errorf("%s still declares %q:\n%s", f.Path, gone, body)
 			}
 		}
-		if strings.Contains(body, "RemovePapelPermissaoResponse{}") {
+		if strings.Contains(body, "ArchivePapelPermissaoResponse{}") {
 			t.Errorf("%s still names the response the verb does not answer with:\n%s", f.Path, body)
 		}
 	}
 
-	cmds := fileNamed(t, m, "internal/application/commands/papel_permissao_commands.go")
+	cmds := fileNamed(t, m, "internal/application/commands/archive_papel_permissao_command.go")
 	if !strings.Contains(cmds, "FromEntity(_ *configuration.AppContext, _ *appdomain.Papel) (fwresults.None, error)") {
 		t.Errorf("the removal command does not project None:\n%s", cmds)
 	}
-	for _, keep := range []string{
-		"type AddPapelPermissaoResult struct",
-		"type ChangePapelPermissaoResult struct",
+	for file, keep := range map[string]string{
+		"add_papel_permissao_command.go":    "type AddPapelPermissaoResult struct",
+		"change_papel_permissao_command.go": "type ChangePapelPermissaoResult struct",
 	} {
-		if !strings.Contains(cmds, keep) {
-			t.Errorf("the verbs that DO answer lost %q:\n%s", keep, cmds)
+		body := fileNamed(t, m, "internal/application/commands/"+file)
+		if !strings.Contains(body, keep) {
+			t.Errorf("the verbs that DO answer lost %q:\n%s", keep, body)
 		}
 	}
 }
@@ -150,7 +155,7 @@ func TestPerEntryRemoveEmitsNoResultOrResponseType(t *testing.T) {
 // aggregate, so no command can even address it. The only way "back" is a fresh
 // add, which mints a NEW id.
 func TestPerEntryArchiveDocPromisesNoUnarchive(t *testing.T) {
-	mount := removeMount(t, childOpsModel(t, ""))
+	mount := removeMount(t, childOpsModel(t, ""), "Archive")
 	if strings.Contains(mount, "reversible") {
 		t.Errorf("the per-entry archive still promises a reversal nothing mounts:\n%s", mount)
 	}

@@ -152,7 +152,7 @@ func TestAPerEntryDerivationIsNamedForItsEntityAndItsCollection(t *testing.T) {
 // nested level it must name the sources BARE: the framework records them under
 // the same segment prefix as the field itself.
 func TestThePerEntryComputedTagNamesItsSourcesBare(t *testing.T) {
-	rows := emittedBody(t, emitAll(t, childComputedModel(t)), "internal/web/requests/cesta_e_children.go")
+	rows := emittedBody(t, emitAll(t, childComputedModel(t)), "internal/web/requests/dtos/linha_e.go")
 	if !strings.Contains(rows, `computed:"Sku,Observacao,ProdutoID,RegistradoEm"`) {
 		t.Errorf("the entry's computed tag is missing or prefixed:\n%s", rows)
 	}
@@ -183,7 +183,7 @@ func TestTheDerivationHookImportsTheTypesItNames(t *testing.T) {
 // domain.NewID and a timestamp as time.Date.
 func TestTheQueryTestImportsTheTypesItBuilds(t *testing.T) {
 	body := emittedBody(t, emitAll(t, childComputedModel(t)),
-		"internal/application/queries/cesta_e_queries_test.go")
+		"internal/application/queries/find_cestas_e_by_params_query_test.go")
 	for _, want := range []string{`"time"`, `omnicore/domain"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the generated test does not import %s, and it constructs one:\n%s", want, body)

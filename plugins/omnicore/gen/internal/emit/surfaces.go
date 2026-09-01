@@ -216,12 +216,12 @@ func emitPerChildMutations(s *src, m *ir.Model, entity string) {
 		}
 		if c.MountsRemove && c.OnGQL("remove") {
 			s.L("\t// REST answers 204 with no body; a GraphQL field must answer SOMETHING,")
-			s.L("\t// so the payload is the acknowledgement and nothing more. Whether the")
-			s.L("\t// row is archived or deleted follows the child's own declaration, the")
-			s.L("\t// same way it does on the REST verb.")
-			emitPerChildMutation(s, m, entity, gqlChildField("remove", op),
-				"requests.Remove"+op+"GraphQLRequest", "requests.Remove"+op+"GraphQLResponse{}.FromResult",
-				"Remove"+op+"Command", "fwresults.None", c.Permissions["remove"],
+			s.L("\t// so the payload is the acknowledgement and nothing more. The field is")
+			s.L("\t// named for what the removal DOES here — archive or delete — the same")
+			s.L("\t// way the REST verb is.")
+			emitPerChildMutation(s, m, entity, gqlChildField(c.RemoveVerb(), op),
+				"requests."+c.RemoveVerbPascal()+op+"GraphQLRequest", "requests."+c.RemoveVerbPascal()+op+"GraphQLResponse{}.FromResult",
+				c.RemoveVerbPascal()+op+"Command", "fwresults.None", c.Permissions["remove"],
 				"handlers.UpdateCommandHandler")
 		}
 	}

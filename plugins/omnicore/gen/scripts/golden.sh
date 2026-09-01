@@ -1336,9 +1336,9 @@ else
   # The build passing is the whole proof, but it is a proof that reads as
   # "nothing happened". Naming the two functions says WHICH names made it pass,
   # so a future emitter that de-qualifies one of them fails with the reason.
-  UNQUALIFIED=$(grep -rl 'func projectPapeis(' "$work/internal" 2>/dev/null)
-  QUALIFIED=$(grep -rh 'func projectUsuarioPRPapeis(\|func projectGrupoPRPapeis(' \
-    "$work/internal" 2>/dev/null | wc -l | tr -d ' ')
+  UNQUALIFIED=$(grep -rl "func ProjectPapeis(" "$work/internal" 2>/dev/null)
+  QUALIFIED=$(grep -rh "func ProjectUsuarioPRPapeis(\\|func ProjectGrupoPRPapeis("  \
+    "$work/internal" 2>/dev/null | wc -l | tr -d " ")
   if [[ -n "$UNQUALIFIED" ]]; then
     bad "two entities share a collection plural: the unqualified projector is still emitted in $UNQUALIFIED"
   elif [[ "$QUALIFIED" != "2" ]]; then

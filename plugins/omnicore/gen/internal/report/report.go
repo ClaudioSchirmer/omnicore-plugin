@@ -1221,9 +1221,10 @@ func renderCheck(b *strings.Builder, in Input) {
 	if m.HasPerChild() {
 		b.WriteString("### Per-entry command tests are generated now\n\n")
 		b.WriteString("The verbs that address ONE entry — " + perChildVerbs(m) + " — have " +
-			"generated tests in `" + fmt.Sprintf("internal/application/commands/%s_commands_test.go",
-			m.Entity.Snake) + "`: the entry is applied and projected back, a change keeps its " +
-			"id, an unknown id projects nothing.\n\n")
+			"generated tests, each one beside the command it covers under " +
+			"`internal/application/commands/` (`<verb>_<collection>_command_test.go`): the " +
+			"entry is applied and projected back, a change keeps its id, an unknown id " +
+			"projects nothing.\n\n")
 		b.WriteString("**If you wrote your own tests for those mappers before this run**, the " +
 			"package will not compile until you delete them — Go reports it as `redeclared in " +
 			"this block`, which reads like a generator bug and is not one. The generated cases " +

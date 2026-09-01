@@ -119,8 +119,14 @@ func TestDroppedChildVerbLeavesNoTrace(t *testing.T) {
 // regeneration takes routes away from a running service.
 func TestPerChildDefaultsToTheWholeTrio(t *testing.T) {
 	m := childOpsModel(t, "")
-	cmds := fileNamed(t, m, "internal/application/commands/papel_permissao_commands.go")
-	for _, verb := range []string{"AddPapelPermissaoCommand", "ChangePapelPermissaoCommand", "RemovePapelPermissaoCommand"} {
+	// One file per verb, like every other command in the service — and the
+	// removal named for what it MOUNTS, which here is an archive.
+	for file, verb := range map[string]string{
+		"add_papel_permissao_command.go":     "AddPapelPermissaoCommand",
+		"change_papel_permissao_command.go":  "ChangePapelPermissaoCommand",
+		"archive_papel_permissao_command.go": "ArchivePapelPermissaoCommand",
+	} {
+		cmds := fileNamed(t, m, "internal/application/commands/"+file)
 		if !strings.Contains(cmds, "type "+verb+" struct") {
 			t.Errorf("the default surface is missing %s:\n%s", verb, cmds)
 		}
@@ -132,11 +138,12 @@ func TestPerChildDefaultsToTheWholeTrio(t *testing.T) {
 // remove-only collection would otherwise carry a function nothing calls.
 func TestRemoveOnlyCollectionWritesNoEntryProjector(t *testing.T) {
 	m := childOpsModel(t, "    operations: [remove]\n")
-	cmds := fileNamed(t, m, "internal/application/commands/papel_permissao_commands.go")
-	if strings.Contains(cmds, "func projectOnePapelPermissao(") {
-		t.Errorf("nothing projects an entry here, yet the projector was written:\n%s", cmds)
+	proj := fileNamed(t, m, "internal/application/commands/utils/papel_papel_permissao_projection.go")
+	if strings.Contains(proj, "func ProjectOnePapelPermissao(") {
+		t.Errorf("nothing projects an entry here, yet the projector was written:\n%s", proj)
 	}
-	if !strings.Contains(cmds, "type RemovePapelPermissaoCommand struct") {
+	cmds := fileNamed(t, m, "internal/application/commands/archive_papel_permissao_command.go")
+	if !strings.Contains(cmds, "type ArchivePapelPermissaoCommand struct") {
 		t.Errorf("the one mounted verb is missing:\n%s", cmds)
 	}
 }

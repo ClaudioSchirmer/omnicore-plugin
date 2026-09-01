@@ -104,7 +104,7 @@ func TestChildInputDTOImportsTheDomainItNames(t *testing.T) {
 
 func TestChildInputTestImportsTheDomainItNames(t *testing.T) {
 	m := childIDModel(t)
-	got := fileNamed(t, m, "internal/application/dtos/papel_dtos_test.go")
+	got := fileNamed(t, m, "internal/application/dtos/papel_permissao_input_test.go")
 	if !strings.Contains(got, "domain.NewID(") {
 		t.Fatalf("the sample does not build an id:\n%s", got)
 	}

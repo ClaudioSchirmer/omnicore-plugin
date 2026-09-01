@@ -116,7 +116,16 @@ func TestSeveralAggregatesAreOneQuery(t *testing.T) {
 // TestFoundRidesOnlyWhereZeroCouldLie is the correctness of the answer's shape,
 // and it differs between the two forms for a reason worth pinning.
 func TestFoundRidesOnlyWhereZeroCouldLie(t *testing.T) {
-	got := fileNamed(t, factAggregateModel(t), "internal/domain/atendimento_service.go")
+	m := factAggregateModel(t)
+	// Each answer shape is its own domain file now; read them together, since
+	// what is under test is the SET of fields the facts answer with.
+	got := fileNamed(t, m, "internal/domain/atendimento_service.go")
+	for _, f := range emitAll(t, m) {
+		if strings.HasPrefix(f.Path, "internal/domain/") && strings.HasSuffix(f.Path, ".go") &&
+			f.Path != "internal/domain/atendimento_service.go" {
+			got += string(f.Content)
+		}
+	}
 
 	// Ungrouped: the matching set can be empty, so avg carries Found. count and
 	// sum never do — zero IS the answer for both.

@@ -20,6 +20,13 @@ all of an entity's surfaces in ONE `<entity>_routes.go`; the shared-identity rea
 **Routes never live in `bootstrap/`** — the feature's Mount is a one-line delegation to
 this layer.
 
+**A child entry's wire shapes belong to no single operation** — `<Child>Row`,
+`<Child>Request` and `<Child>Response` are carried by the insert, the update, both reads
+and every per-entry verb — so they sit in `internal/web/requests/dtos/<child>.go`, one file
+per collection, imported as `webdtos`. Everything else stays one file per operation, the
+GraphQL variant of a verb included: it is the same operation on another surface, and
+splitting it puts one endpoint's wire surface in two places.
+
 ## The Mount signature — layering rule
 
 The repo parameter is the **interface** (`persistence.ScopedRepository[*T]`, plus the

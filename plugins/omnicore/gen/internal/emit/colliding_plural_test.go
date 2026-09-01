@@ -168,13 +168,13 @@ func TestTheCollectionProjectorIsQualifiedByItsEntity(t *testing.T) {
 	if len(m.Children) != 1 {
 		t.Fatalf("the fixture lost its collection: %d children", len(m.Children))
 	}
-	if got := m.Children[0].Projector; got != "projectUsuarioPapeis" {
+	if got := m.Children[0].Projector; got != "ProjectUsuarioPapeis" {
 		t.Errorf("the collection projector is %q — a second entity with a Papeis "+
 			"collection redeclares it in the same package", got)
 	}
 
-	src := fileNamed(t, m, "internal/application/commands/usuario_child_results.go")
-	if !strings.Contains(src, "func projectUsuarioPapeis(") {
+	src := fileNamed(t, m, "internal/application/commands/utils/usuario_usuario_papel_projection.go")
+	if !strings.Contains(src, "func ProjectUsuarioPapeis(") {
 		t.Errorf("the emitted projector does not carry the entity's name:\n%s", src)
 	}
 
@@ -183,11 +183,11 @@ func TestTheCollectionProjectorIsQualifiedByItsEntity(t *testing.T) {
 	// two names in step, which is the whole reason the collision was one-sided.
 	var declared bool
 	for _, f := range emitAll(t, m) {
-		if strings.Contains(string(f.Content), "func projectOneUsuarioPapel(") {
+		if strings.Contains(string(f.Content), "func ProjectOneUsuarioPapel(") {
 			declared = true
 		}
 		// And no emitted file may still declare the unqualified name.
-		if strings.Contains(string(f.Content), "func projectPapeis(") {
+		if strings.Contains(string(f.Content), "func ProjectPapeis(") {
 			t.Errorf("%s still declares the unqualified projector", f.Path)
 		}
 	}

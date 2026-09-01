@@ -6,6 +6,7 @@ import (
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
+	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 func emitApplication(m *ir.Model) ([]fsplan.File, error) {
@@ -19,11 +20,11 @@ func emitApplication(m *ir.Model) ([]fsplan.File, error) {
 		out = append(out, f)
 	}
 	if len(m.Children) > 0 {
-		f, err := emitChildResults(m)
+		files, err := emitChildResults(m)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, f)
+		out = append(out, files...)
 	}
 	if m.Read.Enabled {
 		fs, err := emitQueries(m)
@@ -51,6 +52,10 @@ func commandImports(s *src, m *ir.Model, needsDomain bool) {
 		// called from BOTH, so a write response renders the same value a read
 		// does. The import is pruned when this entity computes nothing.
 		s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
+		// The shapes and projectors EVERY verb answering with a collection needs.
+		// Both lines are pruned for an entity with no children.
+		s.L("\t%s %s", cmdDTOAlias, quote(m.ImportPath(cmdDTOPkg)))
+		s.L("\t%s %s", cmdUtilAlias, quote(m.ImportPath(cmdUtilPkg)))
 	}
 	s.L(")")
 	s.Blank()
@@ -446,7 +451,7 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\t%s %s", c.Name, c.GoType)
 	}
 	for _, c := range m.Children {
-		s.L("\t%s []%sResult", c.GoPlural, c.Name)
+		s.L("\t%s []%s", c.GoPlural, childResultType(c))
 	}
 	s.L("}")
 
@@ -492,7 +497,7 @@ func emitResult(s *src, m *ir.Model, op ir.Operation, entity string) {
 		s.L("\t\t%s: %s,", f.Name, wireValue(f, "e"))
 	}
 	for _, c := range m.Children {
-		s.L("\t\t%s: %s,", c.GoPlural, c.Projector+"(e)")
+		s.L("\t\t%s: %s,", c.GoPlural, childProjector(c)+"(e)")
 	}
 	s.L("%s", tail)
 	if len(groups) > 0 || len(writeComputed) > 0 {
@@ -576,77 +581,126 @@ func emitChildAdds(s *src, m *ir.Model) {
 	}
 }
 
-// emitChildProjectors reads the children back OUT of the framework's collection.
+// emitChildProjector reads ONE collection back OUT of the framework's own.
 //
-// They are read through the framework rather than from a struct field because
-// that collection is the only place they exist — and it is also where the
+// It is read through the framework rather than from a struct field because that
+// collection is the only place the entries exist — and it is also where the
 // persister has just written the minted ids back.
-func emitChildProjectors(s *src, m *ir.Model, entity string) {
-	for _, c := range m.Children {
-		s.L("func %s(e *%s) []%sResult {", c.Projector, entity, c.Name)
-		s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](&e.AggregateRoot)", c.Name)
-		s.L("\tout := make([]%sResult, 0, len(items))", c.Name)
-		s.L("\tfor _, item := range items {")
-		plain, groups := ir.PlainAndComposites(c.Fields)
-		head, tail := "\t\tout = append(out, "+c.Name+"Result{", "\t\t})"
-		if len(groups) > 0 {
-			head, tail = "\t\tentry := "+c.Name+"Result{", "\t\t}"
-		}
-		s.L("%s", head)
-		s.L("\t\t\tID: item.GetID(),")
-		for _, f := range plain {
-			s.L("\t\t\t%s: %s,", f.Name, wireValue(f, "item"))
-		}
-		s.L("%s", tail)
-		if len(groups) > 0 {
-			for _, g := range groups {
-				emitCompositeUnfold(s, g, "\t\t", "entry", "item")
-			}
-			s.L("\t\tout = append(out, entry)")
-		}
-		s.L("\t}")
-		s.L("\treturn out")
-		s.L("}")
-		s.Blank()
+func emitChildProjector(s *src, m *ir.Model, c ir.Child, entity string) {
+	result := childResultType(c)
+	s.Doc(fmt.Sprintf("%s reads %s's %s back off the saved aggregate.",
+		c.Projector, m.Entity.Pascal, c.Segment),
+		"",
+		"Every verb that answers with the whole aggregate calls this one, which is "+
+			"why it is here and not in any of their files.")
+	s.L("func %s(e *%s) []%s {", c.Projector, entity, result)
+	s.L("\titems := domain.GetCurrentItemsOf[aggregatevos.%s](&e.AggregateRoot)", c.Name)
+	s.L("\tout := make([]%s, 0, len(items))", result)
+	s.L("\tfor _, item := range items {")
+	plain, groups := ir.PlainAndComposites(c.Fields)
+	head, tail := "\t\tout = append(out, "+result+"{", "\t\t})"
+	if len(groups) > 0 {
+		head, tail = "\t\tentry := "+result+"{", "\t\t}"
 	}
+	s.L("%s", head)
+	s.L("\t\t\tID: item.GetID(),")
+	for _, f := range plain {
+		s.L("\t\t\t%s: %s,", f.Name, wireValue(f, "item"))
+	}
+	s.L("%s", tail)
+	if len(groups) > 0 {
+		for _, g := range groups {
+			emitCompositeUnfold(s, g, "\t\t", "entry", "item")
+		}
+		s.L("\t\tout = append(out, entry)")
+	}
+	s.L("\t}")
+	s.L("\treturn out")
+	s.L("}")
 }
 
-// emitChildResults holds the collection shapes and their projectors in ONE
-// place, because every verb that returns the aggregate needs the same ones.
-func emitChildResults(m *ir.Model) (fsplan.File, error) {
+// emitChildResults writes what every verb answering with a collection needs:
+// the entry's write-side shape, and the projector that fills it.
+//
+// Both are shared — the root's insert, its update and each of the entry's own
+// verbs read the same ones — so neither can sit beside a Command without making
+// that Command's file the place a reader has to already know about. They split
+// by KIND: the shape is a structure and goes to commands/dtos, the projector is
+// a function several files call and goes to commands/utils. One file per
+// collection in each, named for the collection.
+func emitChildResults(m *ir.Model) ([]fsplan.File, error) {
+	var out []fsplan.File
+	entity := "appdomain." + m.Entity.Pascal
+	for _, c := range m.Children {
+		if !c.Mounted {
+			// A MOUNTED collection's shape is declared, with exactly this shape,
+			// by the role that owns the shared identity. The PROJECTOR below is
+			// not: it takes THIS owner's type.
+			f, err := emitChildResultDTO(m, c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, f)
+		}
+
+		s := &src{}
+		s.Blank()
+		s.L("package utils")
+		s.Blank()
+		s.L("import (")
+		s.L("\t%s", quote("time"))
+		s.L("\t%s", quote(fwImport("domain")))
+		s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
+		s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
+		s.L("\t%s %s", cmdDTOAlias, quote(m.ImportPath(cmdDTOPkg)))
+		s.L(")")
+		s.Blank()
+		emitChildProjector(s, m, c, entity)
+		if wantsEntryProjector(c) {
+			s.Blank()
+			emitChildEntryProjector(s, c)
+		}
+
+		// Qualified by the OWNER, not by the collection alone: the projector
+		// takes this entity's type, so two roles over one shared identity write
+		// two different functions for the same collection — and an unqualified
+		// path would have the second one overwrite the first.
+		f, err := goFile(cmdUtilPkg+"/"+m.Entity.Snake+"_"+naming.Snake(c.Name)+"_projection.go",
+			fsplan.Owned,
+			fmt.Sprintf("the projectors for the %s collection", c.Segment), s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
+// emitChildResultDTO writes one collection's write-side shape.
+func emitChildResultDTO(m *ir.Model, c ir.Child) (fsplan.File, error) {
 	s := &src{}
 	s.Blank()
-	s.L("package commands")
+	s.L("package dtos")
 	s.Blank()
 	s.L("import (")
 	s.L("\t%s", quote("time"))
 	s.L("\t%s", quote(fwImport("domain")))
-	s.L("\tappdomain %s", quote(m.ImportPath("internal/domain")))
-	s.L("\t%s", quote(m.ImportPath("internal/domain/aggregatevos")))
 	s.L(")")
 	s.Blank()
 
-	entity := "appdomain." + m.Entity.Pascal
-	for _, c := range m.Children {
-		if c.Mounted {
-			continue // declared, with this shape, by the role that owns the identity
-		}
-		s.Doc(fmt.Sprintf("%sResult mirrors one persisted %s.", c.Name, c.Name),
-			"",
-			"The id is included because the persister writes the minted ids back before "+
-				"this projection runs, and the caller needs them to address the entry later.")
-		s.L("type %sResult struct {", c.Name)
-		s.L("\tID domain.ID")
-		for _, f := range c.Fields {
-			s.L("\t%s %s", f.Name, f.GoType)
-		}
-		s.L("}")
-		s.Blank()
+	s.Doc(fmt.Sprintf("%s mirrors one persisted %s.", childResultTypeName(c), c.Name),
+		"",
+		"The id is included because the persister writes the minted ids back before "+
+			"this projection runs, and the caller needs them to address the entry later.")
+	s.L("type %s struct {", childResultTypeName(c))
+	s.L("\tID domain.ID")
+	for _, f := range c.Fields {
+		s.L("\t%s %s", f.Name, f.GoType)
 	}
-	emitChildProjectors(s, m, entity)
+	s.L("}")
 
-	return goFile("internal/application/commands/"+m.Entity.Snake+"_child_results.go",
-		fsplan.Owned, fmt.Sprintf("the shapes for %d child collection(s)", len(m.Children)), s)
+	return goFile(cmdDTOPkg+"/"+naming.Snake(c.Name)+"_result.go", fsplan.Owned,
+		fmt.Sprintf("the write shape of one %s entry", c.Name), s)
 }
 
 // emitFieldRestrictions hides fields the caller may not see.
