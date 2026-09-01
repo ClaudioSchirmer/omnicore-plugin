@@ -14,6 +14,17 @@ owner beside this one — `read-joins.md`.
 - **Relational-served** — the view reads straight from the SoR: read-your-writes, NO CDC
   wait, read-time aggregate composition instead of an O(1) fetch. Capability limits below.
 
+**⚠️ AND A THIRD DOOR THAT IS NOT A POSTURE — THE HAND-WRITTEN READ.** A read does not have
+to be a declared read model at all. A `DirectRepository` over a Direct schema is a **fully
+manual query door: ANY table as the anchor, ANY table as a join target (no foreign key and
+no relationship required, chains at any depth), the whole criteria surface over everything
+it reached** — served through a query handler you write. It backs no Mongo projection and it
+is not an `AggregateReader`, so it cannot back a relational view either; what it gives is
+the query the two postures below cannot express. **Reach for it the moment a report, a flat
+joined listing, a parent-to-child reach or a many-rows-per-root query is asked for — never a
+denormalized column, an N+1 loop, aggregates folded in Go, or a view invented to dodge a
+join.** `direct-schema.md` (section *THE READ IS UNRESTRICTED*) owns it.
+
 **A relational read model is its own TYPE, not a flag on the projected one** (pin ≥
 v0.57.0). It is declared by name over the aggregate's existing loader and contributed
 through its own feature seam — the sibling of the one Mongo views use. Everything a

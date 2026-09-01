@@ -49,6 +49,23 @@ old state, and every rule and every audit line that reads `Old` is quietly wrong
 
 ## Which ANCHOR the primitive hangs off — the second question
 
+**⚠️ AND IT IS THE ONE THAT GETS ANSWERED WRONG. THE SHAPE OF THE QUERY IS NEVER A REASON TO
+GIVE UP: A `DirectRepository` OVER A DIRECT SCHEMA IS A FULLY MANUAL DOOR — ANCHOR ON ANY
+TABLE, JOIN ANY TABLE (NO FOREIGN KEY, NO RELATIONSHIP REQUIRED, CHAINS AT ANY DEPTH),
+FILTER / ORDER / GROUP ON EVERYTHING IT REACHED.** An aggregate's own table becomes such an
+anchor through the reduction, and reading it that way costs the aggregate NOTHING — the
+guarantees a Direct door drops are all about writes.
+
+**So the following are bugs, not designs, and every one of them has been shipped here by an
+agent who believed the framework refused the query:** an N+1 loop; a `FindAll` of whole
+aggregates folded in Go; a column denormalized onto the write path so a read would not have
+to join; a Mongo view invented for a one-off report; an aggregate repository bent into
+serving a report shape; and the sentence *"that join is not possible"*. If a query needs a
+shape the aggregate loader cannot hold, **build the Direct anchor and write the query.**
+`direct-schema.md` (section *THE READ IS UNRESTRICTED*) owns it, `read-joins.md` owns the
+traversal rules — which are the same on both anchors.
+
+
 Every row above assumes the question is about an aggregate this service owns, because for a
 long time that was the only anchor there was. It is not any more, on a pin that carries it:
 the same existence probe, the same aggregate DSL and the same grouped form run over a

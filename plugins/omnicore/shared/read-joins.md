@@ -21,6 +21,24 @@ a pin does not. Read the pin's own `read-joins` section:
 | `.Then(read.…)` on a declaration | **chains** — a traversal that continues past its target | v0.66.0 | *Continuing the traversal* |
 | `.AsDirectSchema()` on the argument | **the reduced target** — and it is then MANDATORY, not a style | v0.68.0 | *The target is ONE table* |
 
+## ⚠️ EVERY RESTRICTION IN THIS FILE IS THE AGGREGATE LOADER'S, NOT THE ENGINE'S
+
+**THE SAME JOIN VERBS RUN ON A `DirectRepository`, AND THERE THE ANCHOR AND THE TARGET ARE
+BOTH YOURS: ANY TABLE, TO ANY TABLE, WITH NO FOREIGN KEY AND NO RELATIONSHIP REQUIRED.**
+The declaration rules below (one table per target, the `fk = target.id` predicate, the
+nullability rules, the no-domain-type rule, chains) are IDENTICAL on both anchors — they are
+the engine's. What is NOT identical is everything that comes from having an aggregate to
+hydrate: the "1:N would multiply the root's rows", the "a collection's join is load-only",
+the boot advisory, and the fact that a declaration here rides `FindByID` and therefore every
+write-side load. **On a Direct anchor none of that applies, rows may legitimately multiply,
+and there is no aggregate whose shape has to survive the query.**
+
+So before writing down that a join "is not possible", ask which ANCHOR the question was
+about. A report, a flat joined listing, a parent-to-child reach, a many-rows-per-root query:
+those are not refusals, they are the wrong door — `direct-schema.md`, section *THE READ IS
+UNRESTRICTED*, owns them. Never denormalize a column, loop a per-row query, or fold the
+answer in Go to work around a limit that belongs to the other anchor.
+
 ## What it is
 
 A read join is a **read-only traversal from one aggregate to another, across a foreign key
@@ -41,6 +59,9 @@ Three consequences, and each one is why the placement is what it is:
 - **It is 1:1 and horizontal.** One column onto one field at a time. There is no
   many-valued form: a 1:N traversal would multiply the root's rows and break the paged
   read. "Bring the order's items" is a child collection, never a join.
+  **That reason evaporates on a `DirectRepository`** — there is no root to multiply and no
+  aggregate to hydrate, so a 1:N reach is simply a query returning several rows, which is
+  what a report is. Same verbs, different anchor (`direct-schema.md`).
 
 ## The target is ONE table — the reduction, and why it is written down
 
@@ -289,7 +310,11 @@ collection's, and the fields land on the entry.
   is filterable, sortable and served there like a schema field; a child join's is served
   inside the entry and addressable nowhere.
 
-## The line to hold when someone asks for more
+## The line to hold when someone asks for more — ON AN AGGREGATE REPOSITORY
+
+**Read the heading. Every sentence below is about a traversal declared on an AGGREGATE
+repository, where one row per root is the contract. Do not quote any of it at a
+`DirectRepository`, and never let it become "the framework cannot do that join".**
 
 A read join is not a query language. Each hop reaches ONE table, across ONE declared foreign
 key, by that table's id, bringing back scalars. Aggregating over the other side, matching on

@@ -62,6 +62,21 @@ cannot change it."* That sentence is false.
   the availability test; when it comes out Direct, say so and hand over to
   `/omnicore:implement` instead of generating. Ambiguity resolves in ONE question to the
   dev — "is this ever listed, audited or projected?" — never by assuming.
+- **⚠️ AND THE DECISION ABOVE IS ABOUT WRITES ONLY — A DIRECT READ IS FREE AND UNRESTRICTED.**
+  A `DirectRepository` over a Direct schema is a **fully manual query door: ANCHOR ON ANY
+  TABLE (an aggregate's own included, through the reduction), JOIN ANY TABLE — NO FOREIGN
+  KEY, NO REFERENTIAL CONSTRAINT, NO RELATIONSHIP OF ANY KIND IS REQUIRED — CHAIN AT ANY
+  DEPTH, FILTER / ORDER / GROUP ON EVERYTHING IT REACHED.** Reading an aggregate's table that
+  way takes NOTHING from that aggregate: the guarantees the Direct door drops (outbox, audit,
+  revision guard, cascade) are all about WRITES. So a fact, a report or a joined listing is
+  never a reason to shape the ENTITY differently — **do not add a denormalized column so a
+  read gets easier, do not model a table as an entity just to be able to query it, and never
+  write that a join "is not possible".** The aggregate loader's limits (one row per root, no
+  flat 1:N join into its own child, a child join's field load-only, every declaration riding
+  `FindByID`) belong to that ANCHOR, not to the engine.
+  `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`, section *THE READ IS UNRESTRICTED*, owns
+  it; `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` carries the traversal rules, identical on
+  both anchors.
 - **Mirror local convention; validate framework correctness.** If the project has existing
   entities, mirror their LOCAL flavor (naming, style). But validate every framework usage
   against the docs. If the consumer's code MISUSES the framework (a missing parameter, a
