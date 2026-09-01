@@ -7,6 +7,83 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.56.0] — 2026-09-01
+
+omnicore-gen now writes the layout it tells everyone else to write. `service-layout.html`
+is normative for a generator — "produce exactly this shape unless the developer instructs
+otherwise" — and seven places did not.
+
+### ⚠️ Upgrading: delete the generated files before regenerating
+
+This release RENAMES and SPLITS files the generator owns. It does not remove what an
+earlier version wrote, so a regeneration on top of an existing tree leaves both — the old
+`<entity>_child_results.go` beside the new `commands/dtos/<child>_result.go`, the old
+`<collection>_commands.go` beside the new per-verb files — and the package stops compiling
+on `redeclared in this block`.
+
+Before regenerating, delete the generated files of every entity you are about to
+regenerate (`omnicore-gen prune -apply` removes what the lock still recognises; anything it
+reports as edited or unknown is yours to decide about), then run `generate` again. Hook
+files — `*_manual.go` and the migrations — are untouched by all of this and must be kept.
+
+### Changed
+
+- **Per-child commands are one file per verb.** `<collection>_commands.go` carried Add,
+  Change, Patch and Remove together — the one place the write side stopped obeying its own
+  rule, so a reader looking for the verb that archives an entry had to know it was filed
+  under the collection. Now `add_<child>_command.go`, `change_<child>_command.go`,
+  `patch_<child>_command.go` and the removal, each with its Result co-located.
+- **Per-child wire types are one file per operation.** Same split on the web side:
+  `add_<child>.go`, `change_<child>.go`, `patch_<child>.go` and the removal, request and
+  response co-located. A verb's GraphQL variant stays WITH that verb — it is the same
+  operation on another surface, and splitting it would put one endpoint's wire surface in
+  two places.
+- **Shapes several operations share got their own seat, split by what they are.** A child
+  entry's shapes are read by the root's insert, its update, both reads and each per-entry
+  verb, so there is no operation they belong beside. Structures go to `dtos/` under their
+  layer, functions to `utils/`:
+  `application/commands/dtos/<child>_result.go`,
+  `application/commands/utils/<entity>_<child>_projection.go`,
+  `application/queries/dtos/<child>_row_result.go`,
+  `web/requests/dtos/<child>.go` — replacing `<entity>_child_results.go`,
+  `<entity>_row_results.go` and `<entity>_children.go`. The projectors are EXPORTED now
+  (`ProjectUserAddresses`, `ProjectOneAddress`): a function that left its package has to
+  be reachable from outside it. Every one of these packages is imported under an alias
+  naming its layer — `cmddtos`, `cmdutils`, `qrydtos`, `webdtos` — because
+  `internal/application/dtos` is a fourth package called `dtos`.
+- **A domain-service port's answer types moved out of its file.** `<Fact>Entry`,
+  `<Fact>Group` and `<Fact>Result` rode along inside `<entity>_service.go`, which made it
+  the one domain file a reader could not name from its contents. Each is a domain type and
+  now has a file of its own, `internal/domain/<type>.go`, beside the port.
+- **The per-child removal is named for what it MOUNTS.** `children[].operations` keeps one
+  word — `remove` — and `children[].softRemove` decides the outcome; the generated file and
+  type now say which it is: `archive_<child>_command.go` / `Archive<Child>Command` over
+  `PATCH …/archive`, `delete_<child>_command.go` / `Delete<Child>Command` over `DELETE`.
+  A file called `archive_…` over a route that hard-deletes told the reader the opposite of
+  what the endpoint does. **No spec changes**: `operations`, `permissions` and
+  `surfaces.graphql.mutations` are still keyed on `remove`. The GraphQL mutation field
+  follows the type, so `removeUserRole` is now `archiveUserRole` or `deleteUserRole`.
+- **Generated tests sit beside their source.** One `<entity>_commands_test.go`,
+  `<entity>_requests_test.go`, `<entity>_queries_test.go`, `<entity>_vos_test.go`,
+  `<entity>_schemas_test.go`, `<entity>_children_test.go` and `<entity>_dtos_test.go` per
+  entity meant a file per LAYER holding the cases for a dozen sources: a failing test named
+  a package rather than the thing that broke, and no `<file>.go` ⇄ `<file>_test.go` pairing
+  for an IDE to nest. Every generated test now lands in the test file of the source it
+  covers, and every generated `_test.go` has a source of the same name beside it.
+
+### Removed
+
+- **The per-entity translation test.** `internal/application/translations/` holds the seven
+  catalogs and nothing per entity, so `<entity>_translations_test.go` was the one generated
+  test with no source to pair with — and every entity added another. What it asserted is
+  covered earlier and better: a catalog entry the spec left out is reported by name after
+  every run, and the language each catalog answers is one fact per PROJECT that N entities
+  were each re-asserting. Delete the file on your next regeneration; the catalogs
+  themselves are untouched.
+- **A feature file is named for its aggregate, singular.** `bootstrap/<entity>_feature.go`,
+  not the plural: one feature per aggregate, and the plural belongs to the route group and
+  to the identity feature, which is a read surface over many of them.
+
 ## [0.55.0] — 2026-09-01
 
 One story, told in the eight files that were telling half of it: the Direct door is a
