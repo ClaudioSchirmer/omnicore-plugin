@@ -16,6 +16,26 @@ Change a read model without breaking its evolution contract: the projected shape
 that is the boundary that keeps this skill safe. The moment the change needs data the
 sources don't carry, STOP: that slice is `evolve-entity`'s job first.
 
+## ⚠️ SOME REQUESTS ARE NOT A VIEW CHANGE AT ALL — CHECK BEFORE BUMPING ANYTHING
+
+**A view exists to SERVE a listing. A report, a joined dashboard query, a flat answer across
+tables nothing relates, a parent-to-child reach, a many-rows-per-root result is NOT a reason
+to widen this view, add a leg, or bump a `Version`.** Widening a projection so one query
+gets easier is the expensive version of a query you could simply have written.
+
+**A DIRECT SCHEMA PLUS A `DirectRepository` IS A FULLY MANUAL QUERY DOOR: ANCHOR ON ANY
+TABLE (an aggregate's own included, through the reduction), JOIN ANY TABLE — NO FOREIGN KEY,
+NO REFERENTIAL CONSTRAINT, NO RELATIONSHIP OF ANY KIND IS REQUIRED — CHAIN AT ANY DEPTH, AND
+FILTER / ORDER / GROUP ON EVERYTHING IT REACHED.** It costs the aggregate nothing (a Direct
+door drops guarantees on WRITES only) and it needs no rebuild, no `Version`, no drift check.
+`${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`, section *THE READ IS UNRESTRICTED*, owns it;
+`${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` carries the traversal rules and says at the top
+which limits belong to the aggregate anchor rather than to the engine.
+
+So: **NEVER** grow a projection to dodge a join, **NEVER** denormalize a field into a view so
+a query gets simpler, **NEVER** answer a report with a rebuild, and **NEVER** tell the dev the
+query is not expressible.
+
 **Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 

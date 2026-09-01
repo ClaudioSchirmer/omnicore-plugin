@@ -52,7 +52,86 @@ The SIDEWAYS reach is untouched: a read traverses its declared joins with the sa
 the same reach an aggregate repository has. So "it cannot compose" is the wrong summary; it
 composes horizontally and not vertically, and every refusal below falls out of that.
 
+## ⚠️ THE READ IS UNRESTRICTED — READ THIS BEFORE DESIGNING ANY QUERY
+
+**A DIRECT SCHEMA PLUS A DIRECT REPOSITORY IS A FULLY MANUAL QUERY DOOR. THERE IS NO LIMIT
+ON WHAT A DIRECT READ MAY SELECT OR JOIN. THE FRAMEWORK ASSEMBLES THE SELECT YOU DECLARE
+AND VALIDATES ONLY THAT THE COLUMNS AND THE GO FIELDS EXIST — IT NEVER ASKS WHETHER THE
+TABLES ARE RELATED.**
+
+This section exists because the failure it stops has already happened, repeatedly: an agent
+decides a query "is not possible in this framework" and then PAYS for that belief — an N+1
+loop, whole aggregates loaded to fold three numbers in Go, a denormalized column bolted onto
+the write path, a Mongo view invented for a one-off report, or the aggregate repository bent
+into serving a report shape it was never for. **None of it was necessary. The limit was
+imagined.** What is actually yours:
+
+- **THE ANCHOR IS YOURS.** Any table. One that never had an aggregate → `NewDirectSchema`.
+  One that DOES have an aggregate → the reduction, `AsDirectSchema()`. The anchor does not
+  have to be "a control table": the decision table below answers the WRITE question, and a
+  read has no such question to answer.
+- **THE TARGET IS YOURS.** Any table you can hand a Direct schema for. **NO DECLARED FOREIGN
+  KEY IS REQUIRED — no referential constraint, no relationship of any kind.** The declaration
+  is checked for exactly four things: the target is ONE table, the key column exists on the
+  joining side, each mapped column exists on the target, and the Go field can receive it.
+  Two tables nothing relates join exactly as well as two a constraint ties together.
+- **THE DEPTH IS YOURS.** Chains continue past the target with no depth limit and kinds mix
+  freely — and a chain on a Direct anchor logs NO boot advisory at any depth, because the
+  reach rides only the reads you issue. `read-joins.md` owns the mechanics; every rule there
+  applies here unchanged.
+- **THE PREDICATE HAS ONE FIXED SHAPE, AND IT IS THE ONLY FIXED THING:**
+  `target.<the column that target schema's ID(...) names> = joining.<any declared column>`.
+  Equi-join, one column each side. Because a Direct schema names its OWN id slot, **the join
+  key on the target side is a CHOICE, not a given** — which is how a read reaches from a
+  PARENT down into a CHILD table: declare a read-only Direct schema over the child whose
+  `ID(...)` is the foreign-key column, and the traversal renders `child.<fk> = parent.id`.
+  What is genuinely not expressible is a non-equality predicate, several columns on one side,
+  or an `ON` carrying more than that one comparison — everything else belongs in the criteria.
+- **THE WHOLE CRITERIA SURFACE RIDES ALONG.** Joined fields are filterable, orderable,
+  groupable and usable in the aggregate DSL under the Go names YOU chose; subqueries,
+  `Exists`, windows and the archived scope work exactly as they do anywhere else.
+- **A DIRECT READ COSTS NOTHING.** The guarantees this file says the Direct door does not
+  carry are about the **WRITE**. Reading an aggregate's own table through a reduced schema
+  takes nothing away from that aggregate — no outbox row was due, no audit line, no revision
+  guard, no projection; reading never owed any of them. **Name the trade-off out loud on a
+  Direct WRITE, and never on a Direct READ, because there is none to name.**
+
+### What the AGGREGATE repository genuinely cannot do — and why that is not a framework limit
+
+The aggregate loader's statement shape is fixed by what it must RETURN: one row per root,
+plus one batched SELECT per child collection, hydrated into entities. That shape — not the
+framework — is what refuses the three things an agent keeps misreading as a framework limit:
+
+- a 1:N traversal from the root into its OWN child table as a flat join: it would multiply
+  the root's rows and break both the paged read and the hydration;
+- filtering or sorting the root by a field of a 1:N child (a child join's field is load-only);
+- anything report-shaped — several rows per root, arbitrary grouping, a projection that is
+  not this aggregate.
+
+And every join declared on an aggregate repository **rides EVERY read through that loader,
+`FindByID` included — the load the write-side handlers go through.**
+
+**So none of that is "impossible in the framework". It is the wrong door.** A report-shaped,
+join-heavy, many-rows-per-root read is a Direct anchor's job, where the row type is a storage
+shape you define and nothing is being hydrated into an aggregate. **NEVER reuse an aggregate
+repository for a query whose shape it cannot hold, and NEVER tell the developer their query
+cannot be done: build the Direct anchor and write the query they asked for.**
+
+### Where the freedom stops — state these, and do not overclaim either
+
+- **A Direct read is served by code you write** — a custom query handler, a custom command
+  handler, or a domain service. It is not an `AggregateReader`, so it cannot back a
+  relational read model, and it never backs a Mongo projection.
+- **The row is a FLAT struct.** Joined columns land on ordinary exported scalar fields; no
+  domain type crosses, and an identity crosses as canonical text (`read-joins.md`).
+- **The envelope and the authorization belong to the surface, not to the door.** Pagination,
+  the wire shape and any tenant / permission restriction are what YOUR handler builds into
+  the criteria — a Direct read has no read model behind it to supply them.
+
 ## The decision — read it top to bottom, first YES wins
+
+**This table answers the WRITE question — which door a persisted table is MAINTAINED
+through.** A READ never has to pick: see the section above.
 
 | If the table… | Door |
 |---|---|
@@ -72,7 +151,10 @@ What is never right is reaching for Direct to skip an aggregate's guarantees on 
 that needs them; that trades every promise the write path makes for a shortcut, and nothing
 in the build will say so.
 
-## What it deliberately does not do — say this out loud, every time
+## What a WRITE deliberately does not do — say this out loud, every time
+
+**Every line below is about the WRITE.** A Direct READ gives up nothing at all — reading
+owes an aggregate none of these, so none of them is a cost a query has to justify.
 
 No outbox row · no audit event · no domain events · no revision guard · no old-state snapshot
 · no cascade · no lifecycle hooks.
@@ -211,6 +293,41 @@ snapshot; no cascade; no lifecycle hooks. A write made that way never feeds the 
 aggregate otherwise keeps in step — which is a real escape hatch, left open deliberately
 rather than by oversight.
 
+**THE WRITE ANCHOR IS AS FREE AS THE READ ANCHOR — AND THAT IS THE DANGEROUS HALF.** Insert,
+update, delete, archive/unarchive and upsert work on **ANY** table that can produce a Direct
+schema, whatever that table is to somebody else: a root's table, an aggregate CHILD's table,
+a shared-base ROLE's table, the shared BASE table itself (only a sibling and an external
+schema do not convert, and both panic where they are written). Being a child of another
+aggregate does not protect a table and does not refuse the write — **the framework's only
+promise here is the one it already makes: the statement touches the ANCHOR TABLE and nothing
+else.** No cascade upward, none downward.
+
+**A child table is the sharpest case of all, so name these before offering it** — every one
+of them is silent:
+
+- **the root's projected document keeps the OLD child array.** The view is driven by the
+  AGGREGATE's outbox row, and a Direct write emits none, so the collection is not stale by a
+  few seconds — it is wrong until something else writes that aggregate;
+- **the root's revision guard never sees it**, so a concurrent aggregate write neither
+  conflicts nor notices;
+- **no audit line, no domain or integration event** for a change to that aggregate's data;
+- **archive does not compose.** The root's archive/unarchive is scoped by the operation's
+  own stamp, so a child archived on its own is NOT what a later unarchive brings back;
+- **a delete against the PARENT table through this door orphans the children**, because
+  there is no cascade to remove them.
+
+Where it is genuinely right — a maintenance sweep, a backfill, a column no domain rule owns,
+a control row stamped inside the caller's transaction — **say out loud which of those the
+write is giving up.** Where the resource is the aggregate's actual data, the aggregate
+repository is still its home.
+
+**One declaration note:** the foreign key resolves under the fixed logical name `ParentID` on
+a schema that declared `ParentID(col)`, and a Direct write may bind it (`Values{"ParentID":
+rootID}`) — it is the id, the timestamps and the archive column that have one origin and are
+refused there, never the parent link. A Direct schema written by hand may equally declare
+that column as an ordinary `Field(...)` under a name of its own; on a Direct anchor there is
+no cascade for the fixed name to protect.
+
 Treat it as one. The decision table above still answers the question: a table with rules, a
 lifecycle, a view or an audit trail goes through its aggregate, and reaching for the reduced
 form to skip them is the exact trade this file warns about, now available on a table where
@@ -250,7 +367,7 @@ notification declared beside its raiser (`notification-bases.md` owns that), and
 repository is wired from the relational engine every repository in the service already
 receives.
 
-## Two shapes that will be asked for by their old names
+## Three shapes that will be asked for by their old names
 
 - **"A couple of endpoints with a table behind them, the logic is in the handler."** Ask the
   decision table before answering. It is Direct when nothing lists it, audits it or projects
@@ -263,3 +380,12 @@ receives.
   `read-joins.md` owns the case where the value is a field of an aggregate this entity already
   points at. Reach for a Direct anchor when the truth lives in a table this service has no
   aggregate for — another aggregate's child table, a control table, a lookup.
+- **"A report / a fast listing that joins several tables / can we just run THIS query?"**
+  **YES — and the answer is a Direct anchor, never a contortion of the aggregate repository.**
+  This is the shape the top section of this file exists for. Declare the anchor (any table,
+  reduced from an aggregate's schema if that is where the rows are), declare the traversals
+  the query needs, write the criteria, and serve it from a handler you write. Do NOT
+  denormalize a column, do NOT loop a per-row query, do NOT load aggregates to fold the
+  answer in Go, and do NOT project a Mongo view for a query that has no read model behind it.
+  The only honest refusals are the three at the end of that section — the fixed `ON` shape,
+  the flat row, and the fact that the surface is yours to write.

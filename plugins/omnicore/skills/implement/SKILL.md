@@ -115,6 +115,24 @@ cannot change it."* That sentence is false.
   ANCHOR the primitive hangs off: `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`. Neither
   "write the SQL by hand" nor "declare a whole aggregate so the question can be asked" is
   the answer on a pin that carries the Direct door.
+- **⚠️ NO QUERY IS OUT OF REACH — A DIRECT SCHEMA + A `DirectRepository` IS A FULLY MANUAL
+  DOOR.** Anchor on ANY table (an aggregate's own included, through the reduction), join ANY
+  table — **no foreign key, no referential constraint, no relationship of any kind is
+  required; the framework validates that the columns and Go fields exist and nothing else** —
+  chain at any depth, and filter / order / group on everything the traversal reached. Reading
+  an aggregate's table this way costs that aggregate NOTHING: the guarantees a Direct door
+  drops are all about WRITES.
+  **So these are bugs, and this skill has shipped every one of them by believing a limit that
+  does not exist:** an N+1 loop; whole aggregates loaded to fold the answer in Go; a
+  denormalized column added to the write path so a read would not have to join; a Mongo view
+  invented for a one-off report; the aggregate repository bent into serving a report shape;
+  and the sentence *"the framework cannot do that join"*. **The aggregate loader's limits —
+  one row per root, no flat 1:N join to its own child, a child join's field load-only, every
+  declaration riding `FindByID` — are that ANCHOR's, never the engine's.** When the query
+  needs a shape it cannot hold, build the Direct anchor and write the query the dev asked
+  for. `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`, section *THE READ IS UNRESTRICTED*,
+  is the owner; `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` carries the traversal rules,
+  which are identical on both anchors.
 - **"This rule/service/handler needs a field from ANOTHER aggregate" is not an
   integration.** Before proposing a second `FindOne` inside a rule, a denormalized column
   kept in step by the write path, or a call out to another service, check

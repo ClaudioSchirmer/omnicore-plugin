@@ -24,6 +24,29 @@ write-side aggregate loader, available on every posture;
 `${CLAUDE_PLUGIN_ROOT}/shared/read-side.md` owns that split — route such
 a request to `/omnicore:implement`, never refuse it.)
 
+## ⚠️ A VIEW IS NOT THE ONLY WAY TO READ — AND IT IS THE WRONG ONE FOR A REPORT
+
+**BEFORE PROPOSING ANY VIEW KIND, ASK WHETHER THE REQUEST IS A READ MODEL AT ALL.** A read
+model is what a listing endpoint is SERVED from, kept in step by the framework. A one-off
+report, a joined dashboard query, a flat listing across tables nothing relates, a
+parent-to-child reach, a many-rows-per-root answer — **none of those needs a view, and
+inventing one for them is the expensive mistake this skill keeps making.**
+
+**A DIRECT SCHEMA PLUS A `DirectRepository` IS A FULLY MANUAL QUERY DOOR: ANCHOR ON ANY
+TABLE (an aggregate's own included, through the reduction), JOIN ANY TABLE — NO FOREIGN KEY,
+NO REFERENTIAL CONSTRAINT, NO RELATIONSHIP OF ANY KIND IS REQUIRED — CHAIN AT ANY DEPTH, AND
+FILTER / ORDER / GROUP ON EVERYTHING IT REACHED.** The framework assembles the SELECT you
+declare and validates only that the columns and Go fields exist. Reading an aggregate's table
+that way costs the aggregate NOTHING — the guarantees the Direct door drops are all about
+writes. `${CLAUDE_PLUGIN_ROOT}/shared/direct-schema.md`, section *THE READ IS UNRESTRICTED*,
+is the owner.
+
+**NEVER** project a view to dodge a join, **NEVER** denormalize a column so a read gets
+easier, **NEVER** loop a per-row query or fold the answer in Go, and **NEVER** tell the dev
+their query is not expressible. The aggregate loader's limits (one row per root, no flat 1:N
+join into its own child, a child join's field load-only) belong to that ANCHOR, not to the
+engine — `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` says so at the top.
+
 **Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 

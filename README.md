@@ -36,7 +36,7 @@ The **skills** work with any published omnicore release (docs-pinned by design).
 **generator** is the one part that targets a single line — one supported version, one shape
 of emitted code, because branching templates per framework version is the largest drift
 source a generator can have: today that is the framework's **v0.68.0**, paired with plugin
-**0.54.0**. Publish the two in sync. An older pin is refused by default with the fix named;
+**0.55.0**. Publish the two in sync. An older pin is refused by default with the fix named;
 a newer one generates anyway, and the compiler is the oracle.
 
 Those two numbers are the ones that rot fastest in this file, so do not trust them — read

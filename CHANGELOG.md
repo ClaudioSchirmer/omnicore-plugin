@@ -7,6 +7,49 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.55.0] — 2026-09-01
+
+One story, told in the eight files that were telling half of it: the Direct door is a
+QUERY door, and nothing about a Direct read is restricted.
+
+### Changed
+
+- **The Direct door is now stated as a READ door, not only a write door.** Every file that
+  described `NewDirectSchema` + `DirectRepository` framed it around what a Direct WRITE gives
+  up — no outbox, no audit, no revision guard — and around the tables it is for (a job queue,
+  a lookup, an idempotency ledger). Nothing said the other half out loud, and the cost was
+  real: agents concluded a query "is not possible in this framework" and paid for it with an
+  N+1 loop, whole aggregates folded in Go, a column denormalized onto the write path so a read
+  would not have to join, a Mongo view invented for a one-off report, and an aggregate
+  repository bent into serving a report shape.
+
+  It was never true. A Direct read anchors on ANY table (an aggregate's own included, through
+  `AsDirectSchema()`), joins ANY table with **no foreign key, no referential constraint and no
+  relationship of any kind required** — the framework validates that the columns and Go fields
+  exist and nothing else — chains at any depth, and filters, orders and groups on everything
+  the traversal reached. And a Direct READ costs the aggregate nothing: the guarantees the
+  door drops are all about writes.
+
+  `shared/direct-schema.md` gains the section that owns it (*THE READ IS UNRESTRICTED*),
+  including the one genuinely fixed shape (`target.<its ID column> = joining.<any column>`,
+  which is what makes a parent-to-child reach expressible through the target schema's own id
+  slot), the three limits that belong to the AGGREGATE loader rather than to the engine, and
+  the three places the freedom honestly stops. `shared/read-joins.md` now says at the top that
+  every restriction it lists is the aggregate anchor's; `shared/query-primitives.md` and
+  `shared/read-side.md` route the report-shaped read to the Direct anchor instead of to a view
+  or a workaround; and `implement`, `scaffold-entity`, `scaffold-view`, `evolve-view` and
+  `doctor` carry the same rule in the place where each of them used to get it wrong — with
+  `doctor` gaining a symptom row for the workarounds themselves.
+
+  The write half is stated symmetrically in the same round: `Insert`/`Update`/`Delete`/
+  `Archive`/`Upsert` anchor on ANY table that can produce a Direct schema — a root's, an
+  aggregate CHILD's, a shared-base role's, the base itself (only a sibling and an external
+  schema do not convert) — with the framework's one promise being that the statement touches
+  the anchor table and nothing else. A child table is the sharpest case and its five silent
+  consequences are now enumerated where the escape hatch is described, along with the note
+  that `ParentID` resolves and IS bindable in a Direct write, unlike the id, the timestamps
+  and the archive column.
+
 ## [0.54.0] — 2026-08-31
 
 Framework `v0.68.0` in one round, and it is two stories that share a type. The BREAKING half
