@@ -11,7 +11,43 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 omnicore-gen now writes the layout it tells everyone else to write. `service-layout.html`
 is normative for a generator — "produce exactly this shape unless the developer instructs
-otherwise" — and seven places did not.
+otherwise" — and seven places did not. It also gains the one thing the framework's new
+request-origin resolution left undeclarable.
+
+### ⚠️ Requires framework v0.69.0
+
+`compat.Supported` moves from `v0.68.0` to `v0.69.0`, so a project pinning an older line is
+refused (overridably) rather than handed a tree that does not compile: a field declared
+`assignedFrom: client-ip` emits `ctx.ClientIP()`, and `AppContext` does not answer it
+before v0.69.0.
+
+### Added
+
+- **`assignedFrom: client-ip` — record the request's network origin on the row.** The
+  framework resolves the caller's address in its own HTTP middleware and hands it over as
+  `AppContext.ClientIP()`, and the spec had no way to say "put that in a column". The three
+  sources it did have all read the TOKEN, so the honest workaround was to drop
+  `assignedFrom` entirely — which puts the field in the write DTO and lets a caller state
+  its own origin — or to hand-write the mapper. It is now its own source, with the
+  behaviour that follows from where the value comes from:
+  - The assignment is written **outside** the identity check. The origin is not in the
+    token, so an anonymous route and a bench with authentication off record it just the
+    same; reading it inside `if id := ctx.Identity()` would drop it on exactly those
+    requests, silently.
+  - **Insert only**, like the identity sources: the column says where the row came from,
+    never where the last edit came from.
+  - `type: string` is required — an address is a value to record and compare, never a key
+    this service resolves, and `type: id` would fail to parse the empty string.
+  - It is the second source that accepts `nullable: true`, for a reason the identity ones
+    do not have: a write off the inbound request path (a consumer handler, a job, a test
+    fixture) genuinely has no origin, and `ClientIP()` answers `""` there. Nullable records
+    that absence as `NULL`; non-nullable records it as the empty string.
+  - Like every `assignedFrom`, it is absent from every write request, command and OpenAPI
+    request schema, and is refused on a collection entry and on a facet.
+
+  What the value is WORTH stays a deployment question the spec cannot answer: behind a
+  reverse proxy the framework reads the socket peer — the balancer — until `http.trustProxy`
+  is declared. The generated mapper says so where a reader meets it.
 
 ### ⚠️ Upgrading: delete the generated files before regenerating
 

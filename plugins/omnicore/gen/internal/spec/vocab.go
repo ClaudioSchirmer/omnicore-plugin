@@ -19,10 +19,11 @@ var (
 
 	// AssignedFrom is where the SERVER reads a persisted field's value, for the
 	// fields a client is not allowed to send. The subject is the caller's own
-	// identifier; a claim is anything else the token carries; `derived` is the
-	// ELSE — the value comes from the entity itself, and the generator only
+	// identifier; a claim is anything else the token carries; `client-ip` is the
+	// request's network origin, which is not in the token at all; `derived` is
+	// the ELSE — the value comes from the entity itself, and the generator only
 	// promises to keep the field out of the write surface.
-	AssignedFrom = set("identity-subject", "identity-claim", "derived")
+	AssignedFrom = set("identity-subject", "identity-claim", "client-ip", "derived")
 
 	// StampedKinds is WHAT filling a framework-owned column means. The two
 	// members share the whole mechanism — the same marker asks for both, the
@@ -347,10 +348,15 @@ func Vocabularies() []Vocabulary {
 				"composite when the value needs SEVERAL columns to mean anything; reuse for a " +
 				"type the project ALREADY has, manual for one it does not and you will write."},
 		{"fields[].assignedFrom", AssignedFrom,
-			"the server fills it, so no write request carries it — from the identity, or " +
-				"(derived) from the entity's own fields, by a rule you write. Only " +
-				"`derived` combines with nullable: your rule may leave the value unset, " +
-				"while an identity is written on every insert."},
+			"the server fills it, so no write request carries it — from the identity, " +
+				"from the request's network origin (client-ip), or (derived) from the " +
+				"entity's own fields, by a rule you write. The identity sources refuse " +
+				"nullable, because the server is written on every insert and always has a " +
+				"subject and the claim it required; `client-ip` and `derived` accept it, " +
+				"for the same reason in two shapes — a write off the inbound request path " +
+				"(a consumer handler, a job) HAS no origin, and your rule may legitimately " +
+				"leave a derived value unset. A nullable client-ip column records that " +
+				"absence as NULL; a non-nullable one records it as the empty string."},
 		{"fields[].stamped", StampedKinds,
 			"the framework owns the VALUE, the domain owns the WHEN. time = a nullable " +
 				"timestamp (*time.Time) bound with the write operation's own instant — the " +

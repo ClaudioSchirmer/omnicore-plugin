@@ -1222,6 +1222,24 @@ Four things to get right, because they are the ones that cost a migration later:
   an `owner-only` policy then reads; letting the body carry it means anyone can create a
   row owned by someone else. Do not describe it in `rules.manual` and hand-write the
   mapper: it is a key.
+- **The request's network origin: `assignedFrom: client-ip`.** Same exclusion, and the
+  one source that is NOT in the token: the framework resolves the address in its own HTTP
+  middleware and hands it over on the `AppContext`, so the generator reads it OUTSIDE the
+  identity check and an anonymous route records it just the same. Written on insert and
+  left alone afterwards, like the identity sources — the column says where the row came
+  from, never where the last edit came from. Always `type: string` (an address is a value
+  to record and compare, never a key this service resolves).
+  - **It is the other source that takes `nullable: true`, and for a reason the identity
+    ones do not have.** A write off the inbound request path — a consumer handler, a
+    background job, a test fixture — genuinely HAS no origin, and `ClientIP()` answers `""`
+    there. Nullable records that absence as `NULL` and the column is left untouched;
+    non-nullable records it as the empty string. Both are honest; pick what your reader
+    should see.
+  - **What the value is WORTH is a deployment question, not a spec one.** Behind a reverse
+    proxy the framework reads the socket peer — the balancer, on every request — until
+    `http.trustProxy` is declared. A network control built on this column depends on that
+    block being right, and this key cannot make an undeclared topology trustworthy. Say so
+    when you propose the field.
 - **A field the SERVER computes from another one: `assignedFrom: derived`.** Same
   exclusion, different source: a public key derived from an immutable handle is never
   proposed by a caller, so it leaves every write request, command and OpenAPI request
@@ -1242,8 +1260,9 @@ Four things to get right, because they are the ones that cost a migration later:
     a `rules.manual` entry scoped to that verb, not necessarily to `insert`.
     `identity-subject` and `identity-claim` still refuse `nullable`: the server always has
     a subject and always has the claim it required, so the column is written on every
-    insert. (Earlier builds refused `nullable` on every source, which is what produced the
-    workarounds above; `explain keys` on the pinned build is the authority.)
+    insert. `client-ip` accepts it, for its own reason — a write off the request path has
+    no origin at all. (Earlier builds refused `nullable` on every source, which is what
+    produced the workarounds above; `explain keys` on the pinned build is the authority.)
 - **A column the FRAMEWORK fills: `stamped: time` / `stamped: counter`.** Read it against
   `assignedFrom: derived` directly above, because the two look alike and divide the work
   differently. `derived` says YOUR code owns the VALUE — it computes it and assigns it.

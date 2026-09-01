@@ -262,8 +262,12 @@ func emitApplyPartiallyTo(s *src, m *ir.Model, op ir.Operation, entity string) {
 // computes it is a rule in the entity's own hook file, so there is no
 // assignment for this mapper to write.
 func emitAssignedFields(s *src, m *ir.Model) {
+	emitClientIPFields(s, m)
+
 	assigned := m.IdentityAssignedFields()
 	if len(assigned) == 0 {
+		// No stated-scope override either: the field the guard compares is the
+		// one an identity fills, so an entity with none has no scope to state.
 		return
 	}
 	s.Blank()
@@ -281,6 +285,43 @@ func emitAssignedFields(s *src, m *ir.Model) {
 	}
 	s.L("\t}")
 	emitStatedScope(s, m)
+}
+
+// emitClientIPFields records WHERE the write came from.
+//
+// Outside the identity check, and that is the whole difference from the block
+// below: the origin is resolved by the framework's HTTP middleware, not carried
+// in a token, so it exists for an anonymous route and on a bench with
+// authentication switched off. Reading it inside `if id := ctx.Identity()`
+// would silently drop it on exactly those requests.
+//
+// `ClientIP()` answers "" off the inbound request path — a consumer handler, a
+// background job, a test fixture. The column says which of the two shapes the
+// author chose for that: a nullable field records the absence as NULL and is
+// left untouched, a plain one records it as the empty string.
+func emitClientIPFields(s *src, m *ir.Model) {
+	fields := m.ClientIPAssignedFields()
+	if len(fields) == 0 {
+		return
+	}
+	s.Blank()
+	s.L("\t// The request's network origin, as the framework resolved it. Not from the")
+	s.L("\t// token and not from the body: no write DTO carries it, and an anonymous")
+	s.L("\t// caller has one just the same. Only an insert sets it — it records where")
+	s.L("\t// the row CAME FROM, not where the last edit came from.")
+	s.L("\t//")
+	s.L("\t// Behind a reverse proxy this is only as good as http.trustProxy says it")
+	s.L("\t// is: undeclared, the framework reads the socket peer, which names the")
+	s.L("\t// balancer on every request.")
+	for _, f := range fields {
+		if f.Nullable {
+			s.L("\tif ip := ctx.ClientIP(); ip != \"\" {")
+			s.L("\t\te.%s = &ip", f.Name)
+			s.L("\t}")
+			continue
+		}
+		s.L("\te.%s = ctx.ClientIP()", f.Name)
+	}
 }
 
 // emitStatedScope lets the caller's OWN word override the line above, on the

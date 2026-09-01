@@ -3964,6 +3964,24 @@ func (m *Model) IdentityAssignedFields() []Field {
 	return out
 }
 
+// ClientIPAssignedFields are the columns filled from the request's ORIGIN.
+//
+// They are assigned by the generator like the identity ones and are separate
+// from them for one reason that decides where the assignment goes: the origin
+// is not in the token. It is resolved by the framework's own middleware and
+// read straight off the AppContext, so it is written whether or not a caller
+// authenticated — folding these into the identity block would drop the value on
+// every anonymous route and on a bench with authentication off.
+func (m *Model) ClientIPAssignedFields() []Field {
+	var out []Field
+	for _, f := range m.AssignedFields() {
+		if f.AssignedFrom == "client-ip" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // StampedFields are the columns the FRAMEWORK fills, in spec order.
 //
 // They are not AssignedFields and must not be folded into them: an assigned
