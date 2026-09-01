@@ -293,6 +293,41 @@ snapshot; no cascade; no lifecycle hooks. A write made that way never feeds the 
 aggregate otherwise keeps in step — which is a real escape hatch, left open deliberately
 rather than by oversight.
 
+**THE WRITE ANCHOR IS AS FREE AS THE READ ANCHOR — AND THAT IS THE DANGEROUS HALF.** Insert,
+update, delete, archive/unarchive and upsert work on **ANY** table that can produce a Direct
+schema, whatever that table is to somebody else: a root's table, an aggregate CHILD's table,
+a shared-base ROLE's table, the shared BASE table itself (only a sibling and an external
+schema do not convert, and both panic where they are written). Being a child of another
+aggregate does not protect a table and does not refuse the write — **the framework's only
+promise here is the one it already makes: the statement touches the ANCHOR TABLE and nothing
+else.** No cascade upward, none downward.
+
+**A child table is the sharpest case of all, so name these before offering it** — every one
+of them is silent:
+
+- **the root's projected document keeps the OLD child array.** The view is driven by the
+  AGGREGATE's outbox row, and a Direct write emits none, so the collection is not stale by a
+  few seconds — it is wrong until something else writes that aggregate;
+- **the root's revision guard never sees it**, so a concurrent aggregate write neither
+  conflicts nor notices;
+- **no audit line, no domain or integration event** for a change to that aggregate's data;
+- **archive does not compose.** The root's archive/unarchive is scoped by the operation's
+  own stamp, so a child archived on its own is NOT what a later unarchive brings back;
+- **a delete against the PARENT table through this door orphans the children**, because
+  there is no cascade to remove them.
+
+Where it is genuinely right — a maintenance sweep, a backfill, a column no domain rule owns,
+a control row stamped inside the caller's transaction — **say out loud which of those the
+write is giving up.** Where the resource is the aggregate's actual data, the aggregate
+repository is still its home.
+
+**One declaration note:** the foreign key resolves under the fixed logical name `ParentID` on
+a schema that declared `ParentID(col)`, and a Direct write may bind it (`Values{"ParentID":
+rootID}`) — it is the id, the timestamps and the archive column that have one origin and are
+refused there, never the parent link. A Direct schema written by hand may equally declare
+that column as an ordinary `Field(...)` under a name of its own; on a Direct anchor there is
+no cascade for the fixed name to protect.
+
 Treat it as one. The decision table above still answers the question: a table with rules, a
 lifecycle, a view or an audit trail goes through its aggregate, and reaching for the reduced
 form to skip them is the exact trade this file warns about, now available on a table where

@@ -36,6 +36,15 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   `doctor` carry the same rule in the place where each of them used to get it wrong — with
   `doctor` gaining a symptom row for the workarounds themselves.
 
+  The write half is stated symmetrically in the same round: `Insert`/`Update`/`Delete`/
+  `Archive`/`Upsert` anchor on ANY table that can produce a Direct schema — a root's, an
+  aggregate CHILD's, a shared-base role's, the base itself (only a sibling and an external
+  schema do not convert) — with the framework's one promise being that the statement touches
+  the anchor table and nothing else. A child table is the sharpest case and its five silent
+  consequences are now enumerated where the escape hatch is described, along with the note
+  that `ParentID` resolves and IS bindable in a Direct write, unlike the id, the timestamps
+  and the archive column.
+
 ## [0.54.0] — 2026-08-31
 
 Framework `v0.68.0` in one round, and it is two stories that share a type. The BREAKING half
