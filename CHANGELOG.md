@@ -7,6 +7,11 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.55.0] — 2026-09-01
+
+One story, told in the eight files that were telling half of it: the Direct door is a
+QUERY door, and nothing about a Direct read is restricted.
+
 ### Changed
 
 - **The Direct door is now stated as a READ door, not only a write door.** Every file that
