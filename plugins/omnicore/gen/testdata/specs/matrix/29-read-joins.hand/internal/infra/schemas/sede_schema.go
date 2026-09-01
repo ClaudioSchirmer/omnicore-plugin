@@ -13,5 +13,8 @@ func SedeSchema() *core.TableSchema {
 		ID("id").
 		Revision("revision").
 		Field("Nome", "nome").
-		Field("Codigo", "codigo")
+		Field("Codigo", "codigo").
+		// A chave de onde um HOP parte: a cadeia continua da sede para a sede
+		// MATRIZ dela, e a chave de um hop e coluna da tabela do alvo anterior.
+		Field("MatrizID", "matriz_id")
 }

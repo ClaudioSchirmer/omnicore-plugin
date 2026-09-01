@@ -592,6 +592,12 @@ func emitWithJoins(s *src, m *ir.Model) {
 	s.L("\t// Read joins: read-only traversals across a foreign key into another")
 	s.L("\t// aggregate. They fill ordinary fields of the entity on every load and are")
 	s.L("\t// absent from the TableSchema, so no write can carry them.")
+	s.L("\t//")
+	s.L("\t// Each target is reduced with AsDirectSchema(): a traversal puts ONE table")
+	s.L("\t// in the FROM, so it takes a schema that IS one table. The reduction is a")
+	s.L("\t// copy — the target's own declaration is untouched — and it drops exactly")
+	s.L("\t// what a join never enters: that aggregate's children, facets and shared")
+	s.L("\t// base.")
 	s.L("\tr.WithJoins(")
 	for _, j := range m.Joins {
 		emitOneJoin(s, j)
@@ -600,28 +606,97 @@ func emitWithJoins(s *src, m *ir.Model) {
 }
 
 func emitOneJoin(s *src, j ir.Join) {
-	head := fmt.Sprintf("read.%s(schemas.%s())", j.Verb(), j.TargetSchemaFunc)
+	for _, line := range wrapComment(joinCallNote(j), 70) {
+		s.L("\t\t// %s", line)
+	}
+	lines := joinLines(j, "\t\t")
+	lines[len(lines)-1] += ","
+	for _, l := range lines {
+		s.L("%s", l)
+	}
+}
+
+// joinLines renders ONE hop and everything that continues from it, with no
+// trailing punctuation on the last line: what follows a declaration — the comma
+// of the call list, the closing paren of an enclosing Then — belongs to the
+// caller, and it is the only way a recursive render can nest without counting
+// parentheses twice.
+//
+// The parts are assembled as SEGMENTS and joined with the dot afterwards for the
+// same reason: a chain's last element is the last Field on one hop and the last
+// Then on another, and deciding that inside each loop is how an emitter ends up
+// writing `..` or a dangling dot into somebody's repository.
+func joinLines(j ir.Join, pad string) []string {
+	var segs [][]string
+
+	// The TARGET is reduced; the CHILD is not. A target sits alone in the FROM
+	// under its own alias, so the framework takes a Direct schema there and
+	// refuses a node it could only read in part — the reduction is written at
+	// the call site precisely so a reader sees that the target's satellites play
+	// no part in the traversal. The child of an InChild join is the JOINING
+	// side: its own facets are resolved as usual, exactly as the root's are on a
+	// root join, so reducing it would narrow what the foreign key may be.
+	target := fmt.Sprintf("schemas.%s().AsDirectSchema()", j.TargetSchemaFunc)
 	if j.Child != "" {
 		// Two positional schema arguments would be swappable without a compile
 		// error, so the framework puts the CHILD behind the verb and the target
 		// behind .To(...).
-		head = fmt.Sprintf("read.%sInChild(schemas.%s()).To(schemas.%s())",
-			j.Verb(), j.ChildSchemaFunc, j.TargetSchemaFunc)
+		segs = append(segs,
+			[]string{fmt.Sprintf("%sread.%sInChild(schemas.%s())", pad, j.Verb(), j.ChildSchemaFunc)},
+			[]string{fmt.Sprintf("%s\tTo(%s)", pad, target)})
+	} else {
+		segs = append(segs, []string{fmt.Sprintf("%sread.%s(%s)", pad, j.Verb(), target)})
 	}
-	for _, line := range wrapComment(joinCallNote(j), 70) {
-		s.L("\t\t// %s", line)
-	}
-	s.L("\t\t%s.", head)
-	s.L("\t\t\tOn(%s).", quote(j.FKColumn))
-	for i, f := range j.Fields {
-		sep := "."
-		if i == len(j.Fields)-1 {
-			sep = ","
-		}
+
+	segs = append(segs, []string{fmt.Sprintf("%s\tOn(%s)", pad, quote(j.FKColumn))})
+	for _, f := range j.Fields {
 		// Same two arguments, same order, as TableSchema.Field: the Go field on
 		// this side, then the column on the joined one.
-		s.L("\t\t\tField(%s, %s)%s", quote(f.Name), quote(f.Column), sep)
+		segs = append(segs, []string{
+			fmt.Sprintf("%s\tField(%s, %s)", pad, quote(f.Name), quote(f.Column))})
 	}
+
+	// A hop continues from THIS hop's target, so its own .On(...) names a column
+	// of that table. Depth 2 and beyond is emitted as a nested block, which is
+	// what makes a deeper inner bind the block instead of filtering the result
+	// set — and what makes the whole chain report absent together.
+	for _, t := range j.Through {
+		inner := joinLines(t, pad+"\t")
+		blk := make([]string, 0, len(inner)+2)
+		for _, line := range wrapComment(joinHopNote(t), 66) {
+			blk = append(blk, fmt.Sprintf("%s\t// %s", pad, line))
+		}
+		blk = append(blk, fmt.Sprintf("%s\tThen(%s", pad, strings.TrimLeft(inner[0], "\t")))
+		blk = append(blk, inner[1:]...)
+		blk[len(blk)-1] += ")"
+		segs = append(segs, blk)
+	}
+
+	var out []string
+	for i, seg := range segs {
+		if i < len(segs)-1 {
+			seg[len(seg)-1] += "."
+		}
+		out = append(out, seg...)
+	}
+	return out
+}
+
+// joinHopNote is what a reader of a nested block needs and cannot see: where the
+// hop's foreign key lives, and that absence is decided by the path rather than
+// by this hop's own kind.
+func joinHopNote(j ir.Join) string {
+	note := fmt.Sprintf("%s → %s, across %s ON %s's own table.", j.Via, j.Target, j.FKColumn, j.Via)
+	if j.PathKind == "left" && j.Kind == "inner" {
+		note += " Under a left above it this inner drops nothing: it binds its own " +
+			"block, and a miss reports the WHOLE chain absent, hop one included."
+	} else if j.PathKind == "left" {
+		note += " A miss anywhere reports the whole chain absent, hop one included."
+	} else {
+		note += " Inner all the way, so a miss at this hop drops the aggregate from " +
+			"EVERY read, FindByID included."
+	}
+	return note
 }
 
 // joinCallNote states what the traversal costs and what a missing counterpart

@@ -46,7 +46,7 @@ func TestAJoinedArchiveColumnLandsInAPointer(t *testing.T) {
 		t.Run(tc.kind+" "+tc.column, func(t *testing.T) {
 			j := spec.Join{Kind: tc.kind, To: "Campus", On: "campus_id"}
 			f := spec.JoinField{Name: "CampusStamp", Column: tc.column}
-			got := resolveJoinField("Student", j, f, target)
+			got := resolveJoinField("Student", tc.kind, j, f, target)
 			if got.GoType != tc.want {
 				t.Errorf("%s across a %s join: got %s, want %s — %s",
 					tc.column, tc.kind, got.GoType, tc.want, tc.why)
@@ -55,5 +55,59 @@ func TestAJoinedArchiveColumnLandsInAPointer(t *testing.T) {
 				t.Errorf("a stamped column crosses as a timestamp, got %q", got.SpecType)
 			}
 		})
+	}
+}
+
+// TestAbsenceFollowsThePathNotTheHop is the rule a chain adds, and the one that
+// is wrong by default: a hop's own kind decides the framework VERB, but what can
+// be ABSENT is decided by the whole block it hangs in. One left anywhere above
+// makes every field below it a pointer — an inner hop three levels down a left
+// chain still lands NULL on the root that never matched.
+func TestAbsenceFollowsThePathNotTheHop(t *testing.T) {
+	city := discover.SpecClaim{
+		Entity: "City", Table: "cities",
+		Fields: []discover.FieldClaim{
+			{Name: "CityName", Column: "name", Type: "string", LivesOn: "root"},
+		},
+	}
+	campus := discover.SpecClaim{
+		Entity: "Campus", Table: "campi",
+		Fields: []discover.FieldClaim{
+			{Name: "CampusLabel", Column: "label", Type: "string", LivesOn: "root"},
+		},
+	}
+	p := &discover.Project{SiblingSpecs: []discover.SpecClaim{campus, city}}
+	m := &Model{Entity: Names{Pascal: "Student"}}
+
+	head := spec.Join{
+		Kind: "left", To: "Campus", On: "campus_id",
+		Fields: []spec.JoinField{{Name: "CampusName", Column: "label"}},
+		Then: []spec.Join{{
+			// Declared INNER, and every column it maps is NOT NULL over there.
+			Kind: "inner", To: "City", On: "city_id",
+			Fields: []spec.JoinField{{Name: "CampusCityName", Column: "name"}},
+		}},
+	}
+
+	got := resolveJoinHop(&spec.Spec{}, p, m, head, "", false, "")
+	if len(got.Through) != 1 {
+		t.Fatalf("the hop did not resolve: %+v", got)
+	}
+	hop := got.Through[0]
+	if hop.Kind != "inner" {
+		t.Errorf("the hop's own kind decides the VERB and must survive: got %q", hop.Kind)
+	}
+	if hop.PathKind != "left" {
+		t.Errorf("under a left head the PATH is left, got %q", hop.PathKind)
+	}
+	if hop.Fields[0].GoType != "*string" {
+		t.Errorf("a non-nullable column under a left path still lands NULL, so the field is a "+
+			"pointer: got %s", hop.Fields[0].GoType)
+	}
+	if hop.Via != "Campus" {
+		t.Errorf("the hop should record what it continues from, got %q", hop.Via)
+	}
+	if hop.Child != "" {
+		t.Errorf("a hop hangs off nothing of its own, got child %q", hop.Child)
 	}
 }

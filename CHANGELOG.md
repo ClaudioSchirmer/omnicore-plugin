@@ -7,6 +7,119 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.54.0] — 2026-08-31
+
+Framework `v0.68.0` in one round, and it is two stories that share a type. The BREAKING half
+is a read join's target: a traversal puts one table in its `FROM`, so it takes a Direct
+schema now — code that compiled yesterday stops BOOTING, which is the one kind of break a
+generator cannot leave to the compiler. The other half is reach: `criteria` subqueries reach
+questions no list of literals can answer, and `joins[].then` finally lets a spec say what the
+framework has expressed since `v0.66.0` — a traversal continued past its target.
+
+### Changed
+
+- **A read join's target is emitted REDUCED — `read.LeftJoin(schemas.X().AsDirectSchema())`.**
+  The framework narrowed the argument: a traversal puts exactly ONE table in its `FROM`, so
+  it now takes a Direct schema and refuses a node it could only read in part. The old form
+  still compiles and stops booting — the refusal is raised at repository construction — which
+  makes this the one kind of breaking change a generator cannot leave to the compiler.
+
+  What the fix is worth beyond compiling: the reduction is what closes the defect underneath
+  it. `GoNameForRead` merges a schema's satellites, so a field naming a column of the
+  TARGET's own sibling used to resolve at boot and was then emitted qualified by the target's
+  alias, where that column does not exist — a SQL error on every read through that loader,
+  `FindByID` included. This generator already refused that spec (`joins[].fields[].column`
+  must live on the target's own table), so nothing it emitted was reaching a satellite; the
+  narrowing costs it no reach, and the emitted call now says out loud what the check was
+  already enforcing.
+
+  The **child** of an `inChild` join is deliberately NOT reduced. It is the joining side, not
+  the target: its own facets are resolved exactly as the root's are on a root join, and
+  reducing it would narrow what the foreign key is allowed to be. A test asserts both halves
+  over every matrix spec that declares a traversal, because both are invisible until a boot.
+
+### Added
+
+- **`omnicore-gen` learns the CHAIN: `joins[].then`, nested to any depth.** The framework
+  grew chained traversals in `v0.66.0` and the spec language had no key for them, so the
+  only honest answer to "the value lives one aggregate further out" was a hand-written
+  repository plus an `adopt` — for a capability the generator could express.
+
+  What makes it a walk rather than a list, and where each rule is enforced:
+  - **a hop's `on` is a foreign key of the PREVIOUS TARGET's own table.** That is the rule
+    that tells a chain apart from a second join, and the one an author gets wrong first —
+    `check` names the table the hop departs from. Past the head the previous target enters
+    the statement REDUCED, so a key declared on its shared base or on one of its facets is
+    refused too: it is not in the reduced schema at all.
+  - **absence follows the PATH, not the hop.** One `left` at or above a hop makes every
+    field below it a pointer whatever the deeper hops declare, and the nullable-key refusal
+    narrows to match — an `inner` hop over a nullable key is refused while the path is inner
+    all the way, and accepted under a `left`, where it binds its own block and drops
+    nothing. That case is not an edge: it is what `left(campus).then(inner(city))` is for.
+  - **every hop's fields land on the head's struct**, so a hop three tables out shadows and
+    collides exactly as the head would — one namespace, at any depth.
+  - **the foreign-key collision is keyed by the PATH**, not by the table: two different
+    chains may each cross a `city_id` and they are different traversals under different
+    aliases. Keying by the table would have refused what the framework accepts.
+  - **a hop takes no `inChild`** — only the head decides what the chain hangs off.
+
+  **The cost is stated where the decision is, not only in the boot log.** A chain rides
+  every read the repository serves, `FindByID` included, so `check` warns once per spec and
+  names the framework's own answer for a read-only reach — a `read.DirectRepository`, which
+  this generator does not emit. It is a warning rather than a refusal on purpose: refusing
+  chains because the generator only writes aggregate repositories would be a limit of the
+  tool presented as a limit of the framework.
+
+  The fixtures carry it end to end rather than in a unit test alone: the boot host's
+  `student` chains from campus to a shared-base ROLE by two different keys (which is also
+  what proves a role reduces to its own table), a chain hangs off a COLLECTION with an
+  inner hop under a left head, the coverage matrix carries one onto a hand-written target,
+  and `explain example` shows the key with the three decisions written out.
+
+- **`shared/read-joins.md` learns the two things a declaration's SHAPE now depends on**, each
+  under the mechanical test this repo uses everywhere instead of a stamped version number
+  (read the pin's own `read-joins` section):
+  - **the reduced target** — what converts, the two kinds that panic (a sibling borrows its
+    owner's primary key; an external schema is an upstream mirror), why the reduction is
+    written at the call site rather than done silently, and the fact that an UPGRADE breaks
+    every existing declaration at boot rather than at build;
+  - **chains** (`.Then(...)`) — a capability that had shipped in framework `v0.66.0` and that
+    nothing in this plugin mentioned, so the file's own closing rule ("reaching two hops is
+    outside it") was telling authors a released feature did not exist. A hop's foreign key
+    belongs to the PREVIOUS target, the block is atomic, nullability follows the PATH rather
+    than the hop, and a chain on an aggregate repository logs a boot advisory because those
+    tables ride `FindByID`. The file owns the decision; `joins[].then` above is how a spec
+    writes one.
+
+- **`shared/query-primitives.md` learns SUBQUERIES**, which is the same failure that file
+  already exists to stop, one level down: a first query run only to collect ids and a second
+  one filtered by them — two round trips, two snapshots. Two rows join the decision table
+  (the 1:N reverse filter, and a comparison whose right-hand side is a SELECT) plus a section
+  covering `Sub` over a reduced source, the eight operator forms, `Exists`/`NotExists`,
+  `Outer(...)` reaching exactly one level, the archive gate that rides along unwritten, the
+  refusals — including `NinSub` over a nullable column, whose answer is `NotExists` — and the
+  line that matters most for the read side: this is an infrastructure API, **not wire
+  vocabulary**, so no filter operator is invented for it.
+
+- **`shared/direct-schema.md` learns the second road to an anchor.** `AsDirectSchema()`
+  reduces a schema that already has an aggregate, and the result is an ordinary Direct schema
+  — including as a `DirectRepository` anchor. So an aggregate's own table can now be written
+  through the Direct door, with every guarantee at the top of that file absent: no outbox row
+  and therefore no projection, no audit event, no revision guard, no cascade. The file names
+  it as the deliberate escape hatch it is, and requires a proposal reaching for it to say
+  which guarantees the write is giving up. The join-target refusal it carried was rewritten
+  in the same pass — the raw node is no longer "welcome" as a target.
+
+- **`skills/doctor/SKILL.md` learns the upgrade's first symptom.** A repository that compiled
+  yesterday and panics at construction over a join target is a framework upgrade, not a code
+  change, and the routing row now says so; the query-primitives row gained the shape that
+  IS a subquery — a query run only to collect ids and a second filtered by them.
+
+- **`shared/capabilities.md` routes the criteria DSL by name** — `criteria` on a pin that
+  carries the section, inside `custom-command-handler` on one that does not, with its
+  presence doubling as the availability test for subqueries — and routes read joins to
+  `read-joins`. A section that exists and is never named is a section nobody opens.
+
 ## [0.53.0] — 2026-08-31
 
 Three framework releases land in this one, and they are the same story told in three

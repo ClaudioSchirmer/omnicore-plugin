@@ -110,4 +110,10 @@ or counting one, filled by the framework and settable by no caller → `table-sc
 stamped family; the decision is an ENTITY change, so it belongs to `scaffold-entity` /
 `evolve-entity`, whose `conventions/infra.md` owns it) · WHICH clock stamps the managed
 timestamp columns → `yaml-reference` (`relational.clock`; on a pin that carries it the key
-is mandatory with no default, so its absence is a boot abort — `boot-contract.md`).
+is mandatory with no default, so its absence is a boot abort — `boot-contract.md`) · the
+write-side query DSL — operators, the envelope, and SUBQUERIES (`Sub`/`Exists`/`Outer`) →
+`criteria` on a pin that carries the section, and inside `custom-command-handler` ("Loading
+by criteria") on one that does not; its presence is the availability test for subqueries,
+and `query-primitives.md` owns which question they answer · reaching another aggregate's
+column across a foreign key → `read-joins` (`read-joins.md` owns the decision, including
+the reduced target and chains).

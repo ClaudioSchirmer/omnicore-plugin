@@ -2249,9 +2249,13 @@ func emitJoinStructFields(s *src, joins []ir.Join, owner string) {
 	s.L("\t// internal/infra. They are ordinary fields of %s, populated on EVERY", owner)
 	s.L("\t// load, and readable by the rules like any other; they are absent from the")
 	s.L("\t// TableSchema, so no write can carry them and no migration creates them.")
+	// Every HOP of every chain, flattened: a chain's fields all land on this one
+	// struct, and the note is what tells a reader how far out the value lives.
 	for _, j := range joins {
-		for _, f := range j.Fields {
-			s.L("\t%s %s // %s", f.Name, f.GoType, joinFieldNote(j, f))
+		for _, h := range j.Walk() {
+			for _, f := range h.Fields {
+				s.L("\t%s %s // %s", f.Name, f.GoType, joinFieldNote(h, f))
+			}
 		}
 	}
 }
@@ -2260,7 +2264,12 @@ func emitJoinStructFields(s *src, joins []ir.Join, owner string) {
 // nil means — which is the distinction the pointer exists to preserve.
 func joinFieldNote(j ir.Join, f ir.Field) string {
 	note := fmt.Sprintf("%s.%s, via the %s on %s", j.Target, f.Column, j.Verb(), j.FKColumn)
-	if j.Kind == "left" {
+	if j.Via != "" {
+		note += fmt.Sprintf(", continuing the chain from %s", j.Via)
+	}
+	// The PATH decides the absence, not this hop: one left above makes the whole
+	// block optional, and a miss at any hop reports the chain absent entire.
+	if j.PathKind == "left" {
 		note += "; nil = no counterpart, never the zero value"
 	}
 	if f.Description != "" {

@@ -402,7 +402,7 @@ func labelledFields(m *ir.Model) []ir.Field {
 	// ones: a rule may attach a notification to a joined field whatever the
 	// read side does with it.
 	for _, j := range m.Joins {
-		add(j.Fields)
+		add(j.AllFields())
 	}
 	return out
 }
