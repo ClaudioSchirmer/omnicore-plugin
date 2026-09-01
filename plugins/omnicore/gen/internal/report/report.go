@@ -1512,9 +1512,14 @@ func renderCheck(b *strings.Builder, in Input) {
 	// like the entity's own. Each one gets its own row, with the two things that
 	// bite: what a missing counterpart does, and whether the value is on the
 	// wire.
-	for _, j := range m.Joins {
-		fmt.Fprintf(b, "| Read join → %s | `%s` on `%s`%s | %s |\n",
-			j.Target, j.Verb(), j.FKColumn, joinWhere(j), joinNote(m, j))
+	// One row per HOP: a chain's deeper hops are as invisible on the entity as
+	// its head — the fields all look like the entity's own — and each one is a
+	// table more on every read this repository serves.
+	for _, decl := range m.Joins {
+		for _, j := range decl.Walk() {
+			fmt.Fprintf(b, "| Read join → %s | `%s` on `%s`%s | %s |\n",
+				joinReach(j), j.Verb(), j.FKColumn, joinWhere(decl, j), joinNote(m, j))
+		}
 	}
 	b.WriteString("\n")
 
@@ -1689,17 +1694,46 @@ func compositePartNames(fields []ir.Field, head ir.Field) []string {
 	return out
 }
 
-func joinWhere(j ir.Join) string {
-	if j.Child == "" {
-		return ""
+func joinWhere(decl, j ir.Join) string {
+	where := ""
+	if decl.Child != "" {
+		where = ", from " + decl.Child
 	}
-	return ", from " + j.Child
+	// A hop's key is a column of the PREVIOUS target, never of this entity, and
+	// a reviewer reading `on: cidade_id` against this spec's fields would not
+	// find it.
+	if j.Via != "" {
+		where += ", on " + j.Via + "'s table"
+	}
+	return where
+}
+
+// joinReach names the target with the chain that reaches it, so a row three
+// tables out cannot be read as a direct traversal.
+func joinReach(j ir.Join) string {
+	if j.Via == "" {
+		return j.Target
+	}
+	return j.Via + " → " + j.Target
 }
 
 // joinNote is what a reviewer has to check about one traversal.
 func joinNote(m *ir.Model, j ir.Join) string {
 	var b strings.Builder
+	// A hop carries no child of its own — only the head decides that — and the
+	// absence it reports is the PATH's, so the note is written from both.
+	if j.Via != "" {
+		fmt.Fprintf(&b, "Hop of a chain: it continues from %s and rides the same nested "+
+			"block, so a miss at ANY hop reports the whole chain absent, hop one included. ",
+			j.Via)
+		if j.PathKind == "inner" {
+			b.WriteString("The path is inner all the way, so a missing counterpart here " +
+				"drops the aggregate from EVERY read, FindByID included. ")
+		}
+	}
 	switch {
+	case j.Via != "":
+		// said above, in the terms the depth makes true
 	case j.Child != "" && j.Kind == "inner":
 		b.WriteString("An entry with no counterpart is NOT returned — a silent hole in the " +
 			"collection, not a missing aggregate. Prefer left wherever the relationship is " +

@@ -928,9 +928,51 @@ func CampusSchema() *core.TableSchema {
 		ID("id").
 		Revision("revision").
 		Field("Name", "name").
-		Field("BudgetCode", "budget_code")
+		Field("BudgetCode", "budget_code").
+		// The key a HOP departs from: the example continues its traversal from
+		// the campus to the city, and a hop's foreign key is a column of the
+		// PREVIOUS TARGET's own table.
+		Field("CityID", "city_id")
 }
 CAMPUSSCHEMAEOF
+# The second hand-written target: the example's chain reaches it FROM the campus,
+# so the bargain this lane proves has to hold at depth too — a hop names
+# schemas.CitySchema() by the same convention, and a project that spells it
+# differently fails the build here rather than at somebody's boot.
+cat > "$PRUNE_WORK/internal/domain/city.go" <<'CITYEOF'
+package domain
+
+import "github.com/ClaudioSchirmer/omnicore/domain"
+
+// City is what the example's chain reaches on its second hop, hand-written for
+// the same reason Campus is.
+type City struct {
+	domain.BaseEntity
+	Name string `labelKey:"CityNameField"`
+}
+
+func (e *City) Modes() []domain.EntityMode {
+	return []domain.EntityMode{domain.ModeDisplay}
+}
+
+func (e *City) BuildRules() {}
+CITYEOF
+cat > "$PRUNE_WORK/internal/infra/schemas/city_schema.go" <<'CITYSCHEMAEOF'
+package schemas
+
+import (
+	"github.com/ClaudioSchirmer/omnicore/infra/db/core"
+	appdomain "github.com/omnicore/gen-golden-host/internal/domain"
+)
+
+// CitySchema is the target of the chain's second hop.
+func CitySchema() *core.TableSchema {
+	return core.NewTableSchema[*appdomain.City]("cities").
+		ID("id").
+		Revision("revision").
+		Field("Name", "name")
+}
+CITYSCHEMAEOF
 
 prune_ok=1
 # ORDER MATTERS: the neighbour REUSES a value object the first spec declares, so

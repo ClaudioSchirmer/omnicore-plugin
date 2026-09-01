@@ -39,6 +39,31 @@ func validateJoins(s *Spec, opt Options, ps *Problems) {
 		validateOneJoin(s, opt, s.Joins[i], fmt.Sprintf("joins[%d]", i), fkSeen, joinNames, ps)
 	}
 
+	// A CHAIN costs a table per hop on every read this repository serves —
+	// FindByID included, which is the load the write-side Auto handlers go
+	// through. The framework says so itself, once per chain, in the boot log; a
+	// warning nobody reads until the service is running is a warning that
+	// arrives after the decision, so it is repeated here where the decision is
+	// still open.
+	//
+	// It is a warning and not a refusal on purpose: the generator emits an
+	// aggregate repository and nothing else, so refusing chains would be a limit
+	// of the tool presented as a limit of the framework. What the author owes is
+	// a reason, not a shorter chain.
+	for i := range s.Joins {
+		if len(s.Joins[i].Then) == 0 {
+			continue
+		}
+		ps.WarnFix(fmt.Sprintf("joins[%d].then", i),
+			"a chain rides EVERY read through this repository, FindByID included — "+
+				"one more table per hop, on the load the write side goes through",
+			"the framework logs one advisory per chain at boot for the same reason. "+
+				"Keep it when the aggregate genuinely reads that way; where the reach "+
+				"is only ever READ, its own answer is a read.DirectRepository, which "+
+				"this generator does not emit and which a hand-written repository can")
+		break
+	}
+
 	// A join is not a Mongo concept. The TableSchema is what the projection is
 	// composed from and a join deliberately never touches it, so on a Mongo
 	// backing the joined fields are real on the loaded entity — the rules read
@@ -61,48 +86,88 @@ func validateJoins(s *Spec, opt Options, ps *Problems) {
 	}
 }
 
+// joinDecl is the side that DECLARES a traversal — this entity's own table, or
+// one of its collections. It never moves along a chain: every hop's fields land
+// on the SAME struct the head lands on, so the shadowing check and the name
+// registry are asked of it at any depth.
+type joinDecl struct {
+	InChild string
+	Fields  []Field
+	Label   string
+}
+
+// joinFrom is the table ONE hop joins FROM: the declaring side for the head, the
+// PREVIOUS hop's target for everything after it. Which table the foreign key
+// lives on is the whole difference a chain makes, so it is the one thing carried
+// down the walk.
+//
+// Unseen means the previous target is hand-written — no spec of this project
+// declares it — and then there is nothing to check the key against. The
+// framework checks it at repository construction; refusing here would be a limit
+// of the tool presented as a limit of the framework.
+type joinFrom struct {
+	label   string
+	columns []joinColumn
+	unseen  bool
+	// ownTableOnly says a column of this side's shared base or of one of its
+	// facets is NOT reachable. True for every hop past the head: the previous
+	// target enters the statement REDUCED to its own table, so a foreign key
+	// declared on one of its satellites is not in the reduced schema at all.
+	ownTableOnly bool
+}
+
+// joinColumn is one column of that side, in the spellings a join asks about.
+type joinColumn struct {
+	Name     string
+	Column   string
+	Type     string
+	LivesOn  string
+	Nullable bool
+}
+
+func fromDeclaration(d joinDecl) joinFrom {
+	out := joinFrom{label: d.Label}
+	for _, f := range d.Fields {
+		out.columns = append(out.columns, joinColumn{
+			Name: f.Name, Column: f.Column, Type: f.Type,
+			LivesOn: f.LivesOn, Nullable: f.Nullable,
+		})
+	}
+	return out
+}
+
+func fromTarget(entity string, n *Neighbour) joinFrom {
+	if n == nil {
+		return joinFrom{label: entity, unseen: true, ownTableOnly: true}
+	}
+	out := joinFrom{label: entity, ownTableOnly: true}
+	for _, f := range n.Fields {
+		out.columns = append(out.columns, joinColumn{
+			Name: f.Name, Column: f.Column, Type: f.Type,
+			LivesOn: f.LivesOn, Nullable: f.Nullable,
+		})
+	}
+	return out
+}
+
+func joinColumnByName(cs []joinColumn, column string) *joinColumn {
+	for i := range cs {
+		if cs[i].Column == column {
+			return &cs[i]
+		}
+	}
+	return nil
+}
+
+// validateOneJoin checks the half of a declaration only its HEAD has: what the
+// traversal hangs off. Everything a hop shares with it — the target, the foreign
+// key, the mapped fields — is checked by walkJoinHop, which the head enters as
+// its own first hop.
 func validateOneJoin(s *Spec, opt Options, j Join, where string, fkSeen, joinNames map[string]string, ps *Problems) {
-	if !JoinKinds.Has(j.Kind) {
-		ps.BlockerFix(where+".kind",
-			fmt.Sprintf("%q is not a join kind", j.Kind),
-			"one of: "+JoinKinds.String())
-	}
-	if j.To == "" {
-		ps.BlockerFix(where+".to", "a join needs a target",
-			"name the entity on the other side of the foreign key")
-		return
-	}
-	if j.To == s.Entity {
-		ps.BlockerFix(where+".to",
-			"an entity cannot declare a read join onto itself",
-			"the traversal's predicate is fk = target.id on a second copy of the same "+
-				"table, which is a hierarchy walk rather than a reach into another "+
-				"aggregate — model the parent as its own entity, or read it with "+
-				"deps.DB.Querier()")
-		return
-	}
-
-	// A target this generator can SEE is checked in full: the column exists on
-	// it or it does not, and its type is derived rather than restated. A
-	// hand-written aggregate is invisible here — nothing about it is in a spec —
-	// so it is accepted on the author's word, with the two consequences said out
-	// loud: the field types have to be declared, and the schema function is
-	// assumed to follow the project's own convention.
-	//
-	// Refusing it outright would be the wrong trade. A service that adopted this
-	// generator midway has hand-written aggregates by definition, and "you may
-	// not reach that one" would be a limit of the tool presented as a limit of
-	// the framework.
-	target := neighbourNamed(opt.Neighbours, j.To)
-	if target == nil {
-		warnUnseenTarget(j, where, opt, ps)
-	}
-
 	// The joining table: the root's, or the collection's when inChild is set.
 	// Everything below — the foreign key, the Go fields, the shadowing check —
 	// is asked of THAT table, never of the root by default.
-	ownerFields := s.Fields
-	ownerLabel := "the root"
+	decl := joinDecl{InChild: j.InChild, Fields: s.Fields, Label: "the root"}
 	if j.InChild != "" {
 		c := findChild(s.Children, j.InChild)
 		if c == nil {
@@ -121,22 +186,82 @@ func validateOneJoin(s *Spec, opt Options, j Join, where string, fkSeen, joinNam
 					"the join belongs on that spec")
 			return
 		}
-		ownerFields = c.Fields
-		ownerLabel = "the collection " + j.InChild
+		decl.Fields = c.Fields
+		decl.Label = "the collection " + j.InChild
 	}
 
-	// The foreign key, on the joining table.
-	fk := fieldByColumn(ownerFields, j.On)
+	walkJoinHop(s, opt, j, decl, fromDeclaration(decl), true, false, decl.Label, where, fkSeen, joinNames, ps)
+}
+
+// walkJoinHop checks ONE hop and then the hops that continue from it.
+//
+// head says this is the entry the author wrote under joins[]; leftAbove says
+// some hop above this one is a LEFT, which is what makes the whole block
+// optional however this hop was declared. Both travel down the chain because
+// both change what is legal here rather than what is legal in general.
+func walkJoinHop(s *Spec, opt Options, j Join, decl joinDecl, from joinFrom,
+	head, leftAbove bool, scope, where string, fkSeen, joinNames map[string]string, ps *Problems) {
+
+	if !JoinKinds.Has(j.Kind) {
+		ps.BlockerFix(where+".kind",
+			fmt.Sprintf("%q is not a join kind", j.Kind),
+			"one of: "+JoinKinds.String())
+	}
+	if j.To == "" {
+		ps.BlockerFix(where+".to", "a join needs a target",
+			"name the entity on the other side of the foreign key")
+		return
+	}
+	if head && j.To == s.Entity {
+		ps.BlockerFix(where+".to",
+			"an entity cannot declare a read join onto itself",
+			"the traversal's predicate is fk = target.id on a second copy of the same "+
+				"table, which is a hierarchy walk rather than a reach into another "+
+				"aggregate — model the parent as its own entity, or read it with "+
+				"deps.DB.Querier()")
+		return
+	}
+	// A hop continues from the PREVIOUS TARGET, so what the chain hangs off was
+	// already decided one level up. The framework panics on this one at
+	// declaration; here it costs a `check`.
+	if !head && j.InChild != "" {
+		ps.BlockerFix(where+".inChild",
+			"a hop cannot name a collection — only the HEAD of a chain decides what it hangs off",
+			"move inChild up to the first entry of this chain; a hop carries to, on, "+
+				"fields and then, and nothing else")
+	}
+
+	// A target this generator can SEE is checked in full: the column exists on
+	// it or it does not, and its type is derived rather than restated. A
+	// hand-written aggregate is invisible here — nothing about it is in a spec —
+	// so it is accepted on the author's word, with the two consequences said out
+	// loud: the field types have to be declared, and the schema function is
+	// assumed to follow the project's own convention.
+	//
+	// Refusing it outright would be the wrong trade. A service that adopted this
+	// generator midway has hand-written aggregates by definition, and "you may
+	// not reach that one" would be a limit of the tool presented as a limit of
+	// the framework.
+	target := neighbourNamed(opt.Neighbours, j.To)
+	if target == nil {
+		warnUnseenTarget(j, where, opt, ps)
+	}
+
+	// The foreign key, on the table this hop joins FROM.
+	fk := joinColumnByName(from.columns, j.On)
 	switch {
 	case j.On == "":
 		ps.BlockerFix(where+".on", "a join needs a foreign key column",
-			"name the column on "+ownerLabel+" that points at "+j.To)
+			"name the column on "+from.label+" that points at "+j.To)
 		return
+	case from.unseen:
+		// Nothing to check it against: the previous target is hand-written, and
+		// its columns live in a file no spec declares.
 	case fk == nil:
 		ps.BlockerFix(where+".on",
-			fmt.Sprintf("%q is not a column of %s", j.On, ownerLabel),
-			"the foreign key is a column of the JOINING table — this entity's, not "+
-				j.To+"'s. Declare it under fields[] first if it is genuinely missing")
+			fmt.Sprintf("%q is not a column of %s", j.On, from.label),
+			"the foreign key is a column of the table this hop joins FROM — "+from.label+
+				", not "+j.To+"'s. A chain crosses one key per hop, each on the previous target")
 		return
 	case fk.Type != "id":
 		ps.BlockerFix(where+".on",
@@ -144,8 +269,23 @@ func validateOneJoin(s *Spec, opt Options, j Join, where string, fkSeen, joinNam
 			"the predicate is fk = "+j.To+".id, so the key has to be an id — a match "+
 				"against a code or a natural key is deliberately not expressible")
 	}
+	// Past the head, the side is in the statement REDUCED to its own table, so a
+	// key declared on its shared base or on one of its facets is not there to be
+	// read. The head is different: the declaring schema enters whole, and the
+	// framework resolves a base column on it.
+	if from.ownTableOnly && fk != nil && (fk.LivesOn == "base" || strings.HasPrefix(fk.LivesOn, "sibling:")) {
+		ps.BlockerFix(where+".on",
+			fmt.Sprintf("%q lives on %s's %s, not on its own table", j.On, from.label, fk.LivesOn),
+			"a hop joins from the previous target reduced to ONE table, so its key has "+
+				"to be a column of that table. Reach the satellite from the spec that owns it")
+	}
 
-	fkKey := ownerLabel + "." + j.On
+	// One join per foreign key per POINT IN A CHAIN, which is what the alias is
+	// derived from. The key is the PATH reaching this hop rather than the table
+	// it departs from: two different chains may each cross an owner_id, and they
+	// are different traversals under different aliases. Only a collision at the
+	// same point of the same chain is one.
+	fkKey := scope + "." + j.On
 	if prev, dup := fkSeen[fkKey]; dup {
 		ps.BlockerFix(where+".on",
 			fmt.Sprintf("%q already carries the join to %s", j.On, prev),
@@ -160,13 +300,23 @@ func validateOneJoin(s *Spec, opt Options, j Join, where string, fkSeen, joinNam
 	// choice is intent and query plan; over a nullable one it silently drops
 	// aggregates — from FindByID too, which the write-side handlers load
 	// through, so a legitimate write becomes a 404.
-	if j.Kind == "inner" && fk != nil && fk.Nullable {
+	//
+	// Only while the path is inner ALL THE WAY. Under a left above, an inner hop
+	// over a nullable key drops nothing: the block simply does not match and the
+	// chain comes back absent with the root intact — which is exactly what
+	// left(campus).then(inner(city)) is for.
+	if j.Kind == "inner" && !leftAbove && fk != nil && fk.Nullable {
+		dropped := s.Entity
+		if !head {
+			dropped = s.Entity + " (the whole chain rides one block)"
+		}
 		ps.BlockerFix(where+".kind",
 			fmt.Sprintf("%s is nullable, so an inner join would silently drop every %s with no %s",
-				fk.Name, s.Entity, j.To),
+				fk.Name, dropped, j.To),
 			"use kind: left — the declaration reaches every read through this "+
 				"repository, FindByID included, so the rows it drops are dropped from "+
-				"writes as well")
+				"writes as well. A left ABOVE this hop would settle it too: under one, "+
+				"an inner hop drops nothing")
 	}
 
 	if len(j.Fields) == 0 {
@@ -178,13 +328,22 @@ func validateOneJoin(s *Spec, opt Options, j Join, where string, fkSeen, joinNam
 	}
 
 	for k, f := range j.Fields {
-		validateJoinField(s, j, target, f, ownerFields, ownerLabel,
+		validateJoinField(s, j, target, f, decl,
 			fmt.Sprintf("%s.fields[%d]", where, k), joinNames, ps)
+	}
+
+	// The hops that continue from THIS target. They join from it, so its columns
+	// are what their keys are looked up on — and a left anywhere above makes the
+	// whole block below it optional.
+	next := fromTarget(j.To, target)
+	for k := range j.Then {
+		walkJoinHop(s, opt, j.Then[k], decl, next, false, leftAbove || j.Kind == "left",
+			fkKey, fmt.Sprintf("%s.then[%d]", where, k), fkSeen, joinNames, ps)
 	}
 }
 
 func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
-	ownerFields []Field, ownerLabel, where string, joinNames map[string]string, ps *Problems) {
+	decl joinDecl, where string, joinNames map[string]string, ps *Problems) {
 
 	if f.Name == "" {
 		ps.Blockerf(where+".name", "a joined field needs a Go name")
@@ -227,24 +386,29 @@ func validateJoinField(s *Spec, j Join, target *Neighbour, f JoinField,
 	// would be this generator inventing a rule and presenting it as the
 	// framework's, and the two structs are genuinely separate namespaces in the
 	// emitted Go.
+	// The namespace is the DECLARING side's, at any depth: every hop's fields
+	// land on the struct the head lands on, so a hop three tables out shadows
+	// exactly what the head would have.
 	owner := s.Entity
-	if j.InChild != "" {
-		owner = "the collection " + j.InChild
+	if decl.InChild != "" {
+		owner = "the collection " + decl.InChild
 	}
-	if what := shadowedOnOwner(s, j.InChild, ownerFields, f.Name); what != "" {
+	if what := shadowedOnOwner(s, decl.InChild, decl.Fields, f.Name); what != "" {
 		ps.BlockerFix(where+".name",
 			fmt.Sprintf("%s already resolves on %s — %s", f.Name, owner, what),
 			"the joined side's spelling never surfaces above infra, so rename this "+
 				"field freely: the column it reads is unchanged")
 		return
 	}
-	if prev, dup := joinNames[ownerLabel+"/"+f.Name]; dup {
+	if prev, dup := joinNames[decl.Label+"/"+f.Name]; dup {
 		ps.BlockerFix(where+".name",
 			fmt.Sprintf("%s is already filled by the join to %s", f.Name, prev),
-			"two traversals cannot land on one Go field — give this one its own name")
+			"two traversals cannot land on one Go field — give this one its own name. "+
+				"A hop of a chain lands on the same struct as its head, so the two "+
+				"cannot share a name either")
 		return
 	}
-	joinNames[ownerLabel+"/"+f.Name] = j.To
+	joinNames[decl.Label+"/"+f.Name] = j.To
 
 	// A target this generator cannot see has nothing to check the column
 	// against, so the field's own type is what stands in for the derivation —
@@ -484,19 +648,60 @@ type joinReach struct {
 // the TableSchema untouched, so a Mongo projection over the same entity never
 // carries these columns. Naming one in a filter there would emit a query
 // parameter the store cannot answer.
+// joinHop is ONE hop of a declaration, flattened with the two things an entry
+// past the head does not carry itself: what the chain hangs off, and the kind of
+// the PATH reaching it.
+//
+// Every consumer below the declaration wants this view rather than the tree: a
+// hop's fields land on the same struct the head's do, filter and sort the same
+// way, and are served the same way — the depth is the framework's business and
+// nobody else's.
+type joinHop struct {
+	Join
+	// Head is the entry the author wrote under joins[]. It is what says whether
+	// the chain hangs off the root or off a collection, at any depth.
+	Head *Join
+	// PathKind is "left" as soon as one left join sits at or above this hop, and
+	// "inner" only while every hop above it is inner. It is what decides
+	// ABSENCE — the kind of the hop alone does not.
+	PathKind string
+}
+
+// joinHops flattens every declaration into its hops, in declaration order
+// (pre-order: a head, then what continues from it).
+func joinHops(s *Spec) []joinHop {
+	var out []joinHop
+	var walk func(head *Join, j Join, leftAbove bool)
+	walk = func(head *Join, j Join, leftAbove bool) {
+		left := leftAbove || j.Kind == "left"
+		path := "inner"
+		if left {
+			path = "left"
+		}
+		out = append(out, joinHop{Join: j, Head: head, PathKind: path})
+		for _, t := range j.Then {
+			walk(head, t, left)
+		}
+	}
+	for i := range s.Joins {
+		walk(&s.Joins[i], s.Joins[i], false)
+	}
+	return out
+}
+
 func joinReachOf(s *Spec, opt Options) joinReach {
 	jr := joinReach{child: map[string][]Field{}}
 	if s.Read.Backing != "relational" {
 		return jr
 	}
-	for _, j := range s.Joins {
-		target := neighbourNamed(opt.Neighbours, j.To)
-		for _, f := range j.Fields {
-			rf, ok := joinFieldAsColumn(j, f, target)
+	for _, h := range joinHops(s) {
+		target := neighbourNamed(opt.Neighbours, h.To)
+		for _, f := range h.Fields {
+			rf, ok := joinFieldAsColumn(h, f, target)
 			if !ok {
 				continue
 			}
-			if j.InChild == "" {
+			if h.Head.InChild == "" {
 				jr.root = append(jr.root, rf)
 				continue
 			}
@@ -504,8 +709,8 @@ func joinReachOf(s *Spec, opt Options) joinReach {
 			// one of the two spellings is still found by a key that used the
 			// other. Keying by whatever the join happened to write is how the
 			// same collection could be two entries of this map.
-			jr.child[canonicalChildName(s, j.InChild)] = append(
-				jr.child[canonicalChildName(s, j.InChild)], rf)
+			jr.child[canonicalChildName(s, h.Head.InChild)] = append(
+				jr.child[canonicalChildName(s, h.Head.InChild)], rf)
 		}
 	}
 	return jr
@@ -520,7 +725,7 @@ func joinReachOf(s *Spec, opt Options) joinReach {
 // already refused by validateJoinField; here it simply means the field is not
 // checkable, and inventing a type for it would produce a refusal about a column
 // nobody can see.
-func joinFieldAsColumn(j Join, f JoinField, target *Neighbour) (Field, bool) {
+func joinFieldAsColumn(h joinHop, f JoinField, target *Neighbour) (Field, bool) {
 	specType, targetNullable := f.Type, f.Nullable
 	if target != nil {
 		if tf := neighbourFieldByColumn(target.Fields, f.Column); tf != nil {
@@ -540,9 +745,10 @@ func joinFieldAsColumn(j Join, f JoinField, target *Neighbour) (Field, bool) {
 	}
 	return Field{
 		Name: f.Name, Type: specType, Column: f.Column,
-		// Two independent sources of absence: no counterpart (left), or a
-		// column the target itself declares nullable.
-		Nullable: j.Kind == "left" || targetNullable,
+		// Two independent sources of absence: no counterpart along the PATH
+		// (one left anywhere at or above this hop makes the whole block
+		// optional), or a column the target itself declares nullable.
+		Nullable: h.PathKind == "left" || targetNullable,
 		LivesOn:  "root",
 	}, true
 }
@@ -563,18 +769,19 @@ func joinFieldAsColumn(j Join, f JoinField, target *Neighbour) (Field, bool) {
 // field at all — root or child — which is what tells "you meant a joined field
 // and it is out of reach" apart from "this name resolves to nothing anywhere".
 func JoinFactField(s *Spec, opt Options, name string) (*Field, *Join, bool) {
-	for i := range s.Joins {
-		j := s.Joins[i]
-		target := neighbourNamed(opt.Neighbours, j.To)
-		for _, f := range j.Fields {
+	// The traversal returned is the HEAD, at any depth: it is what says where
+	// the chain hangs off, which is the only thing the callers ask it.
+	for _, h := range joinHops(s) {
+		target := neighbourNamed(opt.Neighbours, h.To)
+		for _, f := range h.Fields {
 			if f.Name != name {
 				continue
 			}
-			fld, ok := joinFieldAsColumn(j, f, target)
+			fld, ok := joinFieldAsColumn(h, f, target)
 			if !ok {
-				return nil, &s.Joins[i], true
+				return nil, h.Head, true
 			}
-			return &fld, &s.Joins[i], true
+			return &fld, h.Head, true
 		}
 	}
 	return nil, nil, false
@@ -615,8 +822,8 @@ func warnUnseenTarget(j Join, where string, opt Options, ps *Problems) {
 }
 
 func anyVisibleJoinField(s *Spec) bool {
-	for _, j := range s.Joins {
-		for _, f := range j.Fields {
+	for _, h := range joinHops(s) {
+		for _, f := range h.Fields {
 			if !f.Hidden {
 				return true
 			}

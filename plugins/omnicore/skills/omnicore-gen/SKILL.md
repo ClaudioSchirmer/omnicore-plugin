@@ -272,9 +272,27 @@ Four things to get right, because they are the ones that cost a migration later:
     nullability the framework cannot check for you — the fields of `domain.Managed` are
     unexported), and the REVISION slot is refused, because it guards the target's own
     writes and a copy of it goes stale the moment that aggregate is written again.
-  What it is NOT: a 1:N reach, a match on anything but the target's id, a second hop, or a
-  way to bring a collection. `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` owns the
-  boundary and the alternatives; `explain keys` prints the language half.
+  - **`then` — the CHAIN, when the value lives one aggregate further out.** It continues
+    the traversal from THIS entry's target: `on` is then a foreign key of the PREVIOUS
+    TARGET's table (never of this entity), and several hops listed together branch off the
+    same target. Three things decide whether to write one:
+    - **absence follows the PATH.** One `left` anywhere above makes every field below it
+      nullable whatever the deeper hops declare, and the chain is one nested block — a
+      miss at ANY hop reports the whole chain absent, hop one included. That is also what
+      makes a deeper `inner` safe under a `left`: it binds its own block instead of
+      dropping the aggregate, and `check` narrows the nullable-key refusal to match.
+    - **it costs a table per hop on EVERY read this repository serves**, `FindByID`
+      included — the load the write side goes through. `check` warns once per spec, and
+      the framework logs its own advisory per chain at boot. Keep the chain when the
+      aggregate genuinely reads that way; where the reach is only ever READ, the
+      framework's own answer is a `read.DirectRepository`, which this generator does not
+      emit and a hand-written repository can.
+    - **a hop takes no `inChild`.** Only the head decides what the chain hangs off — and a
+      chain hanging off a collection lands every hop's fields in the ENTRY, load-only like
+      the head.
+  What it is NOT: a 1:N reach, a match on anything but the target's id, or a way to bring a
+  collection. `${CLAUDE_PLUGIN_ROOT}/shared/read-joins.md` owns the boundary and the
+  alternatives; `explain keys` prints the language half.
 - **Value objects — and ask the closed-set question about EVERY one.** Before writing
   `kind: raw`, ask: is the set of valid values FINITE and known? If it is, it is an
   `enum`, not a shape. `raw` with `regex: '^[A-Z]{2}$'` accepts `XX`, `ZZ` and `QQ` — a

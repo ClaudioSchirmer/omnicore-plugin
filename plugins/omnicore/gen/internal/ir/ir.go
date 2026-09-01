@@ -383,10 +383,24 @@ type Join struct {
 	// ChildSchemaFunc is that collection's schema function.
 	Child           string
 	ChildSchemaFunc string
-	// Fields are what the traversal brings back. Their Column is the column on
-	// the TARGET — the join's own side — not a column of this entity, which has
-	// none for them.
+	// Fields are what THIS HOP brings back. Their Column is the column on the
+	// TARGET — the join's own side — not a column of this entity, which has none
+	// for them. Every hop's fields land on the same struct, so the flattened view
+	// (AllFields) is what everything above infrastructure reads.
 	Fields []Field
+	// Through are the hops that continue the traversal FROM Target — the
+	// aggregate one step further out, and so on. Only the emitted declaration
+	// cares about the shape; the fields are read flat.
+	Through []Join
+	// PathKind is "left" as soon as one left join sits at or above this hop, and
+	// "inner" only while every hop above it is inner. It decides ABSENCE — the
+	// hop's own Kind decides the framework VERB, and the two are not the same
+	// question once a chain is more than one hop long.
+	PathKind string
+	// Via is the chain reaching this hop, as targets ("Campus → Cidade"), empty
+	// on a head. It exists for the comments and the report: a field three tables
+	// out looks exactly like the entity's own.
+	Via string
 	// TargetHandWritten says no spec of this project declares the target, so
 	// every field's type and nullability came from the AUTHOR rather than from a
 	// declaration the generator could read. Nothing downstream changes; it is
@@ -1542,9 +1556,10 @@ func lookupFactFilter(s *spec.Spec, m *Model, name string) (*Field, string) {
 	// half that could not name it. A child join is load-only and never reaches
 	// a predicate — validation refuses that one, so only the root's are here.
 	for _, j := range m.RootJoins() {
-		for i := range j.Fields {
-			if j.Fields[i].Name == name {
-				return &j.Fields[i], ""
+		fs := j.AllFields()
+		for i := range fs {
+			if fs[i].Name == name {
+				return &fs[i], ""
 			}
 		}
 	}

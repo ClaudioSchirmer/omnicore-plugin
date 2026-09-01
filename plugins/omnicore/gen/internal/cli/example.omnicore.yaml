@@ -1067,6 +1067,39 @@ joins:
         description: When the campus was archived, if it was.
         labelKey: StudentCampusArchivedAtField
         text: {eng: Campus archived at, ptbr: Campus arquivado em}
+    # `then` CONTINUES the traversal from THIS entry's target: campus_id reaches
+    # the campus, and city_id reaches the city THE CAMPUS points at. There is no
+    # depth limit, and several hops listed here branch off the same target.
+    #
+    # Two rules make everything else follow. A hop's `on` is a foreign key of the
+    # PREVIOUS TARGET's own table — city_id is a column of campus, not of
+    # students — and every hop's fields land on the SAME struct the head lands
+    # on, at any depth, because a joined field carries no domain type and there
+    # is no "struct of hop 2" for one to live in.
+    #
+    # ABSENCE follows the PATH, not the hop. This one is `left`, so its fields
+    # are nullable however deep they sit; and a chain is emitted as one NESTED
+    # block, so a miss at ANY hop reports the whole chain absent — hop one
+    # included. The mirror image is what makes a deeper `inner` safe under a
+    # `left`: it binds its own block instead of dropping the aggregate.
+    #
+    # What it costs: one more table in EVERY read this repository serves,
+    # FindByID included — the load the write-side handlers go through. The
+    # framework logs one advisory per chain at boot saying exactly that, and
+    # names a Direct repository as the home for a reach that is only ever read.
+    # A chain is worth declaring when the aggregate genuinely reads that way.
+    then:
+      - to: City
+        kind: left
+        on: city_id
+        fields:
+          - name: CampusCityName
+            type: string
+            column: name
+            example: Porto Alegre
+            description: The city the student's campus is in.
+            labelKey: StudentCampusCityNameField
+            text: {eng: Campus city, ptbr: Cidade do campus}
 
   # A join FROM ONE OF THIS ENTITY'S OWN COLLECTIONS. The verb names the
   # collection, `on` names the foreign key on ITS table, and the mapped field

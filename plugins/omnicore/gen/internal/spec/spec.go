@@ -2275,6 +2275,12 @@ func ValueObjectsNamed(s *Spec) []string {
 // at a time. There is no many-valued form — a 1:N traversal would multiply the
 // root's rows and break the paged read — so "bring the order's items" is a
 // child collection, never a join.
+//
+// It reaches as FAR as it is told to: `then` continues the traversal from this
+// join's target to the next aggregate, and from there onward. What the
+// generator emits for every hop is the target reduced to its own table — a
+// traversal puts one table in the FROM, so the framework takes a Direct schema
+// there.
 type Join struct {
 	// Kind decides what a joining row with NO counterpart means:
 	//
@@ -2310,6 +2316,34 @@ type Join struct {
 	// Fields is what the traversal brings back. At least one is mandatory: a
 	// join that maps no column reaches nothing.
 	Fields []JoinField `yaml:"fields"`
+	// Then continues the traversal FROM THIS ENTRY'S TARGET — the aggregate one
+	// hop further out, and from there onward with no depth limit. Several hops
+	// listed here branch off the same target.
+	//
+	// Two rules make the rest follow, and both are what tells a chain apart from
+	// a second join:
+	//
+	//   - a hop's `on` is a foreign key OF THE PREVIOUS TARGET's own table, never
+	//     of the entity that declared the chain;
+	//   - every hop's fields land on the SAME struct the head lands on, at any
+	//     depth — the entity, or the collection's entry under inChild — because a
+	//     joined field carries no domain type and there is no "struct of hop 2"
+	//     for one to live in.
+	//
+	// A hop takes no inChild of its own: only the head decides what the chain
+	// hangs off. `kind` still means what it means per hop, but ABSENCE follows
+	// the PATH: one `left` anywhere above makes every field below it nullable,
+	// whatever the deeper hops declare, and the whole chain reports absent
+	// together — a miss at any hop leaves hop one's fields nil too, because the
+	// framework emits depth 2 and beyond as a NESTED join rather than a flat
+	// list.
+	//
+	// The cost is a table per hop on EVERY read through this repository,
+	// FindByID included — the load the write-side handlers go through. The
+	// framework logs one advisory per chain at boot for exactly that reason;
+	// where the reach is only ever read, its own answer is a Direct repository,
+	// which this generator does not emit.
+	Then []Join `yaml:"then"`
 }
 
 // JoinField maps ONE column of the joined table onto a Go field of the entity

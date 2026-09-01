@@ -166,10 +166,11 @@ is good, and it is still cheaper to know them at design time:
 
 - children, siblings and a shared base on a Direct schema — vertical composition is the
   aggregate's job;
-- an entity / sibling / shared-base / external schema as the repository's **anchor**. As a
-  **join target** the same schema is welcome and is the intended reuse: a traversal only
-  reads, so a control table joins another aggregate through the very schema that aggregate
-  already declares;
+- an entity / sibling / shared-base / external schema as the repository's **anchor**, as
+  declared. The reuse is still the intended one — a traversal only reads, so a control table
+  reaches another aggregate through the very schema that aggregate already declares — but on
+  a pin that carries the reduction it is the REDUCED copy that travels, both as a join target
+  and as an anchor (see below);
 - a schema with no id column, or a row type with no exported identity field — identity is
   neither optional nor inferred, and a row read back without it could not be the target of the
   next write;
@@ -184,6 +185,44 @@ is good, and it is still cheaper to know them at design time:
   column). All three are raised before a transaction is opened;
 - a second match where exactly one row was expected;
 - joins into a child — there is no child; the reach here is horizontal only.
+
+## A second way to get one — reducing a schema that already exists
+
+`NewDirectSchema` declares a table that never had an aggregate. The other road starts from a
+schema that does: **`AsDirectSchema()` returns a COPY of any schema limited to its own
+table**, with the children, the siblings and the shared base dropped and the original
+untouched.
+
+**Shipped in framework v0.68.0; the same mechanical test as everything else here:** does the
+pin's `direct-schema` / `table-schema` section describe the reduction? Absent → the pin predates it and this whole
+section does not apply; a join target is passed as declared and an aggregate's table has no
+Direct door at all.
+
+It exists because two consumers put exactly ONE table in their `FROM` — a read join's TARGET
+and a criteria subquery's SOURCE — and therefore take a schema that is one table rather than
+a node they could only read in part. Where the pin has it, that is not a preference: both
+refuse anything else, and `read-joins.md` owns what it means for the declarations.
+
+**What it means for THIS decision, and it is the sharper half.** The result is an ordinary
+Direct schema — including as a repository's anchor. So an aggregate's own table CAN be
+written through the Direct door, and everything at the top of this file applies unchanged:
+no outbox row, so no CDC and no projection; no audit event; no revision guard; no old-state
+snapshot; no cascade; no lifecycle hooks. A write made that way never feeds the view the
+aggregate otherwise keeps in step — which is a real escape hatch, left open deliberately
+rather than by oversight.
+
+Treat it as one. The decision table above still answers the question: a table with rules, a
+lifecycle, a view or an audit trail goes through its aggregate, and reaching for the reduced
+form to skip them is the exact trade this file warns about, now available on a table where
+the guarantees actually exist. Where it is genuinely right — a maintenance sweep, a column
+no domain rule owns — say out loud, in the proposal, which of the seven guarantees the write
+is giving up.
+
+**Two kinds do not convert**, and both panic where they are written: a SIBLING borrows its
+owner's primary key, so it is not a row source (and reducing the owner yields the OWNER's
+table — a facet's columns leave with the facet; to read that table standalone, declare it as
+its own Direct anchor over the shared id column), and an EXTERNAL schema names an upstream
+service's mirrored collection, which is not a table on this connection at all.
 
 ## What it keeps, because it is the same funnel
 

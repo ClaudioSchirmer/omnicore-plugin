@@ -22,42 +22,98 @@ import (
 // filled. The framework refuses a non-pointer Go field in both cases.
 func resolveJoins(s *spec.Spec, p *discover.Project, m *Model) {
 	for _, j := range s.Joins {
-		// A hand-written target is invisible to the generator: validation has
-		// already demanded an explicit type per field for exactly that case, so
-		// the resolution below falls back to it rather than skipping the join.
-		target := claimNamed(p.SiblingSpecs, j.To)
 		// inChild takes either of the collection's two names; below this line
 		// there is one, and it is the entry type's — which is also what the
 		// generated schema function is called.
 		inChild := canonicalCollection(s.Children, j.InChild)
-		rj := Join{
-			Kind:              j.Kind,
-			Target:            j.To,
-			TargetSchemaFunc:  j.To + "Schema",
-			FKColumn:          j.On,
-			Child:             inChild,
-			TargetHandWritten: target == nil,
-		}
-		if inChild != "" {
-			rj.ChildSchemaFunc = inChild + "Schema"
-		}
-		for _, f := range j.Fields {
-			rj.Fields = append(rj.Fields, resolveJoinField(m.Entity.Pascal, j, f, target))
-		}
+		rj := resolveJoinHop(s, p, m, j, inChild, false, "")
 		m.Joins = append(m.Joins, rj)
 
 		if inChild == "" {
 			continue
 		}
+		// A chain hangs off whatever its head hangs off, so EVERY hop's fields
+		// land in the entry — the same flattening the root case gets for free
+		// through RootJoinFields.
 		for i := range m.Children {
 			if m.Children[i].Name == inChild {
-				m.Children[i].JoinFields = append(m.Children[i].JoinFields, rj.Fields...)
+				m.Children[i].JoinFields = append(m.Children[i].JoinFields, rj.AllFields()...)
 			}
 		}
 	}
 }
 
-func resolveJoinField(entity string, j spec.Join, f spec.JoinField, target *discover.SpecClaim) Field {
+// resolveJoinHop resolves one hop and everything that continues from it.
+//
+// leftAbove is what makes the recursion necessary rather than cosmetic: a hop's
+// own kind decides the framework verb, but ABSENCE follows the PATH — one left
+// above makes every field below it a pointer, whatever the deeper hops declare,
+// because the framework binds the whole chain as one nested block.
+func resolveJoinHop(s *spec.Spec, p *discover.Project, m *Model, j spec.Join,
+	inChild string, leftAbove bool, via string) Join {
+
+	// A hand-written target is invisible to the generator: validation has
+	// already demanded an explicit type per field for exactly that case, so the
+	// resolution below falls back to it rather than skipping the join.
+	target := claimNamed(p.SiblingSpecs, j.To)
+	pathKind := "inner"
+	if leftAbove || j.Kind == "left" {
+		pathKind = "left"
+	}
+	rj := Join{
+		Kind:              j.Kind,
+		PathKind:          pathKind,
+		Target:            j.To,
+		TargetSchemaFunc:  j.To + "Schema",
+		FKColumn:          j.On,
+		Child:             inChild,
+		Via:               via,
+		TargetHandWritten: target == nil,
+	}
+	// Only the head hangs off a collection: a hop continues from the previous
+	// target, and the framework refuses one that names a child of its own.
+	if inChild != "" && via == "" {
+		rj.ChildSchemaFunc = inChild + "Schema"
+	} else {
+		rj.Child = ""
+	}
+	for _, f := range j.Fields {
+		rj.Fields = append(rj.Fields, resolveJoinField(m.Entity.Pascal, pathKind, j, f, target))
+	}
+	deeper := j.To
+	if via != "" {
+		deeper = via + " → " + j.To
+	}
+	for _, t := range j.Then {
+		rj.Through = append(rj.Through,
+			resolveJoinHop(s, p, m, t, inChild, pathKind == "left", deeper))
+	}
+	return rj
+}
+
+// Walk returns this declaration's hops in declaration order — the head, then
+// what continues from it. It is the single flattening every consumer above
+// infrastructure shares, which is what keeps depth from leaking upward.
+func (j Join) Walk() []Join {
+	out := []Join{j}
+	for _, t := range j.Through {
+		out = append(out, t.Walk()...)
+	}
+	return out
+}
+
+// AllFields are the fields of every hop, in that same order. They all land on
+// one struct, so this is the list the entity, the DTOs, the criteria and the
+// read model see.
+func (j Join) AllFields() []Field {
+	var out []Field
+	for _, h := range j.Walk() {
+		out = append(out, h.Fields...)
+	}
+	return out
+}
+
+func resolveJoinField(entity, pathKind string, j spec.Join, f spec.JoinField, target *discover.SpecClaim) Field {
 	// The target's own declaration wins whenever there is one; the field's own
 	// keys stand in ONLY for a hand-written aggregate this project has no spec
 	// for, which is the single case validation demands them in.
@@ -91,7 +147,7 @@ func resolveJoinField(entity string, j spec.Join, f spec.JoinField, target *disc
 	// has one. The framework enforces exactly this pair for an identity column
 	// and leaves the rest to the declaration, so the generator applies it to
 	// every type rather than waiting to be told per column.
-	nullable := j.Kind == "left" || targetNullable
+	nullable := pathKind == "left" || targetNullable
 	goType := base
 	if nullable {
 		goType = "*" + base
@@ -127,7 +183,7 @@ func (m *Model) RootJoins() []Join {
 func (m *Model) RootJoinFields() []Field {
 	var out []Field
 	for _, j := range m.RootJoins() {
-		out = append(out, j.Fields...)
+		out = append(out, j.AllFields()...)
 	}
 	return out
 }
@@ -136,7 +192,7 @@ func (m *Model) RootJoinFields() []Field {
 // It is how the read side answers "is this filterable name a joined one".
 func (m *Model) JoinField(name string) (Field, bool) {
 	for _, j := range m.Joins {
-		for _, f := range j.Fields {
+		for _, f := range j.AllFields() {
 			if f.Name == name {
 				return f, true
 			}

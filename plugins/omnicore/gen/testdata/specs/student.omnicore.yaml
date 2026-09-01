@@ -597,6 +597,44 @@ joins:
         example: "2026-02-01T09:00:00Z"
         description: Quando o campus foi arquivado, se foi.
         labelKey: StudentCampusArquivadoEmField
+    # CADEIA: `then` continua a travessia A PARTIR DO CAMPUS. A chave de um hop e
+    # coluna da TABELA DO ALVO ANTERIOR — owner_id e coluna de campi, nao de
+    # students — e os campos de todo hop pousam na MESMA struct que a cabeca,
+    # porque campo de join nao carrega tipo de dominio e nao existe "struct do
+    # hop 2".
+    #
+    # Dois hops aqui provam duas coisas de uma vez: que uma cadeia RAMIFICA a
+    # partir do mesmo alvo, e que duas travessias para a mesma tabela sao legais
+    # quando cruzam chaves diferentes — e a chave que separa os aliases.
+    then:
+      # left sobre uma chave NAO nula: legal sempre, e a escolha certa aqui. Um
+      # hop inner sobre owner_id seria igualmente legal e diria outra coisa —
+      # "campus SEM responsavel cadastrado nao devolve o aluno, em leitura
+      # nenhuma, FindByID inclusive". Um alcance que existe para ENRIQUECER a
+      # leitura nao decide quem some dela.
+      - to: Teacher
+        kind: left
+        on: owner_id
+        fields:
+          # Coluna da tabela DO PAPEL (livesOn: role). A base compartilhada do
+          # Teacher fica de fora: o alvo entra reduzido a tabela dele, e as
+          # colunas da base moram noutra tabela que este join nao visita.
+          - name: CampusOwnerRegistration
+            column: registration_code
+            example: "MAT-2026-0001"
+            description: Matricula do responsavel pelo campus.
+            labelKey: StudentCampusOwnerRegistrationField
+      # O mesmo alvo por OUTRA chave, esta anulavel — entao left, e os campos
+      # abaixo dela sao ponteiro por causa do CAMINHO.
+      - to: Teacher
+        kind: left
+        on: auditor_id
+        fields:
+          - name: CampusAuditorRegistration
+            column: registration_code
+            example: "MAT-2026-0002"
+            description: Matricula do auditor do campus, quando houver.
+            labelKey: StudentCampusAuditorRegistrationField
 
   # Join a partir de uma COLECAO desta entidade. O verbo nomeia a colecao, `on`
   # nomeia a chave estrangeira NA TABELA DELA, e o campo pousa na entrada.
@@ -630,6 +668,23 @@ joins:
         example: "2026-02-01T09:00:00Z"
         description: Quando o campus de referencia foi arquivado, se foi.
         labelKey: GuardianCampusArquivadoEmField
+    # Uma cadeia pendurada numa COLECAO: a cabeca decide de onde ela sai, os hops
+    # continuam do alvo anterior e todos os campos pousam na ENTRADA.
+    #
+    # Este hop e inner sobre owner_id, que e NAO nula — mas o que o torna
+    # interessante e o left ACIMA dele: sob um left, um inner mais fundo nao
+    # derruba nada; ele amarra o proprio bloco, e uma entrada sem campus volta
+    # com a cadeia inteira ausente em vez de sumir da colecao.
+    then:
+      - to: Teacher
+        kind: inner
+        on: owner_id
+        fields:
+          - name: GuardianCampusOwnerRegistration
+            column: registration_code
+            example: "MAT-2026-0001"
+            description: Matricula do responsavel pelo campus de referencia.
+            labelKey: GuardianCampusOwnerRegistrationField
 
 children:
   - name: Guardian

@@ -34,6 +34,16 @@ joins:
       - {name: NomeSede, type: string, column: nome, example: "Sede Norte", description: Nome da sede., labelKey: EventoNomeSedeField}
       # hidden: na entidade, fora da API.
       - {name: CodigoSede, type: string, column: codigo, hidden: true, description: Codigo interno da sede., labelKey: EventoCodigoSedeField}
+    # CADEIA sobre alvo escrito a mao: o hop continua DA SEDE, entao matriz_id e
+    # coluna da tabela dela e nao de eventos. Como nenhum spec declara Sede, o
+    # tipo de cada campo e declarado aqui — e a nulidade vem do CAMINHO: este hop
+    # e left, entao o campo pousa em ponteiro mesmo sob uma cabeca inner.
+    then:
+      - to: Sede
+        kind: left
+        on: matriz_id
+        fields:
+          - {name: NomeSedeMatriz, type: string, column: nome, example: "Sede Central", description: Nome da sede matriz., labelKey: EventoNomeSedeMatrizField}
   # Filho, LEFT: so-carga, servido dentro da entrada, nunca filtravel.
   - to: Sede
     kind: left

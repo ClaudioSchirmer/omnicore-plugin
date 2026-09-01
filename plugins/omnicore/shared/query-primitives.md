@@ -4,8 +4,10 @@ The single home for **choosing the read primitive** when writing code by hand: a
 `Service` implementation, a custom repository finder, a custom command/query handler.
 Every skill that writes or reviews one routes HERE instead of restating the choice
 inline — one owner, no drift. No code here, by design: the vocabulary and the decision,
-never a snippet; exact signatures are the PIN's (`custom-command-handler.html`, "Loading
-by criteria" / the AggregateLoader section, plus `table-schema.html` for the scalar half).
+never a snippet; exact signatures are the PIN's — the criteria DSL in `criteria.html` where
+the pin carries that section and inside `custom-command-handler.html` ("Loading by criteria")
+where it does not, the primitives themselves in `custom-command-handler.html`'s
+AggregateLoader part, plus `table-schema.html` for the scalar half.
 
 ## The rule
 
@@ -35,6 +37,8 @@ the one that grows; the primitive costs nothing extra to pick correctly at write
 | a user-facing "how many match" | the request DTO's `onlyTotal` opt-in (`auto-query-handlers.html`) — no documents materialized | `ReadPage` + `len(Items)` |
 | "the rule needs a field that belongs to ANOTHER aggregate" | a **read join** declared on the repository — the value becomes an ordinary field of the entity, filled on every load (`read-joins.md`) | a second `FindOne` inside the rule · copying the column into this table and keeping it in step |
 | the truth lives in a table this service has **no aggregate for** — another aggregate's CHILD table, a control table, a lookup | a **Direct schema** anchoring the same primitives on that one table (`direct-schema.md`) — where the pin has it | hand-written SQL against the neutral transaction · promoting the table to an aggregate just to be able to ask |
+| "which rows have at least one / no row over THERE pointing back at them" — the 1:N reverse filter | a **subquery** in the criteria — `Exists` / `NotExists` over the other table, correlated with `Outer(...)` (below) | loading the collection and filtering in Go · a first query to collect ids and a second to filter by them |
+| the right-hand side of a comparison is itself a SELECT — "in the set this other table defines", "greater than the max over there" | the same **subquery**, under the operator you already wanted — `InSub`/`NinSub`, `EqSub`/`GtSub`/… (below) | two round trips with the ids carried between them in Go — which also loses the snapshot |
 
 **`FindAll(…)[0]` is a correctness bug, not only a slow one.** `FindOne` is the
 framework's BIRTH point for a write-side entity: it stamps the old-state snapshot, so
@@ -55,6 +59,58 @@ hand-written SQL or a whole aggregate declared to host the question.
 `direct-schema.md` owns that decision, including the availability test (the pin's docs are
 the oracle) and the guarantees a Direct write does NOT carry. Pick the primitive here; pick
 the anchor there. Neither choice changes the other.
+
+## The other half of a question — a SUBQUERY on the right-hand side
+
+Every row above compares a column against VALUES. A subquery makes the right-hand side the
+result of another `SELECT`, which is what reaches the questions no list of literals can
+answer — and what stops the shape this file exists to stop from reappearing one level down:
+a first query run only to collect ids, and a second one filtered by them, computed across two
+round trips and two snapshots.
+
+**Availability — shipped in framework v0.68.0, and the test is the mechanical one everything
+else here uses:** does the pin's docs carry a `criteria` section (equivalently, does `Sub`
+appear in its criteria vocabulary)?
+Present → everything below applies. Absent → the pin predates it and the honest answers are
+the old ones: a declared read join where the value is a field of an aggregate this row points
+AT, or two queries with the ids carried between them.
+
+**What it changes, said once.** The operator set does not grow: `eq`, `ne`, `gt`, `gte`,
+`lt`, `lte`, `in` and `nin` all take a subquery the moment the operand can be one. Only
+`Exists` / `NotExists` are genuinely new, because they have no left-hand side at all.
+
+- **`Sub(source)` opens the nested SELECT**, and the source is ONE table — so it takes a
+  reduced (Direct) schema, exactly as a read join's target does (`read-joins.md` owns that
+  rule; `direct-schema.md` owns the anchor it produces).
+- **It projects exactly one column** (`Select`, or `SelectCount`/`SelectMax`/`SelectMin`/
+  `SelectSum`/`SelectAvg`), carries its own `Where`, order, `Limit` and quantifier
+  (`Any()`/`All()`) — and `Exists` projects nothing, because the question is whether a row
+  is there.
+- **`Outer(field)` correlates**, and it is a VALUE rather than a builder, so every operator
+  that takes a value takes it for free. It reaches exactly ONE level — the immediately
+  enclosing scope — and a name that does not resolve there is refused rather than searched
+  further out.
+- **The archive gate rides along, unwritten.** A subquery starts on the active scope like
+  every other read: a source declaring an archive column carries its own `IS NULL` gate, one
+  that declares none carries nothing, and `IncludeArchived()` / `OnlyArchived()` are the
+  opt-outs under the same names as on the `Query`.
+- **It works in the predicate of a WRITE too** (`UpdateOne`, `Delete`, `Archive`, …). MySQL
+  is the one engine with a restriction and it is narrow — a statement may not read its own
+  target table in a subquery — and the framework refuses that case at compile time, naming
+  the engine.
+
+**Refused rather than silently wrong**, which is the part to design around: no projection or
+two, a `Select` on an `Exists`, a `Limit` with no order, an `Outer` that does not resolve one
+level up, a source that is not a reduced schema — and `NinSub` over a NULLABLE column, where
+SQL's `NOT IN` matches nothing at all the moment the set contains one NULL. That last one has
+an answer, not a workaround: `NotExists`.
+
+**It is an infrastructure API, not a wire vocabulary — say this out loud whenever the
+question arrives from the read side.** Only Go code builds a subquery. An end user's filter
+is still the request DTO's declared `filter:` allowlist, so the read-model filter operators
+are unchanged and nothing reaches `Sub` from HTTP, GraphQL or gRPC. A listing that must be
+narrowed by "has at least one active phone" is either a projected field on the view or a
+handler that asks this question on the write side — never a filter operator invented for it.
 
 ## What the choice does NOT change
 
@@ -89,7 +145,8 @@ pin ≥ v0.57.0).
 ## Confirm at the pin, always
 
 Names and shapes above are the vocabulary, not a version contract: which specs exist,
-whether several facts compute in one query, and the exact grouped API are the PINNED
-version's to state. Read `custom-command-handler.html` before writing the impl — an older
-pin without part of this surface falls back to the load-and-fold shape, and THAT is the
-only situation in which it is the right answer.
+whether several facts compute in one query, whether the criteria carries subqueries at all,
+and the exact grouped API are the PINNED version's to state. Read `custom-command-handler.html`
+(and `criteria.html`, where the pin has it) before writing the impl — an older pin without
+part of this surface falls back to the load-and-fold shape, and THAT is the only situation in
+which it is the right answer.

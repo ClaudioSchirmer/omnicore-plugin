@@ -7,7 +7,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.67.0" {
+	if Supported != "v0.68.0" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,25 +18,24 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.67.0", false, Exact, false},
-		{"same line, later patch", "v0.67.9", false, Exact, false},
-		{"framework moved ahead", "v0.68.0", false, Ahead, false},
-		// One line older. It reads Behind and blocks, and here the block is the
-		// posture rather than a missing symbol: v0.67.0 added only the Direct
-		// write's upsert scoping (write.OnUpdate, a stamp verb inside a
-		// wrapper), which the generator does not emit — so code emitted today
-		// still compiles on v0.66.0. Floor == ceiling anyway, because the golden
-		// gate proves ONE line and a second supported one is a second shape to
-		// keep proven; --force-unsupported is the escape hatch, and on this
-		// particular gap it is the cheap one. Older lines break for real:
-		// v0.65.0's TableSchema panics at boot on the StampedCounterField over
-		// *int64 a nullable `stamped: counter` emits, and v0.64.0 has no
-		// StampedTimeField / StampedCounterField at all and no
-		// `relational.clock` key. There is no "same line, earlier patch" case
-		// while the supported line is a .0 — the patch comparison is exercised
-		// by the later-patch row.
-		{"project is one line older", "v0.66.0", false, Behind, true},
-		{"project is two lines older", "v0.65.0", false, Behind, true},
+		{"the supported line", "v0.68.0", false, Exact, false},
+		{"same line, later patch", "v0.68.9", false, Exact, false},
+		{"framework moved ahead", "v0.69.0", false, Ahead, false},
+		// One line older, and on THIS bump the block is no longer a posture: a
+		// generated repository calls schemas.X().AsDirectSchema() on every read
+		// join's target, and that method does not exist before v0.68.0 — the
+		// tree does not compile, which is the honest failure the refusal
+		// forecasts. (Before it, the one-line-back gap was only the Direct
+		// write's upsert scoping, which the generator does not emit.) Older
+		// lines break for their own reasons: v0.65.0's TableSchema panics at
+		// boot on the StampedCounterField over *int64 a nullable
+		// `stamped: counter` emits, and v0.64.0 has no StampedTimeField /
+		// StampedCounterField at all and no `relational.clock` key. There is no
+		// "same line, earlier patch" case while the supported line is a .0 — the
+		// patch comparison is exercised by the later-patch row.
+		{"project is one line older", "v0.67.0", false, Behind, true},
+		{"project is one line older, later patch", "v0.67.1", false, Behind, true},
+		{"project is two lines older", "v0.66.0", false, Behind, true},
 		{"project is older", "v0.49.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},
 		{"devel", "(devel)", false, Unknown, false},

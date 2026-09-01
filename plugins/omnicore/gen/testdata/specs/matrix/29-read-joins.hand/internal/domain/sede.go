@@ -8,8 +8,9 @@ import "github.com/ClaudioSchirmer/omnicore/domain"
 // declara o proprio tipo, e a funcao de schema segue a convencao do projeto.
 type Sede struct {
 	domain.BaseEntity
-	Nome   string `labelKey:"SedeNomeField"`
-	Codigo string `labelKey:"SedeCodigoField"`
+	Nome     string     `labelKey:"SedeNomeField"`
+	Codigo   string     `labelKey:"SedeCodigoField"`
+	MatrizID *domain.ID `labelKey:"SedeMatrizIDField"`
 }
 
 func (e *Sede) Modes() []domain.EntityMode {

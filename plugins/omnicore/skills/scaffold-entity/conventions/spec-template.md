@@ -167,7 +167,10 @@ generator emits it).
   repository, `shared/read-joins.md`.) Two answers per traversal, and they are separate
   questions: WHICH columns it brings across, and whether the caller RECEIVES them or the
   field exists for the rules alone. Ask — a dev who does not know it exists will otherwise
-  ask for the column to be copied into this table.
+  ask for the column to be copied into this table. And when the value lives one aggregate
+  FURTHER out, across a key of that first target: that is a CHAIN (`joins[].then`), on a pin
+  that has one — same two questions per hop, plus the cost, which is a table on every read
+  this repository serves, `FindByID` included.
 - Filter/sort/search operators per field (low-risk — filled, shown):
 
 ## 10. Authorization                          [required — BOTH slots, a blank is invalid]

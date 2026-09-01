@@ -62,6 +62,7 @@ const (
 	CapGuardRule        Capability = "guard rules (a barrier that ends the validation pass once something has been rejected)"
 	CapRedactedField    Capability = "redacted fields (the real value stays in the column; every copy the framework makes of the row carries a mask)"
 	CapReadJoin         Capability = "read joins (reaching another aggregate across a foreign key: on the entity for the rules, and on a relational read model for filter/sort/projection)"
+	CapReadJoinChain    Capability = "chained read joins (a traversal continued past its target with then, to any depth: every hop's fields land on the same struct, absence follows the PATH, and the whole chain reports absent together)"
 	CapBodyRuntime      Capability = "body-sourced runtime fields (a value the caller sends that reaches the entity for a rule to check and never a column — a password confirmation)"
 	CapBypassMaySet     Capability = "a server-assigned scope that yields to the bypass (the operator crossing the row scope states which tenant a new row belongs to)"
 	CapManualRuntime    Capability = "manual runtime fields (the aggregate carries it, this generator fills it from nowhere, and no write DTO, command or OpenAPI schema mentions it — for a hand-written operation sharing a mode with a generated verb)"
@@ -115,6 +116,7 @@ var implemented = map[Capability]bool{
 	CapComputedRead:     true,
 	CapPerEntryComputed: true,
 	CapReadJoin:         true,
+	CapReadJoinChain:    true,
 	CapGuardRule:        true,
 	CapRedactedField:    true,
 	CapBodyRuntime:      true,
@@ -146,7 +148,7 @@ func AllCapabilities() []Capability {
 		CapMultiAggregate, CapStampedFilter, CapIdentityFilter,
 		CapCompositeVO,
 		CapManualVO, CapArchiveOnUpdate,
-		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapGuardRule,
+		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapReadJoinChain, CapGuardRule,
 		CapRedactedField, CapBodyRuntime, CapBypassMaySet, CapIdentityRuntime,
 		CapManualRuntime, CapRenderedRuntime,
 	}
@@ -169,6 +171,12 @@ func CheckCoverage(s *Spec) *Problems {
 
 	if len(s.Joins) > 0 {
 		uses(CapReadJoin, "joins", "read joins")
+	}
+	for i := range s.Joins {
+		if len(s.Joins[i].Then) > 0 {
+			uses(CapReadJoinChain, fmt.Sprintf("joins[%d].then", i), "a chained read join")
+			break
+		}
 	}
 	if s.Storage.Kind == "sharedbase-role" {
 		uses(CapSharedBase, "storage.kind", "a shared-base role")

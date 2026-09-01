@@ -12,6 +12,15 @@ correct one. Check the project's `go.mod` before offering it — and note that t
 no-domain-type rule below was settled INSIDE that line, so confirm it against the pin's
 `read-joins` rather than assuming an early v0.57 build enforces it.
 
+**Two later additions are held to the same mechanical test**, because the shape of the
+declaration DEPENDS on which of them the pin has, and a stamped version number drifts where
+a pin does not. Read the pin's own `read-joins` section:
+
+| Does it show… | Then the pin has | Shipped in | Owner below |
+|---|---|---|---|
+| `.Then(read.…)` on a declaration | **chains** — a traversal that continues past its target | v0.66.0 | *Continuing the traversal* |
+| `.AsDirectSchema()` on the argument | **the reduced target** — and it is then MANDATORY, not a style | v0.68.0 | *The target is ONE table* |
+
 ## What it is
 
 A read join is a **read-only traversal from one aggregate to another, across a foreign key
@@ -33,6 +42,36 @@ Three consequences, and each one is why the placement is what it is:
   many-valued form: a 1:N traversal would multiply the root's rows and break the paged
   read. "Bring the order's items" is a child collection, never a join.
 
+## The target is ONE table — the reduction, and why it is written down
+
+A traversal puts the target in the `FROM` as one table under one alias. So it takes a schema
+that **is** one table — a Direct schema — and any other kind is refused where it is
+DECLARED, with the message naming the reduction. Every schema becomes one at the call site,
+and the call site is the point: reducing there is what shows a reader that the target's
+children and satellites play no part in the traversal.
+
+- **What it costs in reach: nothing.** An aggregate root, an aggregate child, a role, a
+  shared base and a Direct schema all convert. The reduction returns a COPY limited to that
+  schema's own table — its columns, its id, its managed slots, its composite parts — and
+  leaves the schema it was called on untouched, so the same declaration keeps serving its
+  own repository, its view and its writes.
+- **Two kinds do not convert, and both fail loudly.** A SIBLING borrows its owner's primary
+  key, so on its own it is not a row source — and reducing the OWNER does not stand in for
+  it, because a facet's columns are declared on the facet and leave with it; read that table
+  standalone by declaring it as its own Direct anchor over the shared id column. An EXTERNAL
+  schema names an upstream service's mirrored collection, which is not a table on this
+  connection at all.
+- **What it PREVENTS is a declaration that used to be accepted.** Before it, a field naming
+  a column of the target's own SIBLING resolved — the target's satellites were merged on the
+  way in — and was then emitted qualified by the target's alias, where that column does not
+  exist. A SQL error on every read through that loader, `FindByID` included. So the rule
+  below ("the target's OWN columns only") stopped being advice and became the type.
+
+**On an upgrade this is the line that breaks.** Every existing declaration keeps compiling
+and stops booting: the refusal is raised at repository construction. The fix is mechanical
+and per call site — reduce the argument — and it is worth reading each one while there, since
+a declaration that only ever worked by reaching a satellite was reading the wrong column.
+
 ## The answer this file exists to change
 
 **A business rule that needs a value belonging to ANOTHER aggregate no longer has to copy
@@ -50,7 +89,11 @@ supplier's country, and it is not on this entity"*:
 1. Is there already a foreign key to that aggregate on this table (or on one of its
    collections)? → **declare the traversal.** Nothing is copied and nothing is synchronized.
 2. No foreign key, and the relationship is genuinely 1:N or many-to-many? → that is a child
-   collection or a separate query, not a join.
+   collection or a separate query, not a join. When the rule only needs to know WHETHER such
+   rows exist (or how many), that is a criteria subquery over the other table, which costs no
+   traversal at all — `query-primitives.md` owns it.
+   The value lives two aggregates out, across a second foreign key? → that is a CHAIN, below,
+   on a pin that has one.
 3. Needs to match on something other than the target's id (a code, a natural key)? → **not
    expressible.** The predicate is always `fk = target.id`. Model it as a real foreign key,
    or read it with the raw querier.
@@ -168,6 +211,44 @@ absent entirely under `,omitempty`). That distinction is the whole reason the fr
 insists on a pointer there — a non-nullable field would report a blank name where the truth
 is "there is no counterpart", and those are not the same answer.
 
+## Continuing the traversal — a chain
+
+A declaration used to reach exactly one aggregate. `.Then(...)` continues it from THAT
+aggregate to the next, and from there onward with no depth limit — how far a read reaches is
+the caller's decision, not the framework's. Two rules make everything else follow:
+
+- **A hop's foreign key belongs to the PREVIOUS target**, never to the entity that declared
+  the chain. Hop two crosses a column of hop one's table.
+- **Every hop's fields land on the SAME struct**, at any depth, under the names you choose —
+  which is possible for exactly the reason a one-hop field carries no domain type: the values
+  arrive read-only and belong to nobody here.
+
+A chain hangs off a root join or a collection's join alike, and every read that already
+served a one-hop join serves a chain: filter, order, the aggregate DSL, `?fields=`, the
+export and the relational read model.
+
+Three consequences worth knowing before declaring one:
+
+- **The block is atomic.** Two hops or more are emitted as a NESTED join, so a deeper `inner`
+  binds its own block instead of filtering the result set: `left(vendor).then(inner(owner))`
+  reads as "the vendor is optional, a vendor HAS an owner", and a root with neither still
+  comes back — with the WHOLE chain absent, hop one included. There is no half-filled chain.
+- **Nullability follows the PATH, not the hop.** One `left` anywhere above makes every field
+  below it a pointer, whatever the deeper hops declare. The `inner`-over-a-nullable-key
+  refusal narrows to match: it applies where the path is inner all the way — the case that
+  would drop roots — and not under a `left`, where the block simply does not match.
+- **The cost is per hop, on every read through that loader.** A chain declared on an
+  AGGREGATE repository logs one advisory per chain at boot for exactly that reason: those
+  tables ride `FindByID` too, which is the load the write-side handlers go through. Where the
+  reach is only ever READ, the honest home is a Direct repository — which is what the advisory
+  suggests, and which logs nothing at any depth (`direct-schema.md`).
+
+**The generator expresses it**: `then:` under a `joins[]` entry, nested to any depth, with
+the hop's `on` naming a column of the previous target. It warns once — the same thing the
+boot advisory says — and refuses what the framework would panic on: a hop that names a
+collection, a key that is not on the previous target's own table, and an `inner` over a
+nullable key while the path is inner all the way.
+
 ## From a collection — and why it is load-only
 
 A traversal may also hang off one of the root's **own** collections: the foreign key is the
@@ -210,9 +291,13 @@ collection's, and the fields land on the entry.
 
 ## The line to hold when someone asks for more
 
-A read join is not a query language. It reaches ONE table, across ONE declared foreign key,
-by that table's id, bringing back scalars. Aggregating over the other side, matching on a
-non-id column, reaching two hops, or pulling a collection are all outside it — and the
-honest answers are, respectively: the aggregate DSL on the loader (`query-primitives.md`), a
-real foreign key, a second join declared on the intermediate aggregate, and a child
-collection or a Mongo composition. Say which one applies; never approximate it with a join.
+A read join is not a query language. Each hop reaches ONE table, across ONE declared foreign
+key, by that table's id, bringing back scalars. Aggregating over the other side, matching on
+a non-id column, filtering the root by the rows that point BACK at it, or pulling a
+collection are all outside it — and the honest answers are, respectively: the aggregate DSL
+on the loader (`query-primitives.md`), a real foreign key, a criteria subquery
+(`query-primitives.md` — a 1:N reverse filter is `Exists` over the child table, not a
+traversal), and a child collection or a Mongo composition. Depth is the one that MOVED: a
+second and third aggregate are a chain on a pin that has `.Then(...)`, and a second join
+declared on the intermediate aggregate on one that does not. Say which one applies; never
+approximate it with a join.
