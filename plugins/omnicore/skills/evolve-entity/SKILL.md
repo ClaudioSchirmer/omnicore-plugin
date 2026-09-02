@@ -164,7 +164,7 @@ of deletion):
    memory. **When item 9's gateway lands on the generator**, annotate each artifact with
    who writes it — generator-owned (regenerated from the spec YAML, never hand-edited) ·
    a `_manual` hook · hand-written on either path (the migration pair, `microservice.*.yaml`,
-   the proto contract, other entities' views, `specs/qa/*.sh`) — and add the spec YAML itself to
+   the proto contract, other entities' views, `qa/*.sh`) — and add the spec YAML itself to
    the list, since editing it IS the change on that path.
 3. **Migration strategy** [high-risk]: additive ALTER vs rename (a "rename" is really
    rename-in-place vs drop+add+backfill — data decides) vs drop. NOT NULL on existing
@@ -239,7 +239,7 @@ of deletion):
    real translations; removed keys leave no orphans.
 7. **Tests** — which existing tests change and why (rule changed ⇒ test changes with it,
    shown here, not discovered later), which new branches need coverage. **The project's
-   generated contract QA (`specs/qa/*.sh`, runner, fixtures) is an entity-shaped artifact,
+   generated contract QA (`qa/*.sh`, runner, fixtures) is an entity-shaped artifact,
    not a frozen oracle**: a deliberate contract change breaks it BY DESIGN — plan its
    update (or a regeneration via `/omnicore:qa`) here, explicitly; that planned update
    is not the "edit a test to pass" sin, silence about it is.
@@ -295,7 +295,7 @@ of deletion):
    > BY HAND — by me, against the shape the generator's report prints. Same for the
    > invariants the spec language cannot express (they live in hook files it never touches)
    > and their tests, and for everything outside its ownership: `microservice.*.yaml`, the
-   > proto contract, views of other entities, `specs/qa/*.sh`. I then review the output against
+   > proto contract, views of other entities, `qa/*.sh`. I then review the output against
    > this spec, read the report, and prove it with build + vet + tests + a real boot.
    > That review reads the emitted code against the spec that produced it, not just for
    > plausibility — the generator can be wrong too, and its mistakes compile. If I find
@@ -384,7 +384,7 @@ The order is not the manual one, and the difference is the point:
 8. **Implement the hooks and everything outside its ownership** — the `_manual` rule and
    fact stubs (an unwritten rule leaves an invariant unenforced and the service runs on; an
    unwritten fact PANICS the moment a rule asks for it), plus `microservice.*.yaml`, the
-   proto contract and its stubs, views of OTHER entities embedding this one, `specs/qa/*.sh`, and
+   proto contract and its stubs, views of OTHER entities embedding this one, `qa/*.sh`, and
    the tests for everything you wrote by hand.
 9. **Review the tree against THIS spec** (omnicore-gen Step 7): the emitted rules against
    what the change was meant to mean, the DDL, authz, the read side. Anything wrong is

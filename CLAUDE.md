@@ -121,7 +121,10 @@ and the convention is stale — fix it, and say so in `CHANGELOG.md`.
 
 **Everything a skill writes into a consumer project goes under `specs/`**, one
 directory per skill — including the generator's, at `specs/omnicore-gen/`
-(`internal/layout` is where that path is decided, once). A new skill that writes
+(`internal/layout` is where that path is decided, once). The single exception is
+`/omnicore:qa`'s EXECUTABLE suite — one `qa/run.sh` calling every `qa/<entity>.sh`,
+at the project ROOT — because it is RUN by a dev and by CI rather than read; its
+plan stays at `specs/qa/plan.md`. A new skill that writes
 anything picks `specs/<its-own-name>/` and is added to the table in
 `plugins/omnicore/shared/generated-documents.md`, which is the contract for both
 halves of the rule: where documents live, and that they are committed rather than
