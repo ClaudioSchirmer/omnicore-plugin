@@ -7,6 +7,28 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.58.0] — 2026-09-01
+
+The QA suite is a command, not a document — so it stops being filed with the decisions.
+
+### Changed
+
+- **`/omnicore:qa` writes its EXECUTABLE suite to `qa/` at the project root** — one
+  `qa/run.sh` plus `qa/<entity>.sh`, `chmod +x` — while the plan stays at
+  `specs/qa/plan.md`. Everything else the tooling writes is READ, by the next dev or the
+  next run; the suite is RUN, by a dev on their machine and by CI, and `specs/qa/run.sh`
+  buried it two levels down from the root it has to `cd` back to. The runner's root
+  resolution moves with it (`cd "$(dirname "$0")/.."`), and a project carrying an older
+  suite under `specs/qa/` has it MOVED rather than duplicated. `shared/generated-documents.md`
+  now states this as the single, reasoned exception to the `specs/` prefix instead of
+  leaving the suite silently in violation of it.
+- **The runner contract says out loud that there is exactly ONE runner and it calls every
+  suite.** `qa/run.sh` owns an explicit, deterministic lane list, takes an optional subset
+  argument (`./qa/run.sh person employee`) as a convenience on the same entry point, and
+  never gets a rival script beside it. The final gate now reconciles the lanes as well as
+  the coverage matrix: `ls qa/*.sh` minus `run.sh` must equal the lane list, because a
+  script no lane names is a suite that silently proves nothing.
+
 ## [0.57.0] — 2026-09-01
 
 A fact's answer shapes stop being files. Three lines of Go under twenty-six lines of

@@ -4,8 +4,8 @@ description: >-
   omnicore: generate and run a CONTRACT QA SUITE for an omnicore-based service — read the
   project's entities, views, surfaces and infra posture, derive the framework's promised
   behaviors from the pinned docs (verb set per mode, status codes, archive semantics,
-  filter vocabulary, typed 400s), and produce an executable e2e suite (specs/qa/*.sh + a
-  runner) that PROVES them against the running service. Use when the dev wants e2e tests,
+  filter vocabulary, typed 400s), and produce an executable e2e suite (qa/*.sh + a runner,
+  at the project root) that PROVES them against the running service. Use when the dev wants e2e tests,
   contract tests, a QA suite, smoke tests, or to "prove the service works". Only for
   projects that import github.com/ClaudioSchirmer/omnicore.
 ---
@@ -18,8 +18,12 @@ surfaces), derives what the PINNED framework therefore promises, and generates a
 executable contract suite that exercises those promises against the real running
 service — then runs it and reports GREEN/RED honestly.
 
-**Every document this run writes lands under `specs/`, and the project keeps it —
-never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+**Two destinations, one rule.** The PLAN — the decision record — lands under
+`specs/qa/` like every other skill's document. The EXECUTABLE SUITE — `run.sh` and the
+per-entity scripts — lands in **`qa/` at the PROJECT ROOT**: it is not a document to
+read, it is a command a dev and a CI job RUN, and it belongs where they look for it.
+Both are part of the project and the project keeps them — **never add either to
+`.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
 ## Generated code is a shortcut, not the source of truth
 
@@ -75,8 +79,8 @@ cannot change it."* That sentence is false.
   project's rules apply.
 - **User language for talk, English for artifacts** — converse in the dev's language;
   generated scripts, case names and comments in English like the rest of the codebase.
-- **This skill writes ONLY under `specs/qa/`** — never application code, never yaml, never
-  migrations. A case that can't pass because the SERVICE is wrong is a finding to
+- **This skill writes ONLY under `specs/qa/` (the plan) and `qa/` (the runnable
+  suite)** — never application code, never yaml, never migrations. A case that can't pass because the SERVICE is wrong is a finding to
   report (route `doctor` / the owning skill), never something to "fix" by weakening
   the case. **Never edit a case to pass — the suite is the oracle.**
 
@@ -132,8 +136,10 @@ Map what the service declares — this inventory IS the test surface:
   assertable and both are worth asserting — a served field must come back with the
   counterpart's value, and a rules-only one must appear in NO response body and in no
   export. The second is the case nobody writes and the one that catches a leak.
-- **Existing `specs/qa/`**: if the project already has a suite, mirror its conventions and
-  EXTEND it — never generate a parallel second style.
+- **Existing `qa/`**: if the project already has a suite, mirror its conventions and
+  EXTEND it — never generate a parallel second style. An older run that put the scripts
+  under `specs/qa/` is the SAME suite in the wrong place: MOVE it to `qa/` (fixing the
+  root resolution as you go — see the runner contract) rather than leaving two homes.
 
 ## Phase 1 — Plan gate: `specs/qa/plan.md`
 
@@ -183,7 +189,7 @@ Map what the service declares — this inventory IS the test surface:
    live. Options, stated honestly: run against the DEV profile bench with
    uniquely-suffixed records the suite archives at the end (residue: archived rows) ·
    a dedicated throwaway database selected by a SUITE-OWNED config file (generated
-   under `specs/qa/`, picked via `OMNICORE_CONFIG_PATH` — that is how a "dedicated profile"
+   under `qa/` beside the runner, picked via `OMNICORE_CONFIG_PATH` — that is how a "dedicated profile"
    respects this skill's never-touch-the-project-yaml rule) · SQLite `:memory:`
    (only if the service already runs so). Never silently write into a database the
    dev cares about. **And state HOW state resets between runs/cases** — exact-count
@@ -203,10 +209,18 @@ Map what the service declares — this inventory IS the test surface:
    (receiver → effect, dedup via `omnicore_integration_processed`); without a live
    relay, mark the delivery half `⚠️ OPEN` honestly instead of silently dropping the
    capability from the contract.
-5. **Runner contract**: `specs/qa/run.sh` **resolves the project root from its own
-   location** — `cd "$(dirname "$0")/../.."` as its first act, and every suite does the
+5. **Runner contract**: **there is exactly ONE runner — `qa/run.sh` — and it calls
+   EVERY suite.** Never a second entry point, never one runner per entity: the dev
+   learns a single command (`./qa/run.sh`) and CI wires a single line, and the list of
+   lanes lives inside it (an explicit array of suite names, in a deterministic order,
+   so what runs is readable in one place) with an optional argument to run a SUBSET
+   (`./qa/run.sh person employee`) — the subset is a convenience on the same runner,
+   never a rival script. Adding a suite means adding its name to that list in the same
+   change that creates the file; a `.sh` no lane names is a suite nobody runs.
+   It **resolves the project root from its own
+   location** — `cd "$(dirname "$0")/.."` as its first act, and every suite does the
    same — so `devops/docker-compose.yml`, `migrations/` and the build all resolve no
-   matter which directory the dev invoked it from. The suite lives two levels down;
+   matter which directory the dev invoked it from. The suite lives one level down;
    a path written as if the CWD were the root is a suite that only runs one way. It
    executes suites **fail-fast by default** (first
    RED stops the run; an explicit flag for the exhaustive sweep), prints per-suite
@@ -223,7 +237,11 @@ Map what the service declares — this inventory IS the test surface:
 
 ## Phase 2 — Generate + execute
 
-1. Generate `specs/qa/<entity>.sh` per entity + `specs/qa/run.sh` per the approved plan. Style:
+1. Generate `qa/<entity>.sh` per entity + the SINGLE `qa/run.sh` that calls them all,
+   per the approved plan, at the PROJECT ROOT (`chmod +x` every one — a suite the dev
+   cannot execute is not delivered); the plan stays at `specs/qa/plan.md`. Every
+   generated `.sh` must appear in the runner's lane list before this step is done.
+   Style:
    plain POSIX-friendly bash + `curl` (+ the project's own tooling for GraphQL/gRPC
    when enabled — `grpcurl` only if available, else mark those cases SKIPPED loudly);
    each case prints its name, expectation and verdict; a failed assertion shows the
@@ -246,14 +264,17 @@ Map what the service declares — this inventory IS the test surface:
    confirm the relay
    reached streaming BEFORE any CDC-dependent case, else those cases report a bench
    problem, not a service failure.
-4. Execute `specs/qa/run.sh`. Report the real counts.
+4. Execute `qa/run.sh` — the one runner, whole. Report the real counts.
 
 ## Final verify (the gate)
 
 0. **Reconcile contract** (`${CLAUDE_PLUGIN_ROOT}/shared/verify-contract.md`) — walk
    the plan's coverage matrix item by item: every promised case family exists in the
    generated suite and RAN; an unimplemented family is RED or an explicit dev-accepted
-   deviation.
+   deviation. **And reconcile the lanes**: `ls qa/*.sh` minus `run.sh` must equal the
+   runner's lane list exactly — a script on disk that the runner never calls is a
+   suite that silently proves nothing, and a lane naming a missing file breaks the
+   run for everyone.
 1. **The suite is honest**: pick one generated case, break its expectation manually
    (e.g. assert 200 where the service returns 409), run it, watch it FAIL, restore it.
    A suite that cannot fail proves nothing — this meta-case is mandatory.
@@ -262,7 +283,8 @@ Map what the service declares — this inventory IS the test surface:
    in the suite).
 3. **Residue as planned**: whatever §2 of the plan promised about data is what
    actually remains; say what was left and where.
-4. Leave `specs/qa/plan.md` in place; offer `/omnicore:run` if the dev wants the service
+4. Leave `specs/qa/plan.md` and the `qa/` suite in place, and tell the dev the one
+   command that re-runs it (`./qa/run.sh` from the project root); offer `/omnicore:run` if the dev wants the service
    kept up for manual poking.
 
 ## Knowledge routing — question → source
@@ -281,7 +303,8 @@ Map what the service declares — this inventory IS the test surface:
 
 ## What this skill never does
 
-- Touch anything outside `specs/qa/` — no application code, no yaml, no migrations.
+- Touch anything outside `specs/qa/` (the plan) and `qa/` (the suite) — no application
+  code, no yaml, no migrations.
 - Weaken or delete a case to make a run green.
 - Invent tokens, credentials or endpoints.
 - Claim coverage it didn't run — SKIPPED is printed as SKIPPED, never folded into
