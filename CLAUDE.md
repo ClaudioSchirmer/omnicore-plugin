@@ -124,7 +124,8 @@ directory per skill — including the generator's, at `specs/omnicore-gen/`
 (`internal/layout` is where that path is decided, once). The single exception is
 `/omnicore:qa`'s EXECUTABLE suite — one `qa/run.sh` calling every `qa/<entity>.sh`,
 at the project ROOT — because it is RUN by a dev and by CI rather than read; its
-plan stays at `specs/qa/plan.md`. A new skill that writes
+plan stays at `specs/qa/<suite>/plan.md`, and its run OUTPUT (`qa/qa-report.md`,
+`qa/.logs/`) is an artifact rather than a document. A new skill that writes
 anything picks `specs/<its-own-name>/` and is added to the table in
 `plugins/omnicore/shared/generated-documents.md`, which is the contract for both
 halves of the rule: where documents live, and that they are committed rather than

@@ -123,8 +123,12 @@ of this skill: a field group repeated across two requested entities, or an entit
 described as covering a real-world asset other entities will also cover, is invisible to
 per-entity runs and obvious here.
 
-Copy `conventions/domain-map-template.md` VERBATIM to `specs/scaffold-system/domain-map.md`
-and fill EVERY slot. Completeness is STRUCTURAL: a section that doesn't apply stays,
+Copy `conventions/domain-map-template.md` VERBATIM to
+`specs/scaffold-system/<system>/domain-map.md` — `<system>` is the kebab name of the
+system this drop maps (`billing`, `school-core`), defaulting to the service name in
+`specs/scaffold-service/spec.md` and confirmed with the dev; a later drop that maps a
+DIFFERENT system gets its own directory rather than overwriting this one — and fill EVERY
+slot. Completeness is STRUCTURAL: a section that doesn't apply stays,
 marked `N/A — <why>`; a decision only the dev can make is `⚠️ OPEN: <question>`; a
 blank slot is a visible defect, and delegation cannot start while one exists. Reasoning
 per section:
@@ -204,13 +208,14 @@ in §7 order, same rules (one per invocation, mark the row, conflicts surface). 
 framework capability is delegated to **`/omnicore:implement`** (it routes the item
 against the pin's docs and runs its own plan gate), same one-per-invocation rules.
 Then the single wrap-up offer: boot the service and click through? Yes → delegate to
-**`/omnicore:run`** (never boot inline). Leave `specs/scaffold-system/domain-map.md` and every
+**`/omnicore:run`** (never boot inline). Leave `specs/scaffold-system/<system>/domain-map.md` and every
 delegated run's spec folder in place — together they are the review trail of the whole
 system.
 
 ## Re-entry — a map already exists
 
-`specs/scaffold-system/domain-map.md` present: `Status: DRAFT` → reopen the Phase 1 gate with
+`specs/scaffold-system/*/domain-map.md` present (read every one — an earlier drop may
+already own an entity this one names): `Status: DRAFT` → reopen the Phase 1 gate with
 what's already answered. `Status: APPROVED` → resume Phase 2 at the first row not marked
 `scaffolded`. A changed answer reopens the map; if the change invalidates an entity
 already scaffolded, that is an `evolve-entity` job on that entity — flagged in the map,

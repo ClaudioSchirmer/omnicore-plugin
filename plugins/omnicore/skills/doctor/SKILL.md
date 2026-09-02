@@ -286,6 +286,7 @@ for concepts this table doesn't list.
 | cache silently degraded (failMode, lazy connect, log anchors) | cache-subsystem |
 | probes / liveness / readiness semantics | bootstrap · reference |
 | tracing / shutdown behavior | tracing |
+| **a 500 on a by-id route, or on an ordinary filter** (`?age=abc`, `?someId=lixo`), where the SAME request answers 404/400 against a Mongo-backed view or a newer pin. Since **v0.70.0** the refusal happens at the wire, before the handler: a malformed `:id` is 404 `UnknownIDAddressNotification` on a read and 400 `MalformedIDNotification` on a write, and a filter value outside the leaf's declared kind is 400 `InvalidFilterValueNotification`. So the suspects are a pin below v0.70.0 (a relational backing reached the driver — SQLSTATE 22P02 on Postgres, a uuid-codec failure elsewhere), or a HAND-WRITTEN handler still on the two-value `fwweb.BindPath` — the auto wrappers got the guard for free, a manual one has to return `fwweb.RespondViolation` | status-mapping · auto-handlers · auto-query-handlers |
 | error envelopes / status codes seen by clients | status-mapping |
 | gRPC surface trouble | grpc |
 | GraphQL surface trouble | graphql |

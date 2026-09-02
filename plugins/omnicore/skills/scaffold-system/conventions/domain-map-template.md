@@ -1,6 +1,6 @@
 # conventions/domain-map-template.md — the Phase 1 domain map skeleton
 
-Copy VERBATIM to `specs/scaffold-system/domain-map.md`, then fill. Rules: every section
+Copy VERBATIM to `specs/scaffold-system/<system>/domain-map.md`, then fill. Rules: every section
 stays (inapplicable → `N/A — <why>`); a decision only the dev can make is
 `⚠️ OPEN: <question>`; high-risk picks carry `(proposed)` + the alternative(s) beside
 them; NO code and NO field-level detail beyond what's needed to place a field group on

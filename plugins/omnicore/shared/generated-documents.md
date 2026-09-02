@@ -21,7 +21,7 @@ lands in `qa/` at the root, not under `specs/`. Everything else the tooling writ
 is READ — by the next dev, the next run, a reviewer; the suite is RUN, by a dev on
 their machine and by CI, and a runnable command belongs beside the other things
 the root offers, not filed with the decisions. Its plan still goes to
-`specs/qa/plan.md`, because a plan is a decision like any other.
+`specs/qa/<suite>/plan.md`, because a plan is a decision like any other.
 
 **Not `docs/`.** That name is reserved for the project's own documentation,
 written for its end users. `specs/` is for the tooling's documents, which have a
@@ -31,7 +31,7 @@ lifetime.
 | Skill | Where it writes |
 |---|---|
 | `/omnicore:scaffold-service` | `specs/scaffold-service/spec.md` |
-| `/omnicore:scaffold-system` | `specs/scaffold-system/domain-map.md` |
+| `/omnicore:scaffold-system` | `specs/scaffold-system/<system>/domain-map.md` |
 | `/omnicore:scaffold-entity` | `specs/scaffold-entity/<entity>/` |
 | `/omnicore:evolve-entity` | `specs/evolve-entity/<entity>/` |
 | `/omnicore:remove-entity` | `specs/remove-entity/<entity>/` |
@@ -40,7 +40,7 @@ lifetime.
 | `/omnicore:implement` | `specs/implement/<slug>/` |
 | `/omnicore:configure` | `specs/configure/plan.md` |
 | `/omnicore:upgrade` | `specs/upgrade/migration-plan.md`, `specs/upgrade/rollback/` |
-| `/omnicore:qa` | `specs/qa/plan.md` — the plan. **Its one exception:** the EXECUTABLE suite (`qa/run.sh` + `qa/<entity>.sh`) goes to `qa/` at the project root — a command the dev and CI run, not a document they read |
+| `/omnicore:qa` | `specs/qa/<suite>/plan.md` — the plan. **Its one exception:** the EXECUTABLE suite (`qa/run.sh` + `qa/<entity>.sh`) goes to `qa/` at the project root — a command the dev and CI run, not a document they read. Its OUTPUT (`qa/qa-report.md`, `qa/.logs/`) is an artifact, not a document — see *What IS ignored* |
 | `omnicore-gen` (the generator) | `specs/omnicore-gen/` — the specs, their reports, the lock |
 
 A skill needing a shape not listed here still writes it under
@@ -59,7 +59,7 @@ Not just prose — anything the tooling writes that a human or a later run READS
 
 | | |
 |---|---|
-| `specs/scaffold-service/`, `specs/scaffold-entity/<entity>/`, `specs/evolve-entity/<entity>/`, `specs/remove-entity/<entity>/`, `specs/scaffold-view/<view>/`, `specs/evolve-view/<view>/`, `specs/implement/<capability>/`, `specs/scaffold-system/` | the approved model (`spec.md`) and the plan + status (`tasks.md`, `task_<layer>.md`) |
+| `specs/scaffold-service/`, `specs/scaffold-entity/<entity>/`, `specs/evolve-entity/<entity>/`, `specs/remove-entity/<entity>/`, `specs/scaffold-view/<view>/`, `specs/evolve-view/<view>/`, `specs/implement/<capability>/`, `specs/scaffold-system/<system>/`, `specs/qa/<suite>/` | the approved model (`spec.md`) and the plan + status (`tasks.md`, `task_<layer>.md`) |
 | `specs/omnicore-gen/<entity>.omnicore.yaml` | the generator's source of truth — the code is derived FROM it, so losing it inverts the dependency |
 | `specs/omnicore-gen/<entity>.gen-report.md` | what still needs implementing and what to check; the hand-off |
 | `specs/omnicore-gen/lock.json` | which files the generator owns, their hashes, the migration ordinals it already spent, and any adopted edit — without it a regeneration re-allocates ordinals and forgets every refusal |
@@ -82,7 +82,15 @@ Not just prose — anything the tooling writes that a human or a later run READS
 
 Local, rebuildable state — never a document: binaries, `go.work*`, `.env*`,
 OS/editor files, `devops/` data dirs, the SQLite sidecars (`app.db`,
-`app.db-wal`, `app.db-shm`).
+`app.db-wal`, `app.db-shm`), and the QA runner's own output — `qa/qa-report.md`
+and `qa/.logs/` — which is the RESULT of running the suite, not a decision about
+it: `./qa/run.sh` writes it again from scratch every time. The suite is the
+document; its last verdict is an artifact.
+
+Ignorable is not the same as ignored: the rule above still holds — **no skill
+edits `.gitignore`**. `qa` names the report at hand-off and OFFERS those two
+lines; whether they go in is the dev's call, and a team that wants the last
+verdict visible in the repository is not doing anything wrong.
 
 The test: **would running a command reproduce it byte for byte?** A binary, yes —
 ignore it. A decision, no — nothing regenerates it, and it is not in the code.

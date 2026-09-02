@@ -7,7 +7,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.69.0" {
+	if Supported != "v0.70.0" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,23 +18,29 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.69.0", false, Exact, false},
-		{"same line, later patch", "v0.69.9", false, Exact, false},
-		{"framework moved ahead", "v0.70.0", false, Ahead, false},
-		// One line older, and on THIS bump the block stays a real failure rather
-		// than a posture: a field declared `assignedFrom: client-ip` emits
-		// ctx.ClientIP(), which AppContext does not answer before v0.69.0, so the
-		// tree does not compile — the honest failure the refusal forecasts. The
-		// line before that had its own: v0.67.0 has no AsDirectSchema(), which
-		// every read join target goes through; v0.65.0 TableSchema panics at
-		// boot on the StampedCounterField over *int64 a nullable
-		// `stamped: counter` emits; and v0.64.0 has no StampedTimeField /
-		// StampedCounterField at all and no `relational.clock` key. There is no
-		// "same line, earlier patch" case while the supported line is a .0 — the
-		// patch comparison is exercised by the later-patch row.
-		{"project is one line older", "v0.68.0", false, Behind, true},
-		{"project is one line older, later patch", "v0.68.9", false, Behind, true},
-		{"project is two lines older", "v0.67.0", false, Behind, true},
+		{"the supported line", "v0.70.0", false, Exact, false},
+		{"same line, later patch", "v0.70.9", false, Exact, false},
+		{"framework moved ahead", "v0.71.0", false, Ahead, false},
+		// One line older, and on THIS bump the block is a POSTURE rather than a
+		// compile break — worth saying, because the two previous bumps were the
+		// opposite and the refusal reads the same either way. v0.70.0 moved the
+		// by-id and filter-value refusals INTO the fwweb wrappers the emitters
+		// already call, so the emitted tree still builds on v0.69.0; what it
+		// loses is the CONTRACT the generated suite asserts — a malformed `:id`
+		// answers 500 on a relational backing instead of 404/400, and a filter
+		// value outside the leaf's kind answers 500 instead of 400. The lines
+		// below it are still hard failures: v0.68.0 has no client-ip on
+		// AppContext, which `assignedFrom: client-ip` emits; v0.67.0 has no
+		// AsDirectSchema(), which every read join target goes through; v0.65.0
+		// TableSchema panics at boot on the StampedCounterField over *int64 a
+		// nullable `stamped: counter` emits; and v0.64.0 has no
+		// StampedTimeField / StampedCounterField at all and no
+		// `relational.clock` key. There is no "same line, earlier patch" case
+		// while the supported line is a .0 — the patch comparison is exercised
+		// by the later-patch row.
+		{"project is one line older", "v0.69.0", false, Behind, true},
+		{"project is one line older, later patch", "v0.69.9", false, Behind, true},
+		{"project is two lines older", "v0.68.0", false, Behind, true},
 		{"project is older", "v0.49.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},
 		{"devel", "(devel)", false, Unknown, false},
