@@ -12,16 +12,16 @@ The line it draws is the point: the repository root holds the SERVICE (its Go
 packages, its migrations, its devops, its `qa/` suite), and `specs/` holds what
 was DECIDED about it — the approved model, the plan, the generator's spec, the QA
 plan. A reader who opens the root sees what RUNS; a reader who opens `specs/`
-sees intent.
+sees intent. Before this, eight working dirs sat at the root interleaved with
+`internal/`, `bootstrap/` and `migrations/`, and telling one from the other meant
+already knowing which names belonged to the tooling.
 
 **The one exception, and the reason for it:** `/omnicore:qa`'s executable suite
 lands in `qa/` at the root, not under `specs/`. Everything else the tooling writes
 is READ — by the next dev, the next run, a reviewer; the suite is RUN, by a dev on
 their machine and by CI, and a runnable command belongs beside the other things
 the root offers, not filed with the decisions. Its plan still goes to
-`specs/qa/plan.md`, because a plan is a decision like any other. Before this, eight working dirs sat at the root
-interleaved with `internal/`, `bootstrap/` and `migrations/`, and telling one
-from the other meant already knowing which names belonged to the tooling.
+`specs/qa/plan.md`, because a plan is a decision like any other.
 
 **Not `docs/`.** That name is reserved for the project's own documentation,
 written for its end users. `specs/` is for the tooling's documents, which have a
