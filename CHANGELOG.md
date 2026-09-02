@@ -24,11 +24,35 @@ domain type earning its own file — it is a fact's name spelled into a director
   one line before the signature that reads them. A service with two such facts added two
   files to `internal/domain/` whose names were the longest in the package and whose content
   was 90% banner.
+- **The derivations behind computed read fields move to
+  `internal/application/queries/utils/<entity>_computed_manual.go`** (package `utils`,
+  imported as `qryutils`). The seat rule has always been that `utils/` holds the functions
+  several files call — and a derivation is called by the reads AND by every write that
+  answers with the record, which is what makes a POST and a GET render one value. Sitting
+  in the `queries` package itself, the only way the write side could reach it was to import
+  the entity's whole read package: `insert_<entity>_command.go` depended on every query of
+  the entity to call one function. Both sides now import a leaf. The gen-report names the
+  new path, since the report is where the author is told where to write the body.
 - **Regenerating leaves the old files behind, and `omnicore-gen prune` removes them.** They
   are recorded in the lock, no longer emitted, and unchanged since they were written — the
   verdict is `delete`, and the plan says so before anything is removed. A project that ran
   `generate` and stopped there keeps two files nothing references; they compile, and they
   mean nothing.
+
+### ⚠️ Upgrading a project that already has computed fields
+
+The derivation hook is a HOOK: written once, never rewritten, and by now it holds your
+bodies. Regenerating creates an EMPTY one at the new path and leaves yours where it was —
+in `package queries`, with nothing calling it. That tree still compiles, and every computed
+field renders absent. `prune` will not clean it either: a hook whose hash no longer matches
+what the generator wrote is reported and left alone, which is the rule that protects your
+work everywhere else.
+
+So the move is yours to make, once per entity: `git mv
+internal/application/queries/<entity>_computed_manual.go internal/application/queries/utils/`,
+change its `package queries` line to `package utils`, and delete the empty one the run
+created. The generator writes the call sites — both the reads and the writes — pointing at
+the new seat.
 
 ### Added
 

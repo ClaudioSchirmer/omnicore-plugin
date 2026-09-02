@@ -135,6 +135,133 @@ func TestThePerEntrySeatFollowsTheEntrysPointerDiscipline(t *testing.T) {
 	}
 }
 
+// TestTheDerivationsLiveInQueriesUtils is about the SEAT, and the seat is the
+// whole reason this file is not in the queries package.
+//
+// A derivation is called by the reads and by every write that answers with the
+// record — that is what makes one surface unable to render a different value
+// than another. While the hook sat in `queries`, the way the write side reached
+// it was to import the entire queries package of the entity: a command
+// depending on every read, for one function. `utils/` is the seat for exactly
+// that shape, and both sides now import a leaf.
+func TestTheDerivationsLiveInQueriesUtils(t *testing.T) {
+	m := childComputedModel(t)
+	files := emitAll(t, m)
+
+	hook := emittedBody(t, files, computedHookFile(m))
+	if !strings.HasPrefix(computedHookFile(m), "internal/application/queries/utils/") {
+		t.Fatalf("the hook is not under queries/utils: %s", computedHookFile(m))
+	}
+	if !strings.Contains(hook, "\npackage utils\n") {
+		t.Errorf("the hook must declare the package of the directory it is in:\n%s", hook)
+	}
+
+	// The reads call it QUALIFIED now: same package no longer.
+	read := emittedBody(t, files, "internal/application/queries/find_cesta_e_by_id_query.go")
+	if !strings.Contains(read, `qryutils "example.test/svc/internal/application/queries/utils"`) {
+		t.Errorf("the read does not import the derivations it calls:\n%s", read)
+	}
+	if !strings.Contains(read, "qryutils.ComputeCestaELinhaERotulo(ctx,") {
+		t.Errorf("the read calls the derivation unqualified, which no longer resolves:\n%s", read)
+	}
+
+	// And the write side reaches the leaf instead of the whole queries package.
+	for _, f := range files {
+		if !strings.HasPrefix(f.Path, "internal/application/commands/") ||
+			!strings.HasSuffix(f.Path, ".go") {
+			continue
+		}
+		body := string(f.Content)
+		if strings.Contains(body, `"example.test/svc/internal/application/queries"`) {
+			t.Errorf("%s imports the whole queries package — that dependency is what "+
+				"moving the derivations was for", f.Path)
+		}
+	}
+}
+
+// rootComputedSpec derives at the ROOT, which is the half a per-entry fixture
+// cannot show: only a root derivation reaches the WRITE side, where the same
+// function fills the Result of a POST that answers with the record.
+const rootComputedSpec = `
+specVersion: 1
+entity: Ficha
+plural: Fichas
+language: pt-BR
+storage:
+  kind: flat
+  table: fichas
+  description: Fichas.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 40, livesOn: root, example: "Ana", description: O nome.}
+  - {name: Apelido, type: string, column: apelido, length: 40, livesOn: root, example: "Aninha", description: O apelido.}
+modes: [display, insert, update]
+update: {shape: both}
+read:
+  backing: relational
+  view: {name: fichas}
+  byId: true
+  byParams:
+    filters:
+      - {field: Nome, ops: [eq]}
+    controls: {pagination: true}
+  computed:
+    - name: Rotulo
+      type: string
+      from: [Nome, Apelido]
+      example: "Ana (Aninha)"
+      description: O rótulo.
+surfaces: {rest: true}
+authz:
+  resource: ficha
+  dataAccess: anyone-with-permission
+  permissions: {insert: "ficha:escrever", update: "ficha:escrever", patch: "ficha:escrever", read: "ficha:ler"}
+`
+
+func rootComputedModel(t *testing.T) *ir.Model {
+	t.Helper()
+	s, err := spec.Parse([]byte(rootComputedSpec), "ficha.omnicore.yaml")
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if ps := spec.Validate(s, spec.Options{}); ps.HasBlockers() {
+		t.Fatalf("the fixture does not validate:\n%v", ps.Error())
+	}
+	m, err := ir.Resolve(s, &discover.Project{
+		ModulePath: "example.test/svc", Dialects: []string{"sqlite"}, Root: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("resolving: %v", err)
+	}
+	return m
+}
+
+// TestTheWriteSideDerivesThroughTheSharedSeat is the other half of the reason
+// the derivations moved: a POST that answers with the record renders the SAME
+// derived value the GET does, because both call one function. The write used to
+// reach it by importing the entity's whole queries package.
+func TestTheWriteSideDerivesThroughTheSharedSeat(t *testing.T) {
+	m := rootComputedModel(t)
+	files := emitAll(t, m)
+
+	insert := emittedBody(t, files, "internal/application/commands/insert_ficha_command.go")
+	if !strings.Contains(insert, `qryutils "example.test/svc/internal/application/queries/utils"`) {
+		t.Errorf("the write does not import the seat it derives through:\n%s", insert)
+	}
+	if !strings.Contains(insert, "qryutils.ComputeFichaRotulo(ctx,") {
+		t.Errorf("the write does not call the same derivation the reads call:\n%s", insert)
+	}
+	if strings.Contains(insert, `"example.test/svc/internal/application/queries"`) {
+		t.Errorf("a command must not depend on every read of the entity to reach one "+
+			"derivation:\n%s", insert)
+	}
+	// And the seat itself declares it once, for both callers.
+	hook := emittedBody(t, files, computedHookFile(m))
+	if !strings.Contains(hook, "func ComputeFichaRotulo(") {
+		t.Errorf("the derivation is not declared where both sides import it:\n%s", hook)
+	}
+}
+
 // The derivation is named for BOTH owners. Every entity of a project writes into
 // one queries package, and two collections of one entity may each want a Rotulo.
 func TestAPerEntryDerivationIsNamedForItsEntityAndItsCollection(t *testing.T) {
