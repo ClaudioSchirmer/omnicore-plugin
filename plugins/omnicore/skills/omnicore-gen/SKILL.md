@@ -658,8 +658,9 @@ Four things to get right, because they are the ones that cost a migration later:
 - **`read.computed` is the read side's `manual` fact: a field no column holds.** You
   declare the shape — `name`, `type`, and `from:` naming the STORED fields the derivation
   reads — and the body is yours, in
-  `internal/application/queries/<entity>_computed_manual.go`, written once and never
-  rewritten. **ONE exported function per FIELD**, taking the sources it declared — a source
+  `internal/application/queries/utils/<entity>_computed_manual.go` (package `utils`, imported
+  as `qryutils` — it is in `utils/` because the WRITES call it too, so a POST answering with
+  the record renders the same value the reads do), written once and never rewritten. **ONE exported function per FIELD**, taking the sources it declared — a source
   declared nullable arrives as a pointer, the rest as values. The read shapes are the
   generator's problem: it unwraps the listing's sparse pointers, guards the ones that were
   not selected, and calls the same function the by-id read calls.
@@ -1405,7 +1406,7 @@ hashed**. The same shape exists three times more:
 |---|---|---|
 | an invariant the rule DSL cannot say | `rules.manual` | `internal/domain/<entity>_rules_manual.go` |
 | a question the service cannot answer declaratively | `service.facts[].kind: manual` | `internal/infra/<entity>_service_manual.go` |
-| a read field no column holds | `read.computed` | `internal/application/queries/<entity>_computed_manual.go` |
+| a read field no column holds | `read.computed` | `internal/application/queries/utils/<entity>_computed_manual.go` |
 | the same, one per ENTRY of a collection | `children[].computed` | the same file — `Compute<Entity><Entry><Field>` |
 | a VALUE OBJECT whose rule is neither a shape nor a set | `valueObjects[].kind: manual` | `internal/domain/vos/<name>.go` — **you create the file** |
 | a COMPOSITE value object whose invariant no rule kind states | `valueObjects[].written: manual` | `internal/domain/vos/<name>.go` — **you create the file**, and the parts stay declared |

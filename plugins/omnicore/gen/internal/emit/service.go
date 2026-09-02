@@ -28,13 +28,7 @@ func emitService(m *ir.Model) ([]fsplan.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := []fsplan.File{port}
-	answers, err := emitAnswerTypeFiles(m)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, answers...)
-	out = append(out, impl)
+	out := []fsplan.File{port, impl}
 
 	// The ELSE: the generator declared methods it does not know how to answer, so
 	// it leaves a file for whoever does, with a body that panics naming itself.
@@ -70,6 +64,7 @@ func emitServicePort(m *ir.Model) (fsplan.File, error) {
 	s.L("package domain")
 	s.Blank()
 	emitServiceImports(s)
+	emitAnswerTypes(s, m)
 	s.Blank()
 
 	iface := m.Entity.Pascal + "Service"
@@ -125,8 +120,8 @@ func emitStubImports(s *src, m *ir.Model) {
 	s.L(")")
 }
 
-// emitAnswerTypeFiles writes the shapes a fact speaks in when a bare scalar is
-// not one: one row of a per-group fact, the struct an ungrouped fact answering
+// emitAnswerTypes writes the shapes a fact speaks in when a bare scalar is not
+// one: one row of a per-group fact, the struct an ungrouped fact answering
 // SEVERAL numbers returns, and the carrier ONE entry of a batched per-entry
 // fact arrives as.
 //
@@ -135,52 +130,25 @@ func emitStubImports(s *src, m *ir.Model) {
 // read an answer would import infra to state an invariant. The entry carrier is
 // the same argument on the way IN — the rule builds those values.
 //
-// ONE FILE EACH, beside the port rather than inside it. An answer type is one
-// more domain type, and the domain's rule is one type per file — the same rule
-// that keeps the port itself out of the aggregate's file. They used to ride
-// along in the port's file, which made `<entity>_service.go` the one domain
-// file a reader could not name from its contents.
-func emitAnswerTypeFiles(m *ir.Model) ([]fsplan.File, error) {
-	var out []fsplan.File
+// INSIDE the port's file, above the interface that names them. They are not
+// domain types in their own right — nothing models them, nothing else may pass
+// them — they are the parameters and returns of these methods, and a reader
+// meets them one line before the signature that reads them. A file each spelled
+// their names in full (`<entity><fact>entry.go`), which put three lines of Go
+// under twenty-six of header and left the domain package quoting fact names in
+// its directory listing.
+func emitAnswerTypes(s *src, m *ir.Model) {
 	for _, f := range m.Service.Facts {
 		if f.PerEntry.Carrier() {
-			file, err := answerTypeFile(m, f.PerEntry.EntryType, func(s *src) { emitEntryType(s, f) })
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, file)
+			emitEntryType(s, f)
 		}
 		switch {
 		case f.Grouped():
-			file, err := answerTypeFile(m, f.GroupType, func(s *src) { emitGroupType(s, f) })
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, file)
+			emitGroupType(s, f)
 		case f.Multi:
-			file, err := answerTypeFile(m, f.ResultType, func(s *src) { emitResultType(s, f) })
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, file)
+			emitResultType(s, f)
 		}
 	}
-	return out, nil
-}
-
-// answerTypeFile is the one-type-per-file wrapper the three writers share. The
-// file is named after the TYPE, not after the entity or the fact: that is what
-// makes it findable from the name a reader arrives with.
-func answerTypeFile(m *ir.Model, typeName string, write func(*src)) (fsplan.File, error) {
-	s := &src{}
-	s.Blank()
-	s.L("package domain")
-	s.Blank()
-	emitServiceImports(s)
-	write(s)
-
-	return goFile("internal/domain/"+naming.Snake(typeName)+".go", fsplan.Owned,
-		fmt.Sprintf("the %s answer shape", typeName), s)
 }
 
 // emitEntryType writes what ONE entry of a batched per-entry fact contributes.

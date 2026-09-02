@@ -7,6 +7,63 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.57.0] — 2026-09-01
+
+A fact's answer shapes stop being files. Three lines of Go under twenty-six lines of
+generated header, named `client_claim_value_does_not_match_value_type_entry.go`, is not a
+domain type earning its own file — it is a fact's name spelled into a directory listing.
+
+### Changed
+
+- **The shapes a fact speaks in are written INSIDE `internal/domain/<entity>_service.go`,
+  above the interface that names them.** A per-group row, the struct an ungrouped fact
+  answering several numbers returns, and the carrier one entry of a batched per-entry fact
+  arrives as used to get one file each, named after the type. The rule that put them there
+  — one domain type per file — does not reach them: nothing models them, nothing else may
+  pass them, they are the parameters and returns of these methods, and a reader meets them
+  one line before the signature that reads them. A service with two such facts added two
+  files to `internal/domain/` whose names were the longest in the package and whose content
+  was 90% banner.
+- **The derivations behind computed read fields move to
+  `internal/application/queries/utils/<entity>_computed_manual.go`** (package `utils`,
+  imported as `qryutils`). The seat rule has always been that `utils/` holds the functions
+  several files call — and a derivation is called by the reads AND by every write that
+  answers with the record, which is what makes a POST and a GET render one value. Sitting
+  in the `queries` package itself, the only way the write side could reach it was to import
+  the entity's whole read package: `insert_<entity>_command.go` depended on every query of
+  the entity to call one function. Both sides now import a leaf. The gen-report names the
+  new path, since the report is where the author is told where to write the body.
+- **Regenerating leaves the old files behind, and `omnicore-gen prune` removes them.** They
+  are recorded in the lock, no longer emitted, and unchanged since they were written — the
+  verdict is `delete`, and the plan says so before anything is removed. A project that ran
+  `generate` and stopped there keeps two files nothing references; they compile, and they
+  mean nothing.
+
+### ⚠️ Upgrading a project that already has computed fields
+
+The derivation hook is a HOOK: written once, never rewritten, and by now it holds your
+bodies. Regenerating creates an EMPTY one at the new path and leaves yours where it was —
+in `package queries`, with nothing calling it. That tree still compiles, and every computed
+field renders absent. `prune` will not clean it either: a hook whose hash no longer matches
+what the generator wrote is reported and left alone, which is the rule that protects your
+work everywhere else.
+
+So the move is yours to make, once per entity: `git mv
+internal/application/queries/<entity>_computed_manual.go internal/application/queries/utils/`,
+change its `package queries` line to `package utils`, and delete the empty one the run
+created. The generator writes the call sites — both the reads and the writes — pointing at
+the new seat.
+
+### Added
+
+- **Tests over the paths that DELETE.** `prune`'s five verdicts for a declaration in a
+  shared file (still declared · gone from the file · edited by hand · claimed by a
+  neighbour · removable), the value-object guard that keeps a sibling spec's types, the
+  lock's own round trip and its view-shape-without-bump guard, and `internal/layout`, which
+  decides where every project's specs and lock live. All of them were reasoned about in
+  prose and exercised by nothing: `internal/cli` 13.7% → 23.8%, `internal/fsplan` 67.4% →
+  84.7%, `internal/layout` 0% → 100%.
+
 ## [0.56.0] — 2026-09-01
 
 omnicore-gen now writes the layout it tells everyone else to write. `service-layout.html`

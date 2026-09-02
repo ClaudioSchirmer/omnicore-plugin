@@ -31,9 +31,15 @@ split by kind — structures in `dtos/`, functions in `utils/`:
 - `internal/application/commands/utils/<entity>_<child>_projection.go` — the projectors
   (`Project<Entity><Children>`, `ProjectOne<Child>`), EXPORTED because they left the package
 - `internal/application/queries/dtos/<child>_row_result.go` — the entry as a read returns it
+- `internal/application/queries/utils/<entity>_computed_manual.go` — the derivations behind
+  computed read fields (`Compute<Entity><Field>`), EXPORTED for the same reason: the reads
+  call them AND so does every write that answers with the record, so one surface never
+  renders a different value than another. Left in the `queries` package itself, this is the
+  import that makes a command depend on every read of the entity.
 
-Import them aliased — `cmddtos`, `cmdutils`, `qrydtos` — since `internal/application/dtos`
-is a third package named `dtos` and a command file names two of them. This is what
+Import them aliased — `cmddtos`, `cmdutils`, `qrydtos`, `qryutils` — since
+`internal/application/dtos` is a third package named `dtos` and a command file names two of
+them. This is what
 omnicore-gen emits; hand-writing a different shape puts two authorities in one tree.
 
 ## The verbs — process notes on top of the docs

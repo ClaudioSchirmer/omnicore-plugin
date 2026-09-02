@@ -50,8 +50,10 @@ func commandImports(s *src, m *ir.Model, needsDomain bool) {
 		s.L("\t%s", quote(m.ImportPath("internal/application/dtos")))
 		// The derivations behind computed fields live on the read side and are
 		// called from BOTH, so a write response renders the same value a read
-		// does. The import is pruned when this entity computes nothing.
-		s.L("\tappqueries %s", quote(m.ImportPath("internal/application/queries")))
+		// does. queries/utils rather than the queries package itself: this is the
+		// import that made a command depend on every read of the entity to reach
+		// one function. Pruned when this entity computes nothing.
+		s.L("\t%s %s", queryUtilAlias, quote(m.ImportPath(queryUtilPkg)))
 		// The shapes and projectors EVERY verb answering with a collection needs.
 		// Both lines are pruned for an entity with no children.
 		s.L("\t%s %s", cmdDTOAlias, quote(m.ImportPath(cmdDTOPkg)))
@@ -602,7 +604,7 @@ func emitWriteComputedCalls(s *src, m *ir.Model, computed []ir.ComputedField, ta
 			args = append(args, factArgValue(f, recv))
 		}
 		s.L("\t{")
-		s.L("\t\tv, err := appqueries.%s(ctx, %s)", computedFuncName(m.Entity, c), strings.Join(args, ", "))
+		s.L("\t\tv, err := %s.%s(ctx, %s)", queryUtilAlias, computedFuncName(m.Entity, c), strings.Join(args, ", "))
 		s.L("\t\tif err != nil {")
 		s.L("\t\t\treturn %s, err", target)
 		s.L("\t\t}")

@@ -483,7 +483,10 @@ func renderTodo(b *strings.Builder, in Input) {
 
 	if emit.HasDerivations(m) {
 		empty = false
-		path := fmt.Sprintf("internal/application/queries/%s_computed_manual.go", m.Entity.Snake)
+		// Asked of the emitter rather than spelled again here: this is the path
+		// the author is told to write in, and a report naming a seat the
+		// generator has moved is worse than one that says nothing.
+		path := emit.ComputedHookFile(m)
 		fmt.Fprintf(b, "### `%s`\n\n", path)
 		// The failure mode here is the opposite of the manual facts' above, and
 		// that is the whole reason this section is worded separately: a fact

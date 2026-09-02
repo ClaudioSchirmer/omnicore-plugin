@@ -158,10 +158,9 @@ func TestTwoEntryFieldsTravelAsOneCarrier(t *testing.T) {
 	// match here would break the day a longer field name is added and prove
 	// nothing about the shape.
 	m := batchedEmitModel(t)
-	// The carrier is one more domain type, so it has a file of its own; the
-	// port names it from the entity.
-	got := squeeze(fileNamed(t, m, "internal/domain/papel_rotulo_nao_confere_entry.go") +
-		fileNamed(t, m, "internal/domain/papel_service.go"))
+	// The carrier is a parameter of the port, so it rides in the port's file,
+	// above the interface that names it.
+	got := squeeze(fileNamed(t, m, "internal/domain/papel_service.go"))
 	for _, want := range []string{
 		"type PapelRotuloNaoConfereEntry struct {",
 		"PermissaoID domain.ID",
@@ -178,7 +177,7 @@ func TestTwoEntryFieldsTravelAsOneCarrier(t *testing.T) {
 // it first — and naming it among the filters as well must not produce two
 // struct fields of one name, which does not compile.
 func TestTheKeyLeadsTheCarrier(t *testing.T) {
-	got := fileNamed(t, batchedEmitModel(t), "internal/domain/papel_rotulo_nao_confere_entry.go")
+	got := fileNamed(t, batchedEmitModel(t), "internal/domain/papel_service.go")
 	body := between(t, got, "type PapelRotuloNaoConfereEntry struct {", "}")
 	if strings.Count(body, "PermissaoID") != 1 {
 		t.Errorf("the key must appear exactly once in the carrier, got:\n%s", body)
