@@ -7,6 +7,39 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.57.0] — 2026-09-01
+
+A fact's answer shapes stop being files. Three lines of Go under twenty-six lines of
+generated header, named `client_claim_value_does_not_match_value_type_entry.go`, is not a
+domain type earning its own file — it is a fact's name spelled into a directory listing.
+
+### Changed
+
+- **The shapes a fact speaks in are written INSIDE `internal/domain/<entity>_service.go`,
+  above the interface that names them.** A per-group row, the struct an ungrouped fact
+  answering several numbers returns, and the carrier one entry of a batched per-entry fact
+  arrives as used to get one file each, named after the type. The rule that put them there
+  — one domain type per file — does not reach them: nothing models them, nothing else may
+  pass them, they are the parameters and returns of these methods, and a reader meets them
+  one line before the signature that reads them. A service with two such facts added two
+  files to `internal/domain/` whose names were the longest in the package and whose content
+  was 90% banner.
+- **Regenerating leaves the old files behind, and `omnicore-gen prune` removes them.** They
+  are recorded in the lock, no longer emitted, and unchanged since they were written — the
+  verdict is `delete`, and the plan says so before anything is removed. A project that ran
+  `generate` and stopped there keeps two files nothing references; they compile, and they
+  mean nothing.
+
+### Added
+
+- **Tests over the paths that DELETE.** `prune`'s five verdicts for a declaration in a
+  shared file (still declared · gone from the file · edited by hand · claimed by a
+  neighbour · removable), the value-object guard that keeps a sibling spec's types, the
+  lock's own round trip and its view-shape-without-bump guard, and `internal/layout`, which
+  decides where every project's specs and lock live. All of them were reasoned about in
+  prose and exercised by nothing: `internal/cli` 13.7% → 23.8%, `internal/fsplan` 67.4% →
+  84.7%, `internal/layout` 0% → 100%.
+
 ## [0.56.0] — 2026-09-01
 
 omnicore-gen now writes the layout it tells everyone else to write. `service-layout.html`

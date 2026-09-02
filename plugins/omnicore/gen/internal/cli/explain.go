@@ -402,7 +402,9 @@ func explainOwnership() string {
                                                DSL cannot express
                   <entity>_service_manual.go   a fact whose kind is manual
                   <entity>_computed_manual.go  read.computed — a read field no
-                                               column holds
+                                               column holds. It sits under
+                                               queries/utils/, because the
+                                               writes call it too
                   NNNN_<entity>_manual.sql     the migration pair
 
                 The three Go ones are NOT equally quiet, and the header of each

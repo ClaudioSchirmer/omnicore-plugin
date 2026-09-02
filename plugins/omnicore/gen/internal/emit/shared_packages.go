@@ -21,17 +21,26 @@ import (
 //     <Child>Row/Request/Response. Data, no behavior beyond the mapping methods
 //     that ride the type.
 //   - utils/ holds the functions several files call — the projectors that read a
-//     collection back off the aggregate.
+//     collection back off the aggregate, and the derivations behind computed
+//     read fields.
+//
+// The derivations are the case that shows why the rule is about CALLERS and not
+// about who generated the thing. They were written into the queries package
+// itself, beside the reads that call them — and then the write side had to call
+// them too, so that every surface renders one answer. A command importing the
+// whole queries package to reach one function is the dependency `utils/` exists
+// to prevent; both sides now import a leaf.
 //
 // Both are subpackages of the layer that owns them, never a service-wide dump:
 // a command's shared shape stays under commands/, a read's under queries/, a
 // wire shape under requests/. The layer boundary is the same one the rest of
 // the layout draws.
 const (
-	cmdDTOPkg   = "internal/application/commands/dtos"
-	cmdUtilPkg  = "internal/application/commands/utils"
-	queryDTOPkg = "internal/application/queries/dtos"
-	webDTOPkg   = "internal/web/requests/dtos"
+	cmdDTOPkg    = "internal/application/commands/dtos"
+	cmdUtilPkg   = "internal/application/commands/utils"
+	queryDTOPkg  = "internal/application/queries/dtos"
+	queryUtilPkg = "internal/application/queries/utils"
+	webDTOPkg    = "internal/web/requests/dtos"
 )
 
 // The import aliases those packages are always given.
@@ -44,10 +53,11 @@ const (
 // alias names the layer, which is the question a reader arrives with: not
 // "which dtos package is this", but "whose".
 const (
-	cmdDTOAlias   = "cmddtos"
-	cmdUtilAlias  = "cmdutils"
-	queryDTOAlias = "qrydtos"
-	webDTOAlias   = "webdtos"
+	cmdDTOAlias    = "cmddtos"
+	cmdUtilAlias   = "cmdutils"
+	queryDTOAlias  = "qrydtos"
+	queryUtilAlias = "qryutils"
+	webDTOAlias    = "webdtos"
 )
 
 // childResultType is the write-side shape of one stored entry, as a file

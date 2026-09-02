@@ -138,8 +138,8 @@ func TestThePerEntrySeatFollowsTheEntrysPointerDiscipline(t *testing.T) {
 // The derivation is named for BOTH owners. Every entity of a project writes into
 // one queries package, and two collections of one entity may each want a Rotulo.
 func TestAPerEntryDerivationIsNamedForItsEntityAndItsCollection(t *testing.T) {
-	hook := emittedBody(t, emitAll(t, childComputedModel(t)),
-		"internal/application/queries/cesta_e_computed_manual.go")
+	m := childComputedModel(t)
+	hook := emittedBody(t, emitAll(t, m), computedHookFile(m))
 	if !strings.Contains(hook, "func ComputeCestaELinhaERotulo(") {
 		t.Errorf("the derivation is not qualified by entity and collection:\n%s", hook)
 	}
@@ -168,8 +168,8 @@ func TestThePerEntryComputedTagNamesItsSourcesBare(t *testing.T) {
 // hand. It went unseen because no fixture that BUILDS had ever derived from an
 // id.
 func TestTheDerivationHookImportsTheTypesItNames(t *testing.T) {
-	hook := emittedBody(t, emitAll(t, childComputedModel(t)),
-		"internal/application/queries/cesta_e_computed_manual.go")
+	m := childComputedModel(t)
+	hook := emittedBody(t, emitAll(t, m), computedHookFile(m))
 	for _, want := range []string{`"time"`, `omnicore/domain"`} {
 		if !strings.Contains(hook, want) {
 			t.Errorf("the hook does not import %s, and it declares a parameter of that "+
@@ -278,7 +278,7 @@ func TestAHookCarryingTheOldUnqualifiedNameIsRefused(t *testing.T) {
 		t.Fatalf("resolving: %v", err)
 	}
 	root := t.TempDir()
-	dir := filepath.Join(root, "internal/application/queries")
+	dir := filepath.Join(root, "internal/application/queries/utils")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestAHookCarryingTheOldUnqualifiedNameIsRefused(t *testing.T) {
 func TestTheReportsSignatureIsTheEmittedOne(t *testing.T) {
 	m := childComputedModel(t)
 	hook := emittedBody(t, emitAll(t, m),
-		"internal/application/queries/cesta_e_computed_manual.go")
+		computedHookFile(m))
 
 	seen := 0
 	for _, c := range m.Read.Computed {

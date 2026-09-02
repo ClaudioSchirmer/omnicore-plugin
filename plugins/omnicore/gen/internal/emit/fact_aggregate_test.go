@@ -113,19 +113,48 @@ func TestSeveralAggregatesAreOneQuery(t *testing.T) {
 	}
 }
 
+// TestAnswerShapesRideInThePortAndNowhereElse pins WHERE they are written, not
+// just what they say.
+//
+// A file each named them in full — `<entity><fact>group.go` — which put four
+// lines of Go under twenty-six of generated header and spelled fact names into
+// the domain package's directory listing. They are parameters and returns of
+// the port's methods, nothing models them, and a reader meets them one line
+// before the signature that reads them.
+func TestAnswerShapesRideInThePortAndNowhereElse(t *testing.T) {
+	m := factAggregateModel(t)
+	port := "internal/domain/atendimento_service.go"
+	for _, f := range emitAll(t, m) {
+		if !strings.HasPrefix(f.Path, "internal/domain/") || f.Path == port {
+			continue
+		}
+		if strings.Contains(string(f.Content), "Group struct") ||
+			strings.Contains(string(f.Content), "Result struct") ||
+			strings.Contains(string(f.Content), "Entry struct") {
+			t.Errorf("%s is an answer shape in a file of its own; it belongs in the port", f.Path)
+		}
+	}
+
+	// ABOVE the interface: a type Go reads after the signature that names it
+	// compiles either way, so only a test keeps the reading order.
+	got := fileNamed(t, m, port)
+	shape := strings.Index(got, "type AtendimentoCargaPorSetorGroup struct")
+	iface := strings.Index(got, "type AtendimentoService interface")
+	if shape < 0 || iface < 0 {
+		t.Fatalf("the port must hold both the shape and the interface:\n%s", got)
+	}
+	if shape > iface {
+		t.Errorf("the answer shape must be declared BEFORE the interface that names it")
+	}
+}
+
 // TestFoundRidesOnlyWhereZeroCouldLie is the correctness of the answer's shape,
 // and it differs between the two forms for a reason worth pinning.
 func TestFoundRidesOnlyWhereZeroCouldLie(t *testing.T) {
 	m := factAggregateModel(t)
-	// Each answer shape is its own domain file now; read them together, since
-	// what is under test is the SET of fields the facts answer with.
+	// Every answer shape rides in the port's file, so one read holds the SET of
+	// fields the facts answer with — which is what is under test.
 	got := fileNamed(t, m, "internal/domain/atendimento_service.go")
-	for _, f := range emitAll(t, m) {
-		if strings.HasPrefix(f.Path, "internal/domain/") && strings.HasSuffix(f.Path, ".go") &&
-			f.Path != "internal/domain/atendimento_service.go" {
-			got += string(f.Content)
-		}
-	}
 
 	// Ungrouped: the matching set can be empty, so avg carries Found. count and
 	// sum never do — zero IS the answer for both.

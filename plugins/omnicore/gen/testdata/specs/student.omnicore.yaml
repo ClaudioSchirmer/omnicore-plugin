@@ -903,7 +903,7 @@ read:
   # A COMPUTED read field: one the reads return and no column holds. The
   # language declares the shape — the name, the type, the stored fields the
   # derivation reads — and the BODY is yours, in
-  # internal/application/queries/<entity>_computed_manual.go, which the
+  # internal/application/queries/utils/<entity>_computed_manual.go, which the
   # generator writes once and never touches again.
   #
   # What the declaration alone buys, on every surface at once:

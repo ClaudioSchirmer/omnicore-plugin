@@ -178,7 +178,7 @@ func emitByIDQuery(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package queries")
 	s.Blank()
-	queryImports(s, resultTypeNames(m, sh), true, childDTOImport(m))
+	queryImports(s, resultTypeNames(m, sh), true, childDTOImport(m), derivationImport(m))
 	s.Blank()
 
 	s.Doc(
@@ -235,7 +235,7 @@ func emitListQuery(m *ir.Model) (fsplan.File, error) {
 	s.Blank()
 	s.L("package queries")
 	s.Blank()
-	queryImports(s, resultTypeNames(m, sh), true, childDTOImport(m))
+	queryImports(s, resultTypeNames(m, sh), true, childDTOImport(m), derivationImport(m))
 	s.Blank()
 
 	s.Doc(
@@ -372,7 +372,7 @@ func emitChildRowResults(m *ir.Model) ([]fsplan.File, error) {
 		s.Blank()
 		s.L("package dtos")
 		s.Blank()
-		queryImports(s, childRowTypeNames(m, sh), false, "")
+		queryImports(s, childRowTypeNames(m, sh), false, "", "")
 		s.Blank()
 
 		doc := []string{
@@ -434,8 +434,14 @@ func hasReadRows(m *ir.Model) bool {
 func computeFuncName(result string) string { return "compute" + result }
 
 func computedHookFile(m *ir.Model) string {
-	return "internal/application/queries/" + m.Entity.Snake + "_computed_manual.go"
+	return queryUtilPkg + "/" + m.Entity.Snake + "_computed_manual.go"
 }
+
+// ComputedHookFile is computedHookFile for the report, which names the file the
+// author has to write in. It is the SAME function and not a second spelling:
+// the report used to build the path itself, which is how a report can go on
+// pointing at a seat the generator has moved.
+func ComputedHookFile(m *ir.Model) string { return computedHookFile(m) }
 
 // emitComputedHook writes the derivation the generator cannot write.
 //
@@ -454,11 +460,15 @@ func computedHookFile(m *ir.Model) string {
 //
 // The functions are EXPORTED because the write side calls them too: a POST that
 // returns the record renders the same derived field, and deriving it a second
-// time somewhere else is how two answers to one question start to differ.
+// time somewhere else is how two answers to one question start to differ. That
+// is also why the file sits in queries/utils/ rather than in the queries package
+// itself: a function BOTH layers call is what `utils/` is for, and leaving it
+// beside the reads made every command import the whole queries package to reach
+// one derivation.
 func emitComputedHook(m *ir.Model) (fsplan.File, error) {
 	s := &src{}
 	s.Blank()
-	s.L("package queries")
+	s.L("package utils")
 	s.Blank()
 	computedHookImports(s, derivationTypeNames(m))
 	s.Blank()
@@ -717,7 +727,7 @@ func emitComputedCalls(s *src, m *ir.Model, recv string, sparse bool) {
 	emitDerivationCalls(s,
 		derivationSeat{recv: recv, fail: recv, pad: "\t", sparse: sparse},
 		m.Read.Computed,
-		func(c ir.ComputedField) string { return computedFuncName(m.Entity, c) })
+		func(c ir.ComputedField) string { return queryUtilAlias + "." + computedFuncName(m.Entity, c) })
 
 	// The ENTRY's pointer discipline is not the root's. One <Child>RowResult
 	// serves BOTH reads — that is the point of the shared type — so it is sparse
@@ -739,7 +749,9 @@ func emitComputedCalls(s *src, m *ir.Model, recv string, sparse bool) {
 				sparse: entryShape.sparse,
 			},
 			ch.Computed,
-			func(c ir.ComputedField) string { return childComputedFuncName(m.Entity, ch, c) })
+			func(c ir.ComputedField) string {
+				return queryUtilAlias + "." + childComputedFuncName(m.Entity, ch, c)
+			})
 		s.L("\t}")
 	}
 }
@@ -828,11 +840,11 @@ func childRowTypeNames(m *ir.Model, sh readShape) []string {
 // childDTOs is the queries/dtos import path when the file names a collection's
 // read shape, and empty when it does not — the shapes' own package passes
 // nothing, since a package cannot import itself.
-func queryImports(s *src, types []string, carriesQuery bool, childDTOs string) {
+func queryImports(s *src, types []string, carriesQuery bool, childDTOs, derivations string) {
 	joined := strings.Join(types, " ")
 	needTime := strings.Contains(joined, "time.")
 	needDomain := strings.Contains(joined, "domain.")
-	if !needTime && !needDomain && !carriesQuery && childDTOs == "" {
+	if !needTime && !needDomain && !carriesQuery && childDTOs == "" && derivations == "" {
 		return // a file of plain shapes over builtin types imports nothing
 	}
 
@@ -852,11 +864,35 @@ func queryImports(s *src, types []string, carriesQuery bool, childDTOs string) {
 	if carriesQuery {
 		s.L("\tfwqueries %s", quote(fwImport("application/queries")))
 	}
-	if childDTOs != "" {
+	if childDTOs != "" || derivations != "" {
 		s.Blank()
+	}
+	if childDTOs != "" {
 		s.L("\t%s %s", queryDTOAlias, quote(childDTOs))
 	}
+	if derivations != "" {
+		s.L("\t%s %s", queryUtilAlias, quote(derivations))
+	}
 	s.L(")")
+}
+
+// derivationImport is the queries/utils path when this read actually CALLS a
+// derivation, and empty otherwise.
+//
+// Decided from the model rather than emitted always and pruned: a read with no
+// computed field anywhere names nothing from that package, and an import block
+// that lists it is one a reader has to check against the file's body to
+// disbelieve.
+func derivationImport(m *ir.Model) string {
+	if len(m.Read.Computed) > 0 {
+		return m.ImportPath(queryUtilPkg)
+	}
+	for _, c := range m.Children {
+		if len(c.Computed) > 0 {
+			return m.ImportPath(queryUtilPkg)
+		}
+	}
+	return ""
 }
 
 // childDTOImport is the queries/dtos path when this entity's reads name a

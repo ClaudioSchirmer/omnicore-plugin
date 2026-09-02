@@ -260,7 +260,10 @@ own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
   `ServiceIsRequiredNotification` at invocation. Generate both sides together.
 - **File placement:** the interface is one more domain type → its own
   `internal/domain/<entity>_service.go` (`service-layout.html`); never embedded in the
-  entity's file.
+  entity's file. The shapes its methods speak in when a bare scalar is not one — a
+  per-group row, a multi-number result, a per-entry carrier — ride in THAT file, above the
+  interface. They are parameters and returns, not types the domain models, and a file each
+  spells the fact's name into the directory listing for three lines of Go.
 - **Layer precision:** the domain holds the INTERFACE only (zero IO); the implementation
   lives in infra (repo read for facts this service owns · httpclient for the external
   world · grpcclient for another microservice — decision matrix in
