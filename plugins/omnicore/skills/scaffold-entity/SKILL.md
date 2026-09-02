@@ -227,9 +227,11 @@ Self-configure by reading the project:
   the project already has. A composite is the easiest to overlook in this sweep, because
   every entity reusing it names the type ONCE and its parts read as ordinary columns
   everywhere else.
-- **A domain map from `scaffold-system`?** Look for `specs/scaffold-system/domain-map.md` —
+- **A domain map from `scaffold-system`?** Look for `specs/scaffold-system/*/domain-map.md`
+  (one directory per mapped system) —
   whether this run was delegated by that skill or invoked directly in a project that has
-  one; if it exists, reading it is MANDATORY, not optional. `Status: APPROVED` and it
+  one; if it exists, reading it is MANDATORY, not optional — and where several exist, the
+  one whose §2 lists THIS entity. `Status: APPROVED` and it
   lists THIS entity → its §9 block is the dev's already-approved answers: Kind, base
   create-vs-reuse, natural key, child-of-whom, the identity-view verdict
   (create/add-role/skip — decided once at the map's §3, surfaced in §9) enter the spec

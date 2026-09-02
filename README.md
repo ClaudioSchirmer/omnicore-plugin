@@ -50,12 +50,14 @@ whatever a given project actually pins.
 
 Every document the skills produce lands under **`specs/`** in your service, one directory
 per skill: the approved model and plan (`specs/scaffold-entity/<entity>/`), the generator's
-specs, reports and lock (`specs/omnicore-gen/`), the QA plan (`specs/qa/plan.md`), the
+specs, reports and lock (`specs/omnicore-gen/`), the QA plan (`specs/qa/<suite>/plan.md`), the
 migration plan (`specs/upgrade/`), and so on for every skill that writes. Your repository
 root keeps the SERVICE — `internal/`, `bootstrap/`, `migrations/`, `devops/` — and `specs/`
 keeps what was decided about it. One exception, because it is executed rather than read:
 the contract QA suite lands in **`qa/`** at the root, a single `qa/run.sh` calling every
-`qa/<entity>.sh`.
+`qa/<entity>.sh` and writing its verdict to `qa/qa-report.md` — a per-suite pass/fail
+matrix with the failing cases and their real response bodies, rewritten live as the run
+proceeds, so a run nobody watched still leaves the answer on disk.
 
 It is not `docs/`: that name stays yours, for the documentation your project writes for
 its own users. And nothing under `specs/` is scratch — it is committed, never ignored

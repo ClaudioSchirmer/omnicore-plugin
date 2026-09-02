@@ -19,11 +19,17 @@ executable contract suite that exercises those promises against the real running
 service — then runs it and reports GREEN/RED honestly.
 
 **Two destinations, one rule.** The PLAN — the decision record — lands under
-`specs/qa/` like every other skill's document. The EXECUTABLE SUITE — `run.sh` and the
+`specs/qa/<suite>/plan.md`, one directory per suite named after what that run PROVES,
+like every other skill's document. The EXECUTABLE SUITE — `run.sh` and the
 per-entity scripts — lands in **`qa/` at the PROJECT ROOT**: it is not a document to
 read, it is a command a dev and a CI job RUN, and it belongs where they look for it.
 Both are part of the project and the project keeps them — **never add either to
 `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
+
+**One plan directory per round of decisions, still exactly ONE runner.** `<suite>` scopes
+the PLAN, never the suite: a later round writes `specs/qa/<its-own-suite>/plan.md` and
+EXTENDS the same `qa/run.sh`. A second plan directory is never a licence for a second
+entry point.
 
 ## Generated code is a shortcut, not the source of truth
 
@@ -79,7 +85,7 @@ cannot change it."* That sentence is false.
   project's rules apply.
 - **User language for talk, English for artifacts** — converse in the dev's language;
   generated scripts, case names and comments in English like the rest of the codebase.
-- **This skill writes ONLY under `specs/qa/` (the plan) and `qa/` (the runnable
+- **This skill writes ONLY under `specs/qa/<suite>/` (the plan) and `qa/` (the runnable
   suite)** — never application code, never yaml, never migrations. A case that can't pass because the SERVICE is wrong is a finding to
   report (route `doctor` / the owning skill), never something to "fix" by weakening
   the case. **Never edit a case to pass — the suite is the oracle.**
@@ -141,7 +147,13 @@ Map what the service declares — this inventory IS the test surface:
   under `specs/qa/` is the SAME suite in the wrong place: MOVE it to `qa/` (fixing the
   root resolution as you go — see the runner contract) rather than leaving two homes.
 
-## Phase 1 — Plan gate: `specs/qa/plan.md`
+## Phase 1 — Plan gate: `specs/qa/<suite>/plan.md`
+
+**Name the suite first.** `<suite>` is a kebab slug of what THIS round proves, proposed by
+this skill and confirmed by the dev in the same breath as the plan: `full-contract` for a
+whole-service round, the scope itself when the dev asked for one (`person-orders`,
+`auth-enabled`). Not a date, not `plan`, not the service's name — the reader of
+`specs/qa/` must be able to tell two rounds apart by their directory names alone.
 
 `Status: DRAFT`, hard STOP until approved. Sections (structural completeness — `N/A —
 <why>`, never deleted):
@@ -174,6 +186,10 @@ Map what the service declares — this inventory IS the test surface:
    `onlyTotal` are selection-natural there, never gated — gRPC INVALID_ARGUMENT; the
    pin's `graphql`/`grpc` sections own the per-surface rendering, don't assert the
    REST envelope cross-surface) ·
+   a filter VALUE outside the leaf's declared kind (`?age=abc` on an `int64`, `?someId=lixo`
+   on an identity column) → 400 `InvalidFilterValueNotification`, **pin ≥ v0.70.0** on every
+   engine; below it the same request was a 500 on a relational backing and an empty `200`
+   page on Mongo, which is exactly why an older suite has no case for it ·
    `?first=`/`?last=` above the view's ceiling · mixed directions (`first`+`last`,
    `first`+`before`, `after`+`before` — backward is `last`+`before`) · `?onlyTotal=true`
    beside a page-shaping control (the only-total conflict matrix; filters/`?search=`/
@@ -183,7 +199,13 @@ Map what the service declares — this inventory IS the test surface:
    `?orderBy=` on a composed leg (derive the exact set from `status-mapping`'s
    SemanticSchema rows + `auto-query-handlers` at the pin — the enumeration here is
    the FAMILIES, the pin owns the members) · absent verbs
-   → the 403/404/405 split above · not-found → 404. Route: `auto-handlers` +
+   → the 403/404/405 split above · not-found → 404 · **a by-id ADDRESS that is not a uuid,
+   split by VERB and not by surface** (pin ≥ v0.70.0): a read answers 404
+   `UnknownIDAddressNotification`, a write 400 `MalformedIDNotification`, identically on
+   REST, GraphQL and gRPC, and the framework's own audit endpoint follows the same rule.
+   It is the family an existing suite is most likely to miss, because before that pin a
+   relational backing answered 500 and a Mongo-backed one 404 for the same request — so
+   assert BOTH verbs, not just the read. Route: `auto-handlers` +
    `status-mapping` + `auto-query-handlers` at the pin for the exact contracts.
 2. **Data hygiene** [high-risk — ⚠️ OPEN, the dev decides]: where the suite's records
    live. Options, stated honestly: run against the DEV profile bench with
@@ -234,12 +256,43 @@ Map what the service declares — this inventory IS the test surface:
    runs on exit; the service is stopped with SIGTERM, **never** `kill -9` — and the
    runner WAITS on the server PID until the drain completes (default budget ~30s)
    before the next suite binds the same port.
+6. **Report contract — the run leaves a DOCUMENT behind: `qa/qa-report.md`.** A run whose
+   only trace is terminal scrollback is a run the dev did not see: an agent boots the
+   bench, executes hundreds of cases and hands back one sentence, and nothing on disk
+   says which suites ran, how many cases passed, or which one failed. The runner writes
+   the verdict itself. Canonical shape to copy — the reference service's own runner
+   (`qa/run.sh`, its `render_report`) — scaled to this project's single lane:
+   - **Header**: timestamp · profile + the engine/transport actually BUILT · the omnicore
+     pin · the §2 hygiene mode · suite count · the plan it executes
+     (`specs/qa/<suite>/plan.md`).
+   - **Matrix**, one row per suite: `| Suite | Pass | Fail | Skip | Verdict | Time |`.
+     EVERY declared suite appears — one that never ran prints `—`, never vanishes: a
+     suite missing from a report reads exactly like a suite that passed.
+   - **Failures section, only when RED**: per failed case its name, expected vs received,
+     and the REAL response body (cap the first few per suite), each pointing at the full
+     log under `qa/.logs/<run-id>/`. The report has to be enough to diagnose from — that
+     is the whole reason it exists.
+   - **Footer, one line**, printed to stdout beside the report's path:
+     `✅ ALL GREEN — <n>/<n> suites · <cases> cases · <secs>s` or
+     `❌ RED — <x> of <n> suites — logs: qa/.logs/<run-id>/`.
+   - **Rendered LIVE — rewritten in full after EVERY suite**, never only at the end. A run
+     killed halfway (a timeout, a Ctrl-C, a bench that died) still leaves what it had
+     proven.
+   - **A trap on `EXIT INT TERM` stamps `❌ RUN ABORTED — <reason>`**, disarmed only once
+     the final verdict is on disk. Without it, yesterday's green report survives today's
+     crash and reads as today's outcome — a stale report is worse than no report.
+   - **SKIP keeps its own column** and is never folded into the pass count, same honesty
+     rule as everything else here.
+   - It is a RUN ARTIFACT, not a decision — running the command reproduces it. So it is
+     the one thing this skill writes that a dev may reasonably ignore: **name it at
+     hand-off and OFFER the lines (`qa/qa-report.md`, `qa/.logs/`), never edit
+     `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md` — no skill does).
 
 ## Phase 2 — Generate + execute
 
 1. Generate `qa/<entity>.sh` per entity + the SINGLE `qa/run.sh` that calls them all,
    per the approved plan, at the PROJECT ROOT (`chmod +x` every one — a suite the dev
-   cannot execute is not delivered); the plan stays at `specs/qa/plan.md`. Every
+   cannot execute is not delivered); the plan stays at `specs/qa/<suite>/plan.md`. Every
    generated `.sh` must appear in the runner's lane list before this step is done.
    Style:
    plain POSIX-friendly bash + `curl` (+ the project's own tooling for GraphQL/gRPC
@@ -264,7 +317,9 @@ Map what the service declares — this inventory IS the test surface:
    confirm the relay
    reached streaming BEFORE any CDC-dependent case, else those cases report a bench
    problem, not a service failure.
-4. Execute `qa/run.sh` — the one runner, whole. Report the real counts.
+4. Execute `qa/run.sh` — the one runner, whole. Report the real counts **and hand the dev
+   the path to `qa/qa-report.md`**: the verdict in your reply is the file's footer, quoted,
+   not a paraphrase of it — if the two can disagree, the report is not doing its job.
 
 ## Final verify (the gate)
 
@@ -277,15 +332,37 @@ Map what the service declares — this inventory IS the test surface:
    run for everyone.
 1. **The suite is honest**: pick one generated case, break its expectation manually
    (e.g. assert 200 where the service returns 409), run it, watch it FAIL, restore it.
-   A suite that cannot fail proves nothing — this meta-case is mandatory.
+   A suite that cannot fail proves nothing — this meta-case is mandatory. **The same
+   deliberate RED proves the REPORT for free**: while it is broken, `qa/qa-report.md`
+   must show that suite RED, the case named in the failures section with the real
+   response body, and a RED footer. A report that stayed green through a failing run is
+   a broken report, and it hides every future failure.
 2. **Full run green** (or the RED list reported verbatim with bodies — a RED here is a
    FINDING about the service, routed to `doctor`/the owning skill, never patched away
    in the suite).
 3. **Residue as planned**: whatever §2 of the plan promised about data is what
    actually remains; say what was left and where.
-4. Leave `specs/qa/plan.md` and the `qa/` suite in place, and tell the dev the one
-   command that re-runs it (`./qa/run.sh` from the project root); offer `/omnicore:run` if the dev wants the service
-   kept up for manual poking.
+4. Leave `specs/qa/<suite>/plan.md` and the `qa/` suite in place, and tell the dev the one
+   command that re-runs it (`./qa/run.sh` from the project root), where the verdict landed
+   (`qa/qa-report.md`) and that it plus `qa/.logs/` are run artifacts they may want in
+   `.gitignore` — their call, offered, never made for them. Offer `/omnicore:run` if the
+   dev wants the service kept up for manual poking.
+
+## Re-entry — a plan already exists
+
+`ls specs/qa/*/plan.md` before Phase 1; read every one — they say what earlier rounds
+already prove, and duplicating a case family is how a suite doubles in runtime without
+covering one more promise.
+
+- **This round's own `<suite>` directory, `Status: DRAFT`** → reopen the Phase 1 gate with
+  what is already answered, don't restart it.
+- **`Status: APPROVED`, its suite generated** → the round is closed. New coverage is a NEW
+  `<suite>` directory whose matrix names what it ADDS and what it inherits, extending the
+  same `qa/run.sh`. Never overwrite an approved plan: it is the record of what was
+  approved, not a scratch file.
+- **An older run's `specs/qa/plan.md`** (flat, no suite directory) → the same document in
+  the wrong place: MOVE it to `specs/qa/<suite>/plan.md`, naming the suite after what it
+  actually covers, before adding anything to it.
 
 ## Knowledge routing — question → source
 
@@ -303,8 +380,8 @@ Map what the service declares — this inventory IS the test surface:
 
 ## What this skill never does
 
-- Touch anything outside `specs/qa/` (the plan) and `qa/` (the suite) — no application
-  code, no yaml, no migrations.
+- Touch anything outside `specs/qa/<suite>/` (the plan) and `qa/` (the suite) — no
+  application code, no yaml, no migrations.
 - Weaken or delete a case to make a run green.
 - Invent tokens, credentials or endpoints.
 - Claim coverage it didn't run — SKIPPED is printed as SKIPPED, never folded into

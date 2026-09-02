@@ -32,6 +32,8 @@ github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 h1:XRzhVemXdgv
 github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0/go.mod h1:HKpQxkWaGLJ+D/5H8QRpyQXA1eKjxkFlOMwck5+33Jk=
 github.com/ClaudioSchirmer/omnicore v0.69.0 h1:OS39sze7NPNJwnV9FcJNv9Ej+UkrFZLQCE1TkduC6sY=
 github.com/ClaudioSchirmer/omnicore v0.69.0/go.mod h1:7IjhBCiQ7wGbiUEkxQ1g9hM15P+yIv/edPWVOJ4Ct5w=
+github.com/ClaudioSchirmer/omnicore v0.70.0 h1:pt+5Iu+DZGCuCBVLNW88SZSaGMhpUEVFApUIzsgF5lE=
+github.com/ClaudioSchirmer/omnicore v0.70.0/go.mod h1:7IjhBCiQ7wGbiUEkxQ1g9hM15P+yIv/edPWVOJ4Ct5w=
 github.com/MicahParks/jwkset v0.11.0 h1:yc0zG+jCvZpWgFDFmvs8/8jqqVBG9oyIbmBtmjOhoyQ=
 github.com/MicahParks/jwkset v0.11.0/go.mod h1:U2oRhRaLgDCLjtpGL2GseNKGmZtLs/3O7p+OZaL5vo0=
 github.com/MicahParks/keyfunc/v3 v3.8.0 h1:Hx2dgIjAXGk9slakM6rV9BOeaWDPEXXZ4Us8guNBfds=

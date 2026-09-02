@@ -7,6 +7,72 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.59.0] — 2026-09-01
+
+A document directory is named after its subject — including the two that had been
+writing a single flat file, where a second round had nowhere to land but on the first.
+And a QA run stops disappearing into terminal scrollback.
+
+### Changed
+
+- **The generator targets framework `v0.70.0`** (`compat.Supported`, the golden host's pin).
+  The release's breaking change — `fwweb.BindPath` returning a `*queryschema.Violation` —
+  does not touch generated code: the emitters only ever call the `fwweb.*Spec` wrappers,
+  and that is where the new refusal lives, so the emitted tree is unchanged. On this bump
+  the "one line older" refusal is therefore a POSTURE rather than a compile break, unlike
+  the two before it, and `compat_test.go` says so where the fixtures live.
+
+### Added
+
+- **The typed refusals `v0.70.0` moved to the wire are now derivable by the skills that
+  assert and diagnose them.** `qa` gained two case families: a by-id ADDRESS that is not a
+  uuid, split by VERB rather than by surface (read → 404 `UnknownIDAddressNotification`,
+  write → 400 `MalformedIDNotification`, identically on REST/GraphQL/gRPC), and a filter
+  value outside the leaf's declared kind (400 `InvalidFilterValueNotification`). Both are
+  the families an existing suite is most likely to lack, because below that pin the same
+  request answered 500 on a relational backing and 404 / an empty `200` page on Mongo —
+  there was no single contract to assert. `doctor` gained the mirror row: a 500 on a by-id
+  route or an ordinary filter now points at a pin below v0.70.0 or at a hand-written
+  handler still on the old two-value `BindPath`, not at a service bug.
+
+- **`/omnicore:qa`'s runner writes `qa/qa-report.md`** — header (profile, engine/transport
+  actually built, the pin, hygiene mode, the plan it executes), a `| Suite | Pass | Fail |
+  Skip | Verdict | Time |` matrix with every DECLARED suite present (one that never ran
+  prints `—`, because a suite missing from a report reads exactly like a suite that
+  passed), a failures section naming each RED case with expected-vs-received and the REAL
+  response body pointing at `qa/.logs/<run-id>/`, and a one-line footer verdict also
+  printed to stdout. Until now a run left nothing on disk: an agent booted the bench, ran
+  hundreds of cases and handed back one sentence, and the dev had no way to see what was
+  actually proven. Two properties, both learned from the reference service's own runner:
+  it is **rendered live after every suite**, so a run killed halfway still leaves what it
+  proved, and an **`EXIT INT TERM` trap stamps `❌ RUN ABORTED`**, disarmed only when the
+  real verdict lands — without it yesterday's green report survives today's crash and
+  reads as today's outcome. The mandatory honesty meta-case (break one case, watch it
+  fail) now doubles as the report's own proof: while a case is broken the report must go
+  RED with the body attached. The report and `qa/.logs/` are RUN ARTIFACTS — the skill
+  names them at hand-off and OFFERS the `.gitignore` lines, and still never edits
+  `.gitignore` itself.
+
+### Changed
+
+- **A skill's document directory is named after its SUBJECT, and `qa` and `scaffold-system`
+  now have one too** — `specs/qa/<suite>/plan.md` and
+  `specs/scaffold-system/<system>/domain-map.md`, joining `scaffold-entity/<entity>/`,
+  `scaffold-view/<view>/`, `implement/<slug>/` and the rest. Both wrote a single flat file,
+  so a second round had nowhere to land but on top of the first: the QA plan of a
+  whole-service round and of a later auth-enabled one were the same path, and the only
+  outcome was an approved plan silently overwritten. `<suite>` is what the round PROVES
+  (`full-contract`, `person-orders`), `<system>` the system the drop maps — proposed by the
+  skill, confirmed by the dev at the gate. Flat stays flat where the document is genuinely
+  one per service and rewritten in place: `scaffold-service/spec.md`, `configure/plan.md`,
+  `upgrade/migration-plan.md`.
+- **`/omnicore:qa` gained the re-entry section it never had** — the only writing skill
+  without one. It reads every existing `specs/qa/*/plan.md` before planning (duplicating a
+  case family is how a suite doubles its runtime without covering one more promise), reopens
+  its own DRAFT, routes new coverage to a NEW suite directory instead of overwriting an
+  APPROVED plan, and MOVES an older run's flat `specs/qa/plan.md` into place. The `<suite>`
+  directory scopes the PLAN only: there is still exactly ONE `qa/run.sh`, extended.
+
 ## [0.58.0] — 2026-09-01
 
 The QA suite is a command, not a document — so it stops being filed with the decisions.
