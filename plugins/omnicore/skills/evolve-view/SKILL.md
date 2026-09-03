@@ -39,6 +39,14 @@ query is not expressible.
 **Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
+**One directory per ROUND — an evolution never overwrites the one before it.** A view is
+evolved again and again — a field included here, a leg added there, an index tuned later —
+and the record of how it reached its current shape IS the sequence of those rounds. So this
+run writes `specs/evolve-view/<view>/<change>/`, where `<change>` names THIS change, and it
+touches no earlier round's directory. Overwriting one destroys the only account of a
+decision nothing else records: the declaration shows the shape the view ended at, never the
+`Version` bumps it went through nor why each rebuild was accepted.
+
 ## Generated code is a shortcut, not the source of truth
 
 `${CLAUDE_PLUGIN_ROOT}/shared/generated-code-review.md` — **read it before you work around
@@ -124,7 +132,21 @@ fields or lifecycle, check whether it FLIPS the segment's ARCHIVE regime
 (`Version` bump ⇒ rebuild) AND it changes what consumers SEE on default reads — call
 it out explicitly in the impact map, per the pin's `views` archived rule.
 
-## Phase 1 — Spec gate: `specs/evolve-view/<view>/spec.md`
+**Then read the view's EARLIER ROUNDS — they are its evolution log.** `ls
+specs/evolve-view/<view>/*/spec.md` and read every one, oldest first, plus the spec that
+created it (`specs/scaffold-view/<view>/spec.md`, or `specs/scaffold-entity/<entity>/spec.md`
+for a plain per-entity view). They carry what the declaration does not: which fields were
+deliberately LEFT OUT of a projection and why, which `Version` bumps already happened and
+what each rebuild cost, and which consumers a past round chose to break. Re-adding a field
+an earlier round removed on purpose is exactly the failure this history exists to prevent.
+
+## Phase 1 — Spec gate: `specs/evolve-view/<view>/<change>/spec.md`
+
+**Name the change first.** `<change>` is a kebab slug of what THIS round does, proposed by
+this skill and confirmed by the dev in the same breath as the spec: `add-city-to-listing`,
+`join-orders-leg`, `index-by-status`, `expose-on-graphql`. Not a date, not `spec`, not the
+view's own name — the reader of `specs/evolve-view/<view>/` must be able to tell the rounds
+apart, and follow them in order, from the directory names alone.
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` answered, never defaulted; sections
 structural (`N/A — <why>`):
@@ -273,12 +295,26 @@ index for concepts this table doesn't list.
 6. **Offer to run.** Ask ONE question: boot the app to click through the evolved read
    endpoints? Yes → delegate to `/omnicore:run` (never boot inline). No → done.
 
-Leave `specs/evolve-view/<view>/` in place for review.
+Leave `specs/evolve-view/<view>/<change>/` in place — and every earlier round beside it,
+untouched — for review.
 
-## Re-entry — spec already exists
+## Re-entry — the view already has rounds
 
-`Status: DRAFT` → reopen the gate with what's answered. `Status: APPROVED` → apply only
-the not-yet-applied impact-map items, then re-verify. A changed answer reopens the spec.
+`ls specs/evolve-view/<view>/*/spec.md` before Phase 1 and read every one (Phase 0b). Then
+place THIS run against them:
+
+- **This round's own `<change>` directory, `Status: DRAFT`** → reopen the gate with what is
+  already answered, don't restart it.
+- **`Status: APPROVED`, its impact map not fully applied** → apply only the not-yet-applied
+  items, then re-verify. A changed answer reopens THAT spec.
+- **`Status: APPROVED` and applied** → the round is closed. A further change is a NEW
+  `<change>` directory whose impact map says what it builds on and which `Version` it starts
+  from. **Never overwrite an approved spec**: it is the record of what was approved and the
+  only surviving account of why, not a scratch file.
+- **An older run's `specs/evolve-view/<view>/spec.md`** (flat, no round directory) → the
+  same document in the wrong place: MOVE the flat directory's contents into
+  `specs/evolve-view/<view>/<change>/`, naming the round after what that document actually
+  changed, before starting anything new. Move, never copy, and never rewrite what it says.
 
 ## What this skill never does
 

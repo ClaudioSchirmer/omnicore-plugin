@@ -21,6 +21,14 @@ service breaks in silence**. That lockstep is the whole reason this is a skill.
 **Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
+**One directory per ROUND — an evolution never overwrites the one before it.** An entity
+is evolved again and again, and the record of how it reached its current shape IS the
+sequence of those rounds. So this run writes `specs/evolve-entity/<entity>/<change>/`,
+where `<change>` names THIS change, and it touches no earlier round's directory.
+Overwriting one destroys the only account of a decision nothing else records: the code
+shows the shape the entity ended at, never the shapes it passed through, nor why it left
+them.
+
 ## Generated code is a shortcut, not the source of truth
 
 `${CLAUDE_PLUGIN_ROOT}/shared/generated-code-review.md` — **read it before you work around
@@ -121,6 +129,15 @@ and mappers · routes/surfaces (REST, GraphQL, gRPC) · views it feeds (own, Sha
 Composed — including views of OTHER entities that embed this one) · translations keys ·
 migrations history · tests. Mirror the project's local flavor in everything you generate.
 
+**Then read the entity's EARLIER ROUNDS — they are its evolution log.** `ls
+specs/evolve-entity/<entity>/*/spec.md` and read every one, oldest first, plus
+`specs/scaffold-entity/<entity>/spec.md` when it exists — that one is how the entity was
+BORN. They carry what nothing in the code does: what was already changed and in which
+order, which options were weighed and REJECTED, which migration ordinals are spent, and
+which consumer breakages a past round accepted on purpose. Proposing a change that
+re-litigates a settled decision — or silently reverses one that was deliberate — is
+exactly the failure this history exists to prevent.
+
 **Then discover WHO WROTE the code — the entity may be the generator's.** Run
 `omnicore-gen doctor -project <service-dir>` (read-only, offline, instant; it looks for
 `specs/omnicore-gen/lock.json`). Its answer decides whether Phase 1 offers a generation gateway
@@ -144,7 +161,13 @@ at all:
 - **generator unavailable** (`needs a Go toolchain`, `this plugin install is incomplete`) →
   say so plainly and continue on the manual path; never approximate the generator by hand.
 
-## Phase 1 — Spec gate: `specs/evolve-entity/<entity>/spec.md`
+## Phase 1 — Spec gate: `specs/evolve-entity/<entity>/<change>/spec.md`
+
+**Name the change first.** `<change>` is a kebab slug of what THIS round does, proposed by
+this skill and confirmed by the dev in the same breath as the spec: `add-cpf`,
+`promote-to-sharedbase`, `make-email-unique`, `drop-legacy-code`. Not a date, not `spec`,
+not the entity's own name — the reader of `specs/evolve-entity/<entity>/` must be able to
+tell the rounds apart, and follow them in order, from the directory names alone.
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` slots must be answered, never
 defaulted. The header also carries `Generation: <pending>` — the gateway's answer (item 9),
@@ -473,15 +496,32 @@ change at hand — never sweep the whole manual; the Documentation Map in
 6. **Offer to run.** Ask ONE question: boot the app to click through the changed
    endpoints? Yes → delegate to `/omnicore:run` (never boot inline). No → done.
 
-Leave `specs/evolve-entity/<entity>/` in place so the dev can review the plan against the
-diff.
+Leave `specs/evolve-entity/<entity>/<change>/` in place — and every earlier round beside
+it, untouched — so the dev can review the plan against the diff and the next run can read
+how the entity got here.
 
-## Re-entry — spec already exists
+## Re-entry — the entity already has rounds
 
-`Status: DRAFT` → reopen the gate with what's answered. `Status: APPROVED` → apply only
-the not-yet-applied items of the impact map, then re-verify. A changed answer reopens
-the spec. **`Generation:` is never re-asked** once it holds an answer — a resumed run reads
-it and continues on that path; only the dev reopening it changes it.
+`ls specs/evolve-entity/<entity>/*/spec.md` before Phase 1 and read every one (Phase 0b).
+Then place THIS run against them:
+
+- **This round's own `<change>` directory, `Status: DRAFT`** → reopen the gate with what is
+  already answered, don't restart it.
+- **`Status: APPROVED`, its impact map not fully applied** → apply only the not-yet-applied
+  items, then re-verify. A changed answer reopens THAT spec.
+- **`Status: APPROVED` and applied** → the round is closed. A further change is a NEW
+  `<change>` directory whose impact map says what it builds on. **Never overwrite an
+  approved spec**: it is the record of what was approved and the only surviving account of
+  why, not a scratch file.
+- **An older run's `specs/evolve-entity/<entity>/spec.md`** (flat, no round directory) →
+  the same document in the wrong place: MOVE the flat directory's contents into
+  `specs/evolve-entity/<entity>/<change>/`, naming the round after what that document
+  actually changed, before starting anything new. Move, never copy, and never rewrite what
+  it says.
+
+**`Generation:` is never re-asked** within a round once it holds an answer — a resumed run
+reads it and continues on that path; only the dev reopening it changes it. A NEW round asks
+it again: the gateway's answer belongs to a change, not to the entity.
 
 ## What this skill never does
 

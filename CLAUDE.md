@@ -131,3 +131,11 @@ anything picks `specs/<its-own-name>/` and is added to the table in
 halves of the rule: where documents live, and that they are committed rather than
 ignored. Never `docs/` — that name belongs to the consumer project's own end-user
 documentation.
+
+**A skill that can run REPEATEDLY on the same target takes a round segment in its
+path** — `<change>`, `<from>-to-<to>`, `<suite>`, `<slug>` — and never writes into
+an earlier round's directory. `specs/` holds what was DECIDED, so a run that
+overwrites its predecessor deletes a decision, and nothing regenerates it: the code
+shows the shape the project ended at, never the ones it left or why. The same file
+owns this third half of the rule, including the two behaviors it obliges (read the
+earlier rounds before proposing; move a flat legacy document into a round directory).
