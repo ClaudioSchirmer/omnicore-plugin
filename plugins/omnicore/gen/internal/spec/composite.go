@@ -797,9 +797,15 @@ func validateCompositeField(s *Spec, f Field, where string, ps *Problems, isChil
 	// one field, so a constraint over one part would enforce something the domain
 	// never said. The constraint the migration creates and the binding the
 	// repository registers both carry every part column, in declaration order.
+	//
 	// Everything else about the key — the enforcement style, the scope, the
-	// conflict notification — is checked by the ordinary per-field pass, which
-	// sees a composite field like any other.
+	// conflict notification, the pre-check fact — is checked by validateRootUnique,
+	// which the composite branch of validateOneField calls before it returns. It
+	// says so explicitly because the earlier wording said "the ordinary per-field
+	// pass" and that was not true: a composite leaves that pass early, so NONE of
+	// those ran, and a composite unique naming a notification nothing declared
+	// validated cleanly and generated an entity referring to a type that does not
+	// exist.
 	if f.Runtime {
 		// The wording is about the FIELD and not about one source, because there
 		// are several and they all fail here identically: a claim, a request body,

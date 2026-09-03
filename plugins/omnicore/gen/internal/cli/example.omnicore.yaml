@@ -216,6 +216,43 @@ fields:
     vo: {kind: composite, ref: TaxID}
     description: The student's tax identification, as issued.
     labelKey: StudentTaxIDField
+    # unique on a COMPOSITE is uniqueness over the TUPLE: one multi-column
+    # constraint, and a pre-check fact that must filter by EVERY part (see
+    # TaxIDTaken under service.facts). A second student from another country may
+    # legitimately carry the same number.
+    unique:
+      enforce: service-precheck+constraint
+      notification: TaxIDAlreadyExistsNotification
+      # attachTo: WHICH field the conflict is reported against. The default for a
+      # composite is the value object's own field name, which is right here and
+      # is written out anyway because it is the key you reach for when it is not
+      # — when the field is called `Key` inside the model and the concept goes by
+      # another name everywhere a caller can see.
+      #
+      # It governs BOTH halves of the enforcement, the pre-check and the database
+      # constraint, because they answer the same conflict. Only the spelling
+      # differs: the constraint reports the wire name, the pre-check the entity's.
+      attachTo: TaxID
+      # echoValue: whether the refusal carries the VALUE that collided. "39053344705
+      # is taken" is a different message from "that tax id is taken", and the
+      # caller picked the number.
+      #
+      # It is OFF here, and this is the case the key exists for: the number is
+      # redacted in the sync payload and in the audit trail two lines below, so
+      # echoing it into a 422 body — and into every log that renders a
+      # notification — would undo both. The generator cannot know that; nothing in
+      # this language marks a field as sensitive, so the judgement is yours.
+      #
+      # On a SCALAR the default is ON (EnrollmentNumber above echoes, and should).
+      # On a COMPOSITE the default is OFF and `true` is opt-in, because what gets
+      # echoed is the value object AS A WHOLE — no single part stands for a tuple
+      # — so the type has to render itself through String(). That makes `true`
+      # legal only on a `written: manual` composite, the one kind whose file is
+      # yours; ask for it on a generated one and the build refuses rather than
+      # answering `{BR 39053344705}`. A permission catalog keyed on
+      # resource + action is the shape that wants it: the conflict says
+      # `tenant:read is taken`, which is the only actionable half of the message.
+      echoValue: false
     parts:
       - {part: Country, column: tax_country, as: TaxCountry, length: 2,  example: BR}
       - part: Number
@@ -769,6 +806,20 @@ notifications:
       ita: Esiste già uno studente con questo numero di iscrizione.
       nld: Er bestaat al een student met dit inschrijvingsnummer.
 
+  # The conflict a COMPOSITE unique raises. The message names the concept and not
+  # the value, which is the same decision unique.echoValue: false makes on the
+  # field: a redacted number must not travel back in a 422 body either.
+  - name: TaxIDAlreadyExistsNotification
+    semantic: conflict
+    text:
+      ptbr: Já existe um aluno com esta identificação fiscal.
+      eng: A student with this tax identification already exists.
+      esp: Ya existe un alumno con esta identificación fiscal.
+      fra: Un élève portant cette identification fiscale existe déjà.
+      deu: Ein Schüler mit dieser Steuernummer existiert bereits.
+      ita: Esiste già uno studente con questa identificazione fiscale.
+      nld: Er bestaat al een student met deze fiscale identificatie.
+
   - name: EnrollmentNumberCannotChangeNotification
     semantic: validation
     text:
@@ -1200,6 +1251,22 @@ service:
         number. Excludes the row being updated, so an update never collides
         with itself.
 
+    # The pre-check half of a COMPOSITE unique. It filters by every PART, under
+    # the exposed names — the composite's own name names no column and cannot
+    # appear in a fact at all. The build holds this list and the constraint's
+    # columns to each other in both directions: a fact asking about the country
+    # alone would refuse students the model allows, and one asking about the
+    # number alone would let a real duplicate through the domain and leave the
+    # database to report it as something else.
+    - name: TaxIDTaken
+      kind: exists
+      filters: [TaxCountry, TaxNumber]
+      excludeSelf: true
+      activeOnly: true
+      description: >-
+        Reports whether another ACTIVE student already holds this country and
+        tax-number pair. Excludes the row being updated.
+
     # `filters` is the fact's WHERE, and it is the framework's own criteria tree
     # rather than a list of equalities. A bare name is an `eq` whose value the
     # caller passes — which is what every filter above is, and what a filter
@@ -1438,3 +1505,49 @@ authz:
     archive: student:archive
     unarchive: student:archive
     read: student:read
+
+# The CALLER-FACING prose. Every other description in this file is written for a
+# developer reading the generated tree — storage.description reaches a migration
+# comment, a field's reaches a Go doc comment, a rule's reaches the hook file.
+# None of them reach Swagger, and none of them should: "stored as two columns" is
+# a fact about the table, not about the call.
+#
+# This block is the other audience. It reaches fwopenapi.Doc.Description, which
+# Swagger UI renders EXPANDED under the endpoint's summary — no click, unlike a
+# field description, which lives one tab inside "Schema". It is markdown and it is
+# multi-line: write it as a YAML block scalar (`|`), leave a blank line between
+# paragraphs, and `code`/**bold**/lists all render.
+#
+# It is APPENDED to the sentence the generator writes for the verb, never a
+# replacement. That sentence states framework behaviour you do not own — that
+# PATCH cannot set a value back to null, that this service mounts no unarchive —
+# and an entity able to overwrite it would be one where a caller quietly stops
+# being told.
+docs:
+  # Reaches EVERY operation, the reads and the writes alike, and the collection
+  # routes too. Put here what is true of the resource however it is being
+  # touched — what its fields mean together, which values are composed out of
+  # several, what has to be known before sending anything.
+  description: |
+    A student is identified by `registration`, which is assigned once and never
+    changes: an update that carries a different one is refused rather than
+    applied, and there is no endpoint that reassigns it.
+
+    Dates are ISO-8601 (`2026-02-01`), and `birthDate` is compared against the
+    server's clock, not the caller's.
+  # Prose for ONE endpoint, keyed by the operation the route serves: insert,
+  # update, patch, delete, archive, unarchive, byId, byParams. The two reads are
+  # separate here even though authz.permissions guards both under `read` — a
+  # listing's filter vocabulary is not what a by-id read needs explained.
+  #
+  # Both halves compose: an operation named here gets `description` first and
+  # then its own paragraph, so what is true of the whole entity is not restated
+  # per verb.
+  operations:
+    archive: |
+      Archiving keeps the row and its guardians: the student stops appearing in
+      listings, and `?includeArchived=true` brings them back into view. It is
+      the reversible removal — `unarchive` is its undo.
+    byParams: |
+      Ordering is stable: every page breaks ties on the student's id, so a row
+      cannot appear twice across two pages or be skipped between them.

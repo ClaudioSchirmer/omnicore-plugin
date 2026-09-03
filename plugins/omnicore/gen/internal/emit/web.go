@@ -269,9 +269,9 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 		// The two tags answer different questions about the same path — which
 		// operations it accepts, and which directions it may be ordered in — and
 		// the framework reads them independently.
-		s.L("\t%s *%s `query:%s filter:%s%s`", f.Field.Name, f.Field.BaseGoType,
+		s.L("\t%s *%s `query:%s filter:%s%s%s`", f.Field.Name, f.Field.BaseGoType,
 			quote(f.Field.JSONName), quote(strings.Join(f.Ops, ",")),
-			sortTagFor(m, f.Field.Name))
+			sortTagFor(m, f.Field.Name), descTagFor(f.Field))
 	}
 	// A path that is orderable and NOT filtered is a leaf of its own: it declares
 	// the vocabulary, carries no value on the wire, and emits no query parameter
@@ -281,8 +281,8 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 		if filteredBy(m, f.Name) {
 			continue
 		}
-		s.L("\t%s *%s `query:%s sort:%s`", f.Name, f.BaseGoType,
-			quote(f.JSONName), quote(sortDirections))
+		s.L("\t%s *%s `query:%s sort:%s%s`", f.Name, f.BaseGoType,
+			quote(f.JSONName), quote(sortDirections), descTagFor(f))
 	}
 	emitReadControls(s, m)
 	s.L("}")
@@ -365,6 +365,34 @@ func emitListDTO(m *ir.Model) (fsplan.File, error) {
 // direction is a real capability of the tag (`sort:"asc"`), kept in reserve for
 // a key that asks for it rather than guessed at per field.
 const sortDirections = "asc,desc"
+
+// descTagFor renders the ` description:"…"` half of a query leaf's tag, which
+// the framework turns into the parameter's description in the OpenAPI document.
+//
+// It is the ONE place a field's own prose reaches Swagger, and it reaches it
+// where a caller cannot miss it: a query parameter's description renders inside
+// the Parameters table, beside the input, with no tab to click. (The body half —
+// a description on a `json:` field — is inert: the framework's body-schema
+// walker reads path, query, json and example, and never description. Emitting
+// one there would be a tag nothing reads.)
+//
+// A composite's PART carries the part's own description, which is what makes
+// this worth doing at all: `resource` and `action` reach the wire as two
+// unrelated-looking strings, and the sentence explaining each is already in the
+// spec with nowhere to go.
+//
+// The sanitisation is not cosmetic. A struct tag is delimited by BACKTICKS, so a
+// backtick inside the prose does not compile — and prose about an API is exactly
+// where `code` spans get written. They become single quotes. Newlines go the
+// same way: a tag is one line, and the description is a YAML block scalar that
+// usually is not.
+func descTagFor(f ir.Field) string {
+	desc := strings.Join(strings.Fields(strings.ReplaceAll(f.Description, "`", "'")), " ")
+	if desc == "" {
+		return ""
+	}
+	return " description:" + quote(desc)
+}
 
 // sortTagFor renders the ` sort:"…"` half of a filter leaf's tag, or nothing
 // when the path is not in the ordering vocabulary.
@@ -539,16 +567,68 @@ func emitRoute(s *src, m *ir.Model, op ir.Operation, entity string) {
 	s.L("\t\t%s, %s,", hv, sv)
 	s.L("\t\tfwopenapi.Doc{")
 	s.L("\t\t\tSummary: %s,", quote(op.Summary))
-	s.L("\t\t\tDescription: %s,", quote(routeDescription(m, op)))
+	writeDoc(s, "\t\t\t", routeDescription(m, op))
 	s.L("\t\t\tTags: []string{%s},", quote(m.Entity.PluralPascal))
 	s.L("\t\t},")
 	s.L("\t\tfwopenapi.RequirePermission(%s))", quote(op.Permission))
 	s.Blank()
 }
 
+// writeDoc emits the Doc.Description field, one Go string per PARAGRAPH joined
+// with +, rather than one %q of the whole thing.
+//
+// The difference is only legibility, and it is worth a helper because the
+// author's prose is markdown: a description with four paragraphs collapses into
+// a single 900-column line whose \n\n escapes are the only clue that structure
+// exists. Split, the generated route file shows the same paragraphs the spec
+// shows, which is what a reviewer diffing the two needs.
+//
+// The escaping stays %q throughout, so a backtick, a quote or a tab in the
+// prose is emitted correctly — the reason this can be a Go string literal at all
+// while a struct tag cannot.
+func writeDoc(s *src, indent, desc string) {
+	paras := strings.Split(desc, "\n\n")
+	if len(paras) == 1 {
+		s.L("%sDescription: %s,", indent, quote(desc))
+		return
+	}
+	s.L("%sDescription: %s +", indent, quote(paras[0]+"\n\n"))
+	for i, p := range paras[1:] {
+		if i == len(paras)-2 {
+			s.L("%s\t%s,", indent, quote(p))
+			continue
+		}
+		s.L("%s\t%s +", indent, quote(p+"\n\n"))
+	}
+}
+
 // routeDescription writes documentation a reader actually benefits from: what
-// the endpoint does and the one behaviour that surprises people.
+// the endpoint does and the one behaviour that surprises people — followed by
+// whatever the SPEC's docs block says about this entity and this operation.
+//
+// The generator's sentence always comes first and is never replaceable. It
+// states framework behaviour the author does not own — that PATCH cannot set a
+// value back to null, that this service mounts no unarchive — and an entity able
+// to overwrite it would be one where a caller quietly stops being told.
 func routeDescription(m *ir.Model, op ir.Operation) string {
+	own := verbDescription(m, op)
+	if prose := m.Docs.For(op.Verb); prose != "" {
+		return own + "\n\n" + prose
+	}
+	return own
+}
+
+// childRouteDescription is routeDescription's twin for a collection's own
+// doors, which carry their sentence already written rather than deriving it
+// from a verb.
+func childRouteDescription(m *ir.Model, own string) string {
+	if prose := strings.TrimSpace(m.Docs.Description); prose != "" {
+		return own + "\n\n" + prose
+	}
+	return own
+}
+
+func verbDescription(m *ir.Model, op ir.Operation) string {
 	e := strings.ToLower(m.Entity.Pascal)
 	switch op.Verb {
 	case "insert":
@@ -822,7 +902,11 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 			s.L("\t\t%s, %s,", hv, sv)
 			s.L("\t\tfwopenapi.Doc{")
 			s.L("\t\t\tSummary: %s,", quote(op.summary))
-			s.L("\t\t\tDescription: %s,", quote(op.doc))
+			// An entry route is an operation of this entity, so the entity-wide
+			// prose reaches it too. The per-operation map deliberately does not:
+			// its keys name the ROOT's verbs, and a collection's doors are the
+			// child's own business — children[] is where that would be declared.
+			writeDoc(s, "\t\t\t", childRouteDescription(m, op.doc))
 			s.L("\t\t\tTags: []string{%s},", quote(m.Entity.PluralPascal))
 			s.L("\t\t},")
 			// Per VERB, not per collection: the entry verbs inherit the root's

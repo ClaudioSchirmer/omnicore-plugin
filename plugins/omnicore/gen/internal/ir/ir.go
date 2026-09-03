@@ -65,6 +65,37 @@ type Model struct {
 	Ordinal  map[string]int
 
 	Constraints []Constraint
+
+	// Docs is the caller-facing prose the OpenAPI operations carry, resolved
+	// per operation name. It is kept as the author wrote it — markdown, with the
+	// paragraph breaks intact — because the only consumer renders markdown and
+	// reflowing it here would silently join two paragraphs into one.
+	Docs Docs
+}
+
+// Docs carries the OpenAPI prose from the spec, unchanged.
+type Docs struct {
+	// Description reaches every operation; Operations adds one operation's own,
+	// keyed by the operation name the routes are generated with.
+	Description string
+	Operations  map[string]string
+}
+
+// For returns the prose one operation carries: what is true of the whole entity
+// first, then what is true of this verb, separated by a blank line.
+//
+// The order is the point. The entity-wide paragraph is the premise — what the
+// fields mean, what composes with what — and the per-verb one usually refers to
+// it. Printing the verb's paragraph first reads as a non sequitur.
+func (d Docs) For(op string) string {
+	parts := make([]string, 0, 2)
+	if s := strings.TrimSpace(d.Description); s != "" {
+		parts = append(parts, s)
+	}
+	if s := strings.TrimSpace(d.Operations[op]); s != "" {
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // Names carries every spelling of the entity so no emitter has to derive one.
@@ -240,6 +271,15 @@ type Unique struct {
 	Enforce      string
 	Notification string
 	Scope        string
+	// AttachTo is the field the conflict is reported against, as the spec named
+	// it; empty means the emitter's default — the field itself, or the value
+	// object's own name for a composite.
+	AttachTo string
+	// EchoValue says the conflict carries the refused value. It is resolved
+	// here rather than left as a pointer because every consumer wants the
+	// answer, not the declaration: the default is true and only the spec knows
+	// it was defaulted.
+	EchoValue bool
 	// Within names the fields the uniqueness is scoped BY — "unique per tenant".
 	// It sizes the index and is held to the pre-check fact's filters, so the
 	// domain and the database cannot disagree about what is unique.
@@ -601,6 +641,7 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 		Dialects:         p.Dialects,
 		Ordinal:          p.NextOrdinal,
 		Authz:            Authz{DataAccess: s.Authz.DataAccess},
+		Docs:             Docs{Description: s.Docs.Description, Operations: s.Docs.Operations},
 	}
 	m.Entity = resolveNames(s.Entity, s.Plural)
 	m.Base = resolveBase(s)
@@ -899,6 +940,7 @@ func resolveField(entity string, f spec.Field) Field {
 		out.Unique = &Unique{
 			Enforce: f.Unique.Enforce, Notification: f.Unique.Notification,
 			Scope: scope, Within: f.Unique.Within,
+			AttachTo: f.Unique.AttachTo, EchoValue: f.Unique.Echoes(),
 		}
 	}
 	return out
@@ -1424,6 +1466,18 @@ func resolveConstraints(s *spec.Spec, m *Model) []Constraint {
 		if f.Composite != nil {
 			cols = compositeRunColumns(m.Fields, i)
 			field = naming.Camel(f.Composite.Owner)
+		}
+		// attachTo governs BOTH halves of the enforcement, because it is declared
+		// on the uniqueness rather than on a rule: the pre-check and the
+		// constraint answer the same conflict, and a caller who saw one seat from
+		// the domain and another from the database would be looking at two
+		// different fields for one problem.
+		//
+		// The SPELLING still differs, and deliberately: this binding reports the
+		// wire name, the pre-check reports the entity's, and each is what its own
+		// road already speaks.
+		if f.Unique.AttachTo != "" {
+			field = naming.Camel(f.Unique.AttachTo)
 		}
 		// `within` scopes the uniqueness — "unique per tenant" — so its columns
 		// lead the index. They lead rather than trail because that is also the
@@ -2592,18 +2646,29 @@ func appendUniqueClauses(m *Model) []Clause {
 		if fact == nil {
 			continue
 		}
+		// The rule is SYNTHESISED, so both answers come off the unique block
+		// rather than off a rules.list entry — which is why that block carries
+		// echoValue and attachTo at all. Defaults are resolved before this point
+		// (Unique.Echoes for the echo, the field's own name for the seat), so
+		// nothing here re-decides them.
+		attach := f.Unique.AttachTo
+		if attach == "" {
+			// The default seat is the field itself — except for a composite,
+			// where the field is one PART and the concept is the value object
+			// holding it. A conflict over the tuple reported against `Resource`
+			// would point a caller at the half that may well be fine.
+			attach = f.Name
+			if f.Composite != nil {
+				attach = f.Composite.Owner
+			}
+		}
 		extra = append(extra, Rule{
-			ID:   "unique-" + f.Name,
-			Kind: "uniquePrecheck",
-			// The synthesised rules have no spec entry to carry echoValue, so the
-			// default rules.list gets from an absent key is applied here instead.
-			// This one earns it more than most: "that handle is taken" is a
-			// different message from "administrator is taken", and the caller
-			// picked the word.
-			EchoValue:    true,
+			ID:           "unique-" + f.Name,
+			Kind:         "uniquePrecheck",
+			EchoValue:    f.Unique.EchoValue,
 			Fields:       []Field{f},
 			Notification: f.Unique.Notification,
-			AttachTo:     f.Name,
+			AttachTo:     attach,
 			Fact:         fact,
 		})
 	}

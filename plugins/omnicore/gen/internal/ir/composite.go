@@ -330,5 +330,13 @@ func uniqueOfOwner(f spec.Field, head bool) *Unique {
 	if scope == "" {
 		scope = "all"
 	}
-	return &Unique{Enforce: f.Unique.Enforce, Notification: f.Unique.Notification, Scope: scope}
+	return &Unique{
+		Enforce: f.Unique.Enforce, Notification: f.Unique.Notification, Scope: scope,
+		AttachTo: f.Unique.AttachTo,
+		// OPT-IN here, unlike a scalar's default-on: what a composite echoes is
+		// the value object as a whole, which only renders if the author gave it a
+		// String() — so silence is the only safe default, and asking for it is
+		// what validation checks the type against.
+		EchoValue: f.Unique.EchoValue != nil && *f.Unique.EchoValue,
+	}
 }

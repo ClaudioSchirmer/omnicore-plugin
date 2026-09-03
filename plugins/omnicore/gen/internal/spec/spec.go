@@ -93,9 +93,60 @@ type Spec struct {
 	// Authz names the permission resource, the permission each operation
 	// requires, and who may reach which rows.
 	Authz Authz `yaml:"authz"`
+	// Docs is the CALLER-FACING prose that reaches the OpenAPI document —
+	// multi-line markdown, written for whoever is about to call the endpoint.
+	Docs Docs `yaml:"docs"`
 
 	// SourcePath is where this spec was loaded from. Not a YAML key.
 	SourcePath string `yaml:"-"`
+}
+
+// ---------------------------------------------------------------- docs
+
+// Docs is the prose an OPERATION carries in the OpenAPI document, below the
+// sentence the generator writes for its verb.
+//
+// It exists because every other description in this language is written for a
+// DEVELOPER reading the generated tree — storage.description reaches a
+// migration comment, a field's reaches a Go doc comment, a rule's reaches the
+// hook file. None of them reach Swagger, and none of them should: "stored as
+// two columns" is a fact about the table, not about the call.
+//
+// What a caller needs is different, and there was nowhere to write it. The case
+// that forced the key: an entity whose composite value object is exposed as two
+// separate wire fields — a resource and an action that are two halves of ONE
+// value, rendered as `resource:action`. Nothing in the generated document said
+// so, so the two fields read as unrelated strings and the composed form was
+// discoverable only by reading the domain code.
+//
+// It is MARKDOWN and it is MULTI-LINE. Swagger UI renders the operation
+// description as markdown — paragraphs, `code`, **bold**, lists — and the
+// framework already relies on that (it appends the required permission in
+// bold). Write it as a YAML block scalar and use blank lines between
+// paragraphs.
+type Docs struct {
+	// Description is appended to EVERY operation this entity mounts — the reads
+	// and the writes alike. Put here what is true of the resource however it is
+	// being touched: what its fields mean together, which values are composed,
+	// what the caller has to know before sending anything.
+	//
+	// It is APPENDED, never a replacement: the sentence the generator writes for
+	// the verb ("Partial update: only the fields present in the body change…")
+	// is framework behaviour the author does not own, and an entity that could
+	// overwrite it would be one where a caller silently stops being told that
+	// PATCH cannot set a value back to null.
+	Description string `yaml:"description"`
+	// Operations adds prose to ONE operation, keyed by the operation the route
+	// serves: insert, update, patch, delete, archive, unarchive, byId, byParams.
+	//
+	// The keys are the OPERATIONS, not the modes and not the authz vocabulary —
+	// `read` is two endpoints with two different things to say, and a listing's
+	// filter vocabulary is rarely what a by-id read needs explained.
+	//
+	// Both halves compose: an operation named here receives Description first
+	// and then its own paragraph, so what is true of the whole entity is not
+	// restated per verb.
+	Operations map[string]string `yaml:"operations"`
 }
 
 // ---------------------------------------------------------------- storage
@@ -675,6 +726,43 @@ type Unique struct {
 	// Notification names the conflict answer a duplicate raises — a custom
 	// <Field>AlreadyExists… notification declared under notifications.
 	Notification string `yaml:"notification"`
+	// AttachTo names the field the conflict is reported against; defaults to
+	// this field (to the value object's own name, for a composite).
+	//
+	// It is the same key rules.list[] carries, and it is here for the same
+	// reason: the default is the right answer only when the field a caller
+	// should look at IS the field the uniqueness is declared on. A composite is
+	// where that breaks first — the conflict lands on the value object's field
+	// name, which may be an internal spelling (`Key`) rather than the one the
+	// concept goes by everywhere else.
+	//
+	// It must name a field of this entity: a notification points a caller at
+	// something they can change, and a free label points at nothing.
+	AttachTo string `yaml:"attachTo"`
+	// EchoValue passes the refused value back with the conflict, so the answer
+	// says WHICH value is taken rather than only that one is — ON BY DEFAULT,
+	// turned off with `echoValue: false`.
+	//
+	// The default and the exception are in the opening sentence for the reason
+	// rules.list[].echoValue says it there: `explain keys` prints one sentence,
+	// and an author who reads "passes the refused value back" and stops
+	// concludes the key is opt-in.
+	//
+	// It earns the default more than most rules do: "that handle is taken" and
+	// "administrator is taken" are different messages, and the caller picked the
+	// word. Turn it OFF for a value the response is not already allowed to carry
+	// — a document number, an e-mail, anything a 422 body and every log that
+	// renders a notification should not repeat back. The generator cannot tell
+	// which those are; nothing in this language marks a field as sensitive.
+	//
+	// A COMPOSITE is the case where it is off by default in effect and must be
+	// asked for: what was refused is the TUPLE, and no single part stands for it
+	// — echoing one half points at the wrong thing. Asking for it echoes the
+	// value object as a whole, which requires the type to render itself
+	// (`String()`), so it is accepted only on a `written: manual` composite: one
+	// this generator writes declares no String(), and the echo would hand back a
+	// formatted struct.
+	EchoValue *bool `yaml:"echoValue"`
 	// Scope decides whether an archived row keeps holding the value: all =
 	// forever; active-only = archiving frees it for reuse.
 	Scope string `yaml:"scope"`
@@ -699,6 +787,11 @@ type Unique struct {
 	// that can be NULL scopes nothing, because NULLs do not collide.
 	Within []string `yaml:"within"`
 }
+
+// Echoes reports whether the conflict carries the refused value. Absent means
+// yes, which is the same reading Rule.Echoes gives the identically named key —
+// one spelling, one default, in both places an author meets it.
+func (u Unique) Echoes() bool { return u.EchoValue == nil || *u.EchoValue }
 
 // ---------------------------------------------------------------- value objects
 

@@ -107,6 +107,7 @@ func Validate(s *Spec, opt Options) *Problems {
 	validateRead(s, joinReachOf(s, opt), ps)
 	validateSurfaces(s, ps)
 	validateAuthz(s, ps)
+	validateDocs(s, ps)
 
 	checkNeighbours(s, opt, ps)
 	ps.Sort()
@@ -943,6 +944,14 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 			ps.WarnFix(where, "no description",
 				"it is what the aggregate's field comment says about the concept as a whole")
 		}
+		// The uniqueness is checked on THIS path too. A composite leaves early —
+		// its type, column and length live under parts[] — and that early exit
+		// used to take the whole unique block with it, so a composite unique
+		// naming a notification nothing declared validated cleanly and generated
+		// an entity referring to a type that does not exist.
+		if f.Unique != nil && !isChild {
+			validateRootUnique(s, f, where, ps)
+		}
 		return
 	}
 
@@ -1218,71 +1227,7 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 		validateChildUnique(s, f, where, ps)
 	}
 	if f.Unique != nil && !isChild {
-		if f.LivesOn == "base" {
-			// The constraint is resolved against the role's table, but a
-			// base-lived column exists only on the base table — the emitted
-			// index named a column that was not there and the migration failed
-			// on every engine.
-			ps.BlockerFix(where+".unique",
-				"a unique on a base-lived field would be created on the role's table, "+
-					"where the column does not exist",
-				"declare the uniqueness in the spec that owns the base, or move the "+
-					"field to the role")
-		}
-		if !UniqueEnforcements.Has(f.Unique.Enforce) {
-			ps.BlockerFix(where+".unique.enforce",
-				fmt.Sprintf("%q is not an enforcement style", f.Unique.Enforce),
-				"one of: "+UniqueEnforcements.String())
-		}
-		validateUniqueWithin(s, f, where, ps)
-		// The precheck half only materialises when a domain service carries an
-		// exists fact filtered by this field. Without this cross-check the
-		// enforce string validated, the report repeated it, and the generated
-		// service quietly had constraint-only behaviour.
-		//
-		// The filters must match the index EXACTLY — `within` plus this field —
-		// which is the other half of the same story: a fact filtering by MORE
-		// than the index covers asks a narrower question than the database
-		// answers, so the domain accepts a value the constraint then refuses,
-		// reported under a notification naming a reason that is not the reason.
-		if f.Unique.Enforce == "service-precheck+constraint" {
-			want := uniqueFilterSet(f)
-			if !hasExistsFactFor(s, want) {
-				reportPrecheckMismatch(s, f, want, where, ps)
-			}
-		}
-		if f.Unique.Scope != "" && !UniqueScopes.Has(f.Unique.Scope) {
-			ps.BlockerFix(where+".unique.scope",
-				fmt.Sprintf("%q is not a uniqueness scope", f.Unique.Scope),
-				"one of: "+UniqueScopes.String())
-		}
-		// active-only is defined by the archive column; without one it used to
-		// fall back to a plain unique SILENTLY — permanently reserving values
-		// the spec said should come free on archive.
-		if f.Unique.Scope == "active-only" && s.Storage.Managed.ArchivedAt == "" {
-			ps.BlockerFix(where+".unique.scope",
-				"active-only scopes the uniqueness to the rows that are not archived, "+
-					"and nothing here is ever archived",
-				"declare storage.managed.archivedAt, or use scope: all")
-		}
-		if f.Type == "bool" {
-			ps.BlockerFix(where+".unique",
-				"a unique flag would allow at most one true and one false row",
-				"uniqueness is for identifying values; drop the key")
-		}
-		if f.Unique.Notification == "" {
-			ps.BlockerFix(where+".unique",
-				"a unique field needs its own conflict notification",
-				"declare one under notifications and name it here — the framework's "+
-					"already-added notification reports a primary-key collision, not this")
-		} else {
-			validateNotificationRef(s, f.Unique.Notification, where+".unique.notification", ps)
-		}
-		if f.Nullable {
-			ps.WarnFix(where,
-				"a nullable field is declared unique",
-				"most engines allow many NULLs past a unique index; confirm that is intended")
-		}
+		validateRootUnique(s, f, where, ps)
 	}
 
 	validateRedact(s, f.Redact, where, redactSeat{
@@ -5316,6 +5261,64 @@ func validateAuthz(s *Spec, ps *Problems) {
 // mountedOperations is the single source of truth for "what this spec actually
 // serves". Both the authz cross-check and the emitters read it, so a permission
 // can never disagree with a route.
+// validateDocs holds the caller-facing prose to the operations that exist.
+//
+// Prose for an operation nobody mounts is the quietest kind of dead
+// configuration: it costs no build, breaks no route, and the author who wrote a
+// paragraph explaining the archive endpoint has every reason to believe callers
+// are reading it. Nothing else would ever tell them the entity declares no
+// archive mode.
+func validateDocs(s *Spec, ps *Problems) {
+	if strings.TrimSpace(s.Docs.Description) == "" && len(s.Docs.Operations) == 0 {
+		return
+	}
+	if s.Docs.Description != "" && strings.TrimSpace(s.Docs.Description) == "" {
+		ps.BlockerFix("docs.description",
+			"the prose is blank",
+			"write it, or drop the key — an empty description reaches the document as "+
+				"an empty paragraph")
+	}
+	ops := mountedRouteOperations(s)
+	for key := range s.Docs.Operations {
+		where := "docs.operations." + key
+		if !DocOperations.Has(key) {
+			ps.BlockerFix("docs.operations",
+				fmt.Sprintf("%q is not an operation", key),
+				"one of: "+DocOperations.String()+" — the two reads are separate here, "+
+					"unlike authz.permissions, which guards both under `read`")
+			continue
+		}
+		if !ops[key] {
+			ps.BlockerFix("docs.operations",
+				fmt.Sprintf("prose is declared for %q but that operation is not served", key),
+				"add the mode/read that mounts it, or remove the prose — nothing would "+
+					"ever render it")
+			continue
+		}
+		if strings.TrimSpace(s.Docs.Operations[key]) == "" {
+			ps.BlockerFix(where,
+				"the prose is blank",
+				"write it, or drop the key")
+		}
+	}
+}
+
+// mountedRouteOperations answers which ROUTES exist, which is a finer question
+// than mountedOperations: that one serves authz, where a single `read`
+// permission guards both read endpoints, and it therefore cannot tell a listing
+// from a by-id read. Prose is written per endpoint, so it needs both names.
+func mountedRouteOperations(s *Spec) map[string]bool {
+	ops := mountedOperations(s)
+	delete(ops, "read")
+	if s.Read.ByID {
+		ops["byId"] = true
+	}
+	if s.Read.ByParams != nil {
+		ops["byParams"] = true
+	}
+	return ops
+}
+
 func mountedOperations(s *Spec) map[string]bool {
 	ops := map[string]bool{}
 	for _, m := range s.Modes {
@@ -5705,8 +5708,90 @@ func reportPrecheckMismatch(s *Spec, f Field, want []string, where string, ps *P
 //   - the enforcement is constraint-only, because a per-entry pre-check would be
 //     an exists query over the collection's own table and this build writes no
 //     such query.
+//
+// validateUniqueAnswer holds the two keys that shape the CONFLICT ANSWER —
+// which field it names, and whether it carries the value that collided.
+//
+// Both are refusals about a promise the generated code could not keep, not about
+// taste. A seat that names nothing points a caller at a field they cannot find;
+// an echo of a value object that cannot render itself puts a formatted Go struct
+// in a 422 body.
+func validateUniqueAnswer(s *Spec, f Field, where string, ps *Problems) {
+	if f.Unique.AttachTo != "" && findField(s.Fields, f.Unique.AttachTo) == nil {
+		ps.BlockerFix(where+".unique.attachTo",
+			fmt.Sprintf("%q does not name a field of this entity", f.Unique.AttachTo),
+			"a conflict points the caller at something they can change; name one of "+
+				"fields[], or drop the key and let it land on this field")
+	}
+	// From here on: the composite half. A SCALAR needs nothing checked — the
+	// default is on, the value is a string or a number, and which values are
+	// sensitive is the author's call rather than something the language marks.
+	vo := findVO(s.ValueObjects, ownerRef(f))
+	if vo == nil || vo.Kind != "composite" {
+		return
+	}
+	// The echo of a composite is OPT-IN, unlike a scalar's: it is the only shape
+	// where the default answer has to be "say nothing". So the check is about an
+	// explicit `echoValue: true` and never about an absent key — every composite
+	// unique written before this key existed keeps meaning exactly what it meant.
+	if f.Unique.EchoValue == nil || !*f.Unique.EchoValue {
+		return
+	}
+	// A composite echoes the value object AS A WHOLE — there is no single part
+	// that stands for the tuple — so the type has to render itself. One this
+	// generator writes does not: it emits the struct, its IsValid and nothing
+	// else, deliberately (a composite declares no Value(), and that absence is
+	// what tells the framework to decompose it into columns rather than store a
+	// rendering). `written: manual` is the kind whose FILE is the author's, and
+	// therefore the only kind that can carry a String().
+	//
+	// Left unchecked this is silent in the worst way: it compiles, it runs, and
+	// the conflict answers `{tenant read}` — a Go struct printed into an API
+	// response, discovered by a caller rather than by a build.
+	if vo.Written != "manual" {
+		ps.BlockerFix(where+".unique.echoValue",
+			fmt.Sprintf("the echo would hand back the %s struct, which nothing renders", vo.Name),
+			"a composite echoes the whole value — no single part stands for the "+
+				"tuple — so the type must declare String(). Either declare the value "+
+				"object with written: manual and write that method, or drop echoValue "+
+				"and let the message name the concept without the value")
+		return
+	}
+	// The author asked for it explicitly on a type they own, so String() is now
+	// a CONTRACT the generated code depends on — and this is a `written: manual`
+	// value object, so the generator emits no file where it could check for one.
+	ps.WarnFix(where+".unique.echoValue",
+		fmt.Sprintf("the conflict will echo %s through its String()", vo.Name),
+		fmt.Sprintf("make sure %s declares one — without it the answer carries a "+
+			"formatted struct, and this build writes no file where that could be "+
+			"caught", vo.Name))
+}
+
 func validateChildUnique(s *Spec, f Field, where string, ps *Problems) {
 	coll := childOwningColumn(s, f.Column)
+	// The two keys that shape a ROOT field's conflict answer do nothing here, and
+	// a key the build ignores is a promise the author believes is in force.
+	//
+	// echoValue has nothing to attach to: an entry's uniqueness is
+	// `constraint-only` (a pre-check would query the collection's own table and
+	// this build writes none), so the answer comes from the constraint binding,
+	// which never saw the value. attachTo has nothing to move: that binding
+	// reports against the COLLECTION's segment rather than against a field,
+	// because what the caller has to look at is which entry of the array
+	// collided.
+	if f.Unique.EchoValue != nil {
+		ps.BlockerFix(where+".unique.echoValue",
+			"an entry's conflict comes from the database constraint, which never saw "+
+				"the value",
+			"drop the key — the value travels back only from a service pre-check, and "+
+				"an entry has none in this build")
+	}
+	if f.Unique.AttachTo != "" {
+		ps.BlockerFix(where+".unique.attachTo",
+			"an entry's conflict is reported against the collection, not against a field",
+			"drop the key — the caller needs to know which entry of the array collided, "+
+				"which is what the collection's own segment says")
+	}
 	if f.Unique.Enforce != "" && f.Unique.Enforce != "constraint-only" {
 		ps.BlockerFix(where+".unique.enforce",
 			fmt.Sprintf("%q needs a service fact asking about the collection's own "+
@@ -6283,4 +6368,84 @@ func validateStamped(s *Spec, f Field, where string, ps *Problems, isChild, isFa
 			fmt.Sprintf("the request is e.Stamp(%q) inside a rules.manual entry you write "+
 				"— without one the column is never written and no error says so", f.Name))
 	}
+}
+
+// validateRootUnique checks the uniqueness declared on a ROOT field — the
+// enforcement style, the scope, the conflict notification, the pre-check fact it
+// is held to, and the two keys that shape the answer.
+//
+// It is a function rather than an inline block because a COMPOSITE field leaves
+// validateOneField early — its type, column and length live under parts[] and
+// asking about them here would refuse a correct spec three times — and used to
+// take this with it. The composite path carried a comment saying these were
+// "checked by the ordinary per-field pass"; they were not, and what got through
+// was a composite unique naming a notification nothing declared, which generates
+// an entity referring to a type that does not exist.
+func validateRootUnique(s *Spec, f Field, where string, ps *Problems) {
+	if f.LivesOn == "base" {
+		// The constraint is resolved against the role's table, but a
+		// base-lived column exists only on the base table — the emitted
+		// index named a column that was not there and the migration failed
+		// on every engine.
+		ps.BlockerFix(where+".unique",
+			"a unique on a base-lived field would be created on the role's table, "+
+				"where the column does not exist",
+			"declare the uniqueness in the spec that owns the base, or move the "+
+				"field to the role")
+	}
+	if !UniqueEnforcements.Has(f.Unique.Enforce) {
+		ps.BlockerFix(where+".unique.enforce",
+			fmt.Sprintf("%q is not an enforcement style", f.Unique.Enforce),
+			"one of: "+UniqueEnforcements.String())
+	}
+	validateUniqueWithin(s, f, where, ps)
+	// The precheck half only materialises when a domain service carries an
+	// exists fact filtered by this field. Without this cross-check the
+	// enforce string validated, the report repeated it, and the generated
+	// service quietly had constraint-only behaviour.
+	//
+	// The filters must match the index EXACTLY — `within` plus this field —
+	// which is the other half of the same story: a fact filtering by MORE
+	// than the index covers asks a narrower question than the database
+	// answers, so the domain accepts a value the constraint then refuses,
+	// reported under a notification naming a reason that is not the reason.
+	if f.Unique.Enforce == "service-precheck+constraint" {
+		want := uniqueFilterSet(f)
+		if !hasExistsFactFor(s, want) {
+			reportPrecheckMismatch(s, f, want, where, ps)
+		}
+	}
+	if f.Unique.Scope != "" && !UniqueScopes.Has(f.Unique.Scope) {
+		ps.BlockerFix(where+".unique.scope",
+			fmt.Sprintf("%q is not a uniqueness scope", f.Unique.Scope),
+			"one of: "+UniqueScopes.String())
+	}
+	// active-only is defined by the archive column; without one it used to
+	// fall back to a plain unique SILENTLY — permanently reserving values
+	// the spec said should come free on archive.
+	if f.Unique.Scope == "active-only" && s.Storage.Managed.ArchivedAt == "" {
+		ps.BlockerFix(where+".unique.scope",
+			"active-only scopes the uniqueness to the rows that are not archived, "+
+				"and nothing here is ever archived",
+			"declare storage.managed.archivedAt, or use scope: all")
+	}
+	if f.Type == "bool" {
+		ps.BlockerFix(where+".unique",
+			"a unique flag would allow at most one true and one false row",
+			"uniqueness is for identifying values; drop the key")
+	}
+	if f.Unique.Notification == "" {
+		ps.BlockerFix(where+".unique",
+			"a unique field needs its own conflict notification",
+			"declare one under notifications and name it here — the framework's "+
+				"already-added notification reports a primary-key collision, not this")
+	} else {
+		validateNotificationRef(s, f.Unique.Notification, where+".unique.notification", ps)
+	}
+	if f.Nullable {
+		ps.WarnFix(where,
+			"a nullable field is declared unique",
+			"most engines allow many NULLs past a unique index; confirm that is intended")
+	}
+	validateUniqueAnswer(s, f, where, ps)
 }

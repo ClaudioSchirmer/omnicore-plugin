@@ -279,6 +279,7 @@ var specTypes = map[string]reflect.Type{
 	"CSVExport":     reflect.TypeOf(CSVExport{}),
 	"XLSXExport":    reflect.TypeOf(XLSXExport{}),
 	"Authz":         reflect.TypeOf(Authz{}),
+	"Docs":          reflect.TypeOf(Docs{}),
 }
 
 // looksLikeProse reports whether a rejected key is more likely a fragment of
