@@ -7,6 +7,80 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.61.0] — 2026-09-03
+
+The tooling stops losing its own history, and the QA suite stops proving only what a
+service serves.
+
+### Added
+
+- **`/omnicore:qa` always generates a SECURITY lane — `qa/security.sh` — proving what the
+  service REFUSES.** Every other family the skill derives proves the service does what it
+  should; none of them notices a `publicRoutes` entry widened past its intent, a
+  `RequirePermission` lost when a route was re-mounted, or a tenant filter dropped from
+  `ToCriteria` — each of those turns a refusal into a 200 while every happy-path case stays
+  green. Section 3 of the plan is now mandatory (never `N/A`, never deferred as a whole) and
+  splits into the halves by what they actually need:
+  - **401 — no valid token required, so no project has an excuse.** Missing header ·
+    a header that is not `Bearer <token>` (with `bearer` asserted as a PASS, since the
+    scheme match is case-insensitive) · a non-JWT · a JWT signed with a foreign key ·
+    wrong `iss` · `aud` missing the audience · an `alg` outside the allowlist (the
+    algorithm-confusion guard) · `exp` past the leeway. The notification KEY is asserted,
+    not just the status: the framework splits expired from invalid so clients can branch
+    on refresh-vs-reauthenticate, and a suite checking only `401` cannot see that split
+    collapse.
+  - **The public-route split, in BOTH directions** — every declared public route answers
+    tokenless AND an undeclared one answers 401; plus the neighbours that make the exact
+    `METHOD /path` matching visible, the framework's own appended surfaces (docs page,
+    `/openapi.json`, JWKS, playground), the probes asserted the way the project actually
+    configured them, and — where GraphQL is wired — the introspection-only bypass at its
+    edges, not just its happy path.
+  - **403 per authorization layer**, once a VALID token has a named source: a route's
+    declared permission missing (and its complement, present → 2xx), an identity-derived
+    `BuildRules` rule proven by two calls differing only in who asks, and tenant scoping —
+    including the cross-tenant READ, whose leak is a 200 and therefore needs its own case.
+    Where `ToCriteria` calls `Restrict`, the column is asserted absent in the JSON and in
+    the tabular export, and the actively-selected field's 403 is asserted with `__typename`
+    riding along, which is what every mainstream GraphQL client sends.
+  - **Where the token comes from is asked, never invented**: the service's own issuer
+    (`auth.issuer`) first, else a keypair the SUITE owns published through the
+    suite-owned config file the plan's §2 already establishes (`OMNICORE_CONFIG_PATH` —
+    never the project's yaml), else the dev's IdP. Forging a deliberately INVALID token
+    for a 401 is not inventing a credential; obtaining a valid one is the question this
+    answers. Under `auth.mode: disabled` the lane proves the declared posture and says
+    plainly that the auth layers are unproven — a missing security family is never one of
+    the outcomes, and the final verify checks the lane by name.
+
+### Changed
+
+- **The generator targets framework `v0.72.1`** (`compat.Supported`, the golden host's
+  pin). The first time a PATCH has been required, and not for a compile reason — `v0.72.0`
+  emits and builds identically. What it costs is a boundary a generated service DECLARES
+  and does not get: with `surfaces.graphql`, a selection carrying `__typename` dropped the
+  projection and with it `ReadCriteria.Restrict`'s `FieldAccessForbiddenNotification`, so
+  an explicitly selected restricted field stopped answering 403 while its value was still
+  scrubbed. Apollo, urql and Relay append `__typename` to every selection set, so that was
+  effectively every real client. A refusal that holds only for documents nobody sends is
+  not a refusal, which is why a read side below this patch is refused rather than warned
+  about; `compat_test.go` records what each older line costs, as always.
+- **A repeated skill run no longer overwrites the previous run's document — one directory
+  per round.** `evolve-entity` and `evolve-view` wrote to a path keyed only by their target
+  (`specs/evolve-entity/<entity>/spec.md`), and `configure` and `upgrade` to no key at all
+  (`specs/configure/plan.md`, `specs/upgrade/migration-plan.md`). All four act on the same
+  target repeatedly, so their "re-entry" rules could only mean *resume the same unfinished
+  change* — and a genuinely NEW change silently replaced the record of the one before it.
+  What was lost is the part nothing else holds: the code shows the shape a project ended at,
+  never the shapes it passed through, which options were weighed and rejected, or what the
+  dev knowingly accepted as lost on the way. The four now take the round segment `qa` and
+  `implement` already had: `specs/evolve-entity/<entity>/<change>/`,
+  `specs/evolve-view/<view>/<change>/`, `specs/configure/<change>/plan.md`, and
+  `specs/upgrade/<from>-to-<to>/` — the last one holding both `migration-plan.md` and
+  `rollback/`, which fixes a second failure inside the first: one shared `rollback/` meant
+  starting a second upgrade replaced the restore point of one still being verified. Each
+  skill now also READS its target's earlier rounds in Phase 0 (they are the only record of
+  what was already settled) and MOVES a flat legacy document into a round directory instead
+  of writing beside it. `shared/generated-documents.md` carries the rule for every skill.
+
 ## [0.60.0] — 2026-09-03
 
 The OpenAPI document stops being the one place the spec's prose cannot reach, and a

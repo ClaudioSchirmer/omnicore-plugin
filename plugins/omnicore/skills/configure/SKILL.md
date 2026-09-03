@@ -22,6 +22,14 @@ direction — and tunes the surrounding configuration.
 **Every document this run writes lands under `specs/`, and the project keeps it —
 never add it to `.gitignore`** (`${CLAUDE_PLUGIN_ROOT}/shared/generated-documents.md`).
 
+**One directory per CONVERSION — a posture change never overwrites the one before it.** A
+service's infrastructure moves more than once (MVP → Postgres, then kafka → nats, then Mongo
+added), and every conversion is reversible, so the record of how the posture got here IS the
+sequence of those plans. This run writes `specs/configure/<change>/plan.md`, where `<change>`
+names THIS conversion, and it touches no earlier plan. Overwriting one destroys the only
+account of a decision nothing else records — the yaml shows the posture the service ended at,
+never the ones it left, nor the honest loss list the dev accepted on the way.
+
 The two anchor postures:
 - **Zero-infra / MVP** — SQLite (`-tags sqlite`, `CGO_ENABLED=0`, one binary + `app.db` or
   `:memory:`), **no Docker**, no Mongo, no broker, no CDC relay. All views served relational from
@@ -145,8 +153,20 @@ Map what exists before proposing — this is the whole safety of the run:
 - **Integration events** — `integration.publishes` / `integration.subscribes` declared?
 - **Devops** — is there a `devops/` bench (compose + Debezium)? Which dialect × transport?
 - **Surfaces** — REST / GraphQL / gRPC.
+- **Earlier conversions — the posture's own history.** `ls specs/configure/*/plan.md` and read
+  every one, oldest first, plus `specs/scaffold-service/spec.md` (how the service was born).
+  They carry what the yaml cannot: which postures this project already left and WHY, what was
+  accepted as lost each time, and which conversion was tried and reversed. A run that proposes
+  moving back to a posture a past round deliberately abandoned must say so out loud in item 1,
+  not rediscover the reasoning halfway through the verify.
 
-## Phase 1 — Plan gate: `specs/configure/plan.md`
+## Phase 1 — Plan gate: `specs/configure/<change>/plan.md`
+
+**Name the conversion first.** `<change>` is a kebab slug of the posture move THIS round
+makes, proposed by this skill and confirmed by the dev in the same breath as the plan:
+`sqlite-to-postgres`, `add-mongo-kafka`, `kafka-to-nats`, `drop-broker`. Not a date, not
+`plan`, not the service's name — the reader of `specs/configure/` must be able to read the
+project's infrastructure history off the directory names alone.
 
 `Status: DRAFT`, hard STOP until approved; `⚠️ OPEN` slots answered, never defaulted; sections
 structural (`N/A — <why>`):
@@ -297,12 +317,27 @@ section(s); the Documentation Map in `<omnicore-dir>/CLAUDE.md` is the fallback 
 6. **Offer to run.** ONE question: boot to click through? Yes → delegate `/omnicore:run` (it follows
    the chosen infra). No → done.
 
-Leave `specs/configure/plan.md` in place for review.
+Leave `specs/configure/<change>/plan.md` in place — and every earlier conversion beside it,
+untouched — for review.
 
-## Re-entry — plan already exists
+## Re-entry — the project already has conversions
 
-`Status: DRAFT` → reopen the gate with what's answered. `Status: APPROVED` → apply only the
-not-yet-applied impact-map items, then re-verify. A changed target reopens the plan.
+`ls specs/configure/*/plan.md` before Phase 1 and read every one (Phase 0b). Then place THIS
+run against them:
+
+- **This round's own `<change>` directory, `Status: DRAFT`** → reopen the gate with what is
+  already answered, don't restart it.
+- **`Status: APPROVED`, its impact map not fully applied** → apply only the not-yet-applied
+  items, then re-verify. A changed target reopens THAT plan.
+- **`Status: APPROVED` and applied** → the conversion is closed. A further posture change is
+  a NEW `<change>` directory whose "From → To" starts where that one landed. **Never
+  overwrite an approved plan**: it is the record of what was approved and the only surviving
+  account of the losses the dev accepted, not a scratch file. A conversion that REVERSES an
+  earlier one is still a new directory — the reversal is a decision too.
+- **An older run's `specs/configure/plan.md`** (flat, no conversion directory) → the same
+  document in the wrong place: MOVE it to `specs/configure/<change>/plan.md`, naming the
+  round after the conversion it actually made, before starting anything new. Move, never
+  copy, and never rewrite what it says.
 
 ## What this skill never does
 

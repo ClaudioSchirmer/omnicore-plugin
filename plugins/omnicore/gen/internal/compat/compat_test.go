@@ -7,7 +7,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.72.0" {
+	if Supported != "v0.72.1" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,13 +18,24 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.72.0", false, Exact, false},
+		{"the supported line", "v0.72.1", false, Exact, false},
 		{"same line, later patch", "v0.72.9", false, Exact, false},
 		{"framework moved ahead", "v0.73.0", false, Ahead, false},
 		// The refusal reads the same at every distance, so what each distance
 		// actually COSTS is written down here — the three nearest lines are a
 		// POSTURE and the ones below them are compile breaks, and treating those
 		// two as one thing is how a bump gets waved through or panicked over.
+		//
+		// v0.72.1 is the first PATCH this generator has required, and the reason is
+		// not a compile break — v0.72.0 emits and builds identically. What it costs
+		// is a boundary a generated service declares and does not get: with
+		// surfaces.graphql, a selection carrying __typename (which Apollo, urql and
+		// Relay append to every selection set, so: effectively every real client)
+		// dropped the projection, and with it ReadCriteria.Restrict's
+		// FieldAccessForbiddenNotification — an explicitly selected restricted field
+		// stopped answering 403 while the value was still scrubbed. A refusal that
+		// only holds for documents no real client sends is not a refusal, so a
+		// generated read side is refused below this patch rather than warned about.
 		//
 		// v0.72.0 is additive for generated code: it made the GraphQL doc surface
 		// bypass authentication the way the Swagger one already did, and added
@@ -48,9 +59,8 @@ func TestVerdicts(t *testing.T) {
 		// TableSchema panics at boot on the StampedCounterField over *int64 a
 		// nullable `stamped: counter` emits; and v0.64.0 has no
 		// StampedTimeField / StampedCounterField at all and no
-		// `relational.clock` key. There is no "same line, earlier patch" case
-		// while the supported line is a .0 — the patch comparison is exercised
-		// by the later-patch row.
+		// `relational.clock` key.
+		{"same line, earlier patch", "v0.72.0", false, Behind, true},
 		{"project is one line older", "v0.71.0", false, Behind, true},
 		{"project is one line older, later patch", "v0.71.9", false, Behind, true},
 		{"project is two lines older", "v0.70.0", false, Behind, true},

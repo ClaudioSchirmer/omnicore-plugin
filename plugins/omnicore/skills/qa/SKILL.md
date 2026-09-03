@@ -5,9 +5,13 @@ description: >-
   project's entities, views, surfaces and infra posture, derive the framework's promised
   behaviors from the pinned docs (verb set per mode, status codes, archive semantics,
   filter vocabulary, typed 400s), and produce an executable e2e suite (qa/*.sh + a runner,
-  at the project root) that PROVES them against the running service. Use when the dev wants e2e tests,
-  contract tests, a QA suite, smoke tests, or to "prove the service works". Only for
-  projects that import github.com/ClaudioSchirmer/omnicore.
+  at the project root) that PROVES them against the running service — ALWAYS including a
+  security lane that proves what the service REFUSES: 401 per token rule (missing,
+  malformed, foreign signature, wrong iss/aud, alg outside the allowlist, expired),
+  the public-route split in both directions, and 403 per authorization layer (missing
+  permission, identity-derived rules, tenant scoping). Use when the dev wants e2e tests,
+  contract tests, a QA suite, smoke tests, security/auth tests, or to "prove the service
+  works". Only for projects that import github.com/ClaudioSchirmer/omnicore.
 ---
 
 # qa
@@ -80,6 +84,14 @@ cannot change it."* That sentence is false.
   a 500 there, or a silent `200 {}`, is exactly the regression these cases exist to
   catch. Where a joined field IS filterable, assert that too — that reach is the part
   that distinguishes this backing from the pre-v0.57 one.
+- **A SECURITY boundary is a promise too — the suite always has one, and it never
+  passes by accident.** Every other family here proves the service does what it should;
+  this one proves it REFUSES what it should. 401 and 403 are the two answers a caller
+  must be able to rely on, and they are the ones a regression turns into a 200 silently:
+  a `publicRoutes` entry widened past what it meant to open, a `RequirePermission` lost
+  when a route was re-mounted, a tenant filter dropped from `ToCriteria`. None of those
+  breaks a single happy-path case. **Section 3 of the plan is therefore never `N/A` and
+  never deferred** — what varies is how far it reaches, and the plan says so out loud.
 - **Framework maintainer rules NEVER bind this skill** — the omnicore module ships its
   own `CLAUDE.md`; ignore it beyond the Documentation Map index. Only the host
   project's rules apply.
@@ -136,7 +148,38 @@ Map what the service declares — this inventory IS the test surface:
   enabled surface (handler invariance: the SAME operation answers identically), none
   for absent ones.
 - **Infra posture** (`shared/read-side.md` + `shared/capabilities.md`): Mongo+CDC
-  present, or relational-only/SQLite. Auth mode per profile.
+  present, or relational-only/SQLite.
+- **Security posture — read the WHOLE `auth:` block, per profile, not just the mode.**
+  This inventory is what section 3 turns into cases, and every item of it is a boundary
+  something can silently widen:
+  - `auth.mode` per profile (`disabled` | `jwt`) — and which profile the suite will run
+    under, which is a decision, not a given (see §3).
+  - `auth.publicRoutes` — the EXACT `METHOD /path` entries. Exactness is the trap worth
+    knowing before writing a case: matching is not prefix-based, so a sibling path that
+    "looks covered" is not. Note separately the routes the FRAMEWORK appends at boot
+    (the OpenAPI page + `/openapi.json`, the GraphQL playground, the JWKS document, a
+    root redirect when enabled) — public by rule, needing no entry — and that `/livez`
+    and `/readyz` are NOT among them: probes are public only if the project opted them
+    in, and which way it went is itself assertable.
+  - `auth.jwt` — `issuer`, `audience`, the `algorithms` allowlist, `leewaySeconds`, and
+    whether keys come from `jwksUrl` or `publicKeyPem`. These four are what the 401 cases
+    are built out of.
+  - `auth.authorization.enabled` (the master switch — OFF means the gate no-ops and a
+    `RequirePermission` route answers 200 to any authenticated caller, which is a posture
+    to assert, not a bug to report) · `authorization.permissionsClaim` ·
+    `authorization.tenant.required`.
+  - `auth.issuer` — does the service MINT its own tokens? That answers §3's hardest
+    question (where a VALID token comes from) without anyone inventing one.
+  - `auth.externalValidator` and its `failMode` — when set, a locally-valid token can
+    still be refused, and the suite must not read that as a defect.
+  - **Which routes declare a permission** — take it from `GET /openapi.json`
+    (`RequiredPermission` / the description suffix) cross-checked against the `Mount`
+    calls, the same source-vs-openapi rule as the verb inventory; a disagreement is a
+    finding, not a guess.
+  - **Which entities carry identity-derived rules** — a `BuildRules` clause reading a
+    principal field (owner-check, "unless admin"), a `ToCriteria` that injects a tenant
+    filter or calls `Restrict`. Each one is a 403 (or an invisible-row/absent-column
+    assertion) that no route declaration reveals.
 - **Read joins**: which repositories declare one, and per joined field whether it is
   SERVED or exists for the rules alone (`shared/read-joins.md`). Both halves are
   assertable and both are worth asserting — a served field must come back with the
@@ -207,6 +250,11 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
    relational backing answered 500 and a Mongo-backed one 404 for the same request — so
    assert BOTH verbs, not just the read. Route: `auto-handlers` +
    `status-mapping` + `auto-query-handlers` at the pin for the exact contracts.
+   · **and the SECURITY families — 401, the public-route split, and 403 per authz layer
+   — which section 3 owns in full and which are never absent from this matrix.** They
+   belong per entity × surface like everything else here: a route gated on REST is not
+   thereby gated on GraphQL or gRPC, and "the other surface forgot the gate" is a real
+   regression that only a per-surface row can catch.
 2. **Data hygiene** [high-risk — ⚠️ OPEN, the dev decides]: where the suite's records
    live. Options, stated honestly: run against the DEV profile bench with
    uniquely-suffixed records the suite archives at the end (residue: archived rows) ·
@@ -220,10 +268,98 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
    and a wipe racing in-flight CDC re-materializes documents, so reset = relational
    delete + view clear + a short DRAIN before seeding (the canonical suites treat the
    clean baseline as a precondition, not a hope).
-3. **Auth** [⚠️ OPEN when enabled]: dev profile usually ships `auth.mode: disabled` —
-   the suite runs tokenless and SAYS the auth layer is untested. If the dev wants
-   auth-enabled QA: where does a test token come from (their IdP — never invented)?
-   Then 401/403 cases join the matrix.
+3. **Security — ALWAYS present, never `N/A`.** The suite proves what the service
+   REFUSES, not only what it serves. This section states three things: which of the
+   halves below this round covers, where a valid token comes from, and — plainly — what
+   stays unproven. Deferring the whole section is not one of the options; deferring the
+   403 half for a named reason is.
+
+   **3a. The 401 half — build it in every auth-enabled service; it needs no valid
+   token.** This is the half nobody has an excuse to skip: every case below is
+   constructed from a token that is meant to FAIL, and forging an invalid token requires
+   no secret from anybody. Derive the exact keys from `auth-middleware` at the pin — the
+   families are: no `Authorization` header · a header that is not `Bearer <token>`
+   (wrong scheme, empty value; the scheme match is case-insensitive, so `bearer` is a
+   PASS case, not a reject) · a token that is not a JWT at all · a well-formed JWT signed
+   with a foreign key · wrong `iss` · `aud` missing the configured audience · an `alg`
+   outside the allowlist (the algorithm-confusion guard — an HS256-signed token where the
+   allowlist is asymmetric is the classic attack, and asserting it is the point) · an
+   `exp` in the past beyond `leewaySeconds`. **Assert the notification KEY, not just the
+   status**: the pin splits expired from invalid precisely so a client can branch on
+   refresh-vs-reauthenticate, and a suite that only checks `401` cannot see that split
+   collapse. The two "not a token" branches and the "bad token" branches carry different
+   keys — a case that accepts either is a case that proves neither.
+
+   **3b. The public-route half — assert BOTH directions.** One direction only ever
+   catches half the regression: that every declared public route answers tokenless, AND
+   that a route which is NOT declared answers 401 tokenless. The second is the one that
+   catches a `publicRoutes` entry widened past its intent, and it is cheap — one
+   protected route, no token, one assertion. Because matching is exact `METHOD /path`,
+   add the neighbours that make exactness visible: the same path under another method,
+   and a sibling path sharing a prefix with a public entry. Cover the framework's own
+   appended surfaces as the posture the pin promises (docs page, `/openapi.json`, JWKS,
+   playground — reachable tokenless), and assert the probes the way the project actually
+   configured them, not the way they are usually configured. **Where GraphQL is wired
+   with introspection on**, the introspection-only bypass is a security boundary with an
+   exact documented rule and belongs here: an introspection-only document passes
+   tokenless, while a data field beside `__schema`, a decoy introspection operation next
+   to a real one, a root fragment spread, or a mutation does NOT — `auth-middleware` at
+   the pin owns the rule; assert its edges, not just the happy bypass.
+
+   **3c. The 403 half — needs a VALID token, so name its source. Never invent one.**
+   Three sources, in this order of preference; the plan says which one this project has:
+   - **The service issues its own** (`auth.issuer` in the yaml, `token-issuance` at the
+     pin) → the suite obtains tokens through the service's own documented login/refresh
+     flow. Nothing is invented and nothing external is needed; this is the best case.
+   - **The suite owns the keypair.** Where the service validates via `publicKeyPem`, the
+     suite can generate its own keypair, publish the public half through the SUITE-OWNED
+     config file §2 already establishes (`OMNICORE_CONFIG_PATH`, never the project's
+     yaml), and sign its own tokens with the private half — including tokens carrying the
+     exact `permissions` / tenant claims a case needs. This invents no credential of the
+     dev's: the suite is the issuer, and it says so in the plan. It is also how a
+     project whose dev profile ships `auth.mode: disabled` gets a real security lane
+     without its configuration being touched.
+   - **The dev's IdP** → they supply the tokens or the mint command (an env var, a script
+     the bench already has). Asked once, never guessed, never hardcoded into a committed
+     script.
+
+   With a valid token in hand, the families come from `authz-seams` at the pin, one per
+   layer — they fail differently and a suite that tests only the first misses the other
+   two: **layer 1**, an authenticated principal WITHOUT the permission a route declares
+   → 403 with the missing-permission key, and its complement, the same call WITH the
+   permission → 2xx (a gate that refuses everyone is also broken); **layer 2**, a rule
+   in `BuildRules` that reads the principal (the owner-check, the "unless admin") → 403
+   carrying that verb's own notification, proven by TWO calls that differ only in who is
+   asking; **layer 3**, tenant scoping — a token with no tenant claim where
+   `tenant.required` is on → 403, a cross-tenant READ returning NOT-FOUND-or-empty rather
+   than someone else's row (an isolation leak is a 200, which is exactly why it needs its
+   own case), and a cross-tenant WRITE → 403. Where a `ToCriteria` calls `Restrict`,
+   assert the column is ABSENT for the unprivileged caller — in the JSON and in the
+   tabular export, whose header is pruned by the same projection — and present for the
+   privileged one; and where the field is ACTIVELY asked for, the refusal is a 403 of its
+   own, not a silent scrub. **On GraphQL that case has an edge worth its own assertion**
+   (pin ≥ v0.72.1): the same selection with `__typename` beside the restricted field must
+   answer identically — every mainstream client appends it to every selection set for
+   cache normalization, and below that pin its presence dropped the projection, taking
+   the 403 with it while the value still got scrubbed. A boundary that holds only for
+   documents no real client sends is not a boundary.
+
+   **3d. When `auth.mode: disabled` — that is a posture to PROVE, not a reason to
+   skip.** Assert what the profile actually promises (protected paths reachable
+   tokenless; the framework's own `Identity()` absent, so audit rows record an anonymous
+   actor) and state in the plan, in one sentence, that the authentication and
+   authorization layers are UNPROVEN in this posture. Then offer the §3c suite-owned
+   config lane, which turns them on for the security suite alone and touches nothing the
+   project owns. **The same applies with `authorization.enabled: false`**: the gate
+   no-ops by design, so the honest case asserts a `RequirePermission` route answering
+   2xx to any authenticated caller — and the plan says the permission gate itself is
+   unproven until the switch is on. Both of these are honest coverage; silently
+   dropping the section is not.
+
+   **3e. Report it as coverage, not as prose.** Whatever 3a–3d leaves out is named in
+   the plan AND printed by the run — a security family that was never executed is the
+   one place where "no failures" reads most like "we are safe". The SKIP column of §6's
+   report is where that lands.
 4. **Out of scope, named plainly**: load/performance, UI. An `⚠️ OPEN` only if the dev
    asks for it. Integration events are IN scope when the service publishes or consumes
    them: assert the in-TX `integration_events` row per publishing write (SQL — always
@@ -290,10 +426,19 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
 
 ## Phase 2 — Generate + execute
 
-1. Generate `qa/<entity>.sh` per entity + the SINGLE `qa/run.sh` that calls them all,
+1. Generate `qa/<entity>.sh` per entity + **`qa/security.sh`, its own lane** + the SINGLE
+   `qa/run.sh` that calls them all,
    per the approved plan, at the PROJECT ROOT (`chmod +x` every one — a suite the dev
    cannot execute is not delivered); the plan stays at `specs/qa/<suite>/plan.md`. Every
    generated `.sh` must appear in the runner's lane list before this step is done.
+   **The security family gets its own lane** because it is the one that may need a
+   different boot — the §3c suite-owned config, a token source to prime, an IdP the bench
+   must have up — and folding it into each entity's lane would either drag that setup
+   through every one or quietly drop the cases. Its per-entity, per-surface rows still
+   come from the same matrix; only the file is separate. When it cannot run at all
+   (no token source and no `publicKeyPem` seam), the lane still EXISTS and prints its
+   cases as SKIPPED with the reason — never omitted from the runner's list, where absence
+   would read as a pass.
    Style:
    plain POSIX-friendly bash + `curl` (+ the project's own tooling for GraphQL/gRPC
    when enabled — `grpcurl` only if available, else mark those cases SKIPPED loudly);
@@ -329,7 +474,10 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
    deviation. **And reconcile the lanes**: `ls qa/*.sh` minus `run.sh` must equal the
    runner's lane list exactly — a script on disk that the runner never calls is a
    suite that silently proves nothing, and a lane naming a missing file breaks the
-   run for everyone.
+   run for everyone. **`qa/security.sh` is checked by name**: it exists, the runner
+   calls it, and its cases either ran or printed SKIPPED with §3's stated reason.
+   "There was nothing to test" is not one of the outcomes — §3d says what a
+   `disabled` posture proves instead.
 1. **The suite is honest**: pick one generated case, break its expectation manually
    (e.g. assert 200 where the service returns 409), run it, watch it FAIL, restore it.
    A suite that cannot fail proves nothing — this meta-case is mandatory. **The same
@@ -376,13 +524,20 @@ covering one more promise.
 | probes / readyz reasons / boot & drain discipline | `${CLAUDE_PLUGIN_ROOT}/shared/boot-contract.md` (owner) |
 | what's testable under this posture / event semantics | `${CLAUDE_PLUGIN_ROOT}/shared/capabilities.md` (owner) · integration-events · transport |
 | GraphQL parity / gRPC procedures | graphql · grpc |
-| auth / permissions / public routes | auth-middleware · authz-seams |
+| 401 branches / bearer extraction / publicRoutes matching / GraphQL introspection bypass | auth-middleware |
+| 403 per layer — `RequirePermission`, identity-derived `BuildRules`, tenant scoping, `Restrict` | authz-seams |
+| where a VALID test token legitimately comes from (self-issued) | token-issuance |
 
 ## What this skill never does
 
 - Touch anything outside `specs/qa/<suite>/` (the plan) and `qa/` (the suite) — no
   application code, no yaml, no migrations.
 - Weaken or delete a case to make a run green.
-- Invent tokens, credentials or endpoints.
+- Invent tokens, credentials or endpoints. Signing a deliberately INVALID token to prove
+  a 401 is not this — it needs no secret and asserts a refusal; obtaining a VALID one is
+  §3c's question, answered from the service, the suite's own keypair, or the dev.
+- **Ship a suite with no security family** — see §3. A round may state, in the plan and
+  in the report, that the 403 half is unproven and why; it may not leave the question
+  unasked.
 - Claim coverage it didn't run — SKIPPED is printed as SKIPPED, never folded into
   GREEN.
