@@ -782,6 +782,28 @@ Four things to get right, because they are the ones that cost a migration later:
   way). `check` refuses a surface that is on and carries nothing. What you never have to
   do is remember to add something to a surface: the failure this replaced was a spec that
   looked complete while half its write side existed on one surface only.
+- **`docs` is the only prose written for the CALLER, and the only prose that reaches
+  Swagger.** Everything else you write in the spec explains the entity to whoever reads the
+  generated tree: `storage.description` becomes a migration comment, a field's becomes a Go
+  doc comment, a rule's reaches the hook file. None of them reach the OpenAPI document, and
+  none of them should — "stored as two columns" is a fact about the table, not about the
+  call. `docs.description` is appended to EVERY operation; `docs.operations.<op>` to one
+  (`insert`, `update`, `patch`, `delete`, `archive`, `unarchive`, `byId`, `byParams` — the
+  two reads are separate here, unlike `authz.permissions`).
+  Write it as a YAML block scalar (`|`) and use it: it is markdown and multi-line, Swagger
+  UI renders paragraphs, `` `code` `` and **bold**, and the operation description is shown
+  EXPANDED under the summary — no tab to click, unlike a field's description, which lives
+  one click inside "Schema". It is appended to the sentence the generator writes for the
+  verb and can never replace it, because that sentence states framework behaviour you do
+  not own.
+  **Reach for it whenever the wire shape does not explain itself.** The case it exists for
+  is a COMPOSITE: `resource` and `action` arrive as two separate, unrelated-looking strings
+  and nothing tells the caller they are two halves of one value rendered as
+  `resource:action`. Also worth a paragraph: a value assigned once and never editable, a
+  format the fields do not imply, a unit, a lifecycle a verb name hides.
+  A field's OWN `description` is emitted separately, onto each query parameter it is
+  filterable by, so it renders in the Parameters table beside the input. Write field
+  descriptions for a caller, not only for a reviewer.
 - **`children[].editStrategy`.** `atomic-replace` means the root's update swaps the whole
   collection — a caller adding one entry must resend every other one, and two callers
   doing that lose each other's work. `per-child` adds POST/PUT/DELETE on
@@ -896,6 +918,24 @@ Four things to get right, because they are the ones that cost a migration later:
     domain accepted a handle the database then refused, reported as "already taken" for a
     tenant where it was free. Every multi-tenant entity landed there, on exactly the
     handles two customers both pick — `administrator`, `owner`, `viewer`.
+  - **What the refusal SAYS is yours too — `unique.attachTo` and `unique.echoValue`.**
+    `attachTo` names the field the conflict is reported against, and governs both halves at
+    once (the pre-check and the constraint answer the same conflict, so a caller never sees
+    one field named by the domain and another by the database). Reach for it when the field
+    the model calls the value is not the name the API goes by — a `Key` holding a
+    resource + action pair, reported as `Permission`.
+    `echoValue` decides whether the answer carries the value that collided. On a SCALAR it
+    is ON: "administrator is taken" is a different message from "that handle is taken", and
+    the caller picked the word. **Turn it OFF for anything the response is not already
+    allowed to repeat** — a document number, an e-mail, a value you redact elsewhere; the
+    echo reaches the 422 body AND every log that renders a notification, and nothing in
+    this language marks a field as sensitive, so the judgement is yours and only yours.
+    On a COMPOSITE it is OFF and `true` is opt-in, because what travels back is the value
+    object AS A WHOLE — no single part stands for a tuple, and echoing one half points at
+    the wrong thing. That requires the type to render itself, so `true` is legal only on a
+    `written: manual` composite and refused on a generated one, which declares no
+    `String()`. Ask for it where the composed value IS the message: a permission catalog
+    answering `tenant:read is taken` instead of "this permission already exists".
 - **Uniqueness on a COLLECTION ENTRY is generated, and it is per owner.**
   `children[].fields[].unique` emits the index on the entry's table — always led by the
   parent column, because an entry has no identity outside its collection — plus the

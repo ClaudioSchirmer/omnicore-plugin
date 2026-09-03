@@ -1254,19 +1254,31 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 		return
 	}
 	f := rule.Fields[0]
+	// The seat is decided ONCE, in the IR: the spec's attachTo when it declared
+	// one, the field itself otherwise, the value object's own name for a
+	// composite. Re-deriving a default here is how the report and the emitted
+	// call came to disagree about which field a conflict names.
+	attach := rule.AttachTo
 	// A composite is unique as a TUPLE, so the rule was synthesised on the first
-	// part — the one carrying the key — and everything the reader sees has to
-	// name the value object instead: the gate reads every part off it, and the
-	// notification lands on the concept rather than on whichever part came
-	// first, which is the same name the constraint binding reports.
-	gate, attach, echo := notEmpty(f, "e"), f.Name, echoArg(rule, f)
+	// part — the one carrying the key — and everything else the reader sees has
+	// to name the value object instead: the gate reads every part off it, and the
+	// echo is the concept rather than whichever part came first.
+	gate, echo := notEmpty(f, "e"), echoArg(rule, f)
 	if f.Composite != nil {
-		// And the echo goes silent: the part's logical name is not a field of the
-		// entity (the entity holds the value object), and echoing the owner hands
-		// back a formatted struct. What was refused is the TUPLE, which no single
-		// value stands for — the same reason a multi-field business identity
-		// echoes nothing.
-		gate, attach, echo = compositeNotEmpty(m, f.Composite.Owner, "e"), f.Composite.Owner, ""
+		// The echo becomes the value object AS A WHOLE, never a part: what was
+		// refused is the TUPLE, and one half of a two-field key points at the
+		// wrong thing. The part's logical name is not a field of the entity
+		// either — the entity holds the concept — so `e.<Owner>` is the only
+		// expression that names what collided.
+		//
+		// Handing back a struct is what this used to avoid by echoing nothing at
+		// all, and the avoidance was too broad: the framework renders a
+		// fmt.Stringer through String(), and the spec only accepts echoValue on a
+		// `written: manual` composite, which is the one kind that can declare it.
+		// A generated composite declares none, and validation refuses the key
+		// there rather than emitting an echo that prints `{tenant read}`.
+		gate = compositeNotEmpty(m, f.Composite.Owner, "e")
+		echo = echoOf(rule, "e."+f.Composite.Owner)
 	}
 	s.L("\t\t// The database unique index is the backstop for the race between this")
 	s.L("\t\t// check and the commit; asking here is what lets the duplicate be")

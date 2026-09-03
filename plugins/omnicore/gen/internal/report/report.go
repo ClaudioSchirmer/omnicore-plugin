@@ -169,7 +169,7 @@ func renderTodo(b *strings.Builder, in Input) {
 			fmt.Fprintf(b, "- **`%s`** — `internal/domain/vos/%s.go`. %s\n",
 				vo.Name, naming.Snake(vo.Name), vo.Description)
 			if vo.IsComposite() {
-				writeOwedComposite(b, vo)
+				writeOwedComposite(b, m, vo)
 				continue
 			}
 			fmt.Fprintf(b, "  ```go\n"+
@@ -202,6 +202,17 @@ func renderTodo(b *strings.Builder, in Input) {
 		for _, vo := range writtenVOs {
 			fmt.Fprintf(b, "- **`%s`** — `internal/domain/vos/%s.go`. %s\n",
 				vo.Name, naming.Snake(vo.Name), vo.Description)
+			// The one thing about an already-written type the generator CAN say
+			// without opening it: what the spec now asks of it. A run that turned
+			// echoValue on adds a method requirement to a file finished three runs
+			// ago, and nothing else would ever mention it.
+			if vo.IsComposite() && echoesInConflict(m, vo.Name) {
+				fmt.Fprintf(b, "  - A unique field over `%s` declares `echoValue: true`, so "+
+					"a duplicate hands the whole value back with the conflict. **Check that "+
+					"it declares `String()`** — the framework renders the echo through "+
+					"`fmt.Stringer`, and without the method the API answers with a formatted "+
+					"Go struct.\n", vo.Name)
+			}
 			writtenComposite = writtenComposite || vo.IsComposite()
 		}
 		b.WriteString("\nThe backing stays a contract across every run: the mappers convert " +
@@ -2292,7 +2303,28 @@ func archiveScopedRuleIDs(m *ir.Model) []string {
 // seven catalogs because the parts are declared in the spec. A tag left out is
 // not a compile error; it is a column header and a notification label that
 // silently fall back to the field's own name.
-func writeOwedComposite(b *strings.Builder, vo ir.ValueObject) {
+// echoesInConflict reports whether some unique field of this model hands this
+// composite back with its conflict — which turns String() from a nicety into a
+// contract the generated code depends on.
+//
+// It is asked at REPORT time because that is the only place it can be answered
+// for a hand-written type: the generator writes no file for it, so nothing else
+// in the pipeline ever sees whether the method is there. The check the spec
+// makes is that the type is the author's to write; the report is what tells them
+// what it now owes.
+func echoesInConflict(m *ir.Model, voName string) bool {
+	for _, f := range m.Fields {
+		if f.Composite == nil || f.Composite.VOName != voName {
+			continue
+		}
+		if f.Unique != nil && f.Unique.EchoValue {
+			return true
+		}
+	}
+	return false
+}
+
+func writeOwedComposite(b *strings.Builder, m *ir.Model, vo ir.ValueObject) {
 	b.WriteString("  ```go\n")
 	fmt.Fprintf(b, "  type %s struct {\n", vo.Name)
 	width, typeWidth := 0, 0
@@ -2319,4 +2351,12 @@ func writeOwedComposite(b *strings.Builder, vo ir.ValueObject) {
 		"point, found by TYPE with no registration, and it is where every invariant over "+
 		"the parts lives — including the ones this language cannot state. A rendering "+
 		"(`String()`, `Format()`) is yours to add under any name but `Value()`.\n", vo.Name)
+	if echoesInConflict(m, vo.Name) {
+		fmt.Fprintf(b, "  **`String()` is REQUIRED on this one**, and it is not a "+
+			"preference: a unique field over `%s` declares `echoValue: true`, so a "+
+			"duplicate hands the whole value back with the conflict — the framework "+
+			"renders it through `fmt.Stringer`. Without the method the API answers with a "+
+			"formatted Go struct, and nothing catches that: it compiles, it runs, and a "+
+			"caller finds it in a 422 body.\n", vo.Name)
+	}
 }

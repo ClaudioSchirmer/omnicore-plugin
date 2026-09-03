@@ -69,12 +69,16 @@ const (
 	CapManualRuntime    Capability = "manual runtime fields (the aggregate carries it, this generator fills it from nowhere, and no write DTO, command or OpenAPI schema mentions it — for a hand-written operation sharing a mode with a generated verb)"
 	CapRenderedRuntime  Capability = "a runtime value rendered in the response of the write that minted it (a machine credential the caller receives once, whose hash is all the row keeps)"
 	CapIdentityRuntime  Capability = "identity-sourced runtime fields (the caller's subject, tenant, a permission they hold, the super-admin grant or their mere presence, carried onto the entity so a rule can read it without a ctx the domain does not have)"
+	CapAPIDocs          Capability = "caller-facing prose in the OpenAPI document (multi-line markdown on every operation, or on one, appended to the sentence the generator writes for the verb — plus each field's own description on the query parameters it is filterable by)"
+	CapConflictAnswer   Capability = "shaping a unique field's conflict answer (which field it is reported against, and whether it carries the value that collided — including a COMPOSITE echoing its whole value through String(), which no single part could stand for)"
 )
 
 // implemented is the honest inventory of this build. Phase F1 ships the
 // vertical slice; later phases flip these on as their golden lane goes green.
 var implemented = map[Capability]bool{
 	CapFlat:           true,
+	CapAPIDocs:        true,
+	CapConflictAnswer: true,
 	CapRulesDSL:       true,
 	CapManualRules:    true,
 	CapREST:           true,
@@ -153,6 +157,7 @@ func AllCapabilities() []Capability {
 		CapComputedRead, CapPerEntryComputed, CapReadJoin, CapReadJoinChain, CapGuardRule,
 		CapRedactedField, CapBodyRuntime, CapBypassMaySet, CapIdentityRuntime,
 		CapManualRuntime, CapRenderedRuntime,
+		CapAPIDocs, CapConflictAnswer,
 	}
 }
 

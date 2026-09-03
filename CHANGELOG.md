@@ -7,6 +7,79 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.60.0] — 2026-09-03
+
+The OpenAPI document stops being the one place the spec's prose cannot reach, and a
+unique field's refusal stops being something only the generator decides.
+
+### Changed
+
+- **The generator targets framework `v0.72.0`** (`compat.Supported`, the golden host's
+  pin). Two releases move at once and neither touches the emitted tree. `v0.71.0` carries
+  the breaking change — `tracing.SubPgx` renamed to `SubRelational`, and the yaml token
+  `pgx` to `relational` — which reaches nothing here: this generator writes no tracing
+  configuration, and no skill or shared document names the old token. Its other half
+  retyped the filter-value coercion around `FilterSpec.GoType`, and no emitter builds a
+  `FilterSpec` by hand. `v0.72.0` is additive for generated code (`web.AuthOptions.PublicWhen`,
+  `graphql.IsIntrospectionOnlyRequest` — neither emitted) plus one behaviour a generated
+  service gains for free: with `surfaces.graphql` under `auth.mode: jwt`, the GraphiQL page
+  and its introspection now bypass authentication the way the Swagger UI already did,
+  instead of answering 401. So on this bump "one line older" is again a POSTURE rather than
+  a compile break, and `compat_test.go` says where the first hard break actually is.
+
+### Added
+
+- **Caller-facing prose in the OpenAPI document — the `docs` block.** Every description this
+  language had was written for a developer reading the generated tree: `storage.description`
+  reaches a migration comment, a field's reaches a Go doc comment, a rule's reaches the hook
+  file. None reached Swagger, and none should — "stored as two columns" is a fact about the
+  table, not about the call. `docs.description` is appended to EVERY operation the entity
+  mounts, `docs.operations.<op>` to one of them (`insert`, `update`, `patch`, `delete`,
+  `archive`, `unarchive`, `byId`, `byParams` — the two reads are separate here, unlike
+  `authz.permissions`, which guards both under `read`). It is multi-line markdown, emitted one
+  Go string per paragraph so the route file shows the same structure the spec does, and it is
+  APPENDED rather than substituted: the sentence the generator writes for the verb states
+  framework behaviour the author does not own (that PATCH cannot set a value back to null,
+  that this service mounts no unarchive), and an entity able to overwrite it would be one
+  where a caller quietly stops being told. Swagger UI renders it expanded under the summary,
+  with no tab to click.
+- **A field's own description now reaches the query parameters it is filterable by.** The
+  framework has always read a `description` struct tag on a `query:` field; the generator
+  never emitted one, so every filter parameter in every generated service was undocumented
+  while the sentence explaining it sat in the spec. It matters most for a COMPOSITE, whose
+  parts reach the wire as separate, unrelated-looking strings. Backticks in the prose become
+  single quotes and newlines collapse, because a struct tag is delimited by backticks and is
+  one line — the two ways this would otherwise fail to compile.
+- **`fields[].unique.attachTo` and `fields[].unique.echoValue` — the conflict answer is now
+  the spec's to shape.** `attachTo` names the field a duplicate is reported against, and
+  governs BOTH halves of the enforcement (the pre-check and the database constraint answer
+  the same conflict; only the spelling differs, the binding reporting the wire name and the
+  pre-check the entity's). `echoValue` says whether the refusal carries the value that
+  collided — ON by default for a scalar, which is what "administrator is taken" adds over
+  "that handle is taken", and now turn-off-able: a unique e-mail or document number echoed
+  into the 422 body and into every log that renders a notification, with no way to say
+  otherwise, while `rules.list[].echoValue` documented that exact judgement as the author's.
+
+### Fixed
+
+- **A composite unique refused duplicates without ever saying which value collided.** The
+  emitter silenced the echo for every composite, justifying it with "echoing the owner hands
+  back a formatted struct" — which the immutable rule on the SAME field disproved, since it
+  echoed the same value object and the framework rendered it through `String()`. A permission
+  catalog keyed on resource + action could only answer "this permission already exists" when
+  the actionable half of the message was `tenant:read`. `unique.echoValue: true` now echoes
+  the value object as a whole (no single part stands for a tuple), accepted only on a
+  `written: manual` composite — one this generator writes declares no `String()`, and the
+  build refuses rather than answering `{tenant read}`. It stays OFF by default there, so every
+  composite unique written before this keeps meaning exactly what it meant.
+- **A composite's `unique` block was not validated at all.** A composite field leaves the
+  per-field pass early — its type, column and length live under `parts[]` — and that early
+  exit took the whole uniqueness check with it, while a comment in `composite.go` asserted the
+  opposite. So a composite unique naming a notification nothing declared validated cleanly and
+  generated an entity referring to a type that does not exist; the same held for an unknown
+  enforcement style, an impossible scope, and a pre-check fact whose filters disagreed with
+  the index. The check is now a function both paths call, and the comment says which one.
+
 ## [0.59.0] — 2026-09-01
 
 A document directory is named after its subject — including the two that had been

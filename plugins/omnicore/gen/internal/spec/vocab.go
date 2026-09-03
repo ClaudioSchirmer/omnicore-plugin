@@ -264,6 +264,15 @@ var (
 	// an operation that does not exist is a refusal, not dead configuration.
 	AuthzOperations = set("insert", "update", "patch", "delete", "archive", "unarchive", "read")
 
+	// DocOperations is the key set accepted under docs.operations, and it is
+	// deliberately NOT AuthzOperations: a permission guards the two reads
+	// together, so authz spells them `read`, while prose does not — a listing's
+	// filter vocabulary is not what a by-id read needs explained. So the two
+	// endpoints are addressable one at a time, under the names the routes are
+	// generated with.
+	DocOperations = set("insert", "update", "patch", "delete", "archive", "unarchive",
+		"byId", "byParams")
+
 	// canonicalActions is the house taxonomy: the ACTION half of a permission
 	// spells the operation it guards, so one project speaks one vocabulary.
 	//
@@ -529,6 +538,10 @@ func Vocabularies() []Vocabulary {
 				"accepting no scoped write."},
 		{"authz.permissions keys", AuthzOperations,
 			"the operations a permission can be required for."},
+		{"docs.operations keys", DocOperations,
+			"the operations caller-facing prose can be attached to. The two reads are " +
+				"separate here (byId, byParams) because they are separate endpoints " +
+				"with different things to explain, even though one permission guards both."},
 		{"(discovered)", Dialects,
 			"the relational engines; read from the project, never declared in the spec."},
 	}
@@ -604,6 +617,12 @@ func RefusedKeys() map[string]string {
 			"removal is declared per child, with children[].softRemove",
 		"siblings[].fields[].unique": "uniqueness of a facet's field is not generated — " +
 			"declare it on a root field",
+		"children[].fields[].unique.echoValue": "an entry's conflict comes from the " +
+			"database constraint, which never saw the value — the echo travels back only " +
+			"from a service pre-check, and an entry has none in this build",
+		"children[].fields[].unique.attachTo": "an entry's conflict is reported against the " +
+			"COLLECTION rather than against a field — what the caller needs is which entry " +
+			"of the array collided",
 		"valueObjects[].rules.manual": "a GENERATED composite value object has no hook file " +
 			"of its own; a hand-written invariant over it belongs to the entity's " +
 			"rules.manual, which already sees the composite as a field — or take the whole " +
