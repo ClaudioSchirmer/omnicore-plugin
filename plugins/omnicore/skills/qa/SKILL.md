@@ -5,7 +5,9 @@ description: >-
   project's entities, views, surfaces and infra posture, derive the framework's promised
   behaviors from the pinned docs (verb set per mode, status codes, archive semantics,
   filter vocabulary, typed 400s), and produce an executable e2e suite (qa/*.sh + a runner,
-  at the project root) that PROVES them against the running service — ALWAYS including a
+  at the project root) that PROVES them against the running service — plus a DOMAIN lane
+  whose expectations come from the project's specs and from ASKING the dev what the
+  business must refuse, never from whatever the service happens to answer — ALWAYS including a
   security lane that proves what the service REFUSES: 401 per token rule (missing,
   malformed, foreign signature, wrong iss/aud, alg outside the allowlist, expired),
   the public-route split in both directions, and 403 per authorization layer (missing
@@ -18,9 +20,15 @@ description: >-
 
 Close the loop the other skills open: scaffold builds it, run boots it, **qa proves
 it**. This skill reads what the service declares (entities, modes, views, backings,
-surfaces), derives what the PINNED framework therefore promises, and generates an
-executable contract suite that exercises those promises against the real running
-service — then runs it and reports GREEN/RED honestly.
+surfaces) to know what EXISTS, derives what the PINNED framework therefore promises,
+reads the project's own specs and ASKS the dev what the BUSINESS requires, and generates
+an executable suite that exercises those expectations against the real running service —
+then runs it and reports GREEN/RED honestly.
+
+**Every expectation predates the first request.** The running service is the thing under
+test, never the source of the answers: a case whose expected value was read off a live
+response can only ever confirm today's behaviour, bug included. Two principles below make
+that concrete, and they outrank everything else in this file.
 
 **Two destinations, one rule.** The PLAN — the decision record — lands under
 `specs/qa/<suite>/plan.md`, one directory per suite named after what that run PROVES,
@@ -56,6 +64,23 @@ cannot change it."* That sentence is false.
 
 ## Core principles — read FIRST
 
+- **The SERVICE is never the oracle.** Every expectation is written — and approved —
+  BEFORE the first request that could reveal it. A suite whose expected values were read
+  off a live response proves only that the service still does what it did an hour ago:
+  it is a characterization test wearing a QA suite's name, and it cannot fail for the bug
+  it was meant to catch. So: never derive an expected status, body, count or ordering
+  from an observed answer; never "pin the contract against the running service"; and when
+  the service disagrees with an approved expectation, the finding is about the SERVICE
+  (route `doctor` / the owning skill) — **the plan is NOT amended to record the
+  deviation.** Amending it is the exact failure this principle exists to prevent.
+- **The DEV is the oracle for the business — so ASK, and ask with `AskUserQuestion`.**
+  The framework's contract comes from the pin's docs; what the DOMAIN must refuse comes
+  from the person who owns it. What the code declares tells you what the service DOES,
+  never what it SHOULD do — an invariant nobody implemented is invisible in `Modes()`, in
+  the DTOs and in `openapi.json`, and that is precisely the bug a suite must be able to
+  see. §1b is built by asking, and every question goes through **`AskUserQuestion` with
+  2–4 concrete options** derived from the specs — never a wall of prose the dev has to
+  answer in an essay.
 - **The contract comes from the PIN's docs, never from this skill.** Which verbs an
   entity serves, which status code each failure maps to, what `?includeArchived`
   reveals, which reads a relational view rejects — all of it is derived per entity from
@@ -122,9 +147,11 @@ session." Never a gate: this run continues on the installed skills.
 - **No version check here** (like `remove-entity`): the suite proves the CURRENT pin's
   contract; upgrading first is `/omnicore:upgrade`, separately.
 
-## Phase 0b — Discover (read, don't ask)
+## Phase 0b-1 — Surface inventory (read, don't ask)
 
-Map what the service declares — this inventory IS the test surface:
+Map what the service declares — this inventory is the test SURFACE: what exists, what is
+mounted, what is wired. It is never the expectation; §0b-2 is where expectations come
+from.
 - **Entities**: schemas (fields, VOs — including any COMPOSITE value object and the
   names its parts are EXPOSED under, which are the only names any surface speaks; the
   composite's own field name appears NOWHERE on the wire), uniqueness incl. active-only, children,
@@ -136,9 +163,10 @@ Map what the service declares — this inventory IS the test surface:
   only → **405**), constraint bindings (which duplicate → which 409 key).
   **Cross-check the derived verb inventory against `GET /openapi.json`** — the
   framework auto-registers it whenever `Wiring.OpenAPI` is set and it enumerates the
-  routes actually wired (probes included): the cheapest, most reliable oracle for
-  "which verbs does this entity really serve"; a source-vs-openapi disagreement is a
-  finding, not a guess to resolve silently.
+  routes actually wired (probes included): the cheapest, most reliable ROUTE
+  INVENTORY for "which verbs does this entity really serve" — an enumeration of what
+  EXISTS, never a statement of what should answer what; a source-vs-openapi disagreement
+  is a finding, not a guess to resolve silently.
 - **Views**: per view its backing (declared as a relational read model, or Mongo) → the read-back
   expectation per the posture rule above; archive regime (kept-but-hidden vs
   `DeleteOnArchive`); filter/sort/search vocabulary per field; which RESERVED controls
@@ -190,6 +218,49 @@ Map what the service declares — this inventory IS the test surface:
   under `specs/qa/` is the SAME suite in the wrong place: MOVE it to `qa/` (fixing the
   root resolution as you go — see the runner contract) rather than leaving two homes.
 
+## Phase 0b-2 — Oracle inventory (read the specs, then ASK)
+
+The surface says what the service DOES. This phase establishes what it SHOULD do — the
+only material a case that can genuinely FAIL is made of. Two sources, in this order, and
+neither of them is the running service.
+
+**Read the project's own decision record first — the plugin wrote it.** These documents
+hold the business rules the dev stated, in their words, before any code existed:
+- `specs/scaffold-entity/<entity>/spec.md` — the entity MODEL, including the answers to
+  scaffold-entity's "business rules, validations, restrictions" gate: ranges, string
+  limits, cross-field invariants, state transitions, what makes a duplicate a duplicate.
+- `specs/scaffold-system/*/domain-map.md` — the whole-system map: which aggregate owns
+  what, which identities are shared, which relationships were deliberate.
+- `specs/omnicore-gen/<entity>.omnicore.yaml` and every `rules.manual` item it names,
+  plus the hook files implementing them (`internal/domain/<entity>_rules_manual.go`,
+  `internal/domain/vos/*.go`). **A `manual` rule is a business invariant the DSL could
+  not express — the highest-value case family in the suite, and the one most likely to be
+  silently unimplemented.** Read the item's stated INTENT, never the function body: the
+  body is the implementation under test.
+- `specs/qa/*/plan.md` from earlier rounds — what is already proven.
+
+**Then ASK. This is not optional, and it is the step that makes the suite worth
+running.** Whatever the documents do not settle, the dev settles — through
+`AskUserQuestion`, options first (2–4, concrete, derived from what you just read, with
+room for one the dev types), in the dev's language, never an essay. A round that asked
+nothing produced a suite that can only confirm the status quo. Per entity, ask:
+- **What must this entity REFUSE?** Offer the candidates the spec and the rules suggest
+  ("confirm with no items", "quantity ≤ 0", "e-mail duplicated inside a tenant but legal
+  across tenants") and let the dev add their own.
+- **Which state transitions are ILLEGAL?** Name the states you found; the dev marks the
+  edges that must not exist. The pin's `lifecycle-map` gives the framework's generic write
+  guards — never this aggregate's own machine.
+- **Where is the SPEC silent and the CODE decided on its own?** Every such spot is a
+  question with three possible answers: "that is right" → it becomes an asserted
+  expectation; "that is wrong" → it is a FINDING now, before a line of suite exists;
+  "undecided" → named in the plan as unproven, never quietly asserted.
+- **What would a bug here cost?** It ranks the matrix: a rule the dev calls critical earns
+  its negative case even when the setup is expensive.
+
+Every answer lands in §1b VERBATIM as the expectation, attributed to the dev. An
+expectation no document holds and nobody stated does not enter the suite — it goes back as
+a question.
+
 ## Phase 1 — Plan gate: `specs/qa/<suite>/plan.md`
 
 **Name the suite first.** `<suite>` is a kebab slug of what THIS round proves, proposed by
@@ -197,6 +268,12 @@ this skill and confirmed by the dev in the same breath as the plan: `full-contra
 whole-service round, the scope itself when the dev asked for one (`person-orders`,
 `auth-enabled`). Not a date, not `plan`, not the service's name — the reader of
 `specs/qa/` must be able to tell two rounds apart by their directory names alone.
+
+**Nothing is requested from the running service before this gate closes.** The plan is
+written from the documents, from the pin's docs and from the dev's answers — booting the
+service to watch what it answers and filling the matrix from that is the failure this
+skill exists to prevent. The one exception is enumerating what EXISTS (`/openapi.json`'s
+route list): an inventory, never a value that becomes an expectation.
 
 `Status: DRAFT`, hard STOP until approved. Sections (structural completeness — `N/A —
 <why>`, never deleted):
@@ -254,7 +331,21 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
    — which section 3 owns in full and which are never absent from this matrix.** They
    belong per entity × surface like everything else here: a route gated on REST is not
    thereby gated on GraphQL or gRPC, and "the other surface forgot the gate" is a real
-   regression that only a per-surface row can catch.
+   regression that only a per-surface row can catch. · **and the DOMAIN families of §1b**
+   — the only rows in this matrix not derived from the pin's docs, and the only ones that
+   can fail for a reason the framework never had an opinion about.
+1b. **Domain expectations — built by ASKING, never `N/A`.** Everything in §1 proves the
+   FRAMEWORK's promises; a service can satisfy every one of them and still be wrong about
+   the business. This section carries what Phase 0b-2 established, one row per rule: **the
+   rule in the dev's words · its SOURCE (`spec.md`, a `rules.manual` item, or "asked —
+   answered by the dev") · the POSITIVE case (an operation the rule permits, which must
+   succeed) · the NEGATIVE case (the input the rule must refuse, with the expected status
+   and notification key) · and what a pass and a fail each mean.** The negative case is the
+   entire point: a rule with only a happy path is a rule nobody tested. Rank the rows by
+   the cost the dev named. Rules the dev left undecided are listed here as UNPROVEN, never
+   as assertions. And where the running service is already known to disagree with an
+   approved row, **the row stays as approved and the run goes RED** — that RED is the
+   deliverable, not a defect in the suite.
 2. **Data hygiene** [high-risk — ⚠️ OPEN, the dev decides]: where the suite's records
    live. Options, stated honestly: run against the DEV profile bench with
    uniquely-suffixed records the suite archives at the end (residue: archived rows) ·
@@ -426,7 +517,8 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
 
 ## Phase 2 — Generate + execute
 
-1. Generate `qa/<entity>.sh` per entity + **`qa/security.sh`, its own lane** + the SINGLE
+1. Generate `qa/<entity>.sh` per entity + **`qa/domain.sh`, the §1b lane** +
+   **`qa/security.sh`, its own lane** + the SINGLE
    `qa/run.sh` that calls them all,
    per the approved plan, at the PROJECT ROOT (`chmod +x` every one — a suite the dev
    cannot execute is not delivered); the plan stays at `specs/qa/<suite>/plan.md`. Every
@@ -439,6 +531,11 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
    (no token source and no `publicKeyPem` seam), the lane still EXISTS and prints its
    cases as SKIPPED with the reason — never omitted from the runner's list, where absence
    would read as a pass.
+   **The domain family gets its own lane as well** (`qa/domain.sh`): these are the cases a
+   dev re-reads whenever a rule changes, and scattering them among the framework-contract
+   cases of each entity buries them. It is generated from §1b alone — and if §1b came out
+   empty because nothing was asked, that is a Phase 0b-2 failure to go back and fix, not a
+   lane to drop.
    Style:
    plain POSIX-friendly bash + `curl` (+ the project's own tooling for GraphQL/gRPC
    when enabled — `grpcurl` only if available, else mark those cases SKIPPED loudly);
@@ -474,8 +571,11 @@ whole-service round, the scope itself when the dev asked for one (`person-orders
    deviation. **And reconcile the lanes**: `ls qa/*.sh` minus `run.sh` must equal the
    runner's lane list exactly — a script on disk that the runner never calls is a
    suite that silently proves nothing, and a lane naming a missing file breaks the
-   run for everyone. **`qa/security.sh` is checked by name**: it exists, the runner
-   calls it, and its cases either ran or printed SKIPPED with §3's stated reason.
+   run for everyone. **`qa/security.sh` and `qa/domain.sh` are checked by name**: each
+   exists, the runner calls it, and its cases either ran or printed SKIPPED with the
+   plan's stated reason. For `qa/domain.sh` the reconcile is row-by-row — every §1b rule
+   has BOTH its positive and its negative case in the file, and a rule whose negative case
+   is missing is an unimplemented family, i.e. RED.
    "There was nothing to test" is not one of the outcomes — §3d says what a
    `disabled` posture proves instead.
 1. **The suite is honest**: pick one generated case, break its expectation manually
@@ -516,6 +616,7 @@ covering one more promise.
 
 | When deriving… | Read |
 |---|---|
+| what the BUSINESS requires — invariants, illegal transitions, what must be REFUSED | `specs/scaffold-entity/<entity>/spec.md` · `specs/scaffold-system/*/domain-map.md` · the `rules.manual` items + their hook files — **and the dev, through `AskUserQuestion`** (Phase 0b-2) |
 | verb set / handler contracts / bodyless results | auto-handlers |
 | status codes / envelopes / notification keys / dual 409 | status-mapping |
 | filter operators / `?fields=` / pagination / exports | auto-query-handlers · query-side |
@@ -539,5 +640,11 @@ covering one more promise.
 - **Ship a suite with no security family** — see §3. A round may state, in the plan and
   in the report, that the 403 half is unproven and why; it may not leave the question
   unasked.
+- **Derive an expectation from a response.** No "pinning the contract against the running
+  service", no expected value read off a live answer, no plan amended to record a
+  deviation a run revealed. A deviation is a finding about the SERVICE.
+- **Generate a plan it asked nothing about.** §1b comes from the specs and from the dev's
+  own answers, collected with `AskUserQuestion`; a round that asked nothing shipped a suite
+  that can only confirm what the service already does.
 - Claim coverage it didn't run — SKIPPED is printed as SKIPPED, never folded into
   GREEN.

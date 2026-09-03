@@ -7,6 +7,52 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.62.0] — 2026-09-03
+
+The QA suite stops taking the service's word for what is correct.
+
+### Changed
+
+- **`/omnicore:qa` no longer lets the service under test be its own oracle, and now ASKS
+  the dev what the business requires.** A round was observed booting the service, probing
+  it, and reporting that it had "pinned all contracts against the real service" and was
+  "recording the deviations in the plan" — i.e. it read the expected values off live
+  responses and amended the plan wherever reality disagreed. That is a characterization
+  test wearing a QA suite's name: it can only ever confirm today's behaviour, bug
+  included, and it can never find a bug in the domain, because the domain was never
+  consulted. Four changes make the oracle independent of the implementation:
+  - **Two new leading principles.** *The SERVICE is never the oracle* — every expectation
+    is written and approved BEFORE the first request that could reveal it; no expected
+    status/body/count/ordering is ever derived from an observed answer, and a service that
+    disagrees with an approved expectation is a FINDING (routed to `doctor`), never a
+    reason to amend the plan. *The DEV is the oracle for the business* — what the code
+    declares says what the service DOES, never what it SHOULD do, and an invariant nobody
+    implemented is invisible in `Modes()`, in the DTOs and in `openapi.json`.
+  - **Phase 0b split in two.** `0b-1 Surface inventory` is what the old Phase 0b was — the
+    test surface, what exists, what is wired — and is explicitly NOT the expectation.
+    `0b-2 Oracle inventory` is new: read the project's own decision record
+    (`specs/scaffold-entity/<entity>/spec.md`, `specs/scaffold-system/*/domain-map.md`, the
+    `rules.manual` items and their hook files — a `manual` rule being an invariant the DSL
+    could not express, hence the highest-value and most-likely-unimplemented family), then
+    **ASK the dev** through `AskUserQuestion` with 2–4 concrete options: what must this
+    entity REFUSE, which state transitions are ILLEGAL, where the spec is silent and the
+    code decided on its own, and what a bug there would cost. Options, not an essay — a
+    wall of prose gets answered once and never again. `openapi.json` is demoted from
+    "oracle" to ROUTE INVENTORY: it enumerates what exists, it does not say what should
+    answer what.
+  - **A domain family in the plan (§1b) and its own lane (`qa/domain.sh`).** One row per
+    rule: the rule in the dev's words · its source · the POSITIVE case · the NEGATIVE case
+    with the expected status and notification key. The negative case is the point — a rule
+    with only a happy path is a rule nobody tested. Undecided rules are listed UNPROVEN,
+    never quietly asserted; and where the service is already known to disagree with an
+    approved row, the row stands and the run goes RED — that RED is the deliverable. The
+    final verify reconciles the lane row-by-row: a rule missing its negative case is an
+    unimplemented family.
+  - **Ordering is now a gate.** Nothing is requested from the running service before the
+    plan is approved, the one exception being route enumeration. Two additions to "what
+    this skill never does" close the loop: never derive an expectation from a response,
+    and never generate a plan it asked nothing about.
+
 ## [0.61.0] — 2026-09-03
 
 The tooling stops losing its own history, and the QA suite stops proving only what a
