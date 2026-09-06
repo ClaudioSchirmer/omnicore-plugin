@@ -174,7 +174,7 @@ func emitChildRules(s *src, m *ir.Model, c ir.Child) {
 		"It runs scoped to this entry, so a notification it raises reaches the caller "+
 			"addressed to the exact position in the collection rather than to the root.",
 	)
-	s.L("func (c %s) BuildRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
+	s.L("func (c *%s) BuildRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
 	if len(c.Clauses) == 0 && !c.HasHookFile {
 		s.L("\t// No rule beyond what the value objects validate on their own.")
 		s.L("}")
@@ -231,8 +231,14 @@ func emitChildRulesHook(m *ir.Model, c ir.Child) (fsplan.File, error) {
 		"A notification raised here is addressed to this entry's position in the "+
 			"collection, which is what makes the caller able to tell which one failed.",
 	)
-	s.L("func (c %s) customRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
-	writeManualRuleGates(s, c.ManualRules)
+	// POINTER receiver, like the generated BuildRules that calls it. A value
+	// receiver compiles and is callable, and then every r.AddNotification(&c.F,
+	// …) written here panics at the first validation: the framework binds the
+	// Rules to the addressable copy it materialized, and a value receiver hands
+	// this method a copy OF that copy, so the reference lands outside the
+	// instance the resolver walks.
+	s.L("func (c *%s) customRules(actionName string, service domain.Service, r *domain.Rules) {", c.Name)
+	writeManualRuleGates(s, c.ManualRules, "c", c.Fields)
 	s.L("}")
 
 	f, err := goFile("internal/domain/aggregatevos/"+naming.Snake(c.Name)+"_rules_manual.go",

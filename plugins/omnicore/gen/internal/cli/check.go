@@ -94,7 +94,7 @@ func Check(w io.Writer, opt CheckOptions) (CheckResult, error) {
 	switch {
 	case v.Blocks && !opt.ForceUnsupported:
 		res.Blockers = append(res.Blockers, Finding{Where: "framework", Message: v.Message,
-			Fix: "upgrade the framework, or pass --force-unsupported"})
+			Fix: v.Fix})
 	case v.Level != compat.Exact:
 		res.Warnings = append(res.Warnings, Finding{Where: "framework", Message: v.Message})
 	}

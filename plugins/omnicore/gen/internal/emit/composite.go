@@ -182,7 +182,7 @@ func ownColumnsOf(c ir.Child) []ir.Field {
 func emitStructFields(s *src, fields []ir.Field) {
 	for _, f := range fields {
 		if f.Composite == nil {
-			s.L("\t%s %s `labelKey:%s`%s", f.Name, f.EntityType, quote(f.LabelKey), fieldComment(f))
+			s.L("\t%s %s `%s`%s", f.Name, f.EntityType, structTagsOf(f), fieldComment(f))
 			continue
 		}
 		if !f.Composite.First {
@@ -199,6 +199,21 @@ func emitStructFields(s *src, fields []ir.Field) {
 		}
 		s.L("\t%s %s `labelKey:%s`%s", c.Owner, typ, quote(c.OwnerLabelKey), comment)
 	}
+}
+
+// structTagsOf renders the tag block of one struct member.
+//
+// labelKey is always there; notifyAs joins it only when the author DECLARED a
+// notification token. Emitting the derived one would be worse than nothing: the
+// framework's default is the same lower-camel rendering, so the tag would say
+// something only while it agreed with the renderer, and would silently freeze a
+// stale token the day the renderer learned a new acronym.
+func structTagsOf(f ir.Field) string {
+	tags := "labelKey:" + quote(f.LabelKey)
+	if f.NotifyAs != "" {
+		tags += " notifyAs:" + quote(f.NotifyAs)
+	}
+	return tags
 }
 
 // ---------------------------------------------------------------- fold / unfold
@@ -609,7 +624,7 @@ func emitPartVOCheck(s *src, p ir.VOPart) {
 	case "enum":
 		s.L("\t// Membership is not a rule this type writes: the enum declares its set,")
 		s.L("\t// and anything outside it arrives as the unknown sentinel.")
-		s.L("\tif !domain.ValidateEnum(%s, %s, ctx) {", ref, quote(p.Name))
+		s.L("\tif !domain.ValidateEnumNamed(%s, %s, ctx) {", ref, quote(p.Name))
 	default:
 		// raw / reuse: the value object owns an IsValid and reports through the
 		// same context, so calling it is the whole check.
@@ -699,7 +714,7 @@ func emitCompositeRule(s *src, m *ir.Model, rule ir.Rule) {
 		s.L("\tif %s {", presenceCheck(*rule.Other, "v"))
 		for _, f := range rule.Fields {
 			s.L("\t\tif %s {", voZeroCheck(f))
-			s.L("\t\t\tctx.AddNotification(%s, %s%s)",
+			s.L("\t\t\tctx.AddNotificationNamed(%s, %s%s)",
 				quote(attachOf(rule, f)), notifLiteralFor(rule, m), echoArgOn(rule, f, "v"))
 			s.L("\t\t\tok = false")
 			s.L("\t\t}")
@@ -713,7 +728,7 @@ func emitCompositeRule(s *src, m *ir.Model, rule ir.Rule) {
 }
 
 func emitCompositeRaise(s *src, m *ir.Model, rule ir.Rule, f ir.Field) {
-	s.L("\t\tctx.AddNotification(%s, %s%s)",
+	s.L("\t\tctx.AddNotificationNamed(%s, %s%s)",
 		quote(attachOf(rule, f)), notifLiteralFor(rule, m), echoArgOn(rule, f, "v"))
 	s.L("\t\tok = false")
 }

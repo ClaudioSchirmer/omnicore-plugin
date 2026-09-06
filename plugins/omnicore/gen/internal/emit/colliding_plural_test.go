@@ -144,13 +144,13 @@ func TestComparisonUnwrapsAValueObject(t *testing.T) {
 // was still untrue.
 func TestABodySourcedFieldIsNeverEchoed(t *testing.T) {
 	got := fileNamed(t, collidingPluralModel(t), "internal/domain/usuario.go")
-	if strings.Contains(got, "ConfirmacaoSenhaDivergenteNotification{}, e.ConfirmacaoSenha") {
+	if strings.Contains(got, "ConfirmacaoSenhaDivergenteNotification{}, true") {
 		t.Errorf("the refusal echoes the plaintext the caller sent:\n%s",
 			ruleLines(got, "ConfirmacaoSenha"))
 	}
 	// And the rule still reports — dropping the value must not drop the answer.
 	if !strings.Contains(got,
-		`r.AddNotification("ConfirmacaoSenha", ConfirmacaoSenhaDivergenteNotification{})`) {
+		`r.AddNotification(&e.ConfirmacaoSenha, ConfirmacaoSenhaDivergenteNotification{}, false)`) {
 		t.Errorf("the rule lost its notification along with the echo:\n%s",
 			ruleLines(got, "ConfirmacaoSenha"))
 	}

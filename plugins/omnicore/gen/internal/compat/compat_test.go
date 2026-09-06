@@ -1,13 +1,16 @@
 package compat
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestVerdicts(t *testing.T) {
 	// The fixtures below are written AGAINST a specific Supported value: which
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.72.1" {
+	if Supported != "v0.73.0" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -18,15 +21,25 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.72.1", false, Exact, false},
-		{"same line, later patch", "v0.72.9", false, Exact, false},
-		{"framework moved ahead", "v0.73.0", false, Ahead, false},
+		{"the supported line", "v0.73.0", false, Exact, false},
+		{"same line, later patch", "v0.73.9", false, Exact, false},
+		{"framework moved ahead", "v0.74.0", false, Ahead, false},
 		// The refusal reads the same at every distance, so what each distance
-		// actually COSTS is written down here — the three nearest lines are a
-		// POSTURE and the ones below them are compile breaks, and treating those
-		// two as one thing is how a bump gets waved through or panicked over.
+		// actually COSTS is written down here — the nearest lines are a POSTURE
+		// and the ones below them are compile breaks, and treating those two as
+		// one thing is how a bump gets waved through or panicked over.
 		//
-		// v0.72.1 is the first PATCH this generator has required, and the reason is
+		// v0.73.0 is where EVERY published pin now lands, and it is a compile
+		// break at zero distance: the notification redesign removed the
+		// string-named Rules.AddNotification, retyped ValidateEnum to take a
+		// field reference, and moved an AggregateValueObject's BuildRules onto
+		// the pointer receiver. Every generated entity, child, value object and
+		// composite calls at least one of those, so nothing this generator
+		// writes compiles against v0.72.1 or below — which is why the refusal at
+		// this distance is a compile break stated in advance rather than a
+		// posture, and why it blocks by default.
+		//
+		// v0.72.1 was the first PATCH this generator required, and the reason is
 		// not a compile break — v0.72.0 emits and builds identically. What it costs
 		// is a boundary a generated service declares and does not get: with
 		// surfaces.graphql, a selection carrying __typename (which Apollo, urql and
@@ -60,7 +73,8 @@ func TestVerdicts(t *testing.T) {
 		// nullable `stamped: counter` emits; and v0.64.0 has no
 		// StampedTimeField / StampedCounterField at all and no
 		// `relational.clock` key.
-		{"same line, earlier patch", "v0.72.0", false, Behind, true},
+		{"the last published line", "v0.72.1", false, Behind, true},
+		{"same published line, earlier patch", "v0.72.0", false, Behind, true},
 		{"project is one line older", "v0.71.0", false, Behind, true},
 		{"project is one line older, later patch", "v0.71.9", false, Behind, true},
 		{"project is two lines older", "v0.70.0", false, Behind, true},
@@ -99,5 +113,43 @@ func TestAheadNeverBlocks(t *testing.T) {
 func TestUnknownNeverBlocks(t *testing.T) {
 	if Evaluate("", true).Blocks {
 		t.Error("an unresolvable pin must not block generation")
+	}
+}
+
+// TestUnpublishedTargetDoesNotSendTheAuthorShopping guards the one thing the
+// SupportedIsPublished flag exists for. While the target has no tag, EVERY pin
+// a project can declare is Behind — and the standing advice for Behind is
+// "upgrade the framework", which would name a version nobody can fetch. The
+// refusal has to say what actually works instead: a checkout.
+func TestUnpublishedTargetDoesNotSendTheAuthorShopping(t *testing.T) {
+	if SupportedIsPublished {
+		t.Skip("Supported is published — the ordinary Behind advice is the correct one")
+	}
+	v := Evaluate("v0.72.1", false)
+	if !v.Blocks {
+		t.Fatal("a pin that cannot carry the emitted API must block")
+	}
+	if strings.Contains(v.Message, "/omnicore:upgrade") {
+		t.Errorf("the refusal points at an upgrade that does not exist yet: %s", v.Message)
+	}
+	for _, want := range []string{"NOT PUBLISHED", "checkout"} {
+		if !strings.Contains(v.Message, want) {
+			t.Errorf("the refusal never says %q, so it does not say what to do: %s", want, v.Message)
+		}
+	}
+	if v.Fix == "" {
+		t.Error("a blocking verdict owes the caller a Fix line to render")
+	}
+}
+
+// TestALocalCheckoutIsToldWhichCheckout: the checkout is the only thing that
+// satisfies an unpublished target, and one parked at the last tag builds
+// nothing — a wall of red that reads as a generator defect.
+func TestALocalCheckoutIsToldWhichCheckout(t *testing.T) {
+	if SupportedIsPublished {
+		t.Skip("Supported is published — any checkout on the line will do")
+	}
+	if v := Evaluate("", true); !strings.Contains(v.Message, Supported) {
+		t.Errorf("the local-checkout path never names the line it needs: %s", v.Message)
 	}
 }

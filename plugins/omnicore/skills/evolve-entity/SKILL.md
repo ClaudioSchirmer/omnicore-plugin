@@ -257,7 +257,23 @@ of deletion):
    hop, or a value that is genuinely this entity's own — say which one applies.
 5. **API impact** [high-risk]: wire-visible changes (json names, removed/renamed fields,
    validation tightening) are BREAKING for consumers — list them, flag them, let the dev
-   decide; never smuggle a break in silently.
+   decide; never smuggle a break in silently. **Renaming the Go field is no longer the
+   same act as renaming the wire** (pin ≥ v0.73.0). A
+   field answers under FOUR: `name` (the Go identifier) and `column` (the physical column)
+   are internal, and a compiler and a migration catch every consequence of moving them;
+   `jsonName` (request and response bodies, the OpenAPI schema, `?fields=`, the filter and
+   sort vocabulary) and `notifyAs` (the `field` token of a refusal, and with it the unique
+   constraint's 409 binding) are what every caller already wrote against. So a rename is
+   TWO decisions the map states separately — does the domain's word for this field change,
+   and does the caller's? Pinning both keys to what the wire already says makes a Go/column
+   rename an evolution with no API impact at all, and moving either key on a released field
+   is a break carrying no migration and no compiler on either side to catch it: the most
+   expensive row this item can hold. **Declare the two together or neither** — a caller who
+   posted `cpf` and is refused about `nationalId` cannot map the answer back to anything
+   they sent (`check` warns on the half-declaration and lets a deliberate split through).
+   On a spec-owned entity both are `fields[]` keys, one line each; by hand they are the web
+   DTO's `json:` tag and the domain field's `notifyAs:` tag, in two layers that cannot see
+   each other — which is why nothing but this item will tell the dev they diverged.
 6. **Translations** — every new/renamed labelKey and notification: all seven catalogs,
    real translations; removed keys leave no orphans.
 7. **Tests** — which existing tests change and why (rule changed ⇒ test changes with it,

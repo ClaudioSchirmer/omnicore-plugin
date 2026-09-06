@@ -145,7 +145,7 @@ func TestCompositeUniqueEchoesTheWholeValueWhenAsked(t *testing.T) {
 	m := uniqueAnswerModel(t, "      echoValue: true", "", "manual")
 	entity := uniqueAnswerSource(t, m, "internal/domain/permission.go")
 
-	want := `r.AddNotification("Key", PermissionAlreadyExistsNotification{}, e.Key)`
+	want := `r.AddNotification(&e.Key, PermissionAlreadyExistsNotification{}, true)`
 	if !strings.Contains(entity, want) {
 		t.Errorf("the conflict does not carry the refused value.\nwant a call containing:\n  %s\ngot:\n%s",
 			want, uniquePrecheckBlock(entity))
@@ -160,11 +160,11 @@ func TestCompositeUniqueStaysSilentByDefault(t *testing.T) {
 	m := uniqueAnswerModel(t, "", "", "manual")
 	entity := uniqueAnswerSource(t, m, "internal/domain/permission.go")
 
-	if strings.Contains(entity, "PermissionAlreadyExistsNotification{}, e.Key") {
+	if strings.Contains(entity, "PermissionAlreadyExistsNotification{}, true)") {
 		t.Errorf("a composite echoed its value with no echoValue asked for:\n%s",
 			uniquePrecheckBlock(entity))
 	}
-	if !strings.Contains(entity, `r.AddNotification("Key", PermissionAlreadyExistsNotification{})`) {
+	if !strings.Contains(entity, `r.AddNotification(&e.Key, PermissionAlreadyExistsNotification{}, false)`) {
 		t.Errorf("the conflict is not raised at all:\n%s", uniquePrecheckBlock(entity))
 	}
 }
@@ -178,17 +178,17 @@ func TestScalarUniqueCanTurnTheEchoOff(t *testing.T) {
 	// OFF rather than to have matched a call that was never emitted.
 	on := uniqueAnswerSource(t,
 		uniqueAnswerModel(t, "", "", "manual"), "internal/domain/permission.go")
-	if !strings.Contains(on, `r.AddNotification("Slug", SlugAlreadyExistsNotification{}, e.Slug)`) {
+	if !strings.Contains(on, `r.AddNotification(&e.Slug, SlugAlreadyExistsNotification{}, true)`) {
 		t.Fatalf("a scalar unique does not echo by default:\n%s", uniquePrecheckBlock(on))
 	}
 
 	off := uniqueAnswerSource(t,
 		uniqueAnswerModel(t, "", "      echoValue: false", "manual"), "internal/domain/permission.go")
-	if strings.Contains(off, "SlugAlreadyExistsNotification{}, e.Slug") {
+	if strings.Contains(off, "SlugAlreadyExistsNotification{}, true)") {
 		t.Errorf("echoValue: false was ignored — the value still travels back:\n%s",
 			uniquePrecheckBlock(off))
 	}
-	if !strings.Contains(off, `r.AddNotification("Slug", SlugAlreadyExistsNotification{})`) {
+	if !strings.Contains(off, `r.AddNotification(&e.Slug, SlugAlreadyExistsNotification{}, false)`) {
 		t.Errorf("turning the echo off dropped the conflict itself:\n%s", uniquePrecheckBlock(off))
 	}
 }
@@ -205,10 +205,10 @@ func TestUniqueAttachToGovernsBothHalves(t *testing.T) {
 	m := uniqueAnswerModel(t, "      attachTo: Slug", "", "manual")
 
 	entity := uniqueAnswerSource(t, m, "internal/domain/permission.go")
-	if !strings.Contains(entity, `r.AddNotification("Slug", PermissionAlreadyExistsNotification{})`) {
+	if !strings.Contains(entity, `r.AddNotificationNamed("Slug", PermissionAlreadyExistsNotification{})`) {
 		t.Errorf("attachTo did not reach the pre-check:\n%s", uniquePrecheckBlock(entity))
 	}
-	if strings.Contains(entity, `r.AddNotification("Key", PermissionAlreadyExistsNotification{})`) {
+	if strings.Contains(entity, `r.AddNotification(&e.Key, PermissionAlreadyExistsNotification{}`) {
 		t.Errorf("the pre-check still reports against the default seat:\n%s", uniquePrecheckBlock(entity))
 	}
 
@@ -231,4 +231,33 @@ func uniquePrecheckBlock(entity string) string {
 		return rest[:j]
 	}
 	return rest
+}
+
+// TestUniqueUsesTheFieldReferenceWhenItAddressesItsOwnField pins the SEAT, which
+// is a different question from which name the seat carries.
+//
+// The framework's default emit is the field reference — r.AddNotification(&e.F,
+// n, expose) — and AddNotificationNamed is the documented exception for a
+// notification that is not about one addressable field. A unique conflict on a
+// plain field IS about one: the seat is that field and the echoed value is that
+// same field's. Emitting it through the named seat spelled the exception where
+// the rule applied, and lost the reference's one guarantee — that the name
+// cannot drift from the field, because there is no name.
+//
+// attachTo is where the exception genuinely starts: the seat moves to another
+// field while the value that collided is still the subject's, and one field
+// reference cannot say a name and a foreign value at once.
+func TestUniqueUsesTheFieldReferenceWhenItAddressesItsOwnField(t *testing.T) {
+	own := uniqueAnswerSource(t,
+		uniqueAnswerModel(t, "", "", "manual"), "internal/domain/permission.go")
+	if strings.Contains(own, `r.AddNotificationNamed("Slug"`) {
+		t.Errorf("a unique on its own field took the exception seat:\n%s", uniquePrecheckBlock(own))
+	}
+
+	moved := uniqueAnswerSource(t,
+		uniqueAnswerModel(t, "", "      attachTo: Key", "manual"), "internal/domain/permission.go")
+	if !strings.Contains(moved, `r.AddNotificationNamed("Key", SlugAlreadyExistsNotification{}, e.Slug)`) {
+		t.Errorf("attachTo did not fall back to the named seat carrying the subject's value:\n%s",
+			uniquePrecheckBlock(moved))
+	}
 }

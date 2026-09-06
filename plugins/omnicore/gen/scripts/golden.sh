@@ -57,19 +57,31 @@ fi
 # The rewrite happens ONCE, into a staged template every lane then copies. The
 # gate lays the host down about thirty times; resolving the module graph that
 # many times would dominate its runtime for no added proof.
+#
+# The staged template is reusable only when the tidy that built it COMPLETED,
+# and completed against THIS checkout — which is what the stamp beside it
+# records. Guarding on the directory merely EXISTING gets both wrong, and the
+# two failures are not equally visible: an aborted run leaves a tree with no
+# go.mod that every later run reuses, so all thirty-odd lanes fail with "no
+# go.mod found" and the wall of red reads as a generator defect rather than a
+# dirty cache; and a second run under a DIFFERENT OMNICORE_LOCAL silently
+# reuses the first checkout's tree, which is worse, because that one compiles
+# and the gate then reports on a framework nobody asked it to measure.
 STAGED="${STAGED:-/tmp/omnicore-gen-host-staged}"
+STAGED_STAMP="$STAGED.against"
 stage_host() {
   local dest="$1"
   if [[ -z "${OMNICORE_LOCAL:-}" ]]; then
     rm -rf "$dest"; mkdir -p "$dest"; cp -R "$HOST/." "$dest/"
     return 0
   fi
-  if [[ ! -d "$STAGED" ]]; then
-    mkdir -p "$STAGED"; cp -R "$HOST/." "$STAGED/"
+  if [[ "$(cat "$STAGED_STAMP" 2>/dev/null)" != "$OMNICORE_LOCAL" ]]; then
+    rm -rf "$STAGED" "$STAGED_STAMP"; mkdir -p "$STAGED"; cp -R "$HOST/." "$STAGED/"
     (cd "$STAGED" \
       && GOWORK=off go mod edit -replace "github.com/ClaudioSchirmer/omnicore=$OMNICORE_LOCAL" \
       && GOWORK=off go mod tidy) >/tmp/gg-local.log 2>&1 \
       || { echo "  ❌ could not point the host at $OMNICORE_LOCAL"; sed -n '1,20p' /tmp/gg-local.log; rm -rf "$STAGED"; exit 1; }
+    printf '%s\n' "$OMNICORE_LOCAL" > "$STAGED_STAMP"
     echo "  (host staged against the framework checkout at $OMNICORE_LOCAL)"
   fi
   rm -rf "$dest"; mkdir -p "$dest"; cp -R "$STAGED/." "$dest/"
@@ -87,12 +99,26 @@ echo "═══ omnicore-gen golden gate ═══"
 # generated code would be measuring the emitters against an API that predates
 # them. Say so once, loudly, instead of letting a wall of red read as a
 # generator defect.
+#
+# The question is answered by compat.SupportedIsPublished — the generator's own
+# declaration — never by comparing the two version strings. They were equal once
+# while the target was unpublished (the flag had been added, Supported had not
+# moved), so the comparison stayed quiet through exactly the run it exists to
+# warn about, and the red that followed read as a generator defect for a while.
 WANTED=$(grep -oE 'Supported = "v[0-9.]+"' "$GEN_DIR/internal/compat/compat.go" | grep -oE 'v[0-9.]+')
+PUBLISHED=$(grep -oE 'SupportedIsPublished = (true|false)' "$GEN_DIR/internal/compat/compat.go" | grep -oE '(true|false)')
 PINNED=$(grep -oE 'ClaudioSchirmer/omnicore v[0-9.]+' "$HOST/go.mod" | head -1 | grep -oE 'v[0-9.]+')
-if [[ -z "${OMNICORE_LOCAL:-}" && -n "$WANTED" && -n "$PINNED" && "$WANTED" != "$PINNED" ]]; then
-  echo "  ⚠  the vendored host pins framework $PINNED and this generator targets $WANTED."
+if [[ -z "${OMNICORE_LOCAL:-}" && ( "$PUBLISHED" == "false" || ( -n "$WANTED" && -n "$PINNED" && "$WANTED" != "$PINNED" ) ) ]]; then
+  if [[ "$PUBLISHED" == "false" ]]; then
+    echo "  ⚠  this generator targets framework $WANTED, which is NOT PUBLISHED — the vendored"
+    echo "     host pins $PINNED, so every lane that compiles generated code is about to measure"
+    echo "     today's emitters against an API that predates them. The red below is that, not the"
+    echo "     generator."
+  else
+    echo "  ⚠  the vendored host pins framework $PINNED and this generator targets $WANTED."
+  fi
   echo "     Point the gate at a checkout — OMNICORE_LOCAL=/path/to/omnicore bash scripts/golden.sh —"
-  echo "     or bump testdata/host/go.mod once $WANTED is published."
+  echo "     or bump testdata/host/go.mod (and flip SupportedIsPublished) once $WANTED is published."
 fi
 
 # ── Lane 0: the generator's own tests ────────────────────────────────────────
@@ -837,7 +863,7 @@ func (v NationalID) IsValid(fieldName string, ctx *domain.NotificationContext) b
 		}
 	}
 	if digits != 11 {
-		ctx.AddNotification(fieldName, domain.SchemaViolationNotification{})
+		ctx.AddNotificationNamed(fieldName, domain.SchemaViolationNotification{})
 		return false
 	}
 	return true
@@ -868,11 +894,11 @@ func (v TaxID) IsValid(fieldName string, ctx *domain.NotificationContext) bool {
 	digits := map[string]int{"BR": 11, "PT": 9}
 	want, known := digits[v.Country]
 	if !known {
-		ctx.AddNotification("Country", domain.SchemaViolationNotification{})
+		ctx.AddNotificationNamed("Country", domain.SchemaViolationNotification{})
 		return false
 	}
 	if len(v.Number) != want {
-		ctx.AddNotification("Number", domain.SchemaViolationNotification{})
+		ctx.AddNotificationNamed("Number", domain.SchemaViolationNotification{})
 		return false
 	}
 	return true

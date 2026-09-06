@@ -19,15 +19,15 @@ type ChavePermissao struct {
 func (k ChavePermissao) IsValid(fieldName string, ctx *domain.NotificationContext) bool {
 	ok := true
 	if k.Recurso == "" {
-		ctx.AddNotification("Recurso", domain.RequiredFieldNotification{})
+		ctx.AddNotificationNamed("Recurso", domain.RequiredFieldNotification{})
 		ok = false
 	}
 	if k.Acao == "" {
-		ctx.AddNotification("Acao", domain.RequiredFieldNotification{})
+		ctx.AddNotificationNamed("Acao", domain.RequiredFieldNotification{})
 		ok = false
 	}
 	if k.Recurso == "*" && k.Acao != "*" {
-		ctx.AddNotification("Acao", domain.SchemaViolationNotification{})
+		ctx.AddNotificationNamed("Acao", domain.SchemaViolationNotification{})
 		ok = false
 	}
 	return ok

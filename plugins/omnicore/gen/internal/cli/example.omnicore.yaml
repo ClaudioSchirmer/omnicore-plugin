@@ -13,6 +13,12 @@
 # in whatever your project speaks, and declare it — the report quotes these
 # descriptions back to a reviewer under that heading.
 #
+# A field carries FOUR names, and mixing them up is the commonest first-draft
+# mistake: `name` is the Go identifier, `column` is the physical column,
+# `jsonName` is what the wire calls it (defaulting to the Go name lower-camelled)
+# and `notifyAs` is what a refusal calls it (defaulting the same way). The last
+# two exist so the domain's own word can reach the caller — see NationalID below.
+#
 # A description and a LABEL are different things. The description is a sentence
 # about what the field means and becomes the column comment; the label is the
 # field's short human NAME — what a 422 payload puts in `fieldLabel` and what a
@@ -116,6 +122,15 @@ fields:
     description: The student's national identity document.
     labelKey: StudentNationalIDField
     text: {eng: National ID, ptbr: CPF}
+    # The two wire-name keys, shown together because that is how they belong.
+    # The Go name is what the code reads best; "cpf" is what this document is
+    # called where it exists at all. jsonName moves the request/response key,
+    # ?fields=, the filters and the OpenAPI schema; notifyAs moves the `field`
+    # token a 422 carries. Declaring only one of them answers a caller who sent
+    # `cpf` with a complaint about `nationalId`, which they cannot map back to
+    # anything they wrote.
+    jsonName: cpf
+    notifyAs: cpf
     redact:
       inSync: {kind: keep-last, keep: 4}
       inAudit: {kind: fixed, value: "***"}

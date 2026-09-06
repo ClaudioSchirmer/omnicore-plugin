@@ -109,7 +109,7 @@ func TestValueObjectRuleValidatesInPlaceAndSilencesTheAutomaticPass(t *testing.T
 		t.Errorf("the call was wrapped in a condition:\n%s", got)
 	}
 	// And it raises nothing of its own — that answer belongs to the value object.
-	if strings.Contains(got, `r.AddNotification("TenantID"`) {
+	if strings.Contains(got, `r.AddNotification(&e.TenantID`) {
 		t.Errorf("a second notification was raised for one wrong value:\n%s", got)
 	}
 }
@@ -120,7 +120,7 @@ func TestValueObjectRuleValidatesInPlaceAndSilencesTheAutomaticPass(t *testing.T
 func TestValueObjectRuleAsksAnEnumForMembership(t *testing.T) {
 	got := voRulesBody(t)
 
-	if !strings.Contains(got, `domain.ValidateEnum(e.Situacao, "Situacao", r.Context())`) {
+	if !strings.Contains(got, `domain.ValidateEnum(&e.Situacao, r)`) {
 		t.Errorf("the enum was not validated by membership:\n%s", got)
 	}
 	if strings.Contains(got, "e.Situacao.IsValid(") {

@@ -7,6 +7,177 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.63.0] — 2026-09-06
+
+A field's wire names become the author's to declare, and every emission moves to
+the framework's field-reference notification API.
+
+### Changed
+
+- **`omnicore-gen` now targets framework `v0.73.0`** (`compat.Supported`, and the
+  vendored host the golden gate builds). Unlike most bumps this one is a compile
+  break at ZERO distance: the redesign below removed the string-named
+  `Rules.AddNotification`, retyped `ValidateEnum` to take a field reference, and
+  moved an aggregate value object's `BuildRules` onto the pointer receiver.
+  Every generated entity, child, value object and composite calls at least one
+  of the three, so nothing this generator writes compiles against `v0.72.1` or
+  below. A project on an older pin therefore reads as **behind** and is refused
+  by default (`--force-unsupported` still overrides) — at this distance the
+  refusal is a compile break stated in advance, not a posture.
+
+- **omnicore-gen emits the framework's field-reference notification API.** The
+  framework's notification redesign (string-named `AddNotification` removed;
+  emissions by field pointer with a mandatory expose flag; string seats renamed
+  `AddNotificationNamed` / `ValidateEnumNamed`; AVO `BuildRules` on the pointer
+  receiver) is now what every generated entity, child, VO and composite VO
+  contains: field rules emit `r.AddNotification(&e.Field, Notif{}, true|false)`
+  with the expose flag derived from `echoValue`; collection, cap, uniqueness
+  and identity refusals — whose subject is not one addressable field — emit
+  through `AddNotificationNamed` (keeping the computed echo); a non-nullable
+  enum VO validates via `domain.ValidateEnum(&e.Field, r)` and a nullable one
+  through the named seat under its nil guard; generated raw/composite VOs emit
+  `ctx.AddNotificationNamed`; generated aggregate children declare
+  `func (c *T) BuildRules(...)`. The generated test helper reads the rejected
+  field off `Path`/`Override` (the removed `FieldName` slot is gone).
+
+  Three seats moved further than the mechanical rename:
+
+  - **A unique conflict on a plain field reports by field reference**, not
+    through the named seat. The subject is one addressable field and the echoed
+    value is that same field's, so it is the framework's default emit and not
+    its documented exception — and the reference carries no name that can drift
+    from the field. `unique.attachTo` is where the exception genuinely starts:
+    the seat moves to another field while the value that collided is still the
+    subject's, and one reference cannot say a name and a foreign value at once.
+  - **A child's not-found refusal names the COLLECTION.** `ChangeXByID` and
+    `RemoveXByID` addressed the entry's TYPE while the sibling add-duplicate
+    refusal already used the plural, so one caller working on one collection was
+    answered `permissions` by one verb and `rolePermission` by the next two.
+    `children[].plural` is the one name the framework uses for a collection —
+    the document segment, the read DTO's field and the notification path — and
+    it is now what all three carry.
+  - **The child hook file takes the POINTER receiver**, like the generated
+    `BuildRules` that calls it. A value receiver compiles and is callable, and
+    then every `r.AddNotification(&c.Field, …)` an author writes there panics at
+    the first validation: the framework binds the `Rules` to the addressable
+    copy it materialized, and a value receiver hands the method a copy OF that
+    copy. Both hook files' per-rule guidance now shows the emission to write —
+    the field reference when the attachment names a field of the scope, the
+    named seat otherwise — instead of the attachment as a bare quoted string.
+
+- **The HAND-WRITTEN entity path is taught the same two seats.**
+  `scaffold-entity`'s domain conventions showed the field reference in the two
+  places a value object forced it to and called the string seat "the named
+  seat" without ever naming it, so a dev writing a cross-field invariant, a
+  state rejection or a cap by hand had the exception described and no API to
+  reach it by. They now carry the split itself: what `AddNotification` reads off
+  the reference (wire token, `labelKey`, the rejected value — leaving
+  `exposeValue` as the only decision), what misuse does (a non-pointer, a
+  missing `&`, a reference into a copy — a panic naming the fix, which is the
+  same reason the child's `BuildRules` and its hook are on the pointer
+  receiver), and when the answer is `AddNotificationNamed` instead —
+  plus its two seats outside a bound `Rules`, `ctx.AddNotificationNamed` and
+  `domain.ValidateEnumNamed`. Stated as a rule, so it does not read as a style
+  choice: the named seat is for a subject that is not one addressable field,
+  never for a reference that was inconvenient to write.
+
+### Added
+
+- **`fields[].notifyAs` and `fields[].jsonName` — a field's wire names are
+  declarable.** Until now a field carried four names and only two were the
+  author's: `name` (the Go identifier) and `column` (the physical column) were
+  declared, while the wire key and the notification token were both the Go name
+  rendered lower-camel, with no way to say otherwise. A service whose domain
+  calls a document `cpf` had to call it `nationalId` to every caller.
+
+  - `jsonName` moves the request and response bodies, the OpenAPI schema,
+    `?fields=` and the filter/sort vocabulary — every surface already read one
+    derivation, so it moves them together.
+  - `notifyAs` travels as the framework's own `notifyAs:"…"` struct tag, which
+    is read off the `reflect.StructField`: ONE declaration governs a
+    field-reference rule, the automatic value-object pass, an enum membership
+    refusal and the named seat. It also moves the unique constraint's 409
+    binding, so the domain pre-check and the database backstop answer one
+    conflict under one name instead of two.
+  - They are one vocabulary and `check` says so: declaring half of it warns,
+    because a caller who posted `cpf` and is refused about `nationalId` cannot
+    map the answer back to anything they sent. It stays a warning — a deliberate
+    split is the author's to make.
+  - Refused: a name outside lower-camel letters and digits (a separator or an
+    initial capital leaves one field spelled unlike its neighbours in the same
+    payload; a dot or a bracket forges a path segment that reads as nesting),
+    a name the framework already answers under (`id`, `parentId`, `revision`,
+    `createdAt`, `updatedAt`, `deletedAt`), a name that restates the default,
+    and two fields of one payload landing on the same token — a collision that
+    was impossible before the override existed and is one line of yaml now.
+    A composite is refused both keys: it travels flat, one key per part, and the
+    parts are named by `fields[].parts[].as`.
+  - The gen-report gains **"Fields the wire calls something else"**, listing
+    both halves per renamed field and flagging the rows where they disagree. It
+    is the one field-level decision a reviewer cannot see by reading the spec's
+    field list, and the one whose cost is asymmetric: the Go name and the column
+    can still be renamed freely, these are what every caller already wrote
+    against. It covers every scope a field can be declared in — a rename inside
+    a COLLECTION is listed under `Telefones[].Numero`, scoped because two
+    collections may each carry a `Numero` and an unqualified row would not say
+    which one to go and read. A field left on its derived name is never listed
+    in either scope: it is not a decision anybody made, and listing it would
+    bury the rows that are.
+  - **`/omnicore:evolve-entity` states the rename as two decisions.** Its impact
+    map had one row for wire-visible change, written when a field's wire name
+    was a function of its Go name — so the skill that OWNS renaming a field was
+    the one place that could not see the override exists. The API-impact item
+    now separates the domain's word for a field from the caller's: pinning both
+    keys to what the wire already answers turns a Go/column rename into an
+    evolution with no API impact at all, and moving either key on a released
+    field is a break carrying no migration and no compiler on either side to
+    catch it — the most expensive row that item can hold, and the reason the
+    half-declaration warning is repeated where the rename is planned rather than
+    only where the spec is written.
+  - **The golden matrix gained `45-nomes-de-fio`.** The two keys arrived with
+    unit tests over the spec and the emitters and no lane that BUILT anything
+    declaring them — and neither key is provable that way: `notifyAs` only
+    becomes behaviour when the framework reads the tag off a real
+    `reflect.StructField` at run time, and `jsonName` crosses the write DTOs,
+    the mappers, the OpenAPI schema and `queryschema` on its way to the wire.
+    The case renames a root field, its sibling and a field inside a collection,
+    leaves one neighbouring child field on the derived name (a payload mixing
+    both is what the collision check exists for), and carries a uniqueness so
+    the 409 binding is generated under the declared token too.
+
+### Fixed
+
+- **The golden gate no longer runs silently against the wrong framework.** Its
+  "the target is unreleased, point me at a checkout" warning was keyed on the
+  generator's supported version differing from the vendored host's pin — and
+  those were equal through exactly the round the warning exists for, because
+  `compat.Supported` had not been moved to the unreleased line it was already
+  emitting for. A run without `OMNICORE_LOCAL` therefore measured today's
+  emitters against yesterday's API in silence, and the wall of red read as a
+  generator defect. The question is now answered by a declaration —
+  `compat.SupportedIsPublished` — never by comparing two strings.
+
+  The same flag fixes what a PROJECT was told. With the target unpublished every
+  pin an author can declare is `Behind`, and `Behind`'s standing advice is
+  "upgrade the framework (`/omnicore:upgrade`)" — a version nobody can fetch.
+  The refusal now says the target is not published and that a `go.mod` replace
+  onto a checkout is the only tree that builds, and the local-checkout path
+  names the line that checkout has to be on.
+
+- **The golden gate stopped reusing a staged host that was never finished — or
+  was staged against another checkout.** `OMNICORE_LOCAL` builds the vendored
+  host ONCE into a template every lane then copies, and the decision to rebuild
+  it was "does the directory exist". A run interrupted between the copy and the
+  `go mod tidy` therefore left a tree with no `go.mod` that every later run
+  adopted as finished: all thirty-odd lanes failed with *"no go.mod found at or
+  above …"*, which reads as the generator refusing to run rather than as a dirty
+  cache in `/tmp`, and no amount of re-running cleared it. The second half was
+  quieter and worse — a run under a different `OMNICORE_LOCAL` reused the first
+  checkout's tree, compiled cleanly, and reported on a framework nobody had
+  asked it to measure. The template now carries a stamp naming the checkout it
+  was completed against, written only after the tidy succeeds, and the gate
+  re-stages whenever that stamp is missing or names something else.
+
 ## [0.62.0] — 2026-09-03
 
 The QA suite stops taking the service's word for what is correct.
