@@ -1,0 +1,86 @@
+# Eixo: os DOIS nomes de fio declarados — jsonName move o corpo, o schema
+# OpenAPI e o vocabulário de filtro/ordenação; notifyAs move o token `field` da
+# recusa e, com ele, o binding do 409 da unique. Na raiz e dentro de uma coleção.
+#
+# Sem este caso as duas chaves tinham teste de unidade no gerador e nenhuma prova
+# de que a árvore emitida COMPILA e SOBE sob os nomes declarados: a tag notifyAs
+# só vira comportamento quando o framework a lê de um reflect.StructField em
+# tempo de execução, e jsonName atravessa DTO, mapper, OpenAPI e queryschema —
+# camadas que só um build e um boot exercitam.
+#
+# O domínio aqui chama o documento de CPF e é isso que o chamador escreve; o
+# identificador Go continua NationalID, que é o ponto: os quatro nomes de um
+# campo são independentes.
+specVersion: 1
+entity: Assinante
+plural: Assinantes
+language: pt-BR
+storage:
+  kind: flat
+  table: assinantes
+  description: Assinantes do serviço.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - name: NationalID
+    type: string
+    column: national_id
+    length: 14
+    livesOn: root
+    jsonName: cpf
+    notifyAs: cpf
+    example: "12345678901"
+    description: Documento do assinante — o domínio o chama de CPF.
+    unique: {enforce: constraint-only, notification: CpfJaExisteNotification}
+  - {name: FullName, type: string, column: full_name, length: 160, livesOn: root, jsonName: nomeCompleto, notifyAs: nomeCompleto, example: Ana Souza, description: Nome completo do assinante.}
+children:
+  - name: Telefone
+    plural: Telefones
+    table: assinante_telefones
+    parentColumn: assinante_id
+    description: Telefones do assinante.
+    ownedBy: root
+    editStrategy: per-child
+    duplicateNotification: TelefoneJaExisteNotification
+    businessIdentity: [Numero]
+    fields:
+      - {name: Numero, type: string, column: numero, length: 20, jsonName: linha, notifyAs: linha, example: "+5551999990000", description: Número do telefone.}
+      # Deliberadamente SEM renome: um payload onde um campo responde pelo nome
+      # declarado e o vizinho pelo derivado é exatamente o que a checagem de
+      # colisão precisa ver funcionando junto.
+      - {name: Rotulo, type: string, column: rotulo, length: 40, example: casa, description: Rótulo do telefone.}
+    rules:
+      list:
+        - {id: linha-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Numero], notification: CampoObrigatorioNotification}
+modes: [display, insert, update]
+update: {shape: both}
+rules:
+  list:
+    - {id: cpf-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [NationalID], notification: CampoObrigatorioNotification}
+    - {id: nome-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [FullName], notification: CampoObrigatorioNotification}
+notifications:
+  - name: CampoObrigatorioNotification
+    semantic: validation
+    description: Campo obrigatorio nao preenchido.
+    text: {ptbr: "Este campo é obrigatório.", eng: "This field is required.", esp: "Este campo es obligatorio.", fra: "Ce champ est obligatoire.", deu: "Dieses Feld ist erforderlich.", ita: "Questo campo è obbligatorio.", nld: "Dit veld is verplicht."}
+  - name: CpfJaExisteNotification
+    semantic: conflict
+    description: Ja existe assinante com este CPF.
+    text: {ptbr: "Já existe um assinante com este CPF.", eng: "A subscriber with this document already exists.", esp: "Ya existe un suscriptor con este documento.", fra: "Un abonné avec ce document existe déjà.", deu: "Ein Abonnent mit diesem Dokument existiert bereits.", ita: "Esiste già un abbonato con questo documento.", nld: "Er bestaat al een abonnee met dit document."}
+  - name: TelefoneJaExisteNotification
+    semantic: conflict
+    description: Telefone ja consta no assinante.
+    text: {ptbr: "Esse telefone já consta no assinante.", eng: "That phone is already on the subscriber.", esp: "Ese teléfono ya consta en el suscriptor.", fra: "Ce téléphone figure déjà sur l'abonné.", deu: "Diese Telefonnummer ist bereits vorhanden.", ita: "Questo telefono è già presente.", nld: "Dat telefoonnummer staat er al op."}
+read:
+  backing: relational
+  view: {name: assinantes}
+  byId: true
+  byParams:
+    filters:
+      - {field: NationalID, ops: [eq]}
+      - {field: FullName, ops: [contains, icontains]}
+    controls: {pagination: true, fields: true}
+surfaces: {rest: true}
+authz:
+  resource: assinante
+  dataAccess: anyone-with-permission
+  permissions: {insert: "assinante:escrever", update: "assinante:escrever", patch: "assinante:escrever", read: "assinante:ler"}

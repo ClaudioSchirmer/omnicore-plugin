@@ -57,19 +57,31 @@ fi
 # The rewrite happens ONCE, into a staged template every lane then copies. The
 # gate lays the host down about thirty times; resolving the module graph that
 # many times would dominate its runtime for no added proof.
+#
+# The staged template is reusable only when the tidy that built it COMPLETED,
+# and completed against THIS checkout — which is what the stamp beside it
+# records. Guarding on the directory merely EXISTING gets both wrong, and the
+# two failures are not equally visible: an aborted run leaves a tree with no
+# go.mod that every later run reuses, so all thirty-odd lanes fail with "no
+# go.mod found" and the wall of red reads as a generator defect rather than a
+# dirty cache; and a second run under a DIFFERENT OMNICORE_LOCAL silently
+# reuses the first checkout's tree, which is worse, because that one compiles
+# and the gate then reports on a framework nobody asked it to measure.
 STAGED="${STAGED:-/tmp/omnicore-gen-host-staged}"
+STAGED_STAMP="$STAGED.against"
 stage_host() {
   local dest="$1"
   if [[ -z "${OMNICORE_LOCAL:-}" ]]; then
     rm -rf "$dest"; mkdir -p "$dest"; cp -R "$HOST/." "$dest/"
     return 0
   fi
-  if [[ ! -d "$STAGED" ]]; then
-    mkdir -p "$STAGED"; cp -R "$HOST/." "$STAGED/"
+  if [[ "$(cat "$STAGED_STAMP" 2>/dev/null)" != "$OMNICORE_LOCAL" ]]; then
+    rm -rf "$STAGED" "$STAGED_STAMP"; mkdir -p "$STAGED"; cp -R "$HOST/." "$STAGED/"
     (cd "$STAGED" \
       && GOWORK=off go mod edit -replace "github.com/ClaudioSchirmer/omnicore=$OMNICORE_LOCAL" \
       && GOWORK=off go mod tidy) >/tmp/gg-local.log 2>&1 \
       || { echo "  ❌ could not point the host at $OMNICORE_LOCAL"; sed -n '1,20p' /tmp/gg-local.log; rm -rf "$STAGED"; exit 1; }
+    printf '%s\n' "$OMNICORE_LOCAL" > "$STAGED_STAMP"
     echo "  (host staged against the framework checkout at $OMNICORE_LOCAL)"
   fi
   rm -rf "$dest"; mkdir -p "$dest"; cp -R "$STAGED/." "$dest/"

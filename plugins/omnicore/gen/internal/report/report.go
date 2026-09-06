@@ -2379,15 +2379,25 @@ func writeOwedComposite(b *strings.Builder, m *ir.Model, vo ir.ValueObject) {
 func writeRenamedFields(b *strings.Builder, m *ir.Model) {
 	type row struct{ goName, wire, notify string }
 	var rows []row
-	for _, f := range m.AllOwnerFields() {
-		if f.Composite != nil {
-			continue // a composite is named per part, by parts[].as
+	collect := func(scope string, fields []ir.Field) {
+		for _, f := range fields {
+			if f.Composite != nil {
+				continue // a composite is named per part, by parts[].as
+			}
+			wire, notify := f.JSONName, notifyTokenIn(f)
+			if wire == naming.Camel(f.Name) && notify == naming.Camel(f.Name) {
+				continue
+			}
+			rows = append(rows, row{scope + f.Name, wire, notify})
 		}
-		wire, notify := f.JSONName, notifyTokenIn(f)
-		if wire == naming.Camel(f.Name) && notify == naming.Camel(f.Name) {
-			continue
-		}
-		rows = append(rows, row{f.Name, wire, notify})
+	}
+	collect("", m.AllOwnerFields())
+	// A collection's fields are renameable on the same terms and just as
+	// invisible in the spec's field list — more so, since they sit one level
+	// down. Scoping the Go name is what keeps the row addressable when two
+	// collections carry a field of the same name.
+	for _, c := range m.Children {
+		collect(c.GoPlural+"[].", c.Fields)
 	}
 	if len(rows) == 0 {
 		return

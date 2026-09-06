@@ -30,7 +30,7 @@ const Supported = "v0.73.0"
 //
 // Flip it to true in the same commit that bumps Supported to a published tag,
 // alongside testdata/host/go.mod.
-const SupportedIsPublished = false
+const SupportedIsPublished = true
 
 // Level is the verdict.
 type Level string

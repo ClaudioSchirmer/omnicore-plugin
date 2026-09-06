@@ -7,7 +7,23 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.63.0] — 2026-09-06
+
+A field's wire names become the author's to declare, and every emission moves to
+the framework's field-reference notification API.
+
 ### Changed
+
+- **`omnicore-gen` now targets framework `v0.73.0`** (`compat.Supported`, and the
+  vendored host the golden gate builds). Unlike most bumps this one is a compile
+  break at ZERO distance: the redesign below removed the string-named
+  `Rules.AddNotification`, retyped `ValidateEnum` to take a field reference, and
+  moved an aggregate value object's `BuildRules` onto the pointer receiver.
+  Every generated entity, child, value object and composite calls at least one
+  of the three, so nothing this generator writes compiles against `v0.72.1` or
+  below. A project on an older pin therefore reads as **behind** and is refused
+  by default (`--force-unsupported` still overrides) — at this distance the
+  refusal is a compile break stated in advance, not a posture.
 
 - **omnicore-gen emits the framework's field-reference notification API.** The
   framework's notification redesign (string-named `AddNotification` removed;
@@ -49,6 +65,22 @@ is the commit bumping that field on `main`, tagged `v<version>`.
     the field reference when the attachment names a field of the scope, the
     named seat otherwise — instead of the attachment as a bare quoted string.
 
+- **The HAND-WRITTEN entity path is taught the same two seats.**
+  `scaffold-entity`'s domain conventions showed the field reference in the two
+  places a value object forced it to and called the string seat "the named
+  seat" without ever naming it, so a dev writing a cross-field invariant, a
+  state rejection or a cap by hand had the exception described and no API to
+  reach it by. They now carry the split itself: what `AddNotification` reads off
+  the reference (wire token, `labelKey`, the rejected value — leaving
+  `exposeValue` as the only decision), what misuse does (a non-pointer, a
+  missing `&`, a reference into a copy — a panic naming the fix, which is the
+  same reason the child's `BuildRules` and its hook are on the pointer
+  receiver), and when the answer is `AddNotificationNamed` instead —
+  plus its two seats outside a bound `Rules`, `ctx.AddNotificationNamed` and
+  `domain.ValidateEnumNamed`. Stated as a rule, so it does not read as a style
+  choice: the named seat is for a subject that is not one addressable field,
+  never for a reference that was inconvenient to write.
+
 ### Added
 
 - **`fields[].notifyAs` and `fields[].jsonName` — a field's wire names are
@@ -85,7 +117,33 @@ is the commit bumping that field on `main`, tagged `v<version>`.
     is the one field-level decision a reviewer cannot see by reading the spec's
     field list, and the one whose cost is asymmetric: the Go name and the column
     can still be renamed freely, these are what every caller already wrote
-    against.
+    against. It covers every scope a field can be declared in — a rename inside
+    a COLLECTION is listed under `Telefones[].Numero`, scoped because two
+    collections may each carry a `Numero` and an unqualified row would not say
+    which one to go and read. A field left on its derived name is never listed
+    in either scope: it is not a decision anybody made, and listing it would
+    bury the rows that are.
+  - **`/omnicore:evolve-entity` states the rename as two decisions.** Its impact
+    map had one row for wire-visible change, written when a field's wire name
+    was a function of its Go name — so the skill that OWNS renaming a field was
+    the one place that could not see the override exists. The API-impact item
+    now separates the domain's word for a field from the caller's: pinning both
+    keys to what the wire already answers turns a Go/column rename into an
+    evolution with no API impact at all, and moving either key on a released
+    field is a break carrying no migration and no compiler on either side to
+    catch it — the most expensive row that item can hold, and the reason the
+    half-declaration warning is repeated where the rename is planned rather than
+    only where the spec is written.
+  - **The golden matrix gained `45-nomes-de-fio`.** The two keys arrived with
+    unit tests over the spec and the emitters and no lane that BUILT anything
+    declaring them — and neither key is provable that way: `notifyAs` only
+    becomes behaviour when the framework reads the tag off a real
+    `reflect.StructField` at run time, and `jsonName` crosses the write DTOs,
+    the mappers, the OpenAPI schema and `queryschema` on its way to the wire.
+    The case renames a root field, its sibling and a field inside a collection,
+    leaves one neighbouring child field on the derived name (a payload mixing
+    both is what the collision check exists for), and carries a uniqueness so
+    the 409 binding is generated under the declared token too.
 
 ### Fixed
 
@@ -105,6 +163,20 @@ is the commit bumping that field on `main`, tagged `v<version>`.
   The refusal now says the target is not published and that a `go.mod` replace
   onto a checkout is the only tree that builds, and the local-checkout path
   names the line that checkout has to be on.
+
+- **The golden gate stopped reusing a staged host that was never finished — or
+  was staged against another checkout.** `OMNICORE_LOCAL` builds the vendored
+  host ONCE into a template every lane then copies, and the decision to rebuild
+  it was "does the directory exist". A run interrupted between the copy and the
+  `go mod tidy` therefore left a tree with no `go.mod` that every later run
+  adopted as finished: all thirty-odd lanes failed with *"no go.mod found at or
+  above …"*, which reads as the generator refusing to run rather than as a dirty
+  cache in `/tmp`, and no amount of re-running cleared it. The second half was
+  quieter and worse — a run under a different `OMNICORE_LOCAL` reused the first
+  checkout's tree, compiled cleanly, and reported on a framework nobody had
+  asked it to measure. The template now carries a stamp naming the checkout it
+  was completed against, written only after the tidy succeeds, and the gate
+  re-stages whenever that stamp is missing or names something else.
 
 ## [0.62.0] — 2026-09-03
 

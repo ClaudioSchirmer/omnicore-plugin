@@ -35,9 +35,9 @@ func TestVerdicts(t *testing.T) {
 		// field reference, and moved an AggregateValueObject's BuildRules onto
 		// the pointer receiver. Every generated entity, child, value object and
 		// composite calls at least one of those, so nothing this generator
-		// writes compiles against v0.72.1 or below — which is also why
-		// SupportedIsPublished is false and the refusal at this distance names a
-		// checkout instead of /omnicore:upgrade.
+		// writes compiles against v0.72.1 or below — which is why the refusal at
+		// this distance is a compile break stated in advance rather than a
+		// posture, and why it blocks by default.
 		//
 		// v0.72.1 was the first PATCH this generator required, and the reason is
 		// not a compile break — v0.72.0 emits and builds identically. What it costs

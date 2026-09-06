@@ -70,14 +70,14 @@ refuses the decidable cases outright.
   round-trip). Both are caught LOUDLY: boot panic at `WithSchema` naming the offender
   (`old-state.html`). Domain structs carry `labelKey` only — plus, on the fields that
   earn it, `notifyAs`.
-- **`notifyAs:"cep"` is the ONE way to rename a field in refusals** (pin ≥ the release
-  carrying the field-reference notification API). Without it a notification names the Go
+- **`notifyAs:"cep"` is the ONE way to rename a field in refusals** (pin ≥ v0.73.0).
+  Without it a notification names the Go
   field rendered lower-camel, acronym-aware — `ZipCode` → `zipCode`, `URL` → `url` — and
   that rendering is the framework's, not something to reproduce by hand. The tag is read
   off the `reflect.StructField`, so ONE declaration governs every seat that can name the
   field: a field-reference rule, the automatic value-object pass, an enum membership
-  refusal and the named seat all render the same token. Two things to hold to when you
-  write one:
+  refusal and the named seat (`AddNotificationNamed`, below) all render the same token.
+  Two things to hold to when you write one:
   - **It renames the REFUSAL, not the body.** The request/response key is the web DTO's
     `json:` tag, in another layer, and the domain cannot see it. Move both or neither: a
     caller who posted `cep` and is refused about `zipCode` cannot map the answer back to
@@ -270,6 +270,26 @@ own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
 - Prefer framework built-in notifications (`RequiredFieldNotification`,
   `SchemaViolationNotification`) — they need no translation entry. Regex validations:
   package-level compiled vars.
+- **A rule reports by FIELD REFERENCE, and the string seat is the named exception**
+  (pin ≥ v0.73.0). `r.AddNotification(&e.ZipCode, n,
+  exposeValue)` takes a pointer to the entity's OWN field, and everything the message needs
+  is read off it: the wire token (the lower-camel Go name, or the `notifyAs` tag above), the
+  `labelKey`, and the rejected value itself — so `exposeValue` is the only thing left to
+  decide (`false` for a required, `true` when the caller has to see what was refused). There
+  is no name to pass and therefore no name that can drift from the field. Misuse dies
+  loudly on the first validation rather than silently blaming the wrong field: a
+  non-pointer, a pointer field passed without `&`, or a reference into a COPY of the entity
+  panics with the fix spelled out — which is also why a child's `BuildRules` and its
+  `_manual` hook are both on the POINTER receiver (`conventions/aggregate-children.md`).
+  **When the subject is not ONE addressable field, the seat is
+  `r.AddNotificationNamed("<Token>", n, value…)`** — a cross-field invariant that names
+  neither operand, a state rejection, a collection or a cap, a synthetic token — and the
+  value is passed there precisely because there is no reference to read it from. The same
+  split holds outside a bound `Rules`: `ctx.AddNotificationNamed` where only a
+  `NotificationContext` is in hand (a raw or composite value object's `IsValid`), and
+  `domain.ValidateEnumNamed(v, "Field", ctx)` where `domain.ValidateEnum(&e.Status, r)` has
+  no field of the scope to point at. Reach for the named seat because the subject is not a
+  field — never because a reference was inconvenient to write.
 
 ## Service — rules that need the outside world (optional)
 
