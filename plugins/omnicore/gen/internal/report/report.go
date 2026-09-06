@@ -1018,6 +1018,8 @@ func renderCheck(b *strings.Builder, in Input) {
 			"just wrote.\n\n", strings.Join(hidden, ", "))
 	}
 
+	writeRenamedFields(b, m)
+
 	// A field the caller sends and the database never sees. It is the mirror of
 	// the case above and needs saying for the same reason: a reviewer reading
 	// the migration finds no column and concludes the field was forgotten, and
@@ -2359,4 +2361,61 @@ func writeOwedComposite(b *strings.Builder, m *ir.Model, vo ir.ValueObject) {
 			"formatted Go struct, and nothing catches that: it compiles, it runs, and a "+
 			"caller finds it in a 422 body.\n", vo.Name)
 	}
+}
+
+// writeRenamedFields reports the fields whose WIRE name is not their Go name.
+//
+// It is here because a rename is the one field-level decision a reviewer cannot
+// see by reading the spec's field list: the entry names the Go identifier, and
+// the override is one more key beside a dozen others. What it costs is
+// asymmetric — the column and the Go field are internal and free to move, while
+// the wire name is the contract every caller already wrote against, so changing
+// it later is a breaking API change with no compiler anywhere to catch it.
+//
+// The two halves are listed separately even when they agree, because a row
+// where they DISAGREE is the shape worth stopping on: a caller who posted under
+// one name and is refused under the other cannot map the answer back to what
+// they sent.
+func writeRenamedFields(b *strings.Builder, m *ir.Model) {
+	type row struct{ goName, wire, notify string }
+	var rows []row
+	for _, f := range m.AllOwnerFields() {
+		if f.Composite != nil {
+			continue // a composite is named per part, by parts[].as
+		}
+		wire, notify := f.JSONName, notifyTokenIn(f)
+		if wire == naming.Camel(f.Name) && notify == naming.Camel(f.Name) {
+			continue
+		}
+		rows = append(rows, row{f.Name, wire, notify})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	b.WriteString("### Fields the wire calls something else\n\n")
+	b.WriteString("| field | in request/response bodies | in refusals |\n|---|---|---|\n")
+	var split []string
+	for _, r := range rows {
+		fmt.Fprintf(b, "| `%s` | `%s` | `%s` |\n", r.goName, r.wire, r.notify)
+		if r.wire != r.notify {
+			split = append(split, fmt.Sprintf("`%s`", r.goName))
+		}
+	}
+	b.WriteString("\nThe Go name and the column are internal and can still be renamed freely. " +
+		"These cannot: they are what every caller already wrote against, and moving one later " +
+		"is a breaking API change that no compiler on either side will catch.\n\n")
+	if len(split) > 0 {
+		fmt.Fprintf(b, "**The two columns disagree for %s.** A caller who sent the first name "+
+			"is refused about the second and cannot map the answer back to anything they "+
+			"wrote. Check that the split is deliberate.\n\n", strings.Join(split, ", "))
+	}
+}
+
+// notifyTokenIn is the token a refusal about this field carries — the mirror of
+// what the framework resolves off the emitted struct tag.
+func notifyTokenIn(f ir.Field) string {
+	if f.NotifyAs != "" {
+		return f.NotifyAs
+	}
+	return f.JSONName
 }

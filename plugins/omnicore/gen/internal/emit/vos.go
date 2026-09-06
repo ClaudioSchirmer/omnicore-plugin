@@ -114,7 +114,7 @@ func emitRawChecks(s *src, vo ir.ValueObject) {
 
 	if vo.GoBacking == "string" {
 		s.L("\tif v == \"\" {")
-		s.L("\t\tctx.AddNotification(fieldName, domain.RequiredFieldNotification{})")
+		s.L("\t\tctx.AddNotificationNamed(fieldName, domain.RequiredFieldNotification{})")
 		s.L("\t\treturn false")
 		s.L("\t}")
 	}
@@ -127,13 +127,13 @@ func emitRawChecks(s *src, vo ir.ValueObject) {
 			conds = append(conds, fmt.Sprintf("len(v) > %d", vo.MaxLength))
 		}
 		s.L("\tif %s {", strings.Join(conds, " || "))
-		s.L("\t\tctx.AddNotification(fieldName, %s, v)", notif)
+		s.L("\t\tctx.AddNotificationNamed(fieldName, %s, v)", notif)
 		s.L("\t\treturn false")
 		s.L("\t}")
 	}
 	if vo.Regex != "" {
 		s.L("\tif !%sPattern.MatchString(string(v)) {", naming.Camel(vo.Name))
-		s.L("\t\tctx.AddNotification(fieldName, %s, v)", notif)
+		s.L("\t\tctx.AddNotificationNamed(fieldName, %s, v)", notif)
 		s.L("\t\treturn false")
 		s.L("\t}")
 	}
@@ -146,7 +146,7 @@ func emitRawChecks(s *src, vo ir.ValueObject) {
 			conds = append(conds, fmt.Sprintf("v > %s", numberIn(*vo.Max, vo.GoBacking)))
 		}
 		s.L("\tif %s {", strings.Join(conds, " || "))
-		s.L("\t\tctx.AddNotification(fieldName, %s, v)", notif)
+		s.L("\t\tctx.AddNotificationNamed(fieldName, %s, v)", notif)
 		s.L("\t\treturn false")
 		s.L("\t}")
 	}

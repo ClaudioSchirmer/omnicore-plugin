@@ -409,6 +409,28 @@ Four things to get right, because they are the ones that cost a migration later:
     `Value()`**: its absence is what tells the framework to decompose the value instead of
     storing a rendering in one column. For a value that occupies ONE column the answer stays
     `kind: manual`.
+- **A field carries FOUR names, and only two of them are free to move later.** `name` is
+  the Go identifier and `column` is the physical column — both internal, both renameable
+  with a migration and a compiler to catch the rest. `jsonName` is what the wire calls the
+  field (request and response bodies, the OpenAPI schema, `?fields=`, the filter and sort
+  vocabulary) and `notifyAs` is what a refusal calls it; both default to the Go name
+  rendered lower-camel, and both are the contract every caller already wrote against, so
+  moving one after release is a breaking API change no compiler on either side will catch.
+  - **Declare the two together or neither.** They are one vocabulary. Half of it answers a
+    caller who posted `cpf` with a complaint about `nationalId`, which they cannot map back
+    to anything they sent; `check` warns on that, and lets it through when the split is
+    deliberate.
+  - **What the build refuses**: a name outside lower-camel letters and digits (a separator
+    or an initial capital leaves ONE field spelled unlike its neighbours in the same
+    payload; a dot or a bracket forges a path segment a caller reads as nesting), a name
+    the framework already answers under (`id`, `parentId`, `revision`, `createdAt`,
+    `updatedAt`, `deletedAt`), a name that restates the default, and two fields of one
+    payload landing on the same token.
+  - **A composite has no single wire name** — it travels flat, one key per part — so both
+    keys are refused on the owner and the parts are named by `fields[].parts[].as`.
+  - `notifyAs` travels as the framework's own struct tag, so it also governs the database
+    constraint's 409 binding: the domain pre-check and the unique index answer one conflict
+    under one name.
 - **A field is not just "stored or sent" — `source` is where its value comes from, and
   most of the answers are ones people work around.** Persisted (it has a `column`) and
   runtime-from-a-named-claim (`runtime: true`, which defaults to `source: claim` + `claim:`)
@@ -1226,20 +1248,23 @@ Four things to get right, because they are the ones that cost a migration later:
   - **The call is bare, and that is the whole point.** `IsValid` REPORTS and EMITS — the
     value object owns its own notification — so there is nothing to raise beside it and no
     result to test. Writing this by hand as `if !e.TenantID.IsValid(...) { r.AddNotification(
-    "TenantID", domain.RequiredFieldNotification{}) }` hands the caller the same complaint
-    twice, which is why `notification`, `attachTo`, `echoValue` and `skipWhen` are all
-    refused on this kind, and why a `required` rule beside it is refused by name.
+    &e.TenantID, domain.RequiredFieldNotification{}, false) }` hands the caller the same
+    complaint twice, which is why `notification`, `attachTo`, `echoValue` and `skipWhen` are
+    all refused on this kind, and why a `required` rule beside it is refused by name.
   - **The exclusion is not optional.** Without `IgnoreValueObject` the automatic pass asks
     again at the end of the rules and reports the value a second time — the same duplicate
     by the other door. The generator writes both lines together; there is no way to declare
     one without the other.
   - **The kinds are not interchangeable.** A raw value object, a composite and an `id`
     (`domain.ID` writes its own `IsValid`) are asked directly; an **enum** declares no
-    `IsValid` at all and is asked for membership — `domain.ValidateEnum`. The generator
-    picks; for a `vo.kind: reuse` field it reads the type out of `internal/domain/vos`, and
-    **refuses rather than guesses** when the file says neither. An OPTIONAL value object is
-    called behind a nil guard, because absence is not a violation there any more than it is
-    in the automatic pass.
+    `IsValid` at all and is asked for membership — `domain.ValidateEnum(&e.Status, r)`. The
+    generator picks; for a `vo.kind: reuse` field it reads the type out of
+    `internal/domain/vos`, and **refuses rather than guesses** when the file says neither. An
+    OPTIONAL value object is called behind a nil guard, because absence is not a violation
+    there any more than it is in the automatic pass — and a nullable ENUM additionally
+    changes seat there, to `domain.ValidateEnumNamed(*e.Status, "Status", r.Context())`: a
+    field reference resolves a field of the entity, and an optional enum's value lives on the
+    heap the pointer points at, outside the struct the resolver walks.
   - **Two rules may not validate one field on the same verb.** `insert` and
     `insertOrUpdate` are different scopes that both run on an insert, so the collision is
     invisible in the yaml — `check` refuses it by name, because two calls emit twice.

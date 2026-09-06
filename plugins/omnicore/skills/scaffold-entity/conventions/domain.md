@@ -68,7 +68,24 @@ refuses the decidable cases outright.
   break the `Old()` snapshot the framework builds via a json round-trip — and a custom
   `json.Marshaler` on the entity is the SAME trap by another door (it hijacks that
   round-trip). Both are caught LOUDLY: boot panic at `WithSchema` naming the offender
-  (`old-state.html`). Domain structs carry `labelKey` only.
+  (`old-state.html`). Domain structs carry `labelKey` only — plus, on the fields that
+  earn it, `notifyAs`.
+- **`notifyAs:"cep"` is the ONE way to rename a field in refusals** (pin ≥ the release
+  carrying the field-reference notification API). Without it a notification names the Go
+  field rendered lower-camel, acronym-aware — `ZipCode` → `zipCode`, `URL` → `url` — and
+  that rendering is the framework's, not something to reproduce by hand. The tag is read
+  off the `reflect.StructField`, so ONE declaration governs every seat that can name the
+  field: a field-reference rule, the automatic value-object pass, an enum membership
+  refusal and the named seat all render the same token. Two things to hold to when you
+  write one:
+  - **It renames the REFUSAL, not the body.** The request/response key is the web DTO's
+    `json:` tag, in another layer, and the domain cannot see it. Move both or neither: a
+    caller who posted `cep` and is refused about `zipCode` cannot map the answer back to
+    anything they sent, and nothing in either layer will tell you they diverged.
+  - **`AddFieldNameAlias(goFieldName, wireName)` is its per-instance twin**, called in the
+    constructor, and it OVERRIDES the tag for that instance. Use the tag for the field's
+    name and the alias only for something an instance decides; two answers to one question
+    is how one of them becomes stale.
 - **A field the framework STAMPS is asked for, never assigned.** Where the pin carries
   the stamped family (`shared` availability test as always; the schema side and the full
   contract are owned by `conventions/infra.md`), the domain's half is one call:
@@ -156,7 +173,7 @@ writes it → raw, the framework checks membership → enum).
   is where a CROSS-FIELD rule belongs ("the end may not precede the start"), which is the
   thing a single-scalar VO cannot express and the reason the kind exists. A part may itself
   be a raw or enum VO (`Money.Currency`) — and the composite validates that part from inside
-  its own `IsValid` (`domain.ValidateEnum(v.Currency, "Currency", ctx)`), because the
+  its own `IsValid` (`domain.ValidateEnumNamed(v.Currency, "Currency", ctx)`), because the
   framework's automatic pass validates the COMPOSITE, never its interior. Nesting a
   composite inside a composite is not modelling: that is an entity in disguise.
   - **Mandatory or optional as a WHOLE.** Held by value → the value object is always there,
@@ -200,10 +217,12 @@ r.IfInsertOrUpdate(func() {
 
 Three things it is easy to get wrong, and each one is a duplicate in the caller's 422:
 **no `if`** — `IsValid` returns the verdict AND emits the notification, so `if !e.TenantID.
-IsValid(...) { r.AddNotification("TenantID", domain.RequiredFieldNotification{}) }` reports the
-same wrong value twice; **the `IgnoreValueObject` is mandatory**, or the automatic pass reaches
-the field at the end and reports it a second time; and **an enum has no `IsValid`** — it is
-`domain.ValidateEnum(e.Status, "Status", r.Context())`, while a raw VO, a composite and a
+IsValid(...) { r.AddNotification(&e.TenantID, domain.RequiredFieldNotification{}, false) }`
+reports the same wrong value twice; **the `IgnoreValueObject` is mandatory**, or the automatic
+pass reaches the field at the end and reports it a second time; and **an enum has no
+`IsValid`** — it is `domain.ValidateEnum(&e.Status, r)` (a NULLABLE enum goes through
+`domain.ValidateEnumNamed(*e.Status, "Status", r.Context())` under its nil guard), while a raw
+VO, a composite and a
 `domain.ID` are all asked directly (an OPTIONAL one behind a `!= nil` check, because absence is
 not a violation). `ValidateValueObject` does NOT do this: a forced VO runs in the automatic
 pass, at the end, like every other one. And note what a barrier does to the pass: `StopIfInvalid`

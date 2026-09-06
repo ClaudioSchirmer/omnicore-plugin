@@ -111,10 +111,10 @@ func TestGuardEmitsABareBarrierAfterTheRule(t *testing.T) {
 func TestGuardLandsBetweenTheRightRules(t *testing.T) {
 	got := buildRulesOf(t, guardModel(t, guardSpec), "internal/domain/pedido.go")
 
-	cliente := strings.Index(got, `r.AddNotification("Cliente"`)
-	total := strings.Index(got, `r.AddNotification("Total"`)
+	cliente := strings.Index(got, `r.AddNotification(&e.Cliente`)
+	total := strings.Index(got, `r.AddNotification(&e.Total`)
 	barrier := strings.Index(got, "r.StopIfInvalid()")
-	apelido := strings.Index(got, `r.AddNotification("Apelido"`)
+	apelido := strings.Index(got, `r.AddNotification(&e.Apelido`)
 
 	if cliente < 0 || total < 0 || barrier < 0 || apelido < 0 {
 		t.Fatalf("a rule is missing from the emitted body:\n%s", got)
@@ -182,8 +182,8 @@ rules:
 		t.Fatalf("no barrier in the child's BuildRules:\n%s", got)
 	}
 	barrier := strings.Index(got, "r.StopIfInvalid()")
-	codigo := strings.Index(got, `r.AddNotification("Codigo"`)
-	nome := strings.Index(got, `r.AddNotification("Nome"`)
+	codigo := strings.Index(got, `r.AddNotification(&c.Codigo`)
+	nome := strings.Index(got, `r.AddNotification(&c.Nome`)
 	if codigo < 0 || nome < 0 || barrier < 0 {
 		t.Fatalf("a rule is missing from the child's body:\n%s", got)
 	}

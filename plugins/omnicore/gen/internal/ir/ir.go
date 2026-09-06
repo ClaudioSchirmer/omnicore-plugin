@@ -135,8 +135,17 @@ type Field struct {
 	VOKind         string // "" | raw | enum | reuse
 	Nullable       bool
 	Length         int
-	JSONName       string
-	LabelKey       string
+	// JSONName is the field's name on the WIRE — request and response bodies,
+	// the OpenAPI schema, ?fields=, filters and sort. The Go name rendered
+	// lower-camel, unless the spec declared fields[].jsonName.
+	JSONName string
+	// NotifyAs is the field's declared NOTIFICATION token, from
+	// fields[].notifyAs — empty when the author declared none, which is what
+	// leaves the framework rendering the Go name lower-camel. It travels to the
+	// generated struct as the framework's `notifyAs:"..."` tag, so declaring it
+	// once governs every seat that can name this field.
+	NotifyAs string
+	LabelKey string
 	// Text is the field's LABEL per catalog code, from the spec. A catalog the
 	// spec left out is absent here too, and the catalog emitter falls back to
 	// the field's own name — the label is deliberately NOT derived from
@@ -893,6 +902,17 @@ func goTypeOf(specType string) string {
 	}
 }
 
+// wireNameOf is the field's name on the wire: what fields[].jsonName declared,
+// or the Go name rendered lower-camel. It is the ONE derivation — everything
+// downstream reads Field.JSONName rather than re-rendering the Go name, so a
+// declared name cannot reach one surface and miss another.
+func wireNameOf(f spec.Field) string {
+	if f.JSONName != "" {
+		return f.JSONName
+	}
+	return naming.Camel(f.Name)
+}
+
 func resolveField(entity string, f spec.Field) Field {
 	base := goTypeOf(f.Type)
 	goType := base
@@ -919,7 +939,7 @@ func resolveField(entity string, f spec.Field) Field {
 		GoType: goType, BaseGoType: base,
 		EntityType: entityType, BaseEntityType: entityBase, VOKind: voKind,
 		Nullable: f.Nullable, Length: f.Length,
-		JSONName: naming.Camel(f.Name), LabelKey: label, Text: f.Text.Map(),
+		JSONName: wireNameOf(f), NotifyAs: f.NotifyAs, LabelKey: label, Text: f.Text.Map(),
 		Example: f.Example, Description: f.Description, Runtime: f.Runtime, Claim: f.Claim,
 		RenderIn:       append([]string(nil), f.RenderIn...),
 		Source:         spec.SourceOf(f),
@@ -1447,6 +1467,18 @@ func byIDWriteOp(verb, e, method, path, perm, handler, summary string) Operation
 	}
 }
 
+// notifyTokenOf is the wire token a NOTIFICATION about this field carries: the
+// declared notifyAs, or the field's wire name. It is what the framework itself
+// resolves off the struct tag, restated here for the one road that does not go
+// through the framework — the database constraint binding, which is a string
+// the generator writes.
+func notifyTokenOf(f Field) string {
+	if f.NotifyAs != "" {
+		return f.NotifyAs
+	}
+	return f.JSONName
+}
+
 func resolveConstraints(s *spec.Spec, m *Model) []Constraint {
 	out := []Constraint{{
 		Kind: "primary-key", Table: m.Table, Columns: []string{"id"},
@@ -1462,7 +1494,7 @@ func resolveConstraints(s *spec.Spec, m *Model) []Constraint {
 		// value object rather than whichever part the database happened to
 		// mention.
 		cols := []string{f.Column}
-		field := f.JSONName
+		field := notifyTokenOf(f)
 		if f.Composite != nil {
 			cols = compositeRunColumns(m.Fields, i)
 			field = naming.Camel(f.Composite.Owner)
@@ -1478,6 +1510,15 @@ func resolveConstraints(s *spec.Spec, m *Model) []Constraint {
 		// road already speaks.
 		if f.Unique.AttachTo != "" {
 			field = naming.Camel(f.Unique.AttachTo)
+			// The seat's OWN declared token, when it has one: this binding and
+			// the domain pre-check answer the same conflict, and the pre-check
+			// reaches the field by reference, where the framework reads the
+			// notifyAs tag. Re-rendering the Go name here would hand the caller
+			// the default token from the database road and the declared one from
+			// the domain road.
+			if at := lookupField(m, f.Unique.AttachTo); at != nil {
+				field = notifyTokenOf(*at)
+			}
 		}
 		// `within` scopes the uniqueness — "unique per tenant" — so its columns
 		// lead the index. They lead rather than trail because that is also the

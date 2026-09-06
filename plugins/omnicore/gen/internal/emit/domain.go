@@ -457,8 +457,8 @@ func emitRowScopeCheck(s *src, m *ir.Model) {
 	s.Doc(doc...)
 	s.L("func (e *%s) refuseForeign%s(r *domain.Rules) {", m.Entity.Pascal, naming.Pascal(what))
 	s.L("\tif %s {", strings.Join(conds, " && "))
-	s.L("\t\tr.AddNotification(%s, notifications.TenantMismatchNotification{})",
-		quote(subject.Name))
+	s.L("\t\tr.AddNotification(%s, notifications.TenantMismatchNotification{}, false)",
+		fieldRef("e", subject.Name))
 	s.L("\t}")
 	s.L("}")
 	s.Blank()
@@ -558,13 +558,15 @@ func emitValueObjectCheck(s *src, rule ir.Rule, recv string) {
 		call := fmt.Sprintf("%s.%s.IsValid(%s, r.Context())", recv, f.Name, quote(f.Name))
 		if rule.VOEnum[f.Name] {
 			// An enum writes no IsValid: it declares its members and the answer
-			// for a value outside them, and the framework checks membership.
-			deref := ""
+			// for a value outside them, and the framework checks membership. A
+			// non-nullable enum resolves by FIELD REFERENCE; a nullable one holds
+			// a heap pointer no reference can resolve, so it takes the named
+			// seat under the nil guard the emitter already wraps.
+			call = fmt.Sprintf("domain.ValidateEnum(&%s.%s, r)", recv, f.Name)
 			if f.Nullable {
-				deref = "*"
+				call = fmt.Sprintf("domain.ValidateEnumNamed(*%s.%s, %s, r.Context())",
+					recv, f.Name, quote(f.Name))
 			}
-			call = fmt.Sprintf("domain.ValidateEnum(%s%s.%s, %s, r.Context())",
-				deref, recv, f.Name, quote(f.Name))
 		}
 		if f.Nullable {
 			for _, line := range wrap(fmt.Sprintf("An absent %s is not a violation: the "+
@@ -760,7 +762,7 @@ func emitRuleWith(s *src, m *ir.Model, gate string, rule ir.Rule, recv string) {
 				continue // a false boolean is a value; there is nothing to require
 			}
 			s.L("\t\tif %s {", zeroCheck(f, recv))
-			s.L("\t\t\tr.AddNotification(%s, %s)", quote(f.Name), notifIn(m, rule.Notification))
+			s.L("\t\t\tr.AddNotification(%s, %s, false)", fieldRef(recv, f.Name), notifIn(m, rule.Notification))
 			s.L("\t\t}")
 		}
 	case "immutable":
@@ -838,8 +840,8 @@ func emitImmutable(s *src, rule ir.Rule, recv string, m *ir.Model) {
 			cmp = pointerNeq("old."+f.Name, fmt.Sprintf("%s.%s", recv, f.Name))
 		}
 		s.L("\t\t\tif %s {", cmp)
-		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
+		s.L("\t\t\t\tr.AddNotification(%s, %s, %s)",
+			fieldRef(recv, f.Name), notifIn(m, rule.Notification), exposeLit(rule, f))
 		s.L("\t\t\t}")
 	}
 	s.L("\t\t}")
@@ -861,8 +863,8 @@ func emitRange(s *src, rule ir.Rule, recv string, m *ir.Model) {
 		} else {
 			s.L("\t\tif %s {", body)
 		}
-		s.L("\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifLiteralFor(rule, m), echoArgOn(rule, f, recv))
+		s.L("\t\t\tr.AddNotification(%s, %s, %s)",
+			fieldRef(recv, f.Name), notifLiteralFor(rule, m), exposeLit(rule, f))
 		s.L("\t\t}")
 	}
 }
@@ -883,8 +885,8 @@ func emitLength(s *src, rule ir.Rule, recv string, m *ir.Model) {
 		} else {
 			s.L("\t\tif %s {", body)
 		}
-		s.L("\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifLiteralFor(rule, m), echoArgOn(rule, f, recv))
+		s.L("\t\t\tr.AddNotification(%s, %s, %s)",
+			fieldRef(recv, f.Name), notifLiteralFor(rule, m), exposeLit(rule, f))
 		s.L("\t\t}")
 	}
 }
@@ -910,8 +912,8 @@ func emitComparison(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	}
 	conds = append(conds, comparisonExpr(left, right, rule.Operator, recv))
 	s.L("\t\tif %s {", strings.Join(conds, " && "))
-	s.L("\t\t\tr.AddNotification(%s, %s%s)",
-		quote(left.Name), notifIn(m, rule.Notification), echoArgOn(rule, left, recv))
+	s.L("\t\t\tr.AddNotification(%s, %s, %s)",
+		fieldRef(recv, left.Name), notifIn(m, rule.Notification), exposeLit(rule, left))
 	s.L("\t\t}")
 }
 
@@ -1068,7 +1070,7 @@ func emitOwnerCheck(s *src, rule ir.Rule, recv string, m *ir.Model) {
 		cond += fmt.Sprintf(" && !%s.%s", recv, rule.AdminField.Name)
 	}
 	s.L("\t\tif %s {", cond)
-	s.L("\t\t\tr.AddNotification(%s, %s)", quote("ID"), notifIn(m, rule.Notification))
+	s.L("\t\t\tr.AddNotificationNamed(%s, %s)", quote("ID"), notifIn(m, rule.Notification))
 	s.L("\t\t}")
 }
 
@@ -1101,11 +1103,51 @@ var frameworkNotifications = map[string]bool{
 // noticed while every fixture left echoValue off.
 func echoArg(rule ir.Rule, f ir.Field) string { return echoArgOn(rule, f, "e") }
 
+// echoArgOn renders the legacy value-variadic echo suffix for the NAMED
+// emission seats (AddNotificationNamed keeps the value parameter — the value
+// there cannot come from a field reference).
 func echoArgOn(rule ir.Rule, f ir.Field, recv string) string {
 	if !rule.EchoValue || neverEchoed(f) {
 		return ""
 	}
 	return ", " + recv + "." + f.Name
+}
+
+// fieldRef renders the field-reference argument of the redesigned
+// Rules.AddNotification: "&<recv>.<Field>".
+func fieldRef(recv, name string) string { return "&" + recv + "." + name }
+
+// exposeLit renders the mandatory exposeValue argument — "true" only when the
+// rule asked to echo AND the field may be echoed at all (see neverEchoed).
+func exposeLit(rule ir.Rule, f ir.Field) string {
+	return boolLit(rule.EchoValue && !neverEchoed(f))
+}
+
+// manualRaiseCall renders the emission the author has to write, on the seat the
+// attachment actually has: a name that IS a field of the scope resolves by
+// reference — the framework's default, and the one that cannot drift from the
+// field because it carries no name — while anything else (a collection, a
+// synthetic token, an attachment the spec left free) is what the named seat
+// exists for. With no attachment at all there is nothing to address, so the
+// call is shown bare for the author to complete.
+func manualRaiseCall(mr ir.ManualRule, recv string, fields []ir.Field) string {
+	notif := mr.Notification + "{}"
+	if mr.AttachTo == "" {
+		return fmt.Sprintf("r.AddNotification(&%s.<field>, %s, false)", recv, notif)
+	}
+	for _, f := range fields {
+		if f.Name == mr.AttachTo {
+			return fmt.Sprintf("r.AddNotification(%s, %s, false)", fieldRef(recv, mr.AttachTo), notif)
+		}
+	}
+	return fmt.Sprintf("r.AddNotificationNamed(%s, %s)", quote(mr.AttachTo), notif)
+}
+
+func boolLit(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // neverEchoed reports whether a field's value must not travel back in a
@@ -1148,7 +1190,13 @@ func number(v float64, specType string) string {
 // A rule scoped to several verbs appears under each of them: it genuinely runs
 // on each, and the doc comment tells the author to implement it once as a method
 // and call it from both blocks.
-func writeManualRuleGates(s *src, rules []ir.ManualRule) {
+// recv is the receiver the hook file's method declares, and fields are the
+// fields a reference can address on it — together they decide which SEAT each
+// rule's guidance shows. The framework emits by field reference and keeps the
+// named seat as the documented exception, so a comment that shows the wrong one
+// teaches the wrong one: this file is written once and then belongs to the
+// author, and the next rule is written the way the ones above it look.
+func writeManualRuleGates(s *src, rules []ir.ManualRule, recv string, fields []ir.Field) {
 	byGate := map[string][]ir.ManualRule{}
 	var order []string
 	for _, mr := range rules {
@@ -1183,10 +1231,7 @@ func writeManualRuleGates(s *src, rules []ir.ManualRule) {
 				s.L("\t\t// %s", line)
 			}
 			if mr.Notification != "" {
-				s.L("\t\t// Notification to raise: %s{}", mr.Notification)
-			}
-			if mr.AttachTo != "" {
-				s.L("\t\t// Attach it to the field: %s", quote(mr.AttachTo))
+				s.L("\t\t// Raise it with: %s", manualRaiseCall(mr, recv, fields))
 			}
 			s.L("\t\t// TODO(%s): implement the rule described above.", mr.ID)
 		}
@@ -1227,7 +1272,7 @@ func emitRulesHook(m *ir.Model) (fsplan.File, error) {
 	)
 	s.L("func (e *%s) customRules(actionName string, service domain.Service, r *domain.Rules) {",
 		m.Entity.Pascal)
-	writeManualRuleGates(s, m.ManualRules)
+	writeManualRuleGates(s, m.ManualRules, "e", m.AllOwnerFields())
 	s.L("}")
 
 	f, err := goFile("internal/domain/"+m.Entity.Snake+"_rules_manual.go", fsplan.Hook,
@@ -1264,6 +1309,12 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 	// to name the value object instead: the gate reads every part off it, and the
 	// echo is the concept rather than whichever part came first.
 	gate, echo := notEmpty(f, "e"), echoArg(rule, f)
+	// subject is the ENTITY FIELD whose value the echo reads. It decides the
+	// seat below: when the conflict is reported against that same field, the
+	// notification is about ONE addressable field and belongs on the field
+	// reference — the framework's default — rather than on the named seat, which
+	// is documented as the exception for everything else.
+	subject, expose := f.Name, exposeLit(rule, f)
 	if f.Composite != nil {
 		// The echo becomes the value object AS A WHOLE, never a part: what was
 		// refused is the TUPLE, and one half of a two-field key points at the
@@ -1279,6 +1330,7 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 		// there rather than emitting an echo that prints `{tenant read}`.
 		gate = compositeNotEmpty(m, f.Composite.Owner, "e")
 		echo = echoOf(rule, "e."+f.Composite.Owner)
+		subject, expose = f.Composite.Owner, boolLit(rule.EchoValue)
 	}
 	s.L("\t\t// The database unique index is the backstop for the race between this")
 	s.L("\t\t// check and the commit; asking here is what lets the duplicate be")
@@ -1306,8 +1358,18 @@ func emitUniquePrecheck(s *src, m *ir.Model, rule ir.Rule) {
 	// named bare rather than qualified.
 	s.L("\t\t\tif service.(%sService).%s(%s) {",
 		m.Entity.Pascal, rule.Fact.Name, strings.Join(args, ", "))
-	s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-		quote(attach), notifIn(m, rule.Notification), echo)
+	if attach == subject {
+		s.L("\t\t\t\tr.AddNotification(%s, %s, %s)",
+			fieldRef("e", subject), notifIn(m, rule.Notification), expose)
+	} else {
+		// attachTo moved the seat to a DIFFERENT field, while the value that
+		// collided is still the subject's. A field reference echoes the field it
+		// addresses and nothing else, so the two cannot be said in one call —
+		// the named seat is what carries a name and a foreign value together,
+		// and it still resolves that field's labelKey and notifyAs.
+		s.L("\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
+			quote(attach), notifIn(m, rule.Notification), echo)
+	}
 	s.L("\t\t\t}")
 	s.L("\t\t}")
 }
@@ -1441,7 +1503,7 @@ func emitChildMethods(s *src, m *ir.Model) {
 			s.L("\t// the collision is an answer, not a silent merge.")
 			s.L("\tfor _, existing := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 			s.L("\t\tif existing.IsSameBusinessIdentity(item) {")
-			s.L("\t\t\te.AddNotification(%s, %s%s)", quote(c.GoPlural),
+			s.L("\t\t\te.AddNotificationNamed(%s, %s%s)", quote(c.GoPlural),
 				notifIn(m, c.DuplicateNotification), addedEcho(c))
 			s.L("\t\t\treturn")
 			s.L("\t\t}")
@@ -1478,7 +1540,13 @@ func emitChangeChildMethod(s *src, m *ir.Model, c ir.Child) {
 			"audit trail reads as a change instead of as a deletion plus a creation.",
 		"",
 		"An id that is not in the collection is NOT silently ignored — it answers "+
-			"not-found, because the caller addressed a specific entry.")
+			"not-found, because the caller addressed a specific entry.",
+		"",
+		"It is addressed to the COLLECTION, like every other refusal about this "+
+			"collection: the plural is the one name the framework uses for it — the "+
+			"document segment, the read DTO's field and the notification path — and "+
+			"naming the entry's type here instead would answer one caller with two "+
+			"different tokens for one collection.")
 	s.L("func (e *%s) %s(id string, replacement aggregatevos.%s) {", m.Entity.Pascal, c.ChangeMethod, c.Name)
 	s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 	s.L("\t\tif current.GetID().Value() == id {")
@@ -1487,7 +1555,7 @@ func emitChangeChildMethod(s *src, m *ir.Model, c ir.Child) {
 	s.L("\t\t\treturn")
 	s.L("\t\t}")
 	s.L("\t}")
-	s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
+	s.L("\te.AddNotificationNamed(%s, domain.RecordNotFoundNotification{}, id)", quote(c.GoPlural))
 	s.L("}")
 	s.Blank()
 }
@@ -1498,7 +1566,8 @@ func emitRemoveChildMethod(s *src, m *ir.Model, c ir.Child) {
 		fmt.Sprintf("%s takes ONE entry out of the collection.", c.RemoveMethod),
 		"",
 		"Same not-found posture as the change: the caller named an entry, so a "+
-			"missing one is an answer rather than a no-op.")
+			"missing one is an answer rather than a no-op — and addressed to the "+
+			"collection's plural for the same reason.")
 	s.L("func (e *%s) %s(id string) {", m.Entity.Pascal, c.RemoveMethod)
 	s.L("\tfor _, current := range domain.GetCurrentItemsOf[aggregatevos.%s](e.GetAggregateRoot()) {", c.Name)
 	s.L("\t\tif current.GetID().Value() == id {")
@@ -1506,7 +1575,7 @@ func emitRemoveChildMethod(s *src, m *ir.Model, c ir.Child) {
 	s.L("\t\t\treturn")
 	s.L("\t\t}")
 	s.L("\t}")
-	s.L("\te.AddNotification(%s, domain.RecordNotFoundNotification{}, id)", quote(c.Name))
+	s.L("\te.AddNotificationNamed(%s, domain.RecordNotFoundNotification{}, id)", quote(c.GoPlural))
 	s.L("}")
 	s.Blank()
 }
@@ -1607,8 +1676,8 @@ func emitRequiredIf(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	s.L("\t\tif %s {", presentCheck(*rule.Other, recv))
 	for _, f := range rule.Fields {
 		s.L("\t\t\tif %s {", zeroCheck(f, recv))
-		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
-			quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
+		s.L("\t\t\t\tr.AddNotification(%s, %s, %s)",
+			fieldRef(recv, f.Name), notifIn(m, rule.Notification), exposeLit(rule, f))
 		s.L("\t\t\t}")
 	}
 	s.L("\t\t}")
@@ -1658,8 +1727,8 @@ func emitTransition(s *src, rule ir.Rule, recv string, m *ir.Model) {
 	s.L("\t\t\t\t\t}")
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t\tif !ok {")
-	s.L("\t\t\t\t\tr.AddNotification(%s, %s%s)",
-		quote(f.Name), notifIn(m, rule.Notification), echoArgOn(rule, f, recv))
+	s.L("\t\t\t\t\tr.AddNotification(%s, %s, %s)",
+		fieldRef(recv, f.Name), notifIn(m, rule.Notification), exposeLit(rule, f))
 	s.L("\t\t\t\t}")
 	s.L("\t\t\t}")
 	s.L("\t\t}")
@@ -1742,7 +1811,7 @@ func emitChildTransition(s *src, m *ir.Model, rule ir.Rule) {
 		s.L("\t\t\t\t\t\t\t}")
 		s.L("\t\t\t\t\t\t}")
 		s.L("\t\t\t\t\t\tif !ok {")
-		s.L("\t\t\t\t\t\t\tr.AddNotification(%s, %s%s)",
+		s.L("\t\t\t\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
 			quote(rule.AttachTo), notifIn(m, rule.Notification), echoOf(rule, read(cur)))
 		s.L("\t\t\t\t\t\t}")
 		s.L("\t\t\t\t\t}")
@@ -1767,7 +1836,7 @@ func emitChildImmutable(s *src, m *ir.Model, rule ir.Rule) {
 			cmp = pointerNeq(fmt.Sprintf("%s.%s", old, f.Name), fmt.Sprintf("%s.%s", cur, f.Name))
 		}
 		s.L("\t\t\t\t\tif %s {", cmp)
-		s.L("\t\t\t\t\t\tr.AddNotification(%s, %s%s)",
+		s.L("\t\t\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
 			quote(rule.AttachTo), notifIn(m, rule.Notification), echoOf(rule, childEcho(f, cur)))
 		s.L("\t\t\t\t\t}")
 	})
@@ -1799,7 +1868,7 @@ func emitChildDuplicate(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\tfor i := range items {")
 	s.L("\t\t\t\tfor j := i + 1; j < len(items); j++ {")
 	s.L("\t\t\t\t\tif items[i].IsSameBusinessIdentity(items[j]) {")
-	s.L("\t\t\t\t\t\tr.AddNotification(%s, %s%s)",
+	s.L("\t\t\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
 		quote(c.GoPlural), notifIn(m, rule.Notification), duplicateEcho(rule, *c))
 	s.L("\t\t\t\t\t\tbreak")
 	s.L("\t\t\t\t\t}")
@@ -1859,7 +1928,7 @@ func emitFactRange(s *src, m *ir.Model, rule ir.Rule) {
 		} else {
 			s.L("\t\t\tif %s {", factBoundCond(groupRead, rule))
 		}
-		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
+		s.L("\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
 			quote(rule.AttachTo), notif, echoOf(rule, groupRead))
 		s.L("\t\t\t\tbreak")
 		s.L("\t\t\t}")
@@ -1872,19 +1941,19 @@ func emitFactRange(s *src, m *ir.Model, rule ir.Rule) {
 		} else {
 			s.L("\t\tif v := %s; %s {", call, factBoundCond(read, rule))
 		}
-		s.L("\t\t\tr.AddNotification(%s, %s%s)",
+		s.L("\t\t\tr.AddNotificationNamed(%s, %s%s)",
 			quote(rule.AttachTo), notif, echoOf(rule, read))
 		s.L("\t\t}")
 	case f.ReturnsFound:
 		s.L("\t\t// No matching row means there is no %s to compare — the rule stands", f.Kind)
 		s.L("\t\t// down rather than treating the zero as an answer.")
 		s.L("\t\tif v, ok := %s; ok && %s {", call, factBoundCond("v", rule))
-		s.L("\t\t\tr.AddNotification(%s, %s%s)",
+		s.L("\t\t\tr.AddNotificationNamed(%s, %s%s)",
 			quote(rule.AttachTo), notif, echoOf(rule, "v"))
 		s.L("\t\t}")
 	default:
 		s.L("\t\tif v := %s; %s {", call, factBoundCond("v", rule))
-		s.L("\t\t\tr.AddNotification(%s, %s%s)",
+		s.L("\t\t\tr.AddNotificationNamed(%s, %s%s)",
 			quote(rule.AttachTo), notif, echoOf(rule, "v"))
 		s.L("\t\t}")
 	}
@@ -2038,7 +2107,7 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 		// owes it code that compiles.
 		if rule.OnlyField == nil {
 			s.L("\t\t\tif len(items) > %d {", rule.Cap)
-			s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
+			s.L("\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
 				quote(c.GoPlural), notifInFor(m, rule), echoOf(rule, "len(items)"))
 			s.L("\t\t\t}")
 			s.L("\t\t}")
@@ -2049,7 +2118,7 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 		countOne("\t\t\t\t", "n++")
 		s.L("\t\t\t}")
 		s.L("\t\t\tif n > %d {", rule.Cap)
-		s.L("\t\t\t\tr.AddNotification(%s, %s%s)",
+		s.L("\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
 			quote(c.GoPlural), notifInFor(m, rule), echoOf(rule, "n"))
 		s.L("\t\t\t}")
 		s.L("\t\t}")
@@ -2066,7 +2135,7 @@ func emitGroupCap(s *src, m *ir.Model, rule ir.Rule) {
 	s.L("\t\t\t}")
 	s.L("\t\t\tfor _, n := range perKey {")
 	s.L("\t\t\t\tif n > %d {", rule.Cap)
-	s.L("\t\t\t\t\tr.AddNotification(%s, %s%s)",
+	s.L("\t\t\t\t\tr.AddNotificationNamed(%s, %s%s)",
 		quote(c.GoPlural), notifInFor(m, rule), echoOf(rule, "n"))
 	s.L("\t\t\t\t\tbreak")
 	s.L("\t\t\t\t}")

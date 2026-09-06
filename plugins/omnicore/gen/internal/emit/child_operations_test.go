@@ -147,3 +147,29 @@ func TestRemoveOnlyCollectionWritesNoEntryProjector(t *testing.T) {
 		t.Errorf("the one mounted verb is missing:\n%s", cmds)
 	}
 }
+
+// TestChildNotFoundNamesTheCollection pins the ONE name a refusal about this
+// collection carries.
+//
+// children[].plural is that name everywhere the framework looks: the document
+// segment the projection nests the collection under, the Go field the read DTO
+// declares for it, and — lower-camelled — the notification path. The add
+// verb's duplicate refusal already used it; the change and remove verbs named
+// the ENTRY'S TYPE instead, so one caller working on one collection was
+// answered "permissoes" by one verb and "papelPermissao" by the next two, with
+// nothing in either payload saying they were the same collection.
+func TestChildNotFoundNamesTheCollection(t *testing.T) {
+	m := childOpsModel(t, "    operations: [add, change, remove]\n")
+	entity := uniqueAnswerSource(t, m, "internal/domain/papel.go")
+
+	notFound := `domain.RecordNotFoundNotification{}, id)`
+	if n := strings.Count(entity, notFound); n != 2 {
+		t.Fatalf("want the change and the remove to answer not-found, found %d", n)
+	}
+	if strings.Contains(entity, `e.AddNotificationNamed("PapelPermissao"`) {
+		t.Error(`a not-found named the entry's TYPE; the collection is "Permissoes"`)
+	}
+	if n := strings.Count(entity, `e.AddNotificationNamed("Permissoes", domain.RecordNotFoundNotification{}, id)`); n != 2 {
+		t.Errorf("the two not-found refusals do not both name the collection:\n%s", entity)
+	}
+}

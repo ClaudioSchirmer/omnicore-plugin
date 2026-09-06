@@ -271,6 +271,33 @@ type Field struct {
 	// LabelKey is the translation-catalog key for the field's label — what a
 	// CSV/XLSX column header resolves through. Derived when omitted.
 	LabelKey string `yaml:"labelKey"`
+	// NotifyAs renames the field in NOTIFICATION envelopes — the `field` token a
+	// 422/409 body carries. Omitted, the framework renders the Go name
+	// lower-camel ("ZipCode" → "zipCode"); declared, the token is used verbatim,
+	// which is how a service answers in the domain's own language ("cep") while
+	// the Go type keeps the name the code reads best.
+	//
+	// It travels as the framework's own `notifyAs:"..."` struct tag, so ONE
+	// declaration governs every seat that can name this field: a field-reference
+	// rule, the automatic value-object pass, an enum membership refusal, the
+	// named seat, and the unique constraint's database backstop.
+	//
+	// It renames the NOTIFICATION and nothing else. The request and response
+	// bodies are a separate vocabulary with its own key — jsonName — and the two
+	// diverge silently if only one is declared: a caller who posted `zipCode`
+	// and is refused about `cep` cannot map the answer back to what they sent.
+	// Declare both, or neither.
+	NotifyAs string `yaml:"notifyAs"`
+	// JSONName renames the field in REQUEST AND RESPONSE bodies — the write
+	// command's payload, the read DTOs, the OpenAPI schema, the `?fields=`
+	// vocabulary and the filter/sort vocabulary, which all read this one name.
+	// Omitted, it is the Go name rendered lower-camel.
+	//
+	// It is the wire's name, so changing it on a service already in production
+	// is a breaking API change — the column and the Go field are unaffected,
+	// which is the point: a name the callers use is not the name the table uses.
+	// Its notification twin is notifyAs; see there for why they belong together.
+	JSONName string `yaml:"jsonName"`
 	// Text is the field's LABEL — its short human name — per language catalog.
 	// It is what a validation payload puts in `fieldLabel` and what a CSV/XLSX
 	// export puts in a column header, so it is a couple of words, never a

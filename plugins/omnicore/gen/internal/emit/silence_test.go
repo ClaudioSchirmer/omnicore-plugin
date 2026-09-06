@@ -134,7 +134,7 @@ func TestEveryDeclaredRuleReachesTheCode(t *testing.T) {
 			for _, w := range wants {
 				// The declaration site does not count as enforcement: what is
 				// being asserted is that something RAISES it.
-				if !regexp.MustCompile(`AddNotification\([^)]*` + regexp.QuoteMeta(w.notification)).MatchString(body) {
+				if !regexp.MustCompile(`AddNotification(?:Named)?\([^)]*` + regexp.QuoteMeta(w.notification)).MatchString(body) {
 					t.Errorf("rule %q declares %s and no emitted code raises it — "+
 						"the rule validated, its type and translations were generated, "+
 						"and the check itself was never written",

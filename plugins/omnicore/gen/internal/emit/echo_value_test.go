@@ -163,7 +163,7 @@ func echoValueModel(t *testing.T) *ir.Model {
 func TestRulesEchoTheRejectedValueByDefault(t *testing.T) {
 	m := echoValueModel(t)
 	got := fileNamed(t, m, "internal/domain/cardapio.go")
-	if !strings.Contains(got, `PorcoesInvalidasNotification{Min: "1", Max: "12"}, e.Porcoes`) {
+	if !strings.Contains(got, `PorcoesInvalidasNotification{Min: "1", Max: "12"}, true`) {
 		t.Errorf("a range refusal states the bound and not the value that crossed it:\n%s", got)
 	}
 }
@@ -173,10 +173,10 @@ func TestRulesEchoTheRejectedValueByDefault(t *testing.T) {
 func TestEchoValueFalseIsHonoured(t *testing.T) {
 	m := echoValueModel(t)
 	got := fileNamed(t, m, "internal/domain/cardapio.go")
-	if strings.Contains(got, "SenhaCurtaNotification{Min: \"8\"}, e.Senha") {
+	if strings.Contains(got, "SenhaCurtaNotification{Min: \"8\"}, true") {
 		t.Errorf("echoValue: false still sent the value back — and this one is a secret:\n%s", got)
 	}
-	if !strings.Contains(got, `SenhaCurtaNotification{Min: "8"})`) {
+	if !strings.Contains(got, `SenhaCurtaNotification{Min: "8"}, false)`) {
 		t.Errorf("the opted-out rule lost its notification entirely:\n%s", got)
 	}
 }
@@ -204,7 +204,7 @@ func TestCollectionRefusalsEchoWhatBrokeThem(t *testing.T) {
 func TestRequiredEchoesNothing(t *testing.T) {
 	m := echoValueModel(t)
 	got := fileNamed(t, m, "internal/domain/cardapio.go")
-	if !strings.Contains(got, `r.AddNotification("Nome", domain.RequiredFieldNotification{})`) {
+	if !strings.Contains(got, `r.AddNotification(&e.Nome, domain.RequiredFieldNotification{}, false)`) {
 		t.Errorf("a required refusal echoes a value it does not have:\n%s", got)
 	}
 }

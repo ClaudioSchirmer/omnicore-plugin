@@ -108,6 +108,7 @@ func Validate(s *Spec, opt Options) *Problems {
 	validateSurfaces(s, ps)
 	validateAuthz(s, ps)
 	validateDocs(s, ps)
+	validateWireNameCollisions(s, ps)
 
 	checkNeighbours(s, opt, ps)
 	ps.Sort()
@@ -344,6 +345,185 @@ func validateFields(s *Spec, ps *Problems, opt Options) {
 		} else if f.Column != "" {
 			seenCol[key] = i
 		}
+	}
+}
+
+// wireTokenRe is the shape of a name the WIRE carries: lower-camel, letters and
+// digits only.
+//
+// The restriction is not style policing. A notification token is a path SEGMENT,
+// so a dot or a bracket in it forges a path the caller reads as nesting that
+// does not exist; and every other name on this service's wire is the lower-camel
+// rendering of a Go identifier, so a snake_case or PascalCase override would
+// leave one field spelled unlike every one beside it, in the same payload.
+var wireTokenRe = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
+
+// managedWireNames are the tokens the FRAMEWORK already answers under on this
+// aggregate's wire — its id, the parent link, the revision watermark and the
+// managed stamps. An override landing on one of them puts two fields under one
+// name in the same payload, and the one the caller gets is whichever the encoder
+// wrote last.
+var managedWireNames = map[string]string{
+	"id":        "the aggregate id",
+	"parentId":  "the parent link of a child row",
+	"revision":  "the revision watermark",
+	"createdAt": "the framework's insert stamp",
+	"updatedAt": "the framework's update stamp",
+	"deletedAt": "the framework's archive stamp",
+}
+
+// validateWireNames holds the two wire-name overrides to the one thing they
+// exist for: saying the domain's own word for a field. Everything below refuses
+// a declaration that would instead make the wire harder to read than the default
+// it replaced.
+func validateWireNames(f Field, where string, ps *Problems) {
+	for _, seat := range []struct {
+		key, value, what string
+	}{
+		{"jsonName", f.JSONName, "the request and response bodies"},
+		{"notifyAs", f.NotifyAs, "notification envelopes"},
+	} {
+		if seat.value == "" {
+			continue
+		}
+		w := where + "." + seat.key
+		if IsComposite(f) {
+			// A composite travels FLAT, one key per part, so there is no single
+			// name for the whole to carry — and the parts already have a seat of
+			// their own that names them per entity.
+			ps.BlockerFix(w,
+				"a composite value object has no single name on the wire — it travels as "+
+					"one key per part",
+				"name the parts instead: fields[].parts[].as")
+			continue
+		}
+		if !wireTokenRe.MatchString(seat.value) {
+			ps.BlockerFix(w,
+				fmt.Sprintf("%q is not a usable wire name", seat.value),
+				"use lowerCamel letters and digits — a separator or an initial capital "+
+					"leaves this one field spelled unlike every other in the same payload, "+
+					"and a dot or a bracket forges a path segment")
+			continue
+		}
+		if why, taken := managedWireNames[seat.value]; taken {
+			ps.BlockerFix(w,
+				fmt.Sprintf("%q is already %s", seat.value, why),
+				"pick another name — two fields under one key answer whichever the "+
+					"encoder wrote last")
+			continue
+		}
+		if f.Name != "" && seat.value == naming.Camel(f.Name) {
+			ps.BlockerFix(w,
+				fmt.Sprintf("%q is already what %s renders to in %s", seat.value, f.Name, seat.what),
+				"drop the key — a declaration that changes nothing reads as a decision "+
+					"somebody made")
+		}
+	}
+	// The two are one vocabulary. Declaring half of it answers a caller who sent
+	// what jsonName named with a refusal about something else, which they cannot
+	// map back to anything they wrote.
+	switch {
+	case f.JSONName != "" && f.NotifyAs == "":
+		ps.WarnFix(where+".notifyAs",
+			fmt.Sprintf("the wire calls this field %q and a refusal about it will not", f.JSONName),
+			fmt.Sprintf("add notifyAs: %s — the caller who sent %q cannot map a complaint "+
+				"about %q back to anything they wrote", f.JSONName, f.JSONName, naming.Camel(f.Name)))
+	case f.NotifyAs != "" && f.JSONName == "":
+		ps.WarnFix(where+".jsonName",
+			fmt.Sprintf("a refusal calls this field %q and the wire does not", f.NotifyAs),
+			fmt.Sprintf("add jsonName: %s, unless the divergence is deliberate — the body "+
+				"the caller sends still says %q", f.NotifyAs, naming.Camel(f.Name)))
+	}
+}
+
+// validateWireNameCollisions refuses two fields answering under ONE name.
+//
+// It runs per WIRE SCOPE rather than per fields list, because a facet's fields
+// land on the same aggregate and the same DTO as the root's — they are one
+// payload — while a collection carries its own. Without the override the
+// collision was impossible by construction (two Go names cannot be equal and the
+// rendering is a function of the name); with it, it is one line of yaml, and
+// what it produces is a payload where the value a caller reads under a key is
+// whichever field the encoder wrote last.
+func validateWireNameCollisions(s *Spec, ps *Problems) {
+	root := make([]wireSeat, 0, len(s.Fields))
+	for i, f := range s.Fields {
+		root = append(root, wireSeatsOf(f, fmt.Sprintf("fields[%d] (%s)", i, orUnnamed(f.Name)))...)
+	}
+	for i, sib := range s.Siblings {
+		for j, f := range sib.Fields {
+			root = append(root, wireSeatsOf(f,
+				fmt.Sprintf("siblings[%d] (%s).fields[%d] (%s)",
+					i, orUnnamed(sib.Name), j, orUnnamed(f.Name)))...)
+		}
+	}
+	reportWireCollisions(root, ps)
+
+	for i, c := range s.Children {
+		var own []wireSeat
+		for j, f := range c.Fields {
+			own = append(own, wireSeatsOf(f,
+				fmt.Sprintf("children[%d] (%s).fields[%d] (%s)",
+					i, orUnnamed(c.Name), j, orUnnamed(f.Name)))...)
+		}
+		reportWireCollisions(own, ps)
+	}
+}
+
+// wireSeat is one name one field occupies in one vocabulary.
+type wireSeat struct {
+	vocabulary string // "the wire" | "notifications"
+	token      string
+	where      string
+}
+
+// wireSeatsOf lists the tokens a field occupies. A composite occupies one per
+// PART — it travels flat — and each part's token comes from its own `as`, which
+// is why the two override keys are refused on the owner.
+func wireSeatsOf(f Field, where string) []wireSeat {
+	if IsComposite(f) {
+		var out []wireSeat
+		for _, fp := range f.Parts {
+			t := naming.Camel(ExposedName(fp))
+			out = append(out,
+				wireSeat{"the wire", t, where + ".parts"},
+				wireSeat{"notifications", t, where + ".parts"})
+		}
+		return out
+	}
+	if f.Name == "" {
+		return nil
+	}
+	json, notify := f.JSONName, f.NotifyAs
+	if json == "" {
+		json = naming.Camel(f.Name)
+	}
+	if notify == "" {
+		notify = naming.Camel(f.Name)
+	}
+	return []wireSeat{
+		{"the wire", json, where + ".jsonName"},
+		{"notifications", notify, where + ".notifyAs"},
+	}
+}
+
+func reportWireCollisions(seats []wireSeat, ps *Problems) {
+	first := map[string]wireSeat{}
+	for _, seat := range seats {
+		key := seat.vocabulary + "\x00" + seat.token
+		prev, taken := first[key]
+		if !taken {
+			first[key] = seat
+			continue
+		}
+		if prev.where == seat.where {
+			continue // one field's two seats, or a composite listed once per part
+		}
+		ps.BlockerFix(seat.where,
+			fmt.Sprintf("%q already names another field of this payload on %s (%s)",
+				seat.token, seat.vocabulary, prev.where),
+			"pick another name — under one key the caller reads whichever field the "+
+				"encoder wrote last, and neither is marked as the loser")
 	}
 }
 
@@ -933,6 +1113,8 @@ func validateOneField(s *Spec, f Field, where string, ps *Problems, isChild, isF
 			fmt.Sprintf("%q is a reserved field name", f.Name),
 			why)
 	}
+
+	validateWireNames(f, where, ps)
 
 	// A COMPOSITE field answers the single-column questions per PART, not once:
 	// its type, column and length live under parts[], and validateComposites

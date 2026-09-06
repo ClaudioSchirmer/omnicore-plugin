@@ -17,7 +17,20 @@ import (
 // Supported is the framework version this build targets and is proven against
 // by the golden gate. Moving it is a deliberate act paired with reviewing the
 // emitters — never a silent bump.
-const Supported = "v0.72.1"
+const Supported = "v0.73.0"
+
+// SupportedIsPublished says whether Supported carries a tag anybody can pin
+// yet. It is false while the emitters are written against the framework's
+// unreleased line, and that case is NOT a detail of wording: no released
+// version can satisfy the target, so every pin a project can actually declare
+// is Behind, and the standing advice — upgrade the framework — names a version
+// that does not exist. The only thing that works meanwhile is a checkout
+// (go.mod replace, or the golden gate's OMNICORE_LOCAL), so that is what the
+// refusal says instead.
+//
+// Flip it to true in the same commit that bumps Supported to a published tag,
+// alongside testdata/host/go.mod.
+const SupportedIsPublished = false
 
 // Level is the verdict.
 type Level string
@@ -43,6 +56,9 @@ type Verdict struct {
 	Pinned    string
 	Supported string
 	Message   string
+	// Fix is the one action that resolves the verdict, for a caller rendering a
+	// finding rather than the prose. Empty when there is nothing to do.
+	Fix string
 	// Blocks reports whether generation should stop absent an override.
 	Blocks bool
 }
@@ -55,6 +71,15 @@ func Evaluate(pinned string, localCheckout bool) Verdict {
 		v.Level = Unknown
 		v.Message = "the framework resolves to a local checkout, so its released version is " +
 			"unknown; generating anyway — the compiler is the oracle"
+		if !SupportedIsPublished {
+			// The checkout is the ONLY thing that can satisfy an unpublished
+			// target, so it is worth saying which checkout: one parked at the
+			// last tag builds nothing the emitters write, and the wall of red
+			// that produces reads as a generator defect.
+			v.Message += fmt.Sprintf(". This build targets the unpublished %s, so that "+
+				"checkout has to be on the line carrying it — an older tag will not compile",
+				Supported)
+		}
 		return v
 	}
 
@@ -81,6 +106,21 @@ func Evaluate(pinned string, localCheckout bool) Verdict {
 				"run keeps it); a capability that changed shape entirely is a generator bump, "+
 				"not a patch",
 			pinned, Supported)
+	case !SupportedIsPublished:
+		// Behind, but not because the project fell behind: the target has no tag
+		// yet, so this is where EVERY real pin lands. Sending the author to
+		// /omnicore:upgrade would name a version nobody can fetch.
+		v.Level = Behind
+		v.Blocks = true
+		v.Message = fmt.Sprintf(
+			"this generator targets framework %s, which is NOT PUBLISHED yet — the project "+
+				"pins %s, and no released version carries the API the emitters call. There is "+
+				"nothing to upgrade to: until %s ships, the only tree that builds is one whose "+
+				"go.mod replaces the framework with a checkout. Pass --force-unsupported to "+
+				"generate anyway and judge the result yourself",
+			Supported, pinned, Supported)
+		v.Fix = fmt.Sprintf("wait for framework %s, or point go.mod at a framework checkout; "+
+			"or pass --force-unsupported", Supported)
 	default:
 		v.Level = Behind
 		v.Blocks = true
@@ -91,6 +131,7 @@ func Evaluate(pinned string, localCheckout bool) Verdict {
 				"(/omnicore:upgrade). Pass --force-unsupported to generate anyway and judge "+
 				"the result yourself",
 			pinned, Supported)
+		v.Fix = "upgrade the framework, or pass --force-unsupported"
 	}
 	return v
 }

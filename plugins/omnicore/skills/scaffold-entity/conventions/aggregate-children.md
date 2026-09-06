@@ -110,6 +110,16 @@ web.md.
   It carries its own scoped `BuildRules` (notifications surface as
   `children[i].field`); its VO-typed fields auto-validate exactly like a root's, so
   `BuildRules` carries ONLY the non-VO rules (`value-objects.html`).
+- **That `BuildRules` is declared on the POINTER receiver** — `func (c *Guardian)
+  BuildRules(actionName string, service domain.Service, r *domain.Rules)` — even though the
+  child is a value type and `CollectionName`/`IsSameBusinessIdentity` stay on the value.
+  The method is deliberately NOT in the `AggregateValueObject` interface (the tracker stores
+  children by value, and a value carries no pointer-receiver method): the framework
+  materializes an addressable copy per validation pass, binds the `*Rules` to it, and
+  asserts the method on that copy's pointer. A value receiver therefore compiles, satisfies
+  the interface, and **panics at the child's first validation** with the contract spelled
+  out. The pointer is also what makes `r.AddNotification(&c.Field, n, expose)` resolvable at
+  all — the reference has to land inside the instance the framework bound.
 
 ## The verb tells the truth (soft removal)
 
