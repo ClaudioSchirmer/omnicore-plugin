@@ -371,17 +371,33 @@ func scopeCallerValue(sc ir.Scope) string {
 // It has to be stated: a never-persisted entity has no id (GetID returns nil),
 // so without it the guard would stand down and every case in the file would
 // pass while proving nothing.
-const scopeFixtureID = "row-of-the-caller"
+//
+// And it has to be a UUID. Every verb that CARRIES an id runs the framework's
+// own `GetID().IsValid("id", …)` before any rule of yours, so a readable
+// placeholder is rejected as a malformed id — which reads as the row-scope
+// guard firing on a caller it should have let through, and sends whoever meets
+// it looking at the wrong file.
+const scopeFixtureID = "7b3c1f10-3c7e-4a8d-9f0e-9d2a8e6d4b51"
 
-// scopesOnIdentity reports whether any scope narrows by the aggregate's own id,
-// which is what makes the fixture state one.
-func scopesOnIdentity(m *ir.Model) bool {
-	for _, sc := range m.Authz.Scopes {
-		if sc.OnIdentity {
-			return true
-		}
+// emitStatedFixtureID gives the fixture the id a scope over the aggregate's own
+// identity compares against.
+//
+// It belongs to the CASE and not to valid<Entity>(), and the reason is the same
+// fact the scope's insert exemption rests on: the framework refuses an insert on
+// an entity that already carries an id (validateForInsert). A fixture that
+// stated one would break every insert-path case in the file — the "a valid one
+// is accepted" baseline first, which points at nothing.
+//
+// Without it the case would prove nothing either: a never-persisted aggregate
+// has NO id (GetID returns nil) and the guard stands down on that, so the write
+// would be accepted and the test would pass with the guard asleep.
+func emitStatedFixtureID(s *src, sc ir.Scope) {
+	if !sc.OnIdentity {
+		return
 	}
-	return false
+	s.L("\t// The row was LOADED, which is the only way it has an identity at all —")
+	s.L("\t// and the guard stands down on an aggregate that has none.")
+	s.L("\te.SetID(domain.NewID(%s))", quote(scopeFixtureID))
 }
 
 // sortedClaimNames keeps a generated map literal stable run to run — an emitter
@@ -430,6 +446,7 @@ func emitRowScopeCases(s *src, m *ir.Model) {
 					"would let them have it anyway.", v[1]))
 			s.L("func Test%s_%sOutside%s_IsRefused(t *testing.T) {", e, v[0], sc.Subject.Name)
 			s.L("\te := valid%s()", e)
+			emitStatedFixtureID(s, sc)
 			s.L("\te.%s = %s", sc.Identity.Name, foreign)
 			emitDomainCall(s, m, e, v[0])
 			s.L("\tif err == nil {")
@@ -481,11 +498,17 @@ func emitRowScopeCases(s *src, m *ir.Model) {
 				"the identity and never consulted — which looks exactly like it working.")
 		s.L("func Test%s_BypassCrossesTheScope(t *testing.T) {", e)
 		s.L("\te := valid%s()", e)
+		probe, onInsert := bypassProbeCall(m, scopes)
+		if !onInsert {
+			for _, sc := range scopes {
+				emitStatedFixtureID(s, sc)
+			}
+		}
 		for _, sc := range scopes {
 			s.L("\te.%s = %s", sc.Identity.Name, foreign)
 		}
 		s.L("\te.%s = true", m.Authz.BypassField.Name)
-		s.L("\tif _, err := %s; err != nil {", bypassProbeCall(m, scopes))
+		s.L("\tif _, err := %s; err != nil {", probe)
 		s.L("\t\tt.Fatalf(%s, err)",
 			quote("the bypass holder was refused a row outside their scope: %v"))
 		s.L("\t}")
@@ -599,7 +622,7 @@ func emitDomainCall(s *src, m *ir.Model, e, verb string) {
 // The insert is the natural probe and it is not always one: a scope on the
 // aggregate's own id skips that verb, and a bypass test running there would go
 // green with the guards asleep.
-func bypassProbeCall(m *ir.Model, scopes []ir.Scope) string {
+func bypassProbeCall(m *ir.Model, scopes []ir.Scope) (call string, onInsert bool) {
 	coveredBy := func(verb string) bool {
 		for _, sc := range scopes {
 			if !sc.AppliesTo(verb) {
@@ -617,16 +640,16 @@ func bypassProbeCall(m *ir.Model, scopes []ir.Scope) string {
 		mounted[v] = true
 	}
 	if mounted["insert"] && coveredBy("insert") {
-		return fmt.Sprintf("domain.GetInsertable(e, %s, %s)", serviceArg(m), quote(insertAction(m)))
+		return fmt.Sprintf("domain.GetInsertable(e, %s, %s)", serviceArg(m), quote(insertAction(m))), true
 	}
 	if mounted["update"] && coveredBy("update") {
 		return fmt.Sprintf("domain.GetUpdatable(e, func(*%s) error { return nil }, %s, %s)",
-			m.Entity.Pascal, serviceArg(m), quote("GetUpdatable"))
+			m.Entity.Pascal, serviceArg(m), quote("GetUpdatable")), false
 	}
 	if mounted["archive"] && coveredBy("archive") {
-		return fmt.Sprintf("domain.GetArchivable(e, %s, %s)", serviceArg(m), quote("GetArchivable"))
+		return fmt.Sprintf("domain.GetArchivable(e, %s, %s)", serviceArg(m), quote("GetArchivable")), false
 	}
-	return fmt.Sprintf("domain.GetInsertable(e, %s, %s)", serviceArg(m), quote(insertAction(m)))
+	return fmt.Sprintf("domain.GetInsertable(e, %s, %s)", serviceArg(m), quote(insertAction(m))), true
 }
 
 // scopeInsertRationale says WHY a scope leaves the insert alone, in the words
@@ -664,11 +687,7 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 			"points at the rule under test rather than at unrelated invalid state.",
 	)
 	s.L("func valid%s() *%s {", m.Entity.Pascal, m.Entity.Pascal)
-	head, tail := "\treturn &"+m.Entity.Pascal+"{", "\t}"
-	if scopesOnIdentity(m) {
-		head, tail = "\te := &"+m.Entity.Pascal+"{", "\t}"
-	}
-	s.L("%s", head)
+	s.L("\treturn &%s{", m.Entity.Pascal)
 	// The body-sourced runtime fields belong in the fixture too, and they are not
 	// among the owner's: they are part of a valid WRITE without being part of a
 	// row. Left out, the value object on one of them is judged against a zero
@@ -676,18 +695,7 @@ func emitValidEntityBuilder(s *src, m *ir.Model) {
 	// baseline fails first — which points at nothing.
 	emitEntityLiteralFields(s, append(m.AllOwnerFields(), m.BodyRuntimeFields()...), "\t\t")
 	emitScopeFixture(s, m, "\t\t")
-	s.L("%s", tail)
-	if scopesOnIdentity(m) {
-		// A never-persisted aggregate has NO id — GetID returns nil — and a
-		// scope over the identity stands down on one. Leaving it unset would
-		// make every case in this file pass with the guard asleep, which is the
-		// one failure a generated suite must not be able to have.
-		s.L("\t// The row's own identity is what the caller is scoped to, so the fixture")
-		s.L("\t// has to state it: a never-persisted aggregate has none, and the guard")
-		s.L("\t// stands down on that — every case below would pass proving nothing.")
-		s.L("\te.SetID(domain.NewID(%s))", quote(scopeFixtureID))
-		s.L("\treturn e")
-	}
+	s.L("\t}")
 	s.L("}")
 	s.Blank()
 
@@ -754,7 +762,16 @@ func emitScopeFixture(s *src, m *ir.Model, indent string) {
 	}
 
 	for _, sc := range m.Authz.Scopes {
-		s.L("%s// The row is inside the caller's own %s.", indent, sc.Subject.Name)
+		if sc.OnIdentity {
+			// The row's half is the id, which valid<Entity>() must NOT set: the
+			// framework refuses an insert on an aggregate that already carries
+			// one. The cases that need both halves state the id themselves —
+			// see emitStatedFixtureID — and this is the half that is always safe.
+			s.L("%s// The caller's own scope, for the verbs that load a row and can", indent)
+			s.L("%s// therefore have an identity to compare.", indent)
+		} else {
+			s.L("%s// The row is inside the caller's own %s.", indent, sc.Subject.Name)
+		}
 		s.L("%s%s: %s,", indent, sc.Identity.Name, quote(scopeCallerValue(sc)))
 	}
 	// An ownerCheck compares a runtime field against a column, and both halves

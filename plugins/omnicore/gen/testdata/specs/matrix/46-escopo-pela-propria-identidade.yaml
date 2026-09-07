@@ -31,9 +31,13 @@ storage:
 fields:
   - {name: Nome, type: string, column: nome, length: 160, livesOn: root, example: Escola Alfa, description: Nome do inquilino.}
   - {name: Documento, type: string, column: documento, length: 20, livesOn: root, unique: {enforce: service-precheck+constraint, scope: all, notification: DocumentoEmUsoNotification}, example: "12345678000190", description: CNPJ do inquilino.}
-modes: [display, insert, update, archive]
+modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
 removal: {root: archive}
+service:
+  required: true
+  facts:
+    - {name: DocumentoExiste, kind: exists, field: Documento, filters: [Documento], excludeSelf: true, description: Ja existe um inquilino com este documento.}
 notifications:
   - name: DocumentoEmUsoNotification
     semantic: conflict

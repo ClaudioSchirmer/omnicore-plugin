@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -242,8 +243,33 @@ func TestTheGeneratedSuiteStatesTheIdOfAScopedRegistry(t *testing.T) {
 	if got == "" {
 		t.Fatal("the domain tests were not emitted")
 	}
-	if !strings.Contains(got, "e.SetID(domain.NewID(") {
-		t.Errorf("the fixture never states an id, so the id scope guard stands down in every case:\n%s", got)
+	// The id is stated by the CASES that can carry one, never by valid<Entity>():
+	// the framework refuses an insert on an aggregate that already has an id
+	// (validateForInsert), so a fixture that stated one would break every
+	// insert-path case in the file — the "a valid one is accepted" baseline
+	// first, which points at nothing.
+	if strings.Contains(got, "func validInquilino() *Inquilino {\n\treturn &Inquilino{") == false {
+		t.Errorf("valid<Entity>() is no longer a plain literal — an id stated there is "+
+			"refused by the framework on every insert:\n%s", got)
+	}
+	if strings.Contains(got, "e.SetID(domain.NewID(") == false {
+		t.Errorf("no case states an id, so the id scope guard stands down in every one "+
+			"of them and they pass proving nothing:\n%s", got)
+	}
+	// And it has to be a UUID: every verb that carries an id runs the framework's
+	// own GetID().IsValid("id", …) before any rule of ours, so a readable
+	// placeholder is rejected as a malformed id — which reads as the guard firing
+	// on a caller it should have let through.
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`).
+		MatchString(scopeFixtureID) {
+		t.Errorf("the fixture id is not a UUID (%q), so the framework refuses every "+
+			"verb that carries one before the row scope is ever consulted", scopeFixtureID)
+	}
+	// The insert case must NOT: that is the verb the framework mints the id on.
+	insert := got[strings.Index(got, "func TestInquilino_InsertIsNotNarrowedByID("):]
+	insert = insert[:strings.Index(insert, "\n}")]
+	if strings.Contains(insert, "SetID") {
+		t.Errorf("the insert case states an id, which the framework refuses outright:\n%s", insert)
 	}
 	if !strings.Contains(got, "func TestInquilino_UpdateOutsideID_IsRefused(") {
 		t.Error("the write half of the id scope is not proven")

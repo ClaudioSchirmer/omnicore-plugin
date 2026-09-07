@@ -31,7 +31,7 @@ fields:
   - {name: FilialID, type: string, column: filial_id, length: 60, livesOn: root, assignedFrom: identity-claim, claim: filial_id, example: filial-centro, description: A filial dona do pedido.}
   - {name: CriadoPor, type: string, column: criado_por, length: 160, livesOn: root, assignedFrom: identity-subject, example: ana@escola.br, description: Quem abriu o pedido.}
   - {name: Descricao, type: string, column: descricao, length: 400, livesOn: root, example: Compra de material, description: O que foi pedido.}
-modes: [display, insert, update, archive]
+modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
 removal: {root: archive}
 read:

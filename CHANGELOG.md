@@ -92,6 +92,15 @@ about the CALLER.
   so, and the generated suite proves it with its own case — a guard that was
   silently never registered would otherwise look exactly like this policy.
 
+  The generated suite states the row's id in the CASES that can carry one — the
+  update and the archive — and never in `valid<Entity>()`, because the framework
+  refuses an insert on an aggregate that already has an id
+  (`validateForInsert`), which is the same fact the exemption above rests on. The
+  stated value is a UUID for the same reason: every verb carrying an id runs
+  `GetID().IsValid("id", …)` before any rule of yours, so a readable placeholder
+  would be rejected as a malformed id and read as the row-scope guard firing on
+  a caller it should have let through.
+
 - **SEVERAL scopes at once, ANDed.** A business that lives under a tenant AND a
   branch AND a cost centre no longer picks which one the generator enforces. Each
   scope gets its own read filter entry and its own `refuseForeign<Field>` guard —
@@ -131,6 +140,25 @@ about the CALLER.
   registry scoped by its own id (`46-escopo-pela-propria-identidade`) and an
   entity under three scopes, one of them a named claim and one of them
   write-only (`47-escopos-multiplos-por-claim`).
+
+- **`TestEveryMatrixSpecValidates` — the check the matrix never had.** The
+  coverage matrix is the corpus every other test reaches for, and each of those
+  tests takes what it needs and SKIPS what it cannot use: the emitters' fixture
+  loader parses and resolves without validating, the IR's invariant sweep
+  `continue`s past a spec with blockers, the report's matrix does the same. Each
+  skip is right on its own; together they meant a fixture ADDED to the matrix
+  could be refused by `check` while the whole Go suite stayed green — and the
+  only thing that noticed was the golden gate, which needs Docker and five
+  engines and therefore runs late. It happened on this very change: both new
+  fixtures above went in refused.
+
+  The new test asserts the property nothing else did — a spec in the matrix is a
+  spec the generator ACCEPTS — over `Validate` **and** `CheckCoverage`, the two
+  `generate` runs before it writes anything. It is the cheapest possible version
+  of the gate, with no containers and no DDL, and it runs on every
+  `go test ./...`. One fixture is exempt, in a map that demands the reason
+  beside the name: `20-filho-de-base-montado` mounts a collection its shared
+  base owns, and validated ALONE that base is not there.
 
 ## [0.64.0] — 2026-09-06
 
