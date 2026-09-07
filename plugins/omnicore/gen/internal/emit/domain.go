@@ -430,6 +430,12 @@ func scopeGates(m *ir.Model, sc ir.Scope) []string {
 			out = append(out, g)
 		}
 	}
+	// The framework has a gate for each half of insert/update AND one for both,
+	// so a scope that covers only one of them is separated by the REGISTRATION
+	// rather than by a condition inside the guard. That matters for the scope
+	// over the aggregate's own id, which skips the insert: the entity carries no
+	// readable mode, so a guard asking "is this an insert?" would have nothing
+	// to ask it with.
 	var insert, update bool
 	for _, op := range m.Ops {
 		switch op.Verb {
@@ -437,6 +443,27 @@ func scopeGates(m *ir.Model, sc ir.Scope) []string {
 			insert = sc.AppliesTo("insert")
 		case "update", "patch":
 			update = update || sc.AppliesTo("update")
+		}
+	}
+	combined := ""
+	switch {
+	case insert && update:
+		combined = "IfInsertOrUpdate"
+	case insert:
+		combined = "IfInsert"
+	case update:
+		combined = "IfUpdate"
+	}
+	// Registered in the order the OPS are mounted, which is the order the
+	// pre-scopes emitter used — a migrated one-scope entity keeps its
+	// registration lines where they were, instead of moving in a diff that is
+	// supposed to be empty.
+	for _, op := range m.Ops {
+		switch op.Verb {
+		case "insert", "update", "patch":
+			if combined != "" {
+				add(combined)
+			}
 		case "archive":
 			if sc.AppliesTo("archive") {
 				add("IfArchive")
@@ -450,19 +477,6 @@ func scopeGates(m *ir.Model, sc ir.Scope) []string {
 				add("IfDelete")
 			}
 		}
-	}
-	// The framework has a gate for each half AND one for both, so a scope that
-	// covers only one of them is separated by the REGISTRATION rather than by a
-	// condition inside the guard. That matters for the scope over the aggregate's
-	// own id, which skips the insert: the entity carries no readable mode, so a
-	// guard asking "is this an insert?" would have nothing to ask it with.
-	switch {
-	case insert && update:
-		add("IfInsertOrUpdate")
-	case insert:
-		add("IfInsert")
-	case update:
-		add("IfUpdate")
 	}
 	return out
 }

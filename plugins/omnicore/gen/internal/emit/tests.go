@@ -241,8 +241,13 @@ func testIdentity(m *ir.Model) identityFixture {
 	fx := identityFixture{Claims: map[string]string{}}
 	// The row scope's own halves first, keyed by the scope they belong to: with
 	// several scopes there is no ONE caller value any more, and reading them off
-	// the runtime list would lose which row field each one has to match.
+	// the runtime list would lose which row field each one has to match. The
+	// read-only scopes are skipped with their carriers: this fixture feeds the
+	// COMMAND mappers, and a scope that reaches no write verb has nothing there.
 	for _, sc := range m.Authz.Scopes {
+		if sc.Identity == nil {
+			continue
+		}
 		switch sc.From {
 		case "subject":
 			fx.Subject = scopeCallerValue(sc)
@@ -312,6 +317,11 @@ func testIdentity(m *ir.Model) identityFixture {
 func emitIdentityArrived(s *src, m *ir.Model, indent string) {
 	fx := testIdentity(m)
 	for _, sc := range m.Authz.Scopes {
+		if sc.Identity == nil {
+			// A read-only scope: no carrier, no feed, and — the point — no
+			// assertion claiming a write-side check this entity does not have.
+			continue
+		}
 		s.L("%sif e.%s != %s {", indent, sc.Identity.Name, quote(scopeCallerValue(sc)))
 		s.L("%s\tt.Errorf(%s, e.%s)", indent,
 			quote("the caller's "+sc.Subject.Name+" scope did not reach the entity (%q) — a write outside it could not be refused"),
@@ -762,6 +772,11 @@ func emitScopeFixture(s *src, m *ir.Model, indent string) {
 	}
 
 	for _, sc := range m.Authz.Scopes {
+		if sc.Identity == nil {
+			// A read-only scope synthesises no carrier, so there is nothing for
+			// the fixture to satisfy.
+			continue
+		}
 		if sc.OnIdentity {
 			// The row's half is the id, which valid<Entity>() must NOT set: the
 			// framework refuses an insert on an aggregate that already carries

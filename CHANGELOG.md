@@ -7,6 +7,71 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.66.0] — 2026-09-07
+
+Two defects in `0.65.0`'s row-scope rollout, both reported from a real 7-entity
+migration and both reproduced before fixing.
+
+### Fixed
+
+- **The documented one-scope migration is now actually equivalent — the carrier
+  and guard keep their pre-scopes names.** `0.65.0` renamed two PUBLIC
+  identifiers on every generated scoped entity: the exported carrier
+  `RequestingTenant` became `RequestingTenantID` and the guard
+  `refuseForeignTenant` became `refuseForeignTenantID` — while its changelog
+  claimed the migration produced byte-for-byte identical output. The carrier is
+  an exported field on a generated aggregate that HAND-WRITTEN code feeds (the
+  generated mappers do exactly that, so hand-written command handlers do the
+  same), which made a migration documented as mechanical a compile break at
+  zero distance, in files the generator does not own, with `check` and `doctor`
+  green until `go build` failed.
+
+  The naming rule now lives in one exported function (`spec.ScopeNames`) and
+  reads: an ACCESSOR-FED scope keeps the pair the pre-scopes generator emitted
+  — `from: tenant` → `RequestingTenant` / `refuseForeignTenant`,
+  `from: subject` → `RequestingSubject` / `refuseForeignOwner` — and only the
+  shapes the old language could not spell derive from the field
+  (`Requesting<Field>` / `refuseForeign<Field>`): a claim-fed scope, a
+  `field: ID` scope, and the rare pair of scopes sharing one accessor (two
+  carriers cannot share a name, so a duplicated accessor takes every scope it
+  feeds to derived names — deterministically, not first-come). Validation
+  refuses a derived name colliding with a legacy one (a claim scope over a
+  field called `Tenant`), and `RequestingTenant` / `RequestingSubject` return
+  to the reserved-name list. Guard registrations also follow the ops' mount
+  order again, as `0.64.0`'s did.
+
+  A service migrated onto `0.65.0` that renamed its hand-written references to
+  the `…TenantID` forms will meet the rename once more, in reverse — this
+  release chooses the name the majority never left, and chooses it permanently.
+
+  **The `0.65.0` changelog's "byte-for-byte" claim was false and is hereby
+  corrected**: what this release promises is identifier-for-identifier — the
+  same exported names, the same comparison, the same 403. Comments and the
+  generated-file headers (date, checksum) may still differ across a
+  regeneration; nothing hand-written code references changes name.
+
+- **A read-only scope (`applies: [read]`) no longer emits the write-side
+  plumbing it cannot use.** `0.65.0` correctly skipped the guard but still
+  synthesised the three runtime fields (`Requesting<…>`,
+  `RequestingIdentityPresent`, `RequestingMayCrossScope`), fed them in every
+  write mapper, and generated a test asserting the feed arrives — under the
+  message "a write outside it could not be refused". The dead code was the
+  small half: the aggregate's comment and a passing generated test both
+  described a write-side refusal the entity deliberately does not have, so a
+  reviewer reading generated artifacts concluded `PATCH` was row-guarded when
+  it was not. A generated artifact stating a false security posture is worse
+  than the missing guard, because the guard's absence was a documented
+  decision.
+
+  The carrier, the presence flag, the bypass flag, their feeds and their tests
+  are now synthesised only when some scope actually reaches a write verb. A
+  read-only scope's whole diff is the two `ToCriteria` bodies — filter plus
+  bypass — which is what `applies: [read]` says. The same gate closed a hole
+  beside it: `bypassMaySet` on a field whose scope does not cover the insert is
+  now refused, because the value a caller states there is judged by the guard
+  ON that verb, and with the scope read-only nothing would judge it — it would
+  be applied from everybody.
+
 ## [0.65.0] — 2026-09-07
 
 Row scoping stops being two shapes the language was born with and becomes what

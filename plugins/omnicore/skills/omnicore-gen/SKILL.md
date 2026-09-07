@@ -615,10 +615,10 @@ Four things to get right, because they are the ones that cost a migration later:
     reads); `permission:` on any other source or on a persisted field; `modes:` (an identity
     rides every verb, the bodyless ones included, which is exactly where an archive guard
     reads it); a `vo:` (the value comes from the framework, through no constructor of
-    yours); a field named `RequestingMayCrossScope`, `RequestingIdentityPresent`, or
-    `Requesting<ScopeField>` for a field `authz.scopes` narrows by (the row scope
-    synthesises those names itself — one carrier per scope, named after the field it is
-    compared against).
+    yours); a field named `RequestingTenant`, `RequestingSubject`,
+    `RequestingMayCrossScope`, `RequestingIdentityPresent`, or `Requesting<ScopeField>`
+    for a field `authz.scopes` narrows by (the row scope synthesises those names itself —
+    one carrier per write-reaching scope; see the naming rule under the scopes bullet).
 - **Row scoping is `authz.scopes`, a LIST, and each entry is one equality: a value the ROW
   carries and a fact about the CALLER.** `dataAccess` answers only the posture —
   `anyone-with-permission` or `scoped` — because "which fact narrows the rows" is not a
@@ -658,14 +658,28 @@ Four things to get right, because they are the ones that cost a migration later:
     branch, but only the author may edit" — `applies: [insert, update, archive]` with
     `read` left out — or the reverse. `update` covers PUT and PATCH together, which is the
     granularity the framework's write gates have; `check` refuses `patch` as a word.
+    **A scope that reaches no write verb (`applies: [read]`) changes the two `ToCriteria`
+    bodies and NOTHING else**: no carrier field, no guard, no feed in the write mappers,
+    no generated test about the feed — write-side artifacts for a read-only scope would
+    state a refusal the entity deliberately does not have, and a reviewer believes
+    generated code. `bypassMaySet` on such a scope's field is refused for the same reason:
+    the stated value is judged by the guard on the insert, and there is none.
   - **`bypass` is ONE key for the whole set**: whoever crosses, crosses every scope. A
     bypass that crossed the branch but not the tenant would be a second, narrower posture
     hiding inside the first, and nothing in the generated code would make the difference
     visible to a reviewer.
   - **Both halves are generated, per scope.** The read filter forces each scope's value
-    into the query; a `refuseForeign<Field>` guard in `BuildRules` runs under each write
-    gate the scope covers, and reports against the field the write fell outside of — one
-    body per scope rather than one with an `&&`, so a 403 says WHICH rule was broken.
+    into the query; a guard in `BuildRules` runs under each write gate the scope covers,
+    and reports against the field the write fell outside of — one body per scope rather
+    than one with an `&&`, so a 403 says WHICH rule was broken.
+  - **The synthesised names are a compatibility contract.** An accessor-fed scope keeps
+    the pair the pre-scopes generator emitted — `from: tenant` is `RequestingTenant` /
+    `refuseForeignTenant`, `from: subject` is `RequestingSubject` / `refuseForeignOwner` —
+    because the carrier is an EXPORTED field on the aggregate that hand-written command
+    handlers feed, and a rename there is a compile break in files the generator does not
+    own. Only the shapes the old language could not spell derive from the field
+    (`Requesting<Field>` / `refuseForeign<Field>`): a claim-fed scope, a `field: ID`
+    scope, and the rare pair of scopes sharing one accessor.
 - **A scoped entity's scope field: `assignedFrom` alone is a trap, and the way out is
   `bypassMaySet`.** `assignedFrom: identity-claim` on a field an `authz.scopes` entry names is
   the right shape — the server fills it, so no caller can file a record under someone

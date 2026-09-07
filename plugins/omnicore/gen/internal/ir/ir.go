@@ -565,10 +565,21 @@ type Scope struct {
 	// set for `claim` alone.
 	From, Claim string
 	// Identity is the runtime field the resolver synthesises to carry the
-	// CALLER's half onto the aggregate, named Requesting<Subject>. It is what
-	// lets BuildRules refuse a foreign write, which is the only place a write
-	// can be refused: the read filter lives in the query and never sees one.
+	// CALLER's half onto the aggregate — named by spec.ScopeNames, which keeps
+	// the pre-scopes names for the accessor-fed shapes. It is what lets
+	// BuildRules refuse a foreign write, which is the only place a write can be
+	// refused: the read filter lives in the query and never sees one.
+	//
+	// It is NIL for a scope that reaches no write verb (applies: [read]): the
+	// carrier exists only to feed the guard, and a field nothing reads would be
+	// worse than dead weight — its feed in every write mapper and the comment
+	// on the aggregate would both claim a write-side check that does not exist,
+	// which is a security posture stated falsely by generated code.
 	Identity *Field
+	// Guard is the name of the BuildRules method that refuses a write outside
+	// this scope, resolved by spec.ScopeNames beside the carrier. Empty exactly
+	// when Identity is nil.
+	Guard string
 	// Applies is where this scope is enforced — `read` plus the write verbs —
 	// with the default already materialised and everything the entity does not
 	// serve already dropped. See spec.ScopeApplies.
@@ -593,10 +604,10 @@ func (sc Scope) appliesTo(what string) bool {
 }
 
 // GuardName is the method BuildRules calls to refuse a write outside this
-// scope. One per scope, named after the field it compares, because two scopes
-// on one entity ask two different questions and a shared body could only answer
-// the last one written.
-func (sc Scope) GuardName() string { return "refuseForeign" + sc.Subject.Name }
+// scope. One per scope, because two scopes on one entity ask two different
+// questions and a shared body could only answer the last one written. The name
+// itself is spec.ScopeNames' answer, carried here from the resolver.
+func (sc Scope) GuardName() string { return sc.Guard }
 
 type Authz struct {
 	DataAccess string
@@ -832,7 +843,11 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 // carried no identity — which is exactly what needs to tell "no identity" apart
 // from "an identity without the claim".
 func standsDown(m *Model) bool {
-	if m.Authz.Scoped() && m.Authz.NoIdentity == "stand-down" {
+	// The write scopes, not Scoped(): the presence flag is read by the write
+	// guards alone (the read side branches on Identity() != nil inside the
+	// query), so an entity whose every scope is read-only has no guard to feed
+	// and the field would sit on the aggregate as a false claim.
+	if len(m.Authz.WriteScopes()) > 0 && m.Authz.NoIdentity == "stand-down" {
 		return true
 	}
 	for _, c := range m.Clauses {
@@ -893,7 +908,11 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 		}
 		m.Runtime = append(m.Runtime, *m.Authz.PresenceField)
 	}
-	if !m.Authz.Scoped() {
+	// The bypass FLAG, like the presence flag, serves the write guards alone —
+	// the read side asks HasPermission/IsSuperAdmin directly in the query — so
+	// with no write scope there is nothing to synthesise it for. authz.bypass
+	// itself stays meaningful: the read filter honours it either way.
+	if len(m.Authz.WriteScopes()) == 0 {
 		return
 	}
 	if m.Authz.Bypass == "" {
@@ -950,27 +969,50 @@ func resolveScopes(s *spec.Spec, m *Model) []Scope {
 			// ship a service that says it is scoped and serves everything.
 			panic("row scope over " + sc.Field + ": validation should have refused this spec")
 		}
-		// A scope fed by a CLAIM BY NAME carries the same shape a declared
-		// `source: claim` field carries — an empty IdentitySource and the name
-		// in Claim — so the command mapper's identity feed, the test fixture and
-		// the report reach it through the branch they already have. Giving the
-		// synthesised one a vocabulary of its own would fork every switch that
-		// reads this string.
-		identitySource := sc.From
-		if sc.From == "claim" {
-			identitySource = ""
+		// The carrier and the guard exist ONLY for the write half. A scope that
+		// reaches no write verb (applies: [read]) synthesises neither: the read
+		// filter asks the identity directly inside the query, so a carrier here
+		// would be fed by every write mapper and read by nothing — and worse
+		// than dead, because the aggregate's comment and the generated feed
+		// test would both describe a write-side refusal this entity does not
+		// have. A reviewer believing generated artifacts over an absent guard
+		// is exactly the failure a generator must not manufacture.
+		if scopeReachesAWrite(res) {
+			// A scope fed by a CLAIM BY NAME carries the same shape a declared
+			// `source: claim` field carries — an empty IdentitySource and the
+			// name in Claim — so the command mapper's identity feed, the test
+			// fixture and the report reach it through the branch they already
+			// have. Giving the synthesised one a vocabulary of its own would
+			// fork every switch that reads this string.
+			identitySource := sc.From
+			if sc.From == "claim" {
+				identitySource = ""
+			}
+			carrier, guard := spec.ScopeNames(s.Authz.Scopes, sc)
+			res.Guard = guard
+			res.Identity = &Field{
+				Name:   carrier,
+				GoType: "string", BaseGoType: "string", SpecType: "string",
+				Runtime: true, Synthesised: true,
+				IdentitySource: identitySource, Claim: sc.Claim,
+				Description: "The caller's own " + scopeWhat(sc) + ", from the request identity",
+			}
+			m.Runtime = append(m.Runtime, *res.Identity)
 		}
-		res.Identity = &Field{
-			Name:   spec.ScopeIdentityFieldName(res.Subject.Name),
-			GoType: "string", BaseGoType: "string", SpecType: "string",
-			Runtime: true, Synthesised: true,
-			IdentitySource: identitySource, Claim: sc.Claim,
-			Description: "The caller's own " + scopeWhat(sc) + ", from the request identity",
-		}
-		m.Runtime = append(m.Runtime, *res.Identity)
 		out = append(out, res)
 	}
 	return out
+}
+
+// scopeReachesAWrite reports whether any write verb enforces this scope, which
+// is the condition for its carrier, its guard and their feed to exist at all.
+func scopeReachesAWrite(sc Scope) bool {
+	for _, a := range sc.Applies {
+		if a != "read" {
+			return true
+		}
+	}
+	return false
 }
 
 // scopeWhat names what the caller's half of a scope holds, for the doc comment
