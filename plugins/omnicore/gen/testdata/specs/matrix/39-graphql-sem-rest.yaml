@@ -16,7 +16,7 @@ storage:
   kind: flat
   table: perfis_gq
   description: Perfis de acesso servidos apenas pelo schema.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Chave, type: string, column: chave, length: 40, livesOn: root, example: operador, description: Chave do perfil.}
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Operador, description: Nome exibido.}
@@ -30,8 +30,8 @@ children:
     editStrategy: per-child
     duplicateNotification: PermissaoJaConcedidaNotification
     businessIdentity: [PermissaoID]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     # Sem bloco surfaces: a coleção SEGUE a entidade, que é o default e o ponto
     # inteiro da mudança — ligar o schema já traz os três verbos junto.
     permissions: {add: "perfilgq:conceder", remove: "perfilgq:conceder"}
@@ -43,7 +43,7 @@ children:
         - {id: permissao-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [PermissaoID], notification: RequiredFieldNotification}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: chave-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Chave], notification: RequiredFieldNotification}

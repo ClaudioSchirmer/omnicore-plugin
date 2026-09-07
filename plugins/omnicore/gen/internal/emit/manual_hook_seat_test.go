@@ -22,13 +22,13 @@ storage:
   kind: flat
   table: pedidos
   description: Pedidos.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Cliente, type: string, column: cliente, length: 120, livesOn: root, example: Ana, description: O cliente.}
   - {name: Total, type: float64, column: total, livesOn: root, example: 10.5, description: O total.}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 notifications:
   - name: TotalForaDaFaixaNotification
     semantic: validation

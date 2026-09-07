@@ -19,7 +19,7 @@ storage:
   kind: flat
   table: permissoes
   description: Permissões concedidas, na forma recurso:acao.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Descricao, type: string, column: descricao, length: 120, livesOn: root, example: "Leitura de alunos", description: O que a permissão concede.}
   # O composto à mão ocupa DUAS colunas, exatamente como um gerado: quem lê,

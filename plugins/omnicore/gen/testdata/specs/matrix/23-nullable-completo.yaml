@@ -12,7 +12,7 @@ storage:
   kind: flat
   table: reservas
   description: Reservas de sala — o eixo nullable do gerador.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Observacao, type: string, column: observacao, length: 200, livesOn: root, nullable: true,
      example: "trazer projetor", description: "Observação livre — primeiro campo patchável, e opcional."}

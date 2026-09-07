@@ -34,7 +34,7 @@ per dialect (infra.md).
 
 Nullable Go pointer → nullable column; money = `int64` minor units, never float; exact
 decimals → `string` (float64 rounds); binary floats fine for non-money numerics. Managed
-columns when declared: `deleted_at` nullable **and sub-second, in the same type on a root
+columns when declared: `archived_at` nullable **and sub-second, in the same type on a root
 and its children** (Traps), `created_at`/`updated_at` NOT NULL with a DB default as
 belt-and-suspenders (the framework stamps actively). If the entity has no Archive mode,
 there is no archive column — keep `Modes()` ⟺ the schema declaration ⟺ the migration in
@@ -109,7 +109,7 @@ shape change, and `evolve-entity`'s impact map is where it belongs.
   cannot catch. On older pins (≤ v0.29.0): required reference ⇒ `BINARY(16)`, nullable
   (`*string`) ⇒ `VARCHAR(36)`; Postgres `UUID` for both. (The framework's own
   control-plane tables use `CHAR(36)` via a different write path — do NOT mirror them.)
-- **⚠️ The archive stamp column (`deleted_at`) needs SUB-SECOND precision, and a root and
+- **⚠️ The archive stamp column (`archived_at`) needs SUB-SECOND precision, and a root and
   its children must declare the SAME type — take it from the pinned `table-schema.html`,
   never from the engine's friendliest default.** The stamp is not only a flag: it
   identifies the archive OPERATION. One archive binds a single instant on the root row and

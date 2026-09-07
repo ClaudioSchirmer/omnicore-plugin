@@ -25,7 +25,7 @@ Docs: `table-schema.html` (Child, aggregate depth) · `aggregate-persistence.htm
     not-found notification, 404 (`RecordNotFoundNotification`) — never the framework's
     does-not-exist one (`EntityDoesNotExistNotification`), which is 422; the mapping
     table is `status-mapping.html`).
-  - **ARCHIVE** (`PATCH …/:id/<children>/:childId/archive`) — soft removal; same guard.
+  - **ARCHIVE** (`PATCH …/:id/<children>/:childId/archive`) — archiving; same guard.
   - **Wiring — all THREE ops are commands ON THE ROOT** (load root → your domain method
     mutates the one child → the framework persists the diff). The handler follows the
     operation's field contract like any root op (`auto-handlers.html`): a full-replace
@@ -121,10 +121,10 @@ web.md.
   out. The pointer is also what makes `r.AddNotification(&c.Field, n, expose)` resolvable at
   all — the reference has to land inside the instance the framework bound.
 
-## The verb tells the truth (soft removal)
+## The verb tells the truth (archiving)
 
 **The child's own column is the whole rule, exactly like the root's is.** A child that
-declares an archive (deleted-at) column is ARCHIVED on removal (the row lingers, hidden) —
+declares an archive (archived-at) column is ARCHIVED on removal (the row lingers, hidden) —
 so the route is **`PATCH …/archive`, never `DELETE`** (a lying contract). A child that
 declares none has its row deleted, and there `DELETE` is the honest spelling. Where the
 child lives does not change the answer: a root's own child and a shared base's native child
@@ -137,7 +137,7 @@ transaction.
 > On an older pin, a removable root child MUST declare the column.
 
 > **⚠️ NO per-child unarchive** — the edit-path load hides archived children and the
-> update never clears the archive stamp, so a soft-removed child cannot be revived alone;
+> update never clears the archive stamp, so an archived child cannot be revived alone;
 > only the ROOT's unarchive revives children, in cascade — **and it revives only the ones
 > the root's OWN archive put to sleep** (below). **A child needing its own reversible
 > archive⇄unarchive is NOT a value object — promote it (model C).** Surface this in the
@@ -186,7 +186,7 @@ earlier — through a PUT replace-all or a per-child archive — stays down. Sam
 shared base, with TWO instants: the role's children come back from the ROLE's stamp and
 the base's native children from the BASE's, which are not the same write whenever a
 sibling role kept the identity up. This is what makes the column type a correctness
-question, not a style one — `deleted_at` must be sub-second and identical between root and
+question, not a style one — `archived_at` must be sub-second and identical between root and
 child (migrations.md, Traps).
 
 > Since **v0.62.0**. Before it, the cascade was gated on "is this child archived?", so a

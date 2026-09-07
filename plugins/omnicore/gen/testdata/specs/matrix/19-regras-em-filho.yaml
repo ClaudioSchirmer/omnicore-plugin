@@ -13,7 +13,7 @@ storage:
   kind: flat
   table: pedidos_rf
   description: Pedidos com seus itens e o andamento de cada item.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Numero, type: string, column: numero, length: 20, livesOn: root, example: "PED-2026-001", description: Número do pedido.}
 children:
@@ -26,8 +26,8 @@ children:
     editStrategy: per-child
     duplicateNotification: ItemJaExisteNotification
     businessIdentity: [Sku]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: Sku, type: string, column: sku, length: 20, example: "SKU-9", description: Código do item.}
       - {name: Status, type: string, column: status, length: 20, vo: {kind: enum, ref: StatusItemRF}, example: separando, description: Andamento do item.}
@@ -67,7 +67,7 @@ children:
           attachTo: Status
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: numero-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Numero], notification: CampoObrigatorioNotification}

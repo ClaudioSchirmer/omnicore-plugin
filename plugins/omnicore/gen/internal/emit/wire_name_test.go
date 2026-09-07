@@ -22,7 +22,7 @@ storage:
   kind: flat
   table: pessoas
   description: Pessoas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 notifications:
   - name: DocumentoJaExisteNotification
     semantic: conflict
@@ -51,7 +51,7 @@ service:
       description: Se o documento já pertence a outra pessoa.
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: pessoas}

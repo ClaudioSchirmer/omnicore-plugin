@@ -198,15 +198,15 @@ is null only when the aggregated column is null in EVERY row of it — which is
 possible over a nullable column and not otherwise. That is where the flag is
 emitted, and nowhere else.
 
-THE THREE COLUMNS THE FRAMEWORK STAMPS — CreatedAt, UpdatedAt, DeletedAt — are
+THE THREE COLUMNS THE FRAMEWORK STAMPS — CreatedAt, UpdatedAt, ArchivedAt — are
 addressable in a fact's filters by those fixed logical names, whenever
 storage.managed declares them. Nothing declares a field for them and the
 aggregate carries no Go field; the framework's own resolver answers for the
 name, exactly as read.managed relies on.
 
     - {field: CreatedAt, op: gte, as: since}     "how many since this instant"
-    - {field: DeletedAt, op: notnull}            the archived rows alone
-    - {field: DeletedAt, op: isnull}             the living ones
+    - {field: ArchivedAt, op: notnull}           the archived rows alone
+    - {field: ArchivedAt, op: isnull}            the living ones
 
 Filters only: aggregating a timestamp has no carrier, and grouping BY one would
 be one group per row unless it were truncated to a day or a month, which this

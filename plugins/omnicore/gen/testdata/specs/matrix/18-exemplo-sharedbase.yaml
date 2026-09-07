@@ -72,7 +72,7 @@ storage:
     revision: revision
     createdAt: created_at
     updatedAt: updated_at
-    archivedAt: deleted_at
+    archivedAt: archived_at
 
 fields:
   # livesOn decides the TABLE: base fields are shared by every role over the
@@ -235,7 +235,7 @@ children:
       - {name: ZipCode, type: string, column: zip_code, length: 9, example: 90000-000, description: The postal code.}
 
   # editStrategy: per-child — POST/PUT on /:id/classes[/:classId], a duplicate
-  # answer on add, and a 404 for an entry that is not there. softRemove makes the
+  # answer on add, and a 404 for an entry that is not there. archiveOnRemove makes the
   # removal reversible, so it is mounted as PATCH .../archive rather than DELETE.
   - name: Class
     plural: Classes
@@ -298,8 +298,8 @@ children:
       graphql: {enabled: true, mutations: [add, change, remove]}
     duplicateNotification: ClassAlreadyAssignedNotification
     businessIdentity: [Code]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: Code, type: string, column: code, length: 20, example: 3B-2026, description: The class code.}
       - {name: Subject, type: string, column: subject, length: 80, example: Mathematics, description: The subject taught.}
@@ -337,10 +337,10 @@ update:
   # change has to go through a deliberate operation instead.
   patchExcludes: [Document]
 
-delete:
-  root: soft
+removal:
+  root: archive
   # There is a key that would fit here and is deliberately NOT declared:
-  # `delete.archiveWhen`, which makes an ordinary update finish as an archive —
+  # `removal.archiveWhen`, which makes an ordinary update finish as an archive —
   # a contract moving to "terminated" retiring the row off the same PATCH.
   #
   # It is left out because of what guards removal on THIS entity. A write passes

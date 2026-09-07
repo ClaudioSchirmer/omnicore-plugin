@@ -10,7 +10,7 @@ storage:
   kind: flat
   table: cursos
   description: Cursos oferecidos, lidos por uma projeção no Mongo.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "MAT-101", description: Código do curso.}
@@ -53,8 +53,8 @@ children:
     ownedBy: root
     editStrategy: atomic-replace
     businessIdentity: [Ordem]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: Ordem, type: int, column: ordem, example: "1", description: Posição do módulo.}
       - {name: Titulo, type: string, column: titulo, length: 120, example: Introdução, description: Título do módulo.}
@@ -64,7 +64,7 @@ children:
 
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 
 rules:
   list:

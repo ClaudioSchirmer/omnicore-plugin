@@ -29,7 +29,7 @@ storage:
   managed:
     createdAt: created_at
     updatedAt: updated_at
-    archivedAt: deleted_at
+    archivedAt: archived_at
     revision: revision
 
 fields:
@@ -94,8 +94,8 @@ modes: [display, insert, update, archive]
 update:
   shape: both
 
-delete:
-  root: soft
+removal:
+  root: archive
 
 rules:
   list:
@@ -149,8 +149,8 @@ children:
     editStrategy: per-child
     businessIdentity: [PermissionID]
     duplicateNotification: PermissionGrantedTwiceNotification
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - name: PermissionID
         type: id

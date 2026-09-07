@@ -76,7 +76,7 @@ var deliberatelyUnread = map[string]string{
 	"Texts.NLD":  readThroughTextsMap,
 
 	"Spec.SourcePath": "bookkeeping, not part of the language",
-	"Child.SoftRemove": "the validator's gate for archivedAt: it forces the pair to " +
+	"Child.ArchiveOnRemove": "the validator's gate for archivedAt: it forces the pair to " +
 		"agree, and archivedAt is what the schema and the DDL actually read",
 	"Authz.Resource": "the validator reads it to check every permission is namespaced " +
 		"by it; the emitters write the permission STRINGS, which are declared",
@@ -106,7 +106,7 @@ var deliberatelyUnread = map[string]string{
 	"Storage.Description":     "rendered into the table comment",
 	"Base.Description":        "rendered into the base table's comment",
 	"Rule.Description":        "rendered as the comment above the generated rule",
-	"Spec.Delete": "the emitters read the MODES; the validator forces this block " +
+	"Spec.Removal": "the emitters read the MODES; the validator forces this block " +
 		"to agree with them, and declaring both is what makes a disagreement " +
 		"detectable instead of ambiguous",
 	"Delete.Root": "same: it is cross-checked against the modes rather than read " +

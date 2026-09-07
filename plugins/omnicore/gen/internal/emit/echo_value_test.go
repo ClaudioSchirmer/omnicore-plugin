@@ -28,7 +28,7 @@ storage:
   kind: flat
   table: cardapios
   description: Cardápios.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Executivo, description: O nome.}
   - {name: Porcoes, type: int, column: porcoes, livesOn: root, example: "4", description: Quantas porções rende.}
@@ -44,13 +44,13 @@ children:
     operations: [add, remove]
     businessIdentity: [PratoID]
     duplicateNotification: PratoJaNoCardapioNotification
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: PratoID, type: id, column: prato_id, example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31, description: O prato.}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: nome-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Nome], notification: RequiredFieldNotification}

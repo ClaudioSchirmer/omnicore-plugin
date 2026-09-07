@@ -28,7 +28,7 @@ storage:
   kind: flat
   table: cadastros
   description: Cadastros.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana, description: O nome.}
   - {name: Email, type: string, column: email, length: 160, livesOn: root, vo: {kind: raw, ref: Email}, example: ana@x.com, description: O e-mail.}
@@ -63,7 +63,7 @@ notifications:
     text: {ptbr: E-mail invalido., eng: Invalid e-mail., esp: Correo invalido., fra: E-mail invalide., deu: Ungueltige E-Mail., ita: E-mail non valida., nld: Ongeldig e-mailadres.}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: cadastros}

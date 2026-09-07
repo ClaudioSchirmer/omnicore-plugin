@@ -20,12 +20,12 @@ import "testing"
 // gate, so declaring both is refused rather than reconciled.
 
 // archivableFactSpec is factSpec plus the archive column and the modes that
-// make it coherent — a soft delete on an entity that does not archive is
+// make it coherent — removal.root: archive on an entity that does not archive is
 // refused, and that refusal would otherwise stand in for the one under test.
 func archivableFactSpec(f Fact) *Spec {
 	s := factSpec(f)
-	s.Storage.Managed.ArchivedAt = "deleted_at"
-	s.Delete.Root = "soft"
+	s.Storage.Managed.ArchivedAt = "archived_at"
+	s.Removal.Root = "archive"
 	s.Modes = append(s.Modes, "archive", "unarchive")
 	s.Authz.Permissions["archive"] = "student:archive"
 	s.Authz.Permissions["unarchive"] = "student:archive"

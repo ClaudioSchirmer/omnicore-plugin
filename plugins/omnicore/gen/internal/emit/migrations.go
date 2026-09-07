@@ -540,7 +540,7 @@ func upSQL(m *ir.Model, d dialect) string {
 			fmt.Fprintf(&b, "%s cannot be: that check sees ONE write, never the concurrent one.\n", d.Comment)
 		}
 		// The archive column is the CONSTRAINT's, not the model's: a collection
-		// entry is freed for reuse by being soft-removed itself, which has
+		// entry is freed for reuse by being archived itself, which has
 		// nothing to do with whether the root is archived.
 		if c.Scope == "active-only" && c.Archived != "" {
 			fmt.Fprintf(&b, "%s Scoped to the ACTIVE rows: an archived row releases the value, so it\n", d.Comment)

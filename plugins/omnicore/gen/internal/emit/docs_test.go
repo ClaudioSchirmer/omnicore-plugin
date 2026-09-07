@@ -32,7 +32,7 @@ storage:
   kind: flat
   table: permissions
   description: The catalog of enforceable permissions.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - name: Key
     livesOn: root
@@ -51,7 +51,7 @@ valueObjects:
       - {name: Action, type: string, description: What may be done to it.}
 modes: [display, insert, update, archive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: permissions}

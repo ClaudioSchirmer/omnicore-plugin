@@ -14,7 +14,7 @@ storage:
   kind: flat
   table: chamados
   description: Chamados de atendimento.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 30, livesOn: root, example: "CH-2026-001", description: Código do chamado.}
   - {name: Titulo, type: string, column: titulo, length: 120, livesOn: root, example: Impressora sem tinta, description: Título do chamado.}
@@ -51,7 +51,7 @@ valueObjects:
         text: {ptbr: Cancelado, eng: Cancelled, esp: Cancelado, fra: Annulé, deu: Storniert, ita: Annullato, nld: Geannuleerd}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}

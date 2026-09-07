@@ -8,7 +8,7 @@ storage:
   kind: flat
   table: turmas_pc
   description: Turmas com sua grade de aulas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "3B-2026", description: Código da turma.}
   - {name: Capacidade, type: int, column: capacidade, livesOn: root, example: "30", description: Número máximo de alunos.}
@@ -22,8 +22,8 @@ children:
     editStrategy: per-child
     duplicateNotification: AulaJaExisteNotification
     businessIdentity: [DiaSemana, Horario]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: DiaSemana, type: string, column: dia_semana, length: 15, example: segunda, description: Dia da semana.}
       - {name: Horario, type: string, column: horario, length: 5, example: "08:00", description: Horário de início.}
@@ -53,7 +53,7 @@ siblings:
       - {name: CoordenadorEmail, type: string, column: coordenador_email, length: 160, nullable: true, example: helena@escola.br, description: E-mail do coordenador.}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}

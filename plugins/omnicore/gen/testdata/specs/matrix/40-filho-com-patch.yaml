@@ -25,7 +25,7 @@ storage:
   kind: flat
   table: contratos_pp
   description: Contratos e as coberturas contratadas em cada um.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Numero, type: string, column: numero, length: 20, livesOn: root, example: "CT-2026-77", description: Número do contrato.}
   - {name: Titular, type: string, column: titular, length: 120, livesOn: root, example: Helena Duarte, description: Nome do titular.}
@@ -46,8 +46,8 @@ children:
       patchExcludes: [CoberturaRef]
     duplicateNotification: CoberturaJaContratadaNotification
     businessIdentity: [CoberturaRef]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: CoberturaRef, type: id, column: cobertura_ref, example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31, description: Cobertura do catálogo — a identidade da entrada.}
       - {name: Valor, type: float64, column: valor, example: "1250.5", description: Valor mensal da cobertura.}
@@ -57,7 +57,7 @@ children:
         - {id: valor-positivo, kind: range, scope: [insertOrUpdate], fields: [Valor], min: 1, notification: ValorDeCoberturaInvalidoNotification}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: numero-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Numero], notification: RequiredFieldNotification}

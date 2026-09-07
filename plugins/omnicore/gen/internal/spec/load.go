@@ -111,6 +111,14 @@ func translateDecodeError(err error, path string) error {
 			if sugg := suggestKey(goType, key); sugg != "" {
 				hint = fmt.Sprintf(" — did you mean %q?", sugg)
 			}
+			// A key this generator RENAMED is not a typo to guess at — it is a
+			// spec written against an older release, and the answer is known
+			// exactly. Stated after the guess so it always wins: an edit-distance
+			// suggestion for a renamed key would be a worse answer offered with
+			// the same confidence.
+			if to, ok := renamedKeys[renamedKey{goType: shortTypeName(goType), from: key}]; ok {
+				hint = fmt.Sprintf(" — renamed to %q in %s; see the CHANGELOG entry for the rename", to.to, to.since)
+			}
 			// A "key" that reads like prose is almost never a typo: it is the tail
 			// of a sentence that got split by an unquoted comma inside a one-line
 			// {a: b, c: d} mapping. Saying "unknown key" there sends the reader
@@ -136,10 +144,7 @@ func translateDecodeError(err error, path string) error {
 // specSectionName renders a Go type name as the spec section a spec author
 // recognises ("spec.Storage" → "the storage block").
 func specSectionName(goType string) string {
-	name := goType
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
+	name := shortTypeName(goType)
 	switch name {
 	case "Spec":
 		return "the top level of the spec"
@@ -162,11 +167,7 @@ func camelToWords(s string) string {
 // knownKeysOf reflects the yaml tags declared on a spec type so the suggestion
 // list is derived from the types themselves and can never go stale.
 func knownKeysOf(goType string) []string {
-	name := goType
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
-	t, ok := specTypes[name]
+	t, ok := specTypes[shortTypeName(goType)]
 	if !ok {
 		return nil
 	}
@@ -229,6 +230,31 @@ func min3(a, b, c int) int {
 	return a
 }
 
+// renamedKey addresses one key of one spec section, so the same old word can be
+// renamed differently in two places without either answer leaking into the other.
+type renamedKey struct{ goType, from string }
+
+type renamedTo struct{ to, since string }
+
+// renamedKeys is the memory a breaking spec rename leaves behind. Without it the
+// author of a spec written against an older release meets "unknown key", which
+// is true and useless: the key is not misspelled, it moved, and the generator is
+// the only thing that knows where to. Entries stay forever — a spec does not
+// expire, and the cost of an entry is one map row.
+var renamedKeys = map[renamedKey]renamedTo{
+	{goType: "Spec", from: "delete"}:      {to: "removal", since: "0.64.0"},
+	{goType: "Child", from: "softRemove"}: {to: "archiveOnRemove", since: "0.64.0"},
+}
+
+// shortTypeName reduces the decoder's "spec.Storage" to the bare "Storage" the
+// tables in this file are keyed on.
+func shortTypeName(goType string) string {
+	if i := strings.LastIndex(goType, "."); i >= 0 {
+		return goType[i+1:]
+	}
+	return goType
+}
+
 // specTypes is the reflection index used for key suggestions. Every struct in
 // the spec language is registered here; the manifest test asserts none is missing.
 var specTypes = map[string]reflect.Type{
@@ -249,7 +275,7 @@ var specTypes = map[string]reflect.Type{
 	"ChildChange":   reflect.TypeOf(ChildChange{}),
 	"Sibling":       reflect.TypeOf(Sibling{}),
 	"Update":        reflect.TypeOf(Update{}),
-	"Delete":        reflect.TypeOf(Delete{}),
+	"Removal":       reflect.TypeOf(Removal{}),
 	"ArchiveWhen":   reflect.TypeOf(ArchiveWhen{}),
 	"Rules":         reflect.TypeOf(Rules{}),
 	"Rule":          reflect.TypeOf(Rule{}),

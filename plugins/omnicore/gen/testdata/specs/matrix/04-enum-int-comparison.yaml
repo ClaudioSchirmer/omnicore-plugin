@@ -8,7 +8,7 @@ storage:
   kind: flat
   table: contratos
   description: Contratos de prestação de serviço.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Numero, type: string, column: numero, length: 20, livesOn: root, example: "CT-2026-001", description: Número do contrato.}
   - name: Nivel
@@ -46,7 +46,7 @@ update:
   shape: patch
   # O número identifica o contrato: não se muda por PATCH.
   patchExcludes: [Numero]
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: numero-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Numero], notification: RequiredFieldNotification}

@@ -24,7 +24,7 @@ storage:
   kind: flat
   table: pacientes
   description: Pacientes atendidos na clinica.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana Ribeiro, description: O nome do paciente.}
   # keep-last no sync, fixed na auditoria: o suporte confirma os quatro ultimos
@@ -129,7 +129,7 @@ children:
           inAudit: {kind: plain}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: put}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: mongo
   view: {name: pacientes, version: 1}

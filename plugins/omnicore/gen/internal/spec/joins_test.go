@@ -369,7 +369,7 @@ func campusThatStamps() Neighbour {
 	n.Fields = append(n.Fields,
 		NeighbourField{Name: "CreatedAt", Column: "created_at", Type: "time", LivesOn: "root"},
 		NeighbourField{Name: "UpdatedAt", Column: "updated_at", Type: "time", LivesOn: "root"},
-		NeighbourField{Name: "DeletedAt", Column: "deleted_at", Type: "time", LivesOn: "root", Nullable: true})
+		NeighbourField{Name: "ArchivedAt", Column: "archived_at", Type: "time", LivesOn: "root", Nullable: true})
 	return n
 }
 
@@ -393,7 +393,7 @@ func TestAJoinReachesTheTargetsStampedColumns(t *testing.T) {
 	s.Joins[0].Fields = append(s.Joins[0].Fields,
 		JoinField{Name: "CampusCreatedAt", Column: "created_at", Description: "Quando o campus entrou."},
 		JoinField{Name: "CampusUpdatedAt", Column: "updated_at", Description: "Quando mudou."},
-		JoinField{Name: "CampusArchivedAt", Column: "deleted_at", Description: "Quando foi arquivado."})
+		JoinField{Name: "CampusArchivedAt", Column: "archived_at", Description: "Quando foi arquivado."})
 
 	opts := Options{Neighbours: []Neighbour{campusThatStamps()}}
 	if ps := Validate(s, opts); ps.HasBlockers() {
@@ -443,7 +443,7 @@ func TestAChildJoinReachesTheStampedColumnsToo(t *testing.T) {
 	s.Joins = append(s.Joins, Join{
 		Kind: "left", To: "Campus", On: "campus_id", InChild: "Guardiao",
 		Fields: []JoinField{{
-			Name: "CampusArchivedAt", Column: "deleted_at", Description: "Quando foi arquivado.",
+			Name: "CampusArchivedAt", Column: "archived_at", Description: "Quando foi arquivado.",
 		}},
 	})
 	opts := Options{Neighbours: []Neighbour{campusThatStamps()}}
@@ -454,10 +454,10 @@ func TestAChildJoinReachesTheStampedColumnsToo(t *testing.T) {
 
 // TestAStampedColumnTheTargetDoesNotDeclareIsStillRefused keeps the reach honest:
 // the columns are declared BY PRESENCE, so a target with no archive column has
-// no deleted_at to traverse onto and the ordinary refusal is the right one.
+// no archived_at to traverse onto and the ordinary refusal is the right one.
 func TestAStampedColumnTheTargetDoesNotDeclareIsStillRefused(t *testing.T) {
 	s := joiningSpec()
-	s.Joins[0].Fields[0].Column = "deleted_at"
+	s.Joins[0].Fields[0].Column = "archived_at"
 	// campusNeighbour declares no managed columns at all.
 	ps := Validate(s, joinOpts())
 	if !ps.HasBlockers() {
@@ -502,8 +502,8 @@ func TestAJoinFieldCannotShadowWhatTheOwnersSchemaStamps(t *testing.T) {
 	}{
 		{"the created_at the entity itself stamps", "CreatedAt", func(*Spec) {}},
 		{"the updated_at the entity itself stamps", "UpdatedAt", func(*Spec) {}},
-		{"the archive column the entity declares", "DeletedAt",
-			func(s *Spec) { s.Storage.Managed.ArchivedAt = "deleted_at" }},
+		{"the archive column the entity declares", "ArchivedAt",
+			func(s *Spec) { s.Storage.Managed.ArchivedAt = "archived_at" }},
 		{"the link column a role resolves as ParentID", "ParentID", func(s *Spec) {
 			s.Storage.Kind = "sharedbase-role"
 			s.Storage.Base = &Base{

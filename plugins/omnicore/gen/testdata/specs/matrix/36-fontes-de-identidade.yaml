@@ -17,7 +17,7 @@ storage:
   kind: flat
   table: chamados
   description: Chamados de suporte.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Titulo, type: string, column: titulo, length: 120, livesOn: root, example: Impressora do 2o andar, description: Título do chamado.}
   - name: DonoId
@@ -69,7 +69,7 @@ fields:
     description: Se a requisição trouxe alguma identidade.
 modes: [display, insert, update, archive, unarchive, delete]
 update: {shape: put}
-delete: {root: hard}
+removal: {root: delete}
 rules:
   list:
     - id: chamado-e-do-proprio-setor

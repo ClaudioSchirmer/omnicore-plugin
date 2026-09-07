@@ -20,7 +20,7 @@ storage:
   kind: flat
   table: papeis
   description: Papéis.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: TenantID, type: id, column: tenant_id, livesOn: root, example: 9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3, description: O tenant.}
   - {name: Apelido, type: string, column: apelido, length: 60, nullable: true, livesOn: root, example: adm, description: Apelido opcional.}
@@ -42,7 +42,7 @@ notifications:
     text: {ptbr: Ja existe., eng: Already exists., esp: Ya existe., fra: Existe deja., deu: Existiert bereits., ita: Esiste gia., nld: Bestaat al.}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 service:
   required: true
   facts:

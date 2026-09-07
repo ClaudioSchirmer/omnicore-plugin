@@ -20,7 +20,7 @@ storage:
   kind: flat
   table: cestas_cf
   description: Cestas de compra com suas linhas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "CST-2026-001", description: Código da cesta.}
   - {name: Cliente, type: string, column: cliente, length: 120, livesOn: root, example: "Alice Reis", description: Nome do cliente.}
@@ -52,7 +52,7 @@ children:
         - {id: sku-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Sku], notification: CampoObrigatorioNotification}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: CampoObrigatorioNotification}

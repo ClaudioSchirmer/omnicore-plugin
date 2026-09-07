@@ -13,7 +13,7 @@ storage:
   kind: flat
   table: salas
   description: Salas de aula.
-  managed: {revision: revision, archivedAt: deleted_at}
+  managed: {revision: revision, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 10, livesOn: root, example: "A-101", description: Código da sala.}
   - name: SolicitanteEmail

@@ -242,7 +242,7 @@ own notifications go in `vos/notifications.go` (keys in all 7 catalogs).
 
 - **`Modes()` → the schema's archive-column declaration must exist** — `ModeArchive`
   without the declared column panics at repo construction. (The reverse is legal:
-  `DeletedAt(col)` with no archive verb boots fine.)
+  `ArchivedAt(col)` with no archive verb boots fine.)
 - **Archive/unarchive have their OWN clauses — `IfArchive`/`IfUnarchive`** (gate on
   ModeArchive/ModeUnarchive). `IfUpdate` is PUT/PATCH exclusively; a rule left in `IfUpdate`
   will NOT fire on an archive transition. `actionName` is a free-form label, never a verb

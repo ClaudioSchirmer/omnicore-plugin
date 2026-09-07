@@ -99,7 +99,7 @@ func pgService(t *testing.T) *AtendimentoServiceImpl {
 	}
 	for _, r := range rows {
 		_, err := db.Exec(
-			`INSERT INTO "atendimentos" (id, codigo, setor, duracao, nota, cliente_id, revision, created_at, updated_at, deleted_at)
+			`INSERT INTO "atendimentos" (id, codigo, setor, duracao, nota, cliente_id, revision, created_at, updated_at, archived_at)
 			 VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $7, $8)`,
 			r.id, r.codigo, r.setor, r.duracao, r.nota, clientePG, r.created, r.deleted)
 		if err != nil {

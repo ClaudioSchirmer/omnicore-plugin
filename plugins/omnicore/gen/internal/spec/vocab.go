@@ -109,7 +109,7 @@ var (
 	// entity fields — nothing declares them under fields[], the aggregate carries
 	// no Go field for them, and no write DTO accepts one — so the read side names
 	// them here instead.
-	ManagedReads = set("CreatedAt", "UpdatedAt", "DeletedAt")
+	ManagedReads = set("CreatedAt", "UpdatedAt", "ArchivedAt")
 
 	// VOWritings is WHO writes the type, asked separately from what it is. It
 	// exists for the composite: its parts have to stay declared (the schema
@@ -156,8 +156,8 @@ var (
 	// the reads too" — which is already what enabling the surface does.
 	GraphQLMutations = set("insert", "update", "delete", "archive", "unarchive")
 	UpdateShapes     = set("patch", "put", "both")
-	DeleteRoot       = set("soft", "hard", "both")
-	DeleteChild      = set("soft", "hard")
+	RemovalRoot      = set("archive", "delete", "both")
+	RemovalChild     = set("archive", "delete")
 
 	RuleKinds = set(
 		"required", "immutable", "length", "range", "comparison", "transition",
@@ -460,14 +460,14 @@ func Vocabularies() []Vocabulary {
 			"WHICH per-entry verb a permission is required for; a verb left out keeps " +
 				"inheriting the root's update permission, which is what every per-child " +
 				"collection required before this key existed."},
-		{"delete.children", DeleteChild,
-			"soft = the entry is archived and can come back; hard = the row is gone."},
+		{"removal.children", RemovalChild,
+			"archive = the entry is kept and can come back; delete = the row is gone."},
 		{"modes", Modes,
 			"the verbs the entity has at all; an absent one is not routed."},
 		{"update.shape", UpdateShapes,
 			"patch cannot say \"set this to null\", which is why a clearable facet forces put."},
-		{"delete.root", DeleteRoot,
-			"soft = archive, reversible; hard = a permanent purge, and the HTTP verb must say so."},
+		{"removal.root", RemovalRoot,
+			"archive = reversible, the row stays; delete = a permanent purge, and the HTTP verb must say so."},
 		{"rules.list[].kind", RuleKinds,
 			"what the rule checks — or, for valueObject, WHEN a value object is checked; " +
 				"anything outside this set goes to rules.manual."},
@@ -613,8 +613,8 @@ func RefusedKeys() map[string]string {
 			"facet's field is not the subject of any scope",
 		"read.byParams.filters[].required": "a mandatory filter is not generated; the " +
 			"endpoint would serve the parameter as optional",
-		"delete.children": "nothing reads a blanket delete semantic for the collections — " +
-			"removal is declared per child, with children[].softRemove",
+		"removal.children": "nothing reads a blanket delete semantic for the collections — " +
+			"removal is declared per child, with children[].archiveOnRemove",
 		"siblings[].fields[].unique": "uniqueness of a facet's field is not generated — " +
 			"declare it on a root field",
 		"children[].fields[].unique.echoValue": "an entry's conflict comes from the " +

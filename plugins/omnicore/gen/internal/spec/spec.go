@@ -55,9 +55,9 @@ type Spec struct {
 	// Update decides the shape of the update surface — PATCH, PUT or both — and
 	// what a partial update may not touch.
 	Update Update `yaml:"update"`
-	// Delete decides what removing the entity means: archive (soft, reversible)
+	// Removal decides what removing the entity means: archive (reversible)
 	// or purge (hard, permanent).
-	Delete Delete `yaml:"delete"`
+	Removal Removal `yaml:"removal"`
 	// Rules are the entity's invariants: the declarative list the DSL expresses
 	// in full, plus the named manual residue a human implements.
 	Rules Rules `yaml:"rules"`
@@ -208,7 +208,7 @@ type Managed struct {
 	CreatedAt string `yaml:"createdAt"`
 	// UpdatedAt is the column the framework stamps on every write.
 	UpdatedAt string `yaml:"updatedAt"`
-	// ArchivedAt is the column that marks a soft-deleted row — what soft delete,
+	// ArchivedAt is the column that marks an archived row — what archiving,
 	// unarchive and includeArchived hinge on. Empty = no archived state.
 	ArchivedAt string `yaml:"archivedAt"`
 	// Revision is the optimistic-concurrency column: bumped on every write, and
@@ -1137,7 +1137,7 @@ type Child struct {
 	Computed []Computed `yaml:"computed"`
 	// Rules are the invariants checked on each entry of the collection.
 	Rules Rules `yaml:"rules"`
-	// SoftRemove keeps the row: the entry is archived (see archivedAt) instead
+	// ArchiveOnRemove keeps the row: the entry is archived (see archivedAt) instead
 	// of deleted, and per-child removal mounts as an archive rather than a
 	// DELETE — the verb has to say which of the two it performs.
 	//
@@ -1147,9 +1147,9 @@ type Child struct {
 	// command can address it. What the archive buys is history and a row that
 	// whatever references it still finds — not a way back. A collection whose
 	// entries genuinely need archive⇄unarchive is an entity of its own.
-	SoftRemove bool `yaml:"softRemove"`
+	ArchiveOnRemove bool `yaml:"archiveOnRemove"`
 	// ArchivedAt is the column marking an archived entry; required when
-	// softRemove is on, refused when it is off.
+	// archiveOnRemove is on, refused when it is off.
 	ArchivedAt string `yaml:"archivedAt"`
 	// DuplicateNotification names the conflict answer a per-child ADD raises
 	// when the entry is already there.
@@ -1300,14 +1300,14 @@ type Update struct {
 	PatchExcludes []string `yaml:"patchExcludes"`
 }
 
-type Delete struct {
-	// Root is what deleting the entity means: soft = archive, reversible; hard
+type Removal struct {
+	// Root is what removing the entity means: archive = reversible, the row stays; delete
 	// = a permanent purge, and the HTTP verb must say so; both = the two verbs
 	// are served.
 	Root string `yaml:"root"`
 	// Children would declare a blanket removal semantic for the collections.
 	// Refused by this build — removal is declared per child, with
-	// children[].softRemove.
+	// children[].archiveOnRemove.
 	Children string `yaml:"children"`
 	// ArchiveWhen makes an ORDINARY UPDATE retire the row: when the field
 	// reaches the value named here, the domain finishes that write as an
@@ -1936,7 +1936,7 @@ type Read struct {
 	// projection's collection.
 	View View `yaml:"view"`
 	// Managed exposes the framework-stamped columns on the READ side, by their
-	// fixed logical names: CreatedAt, UpdatedAt, DeletedAt. Each one listed is
+	// fixed logical names: CreatedAt, UpdatedAt, ArchivedAt. Each one listed is
 	// projected into the view, returned by the by-id read and by every listing
 	// row, carried into the CSV/XLSX export, and may be named under
 	// byParams.filters like any other field — "created between these dates" is a

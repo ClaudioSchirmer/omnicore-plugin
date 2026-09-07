@@ -12,7 +12,7 @@ storage:
   kind: flat
   table: contratos
   description: Contratos com valores e vigencias.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "CT-9911", description: Codigo do contrato.}
   # Composto OBRIGATORIO na RAIZ, com uma parte que e ela mesma um enum.
@@ -108,7 +108,7 @@ valueObjects:
         - {id: janela-fim-depois-do-inicio, kind: comparison, fields: [Fim], other: Inicio, operator: gte, notification: FimAntesDoInicioNotification}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}

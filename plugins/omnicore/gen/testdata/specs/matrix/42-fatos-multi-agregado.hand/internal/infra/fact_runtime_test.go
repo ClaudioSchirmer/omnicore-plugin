@@ -31,7 +31,7 @@ import (
 //     every one of them filled;
 //   - a group whose aggregated column is NULL in every row reports Found=false
 //     rather than a zero that reads as an answer;
-//   - a comparison against a framework-stamped column (CreatedAt, DeletedAt)
+//   - a comparison against a framework-stamped column (CreatedAt, ArchivedAt)
 //     resolves to the right column AND binds a time.Time the engine compares
 //     the way the column is stored.
 
@@ -51,7 +51,7 @@ func seed(t *testing.T) core.RelationalEngine {
 	  "id" TEXT NOT NULL, "codigo" TEXT NOT NULL, "setor" TEXT NOT NULL,
 	  "duracao" INTEGER NOT NULL, "nota" REAL NULL, "cliente_id" TEXT NOT NULL,
 	  "revision" INTEGER NOT NULL DEFAULT 0,
-	  "created_at" TEXT NOT NULL, "updated_at" TEXT NOT NULL, "deleted_at" TEXT NULL,
+	  "created_at" TEXT NOT NULL, "updated_at" TEXT NOT NULL, "archived_at" TEXT NULL,
 	  CONSTRAINT "atendimentos_pkey" PRIMARY KEY ("id"))`
 	if _, err := db.Exec(ddl); err != nil {
 		t.Fatalf("ddl: %v", err)
@@ -73,7 +73,7 @@ func seed(t *testing.T) core.RelationalEngine {
 	}
 	for _, r := range rows {
 		_, err := db.Exec(
-			`INSERT INTO "atendimentos" (id, codigo, setor, duracao, nota, cliente_id, revision, created_at, updated_at, deleted_at)
+			`INSERT INTO "atendimentos" (id, codigo, setor, duracao, nota, cliente_id, revision, created_at, updated_at, archived_at)
 			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
 			r.id, r.codigo, r.setor, r.duracao, r.nota, cliente, r.created, r.created, r.deleted)
 		if err != nil {
@@ -178,7 +178,7 @@ func TestStampedColumnsAreComparable(t *testing.T) {
 	}
 
 	if got := svc.ArquivadosDoCliente(domain.NewID(cliente)); got != 1 {
-		t.Errorf("ArquivadosDoCliente = %d, want 1 — DeletedAt IS NOT NULL selects the archived row", got)
+		t.Errorf("ArquivadosDoCliente = %d, want 1 — ArchivedAt IS NOT NULL selects the archived row", got)
 	}
 
 	de := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)

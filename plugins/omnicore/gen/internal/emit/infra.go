@@ -135,7 +135,7 @@ func emitSchema(m *ir.Model) (fsplan.File, error) {
 		chain = append(chain, call{text: c})
 	}
 	if m.Managed.ArchivedAt != "" {
-		chain = append(chain, call{text: fmt.Sprintf("DeletedAt(%s)", quote(m.Managed.ArchivedAt))})
+		chain = append(chain, call{text: fmt.Sprintf("ArchivedAt(%s)", quote(m.Managed.ArchivedAt))})
 	}
 	if m.Managed.CreatedAt != "" {
 		chain = append(chain, call{text: fmt.Sprintf("CreatedAt(%s)", quote(m.Managed.CreatedAt))})
@@ -461,7 +461,7 @@ func emitBaseSchema(m *ir.Model) (fsplan.File, error) {
 	s.L("\t\tNaturalID(%s).", quote(naturalColumn(m)))
 	tail := []string{}
 	if m.Managed.ArchivedAt != "" {
-		tail = append(tail, fmt.Sprintf("DeletedAt(%s)", quote(m.Managed.ArchivedAt)))
+		tail = append(tail, fmt.Sprintf("ArchivedAt(%s)", quote(m.Managed.ArchivedAt)))
 	}
 	if m.Managed.CreatedAt != "" {
 		tail = append(tail, fmt.Sprintf("CreatedAt(%s)", quote(m.Managed.CreatedAt)))

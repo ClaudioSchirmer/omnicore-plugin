@@ -119,11 +119,11 @@ storage:
   kind: flat
   table: turmas
   description: Turmas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "3B", description: O código.}
 modes: [display, archive, unarchive]
-delete: {root: soft}
+removal: {root: archive}
 children:
   - name: Aula
     plural: Aulas
@@ -134,8 +134,8 @@ children:
     editStrategy: per-child
     operations: [add]
     businessIdentity: [DiaSemana]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
 %s
     fields:
       - {name: DiaSemana, type: string, column: dia_semana, length: 15, example: segunda, description: O dia.}

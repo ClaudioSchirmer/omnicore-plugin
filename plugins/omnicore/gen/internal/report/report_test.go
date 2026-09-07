@@ -75,7 +75,7 @@ func TestUniqueLineCarriesTheScope(t *testing.T) {
 // is not the verb it looks like.
 //
 // A reviewer reads the routes and sees an update and an archive as two doors.
-// `delete.archiveWhen` makes one of them also the other, and a write through it
+// `removal.archiveWhen` makes one of them also the other, and a write through it
 // passes NEITHER gate the entity declares for removal: not the archive
 // permission (it arrived on the update's route) and not the archive-scoped
 // rules (IfArchive does not fire in ModeUpdate). The row said only the first,
@@ -219,7 +219,7 @@ func TestUniqueLineNamesTheWholeTuple(t *testing.T) {
 			Constraints: []ir.Constraint{{
 				Kind: "unique", Table: "permissoes", Field: "chave",
 				Columns: append(within, "chave_recurso", "chave_acao"),
-				Within:  within, Scope: "active-only", Archived: "deleted_at",
+				Within:  within, Scope: "active-only", Archived: "archived_at",
 			}},
 		}
 	}

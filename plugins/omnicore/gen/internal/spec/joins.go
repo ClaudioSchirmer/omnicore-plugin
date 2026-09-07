@@ -529,7 +529,7 @@ func shadowedOnOwner(s *Spec, inChild string, ownerFields []Field, name string) 
 // answers to by itself, each mapped to what it is.
 //
 // They are the second thing `owner.Resolve` reaches, right after the owner's own
-// columns: CreatedAt, UpdatedAt and DeletedAt wherever the schema names those
+// columns: CreatedAt, UpdatedAt and ArchivedAt wherever the schema names those
 // columns, and ParentID wherever it has a link to resolve — a collection's
 // foreign key back to its owner, or a role's to its shared identity. Not one of
 // them appears under fields[]; they are declared by presence, or by the shape of
@@ -564,7 +564,7 @@ func managedOnOwner(s *Spec, inChild string) map[string]string {
 	}
 	stamped("CreatedAt", s.Storage.Managed.CreatedAt, "when the row was inserted")
 	stamped("UpdatedAt", s.Storage.Managed.UpdatedAt, "when it was last written")
-	stamped("DeletedAt", archivedAt, "when it was archived")
+	stamped("ArchivedAt", archivedAt, "when it was archived")
 	if parentID != "" {
 		out["ParentID"] = fmt.Sprintf("the link column %s, which its schema resolves read-only "+
 			"under the fixed name ParentID", parentID)

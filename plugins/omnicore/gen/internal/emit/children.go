@@ -323,7 +323,7 @@ func emitChildSchema(m *ir.Model, c ir.Child) (fsplan.File, error) {
 func childTail(m *ir.Model, c ir.Child) []string {
 	var tail []string
 	if c.ArchivedAt != "" {
-		tail = append(tail, fmt.Sprintf("DeletedAt(%s)", quote(c.ArchivedAt)))
+		tail = append(tail, fmt.Sprintf("ArchivedAt(%s)", quote(c.ArchivedAt)))
 	}
 	if m.Managed.CreatedAt != "" {
 		tail = append(tail, fmt.Sprintf("CreatedAt(%s)", quote(m.Managed.CreatedAt)))

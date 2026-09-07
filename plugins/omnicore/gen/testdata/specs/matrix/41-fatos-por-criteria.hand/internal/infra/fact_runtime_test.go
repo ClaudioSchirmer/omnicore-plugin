@@ -44,7 +44,7 @@ func seed(t *testing.T) *ChamadoServiceImpl {
 	  "revision" INTEGER NOT NULL DEFAULT 0,
 	  "created_at" TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
 	  "updated_at" TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
-	  "deleted_at" TEXT NULL,
+	  "archived_at" TEXT NULL,
 	  CONSTRAINT "chamados_pkey" PRIMARY KEY ("id"))`
 	if _, err := db.Exec(ddl); err != nil {
 		t.Fatalf("ddl: %v", err)

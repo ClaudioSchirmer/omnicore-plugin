@@ -45,7 +45,7 @@ binary UUID codec here — SQLite stores the id as text.
 ## Active-only uniqueness (archived remnants must not block)
 
 SQLite supports Postgres-style partial indexes (since 3.8.0; the framework's own embedded
-SQLite migrations use them): `CREATE UNIQUE INDEX ... ON <role>(<fk>) WHERE deleted_at IS
+SQLite migrations use them): `CREATE UNIQUE INDEX ... ON <role>(<fk>) WHERE archived_at IS
 NULL` — the same statement as Postgres. `table-schema.html` owns the per-dialect shapes.
 
 ## Column & table descriptions — the ONE engine that cannot store them

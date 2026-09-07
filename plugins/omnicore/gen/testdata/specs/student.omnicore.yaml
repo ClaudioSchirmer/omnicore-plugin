@@ -11,7 +11,7 @@ storage:
   managed:
     createdAt: created_at
     updatedAt: updated_at
-    archivedAt: deleted_at
+    archivedAt: archived_at
     revision: revision
 
 fields:
@@ -238,8 +238,8 @@ update:
   # full replacement can express — PATCH cannot say "set this to null".
   shape: both
 
-delete:
-  root: soft
+removal:
+  root: archive
 
 rules:
   list:
@@ -588,12 +588,12 @@ joins:
         labelKey: StudentCampusCriadoEmField
       # A coluna de ARQUIVO do alvo, sob um join INNER. Ela pousa em PONTEIRO, e
       # nao por causa do kind: "nao arquivado" e o estado NORMAL de uma linha,
-      # entao deleted_at e NULL na primeira linha lida. O framework nao consegue
+      # entao archived_at e NULL na primeira linha lida. O framework nao consegue
       # exigir isso — os campos de domain.Managed nao sao exportados, e a
       # checagem reflexiva dele responde "nao anulavel" em vez de chutar — entao
       # quem fecha o buraco e o gerador, que le a coluna no spec do alvo.
       - name: CampusArquivadoEm
-        column: deleted_at
+        column: archived_at
         example: "2026-02-01T09:00:00Z"
         description: Quando o campus foi arquivado, se foi.
         labelKey: StudentCampusArquivadoEmField
@@ -664,7 +664,7 @@ joins:
         description: Quando o campus de referencia foi criado.
         labelKey: GuardianCampusCriadoEmField
       - name: GuardianCampusArquivadoEm
-        column: deleted_at
+        column: archived_at
         example: "2026-02-01T09:00:00Z"
         description: Quando o campus de referencia foi arquivado, se foi.
         labelKey: GuardianCampusArquivadoEmField
@@ -695,8 +695,8 @@ children:
     ownedBy: root
     editStrategy: atomic-replace
     businessIdentity: [Document]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - name: FullName
         type: string
@@ -865,7 +865,7 @@ service:
     # aggregate loader takes, and what asking them as one fact each throws away.
     # The answer is a struct: one field per entry, named by `as`.
     #
-    # DeletedAt is a column the FRAMEWORK stamps: no fields[] entry declares it,
+    # ArchivedAt is a column the FRAMEWORK stamps: no fields[] entry declares it,
     # the aggregate carries no Go field for it, and the framework's own resolver
     # answers for the name. With no activeOnly the scope admits both, so this
     # condition is what narrows to the living rows — and it takes no parameter,
@@ -877,7 +877,7 @@ service:
         - {kind: max, field: Grade, as: MelhorNota}
       filters:
         - CampusID
-        - {field: DeletedAt, op: isnull}
+        - {field: ArchivedAt, op: isnull}
       description: >-
         Quantas matrículas vivas este campus tem e como elas foram avaliadas —
         contadas, somadas e maximizadas pelo banco numa passada só.

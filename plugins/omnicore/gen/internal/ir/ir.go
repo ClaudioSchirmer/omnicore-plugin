@@ -631,7 +631,7 @@ type Constraint struct {
 	Within []string
 	// Archived is the column an active-only constraint skips by. It is carried
 	// per constraint rather than read off the model because a COLLECTION
-	// archives by its own column: an entry freed for reuse is a soft-removed
+	// archives by its own column: an entry freed for reuse is an archived
 	// entry, which has nothing to do with whether the root is archived.
 	Archived string
 	// Collection names the collection this constraint belongs to, empty for the
@@ -1587,7 +1587,7 @@ func childConstraints(m *Model) []Constraint {
 				Within:   f.Unique.Within,
 				Archived: c.ArchivedAt,
 				// Not the root's archive column: an entry is freed for reuse by
-				// being soft-removed itself.
+				// being archived itself.
 				Collection: c.Plural,
 			})
 		}
@@ -1770,12 +1770,12 @@ func identityFilterField() Field {
 // emitter already knows how to write.
 //
 // The framework resolves these names itself — its schema maps CreatedAt,
-// UpdatedAt and DeletedAt to their columns on the read path — so a filter or a
+// UpdatedAt and ArchivedAt to their columns on the read path — so a filter or a
 // projection naming one needs nothing beyond the Go field being there under the
-// same name. DeletedAt is the only optional one: a row that was never archived
+// same name. ArchivedAt is the only optional one: a row that was never archived
 // has none.
 func managedReadField(s *spec.Spec, m *Model, name string) Field {
-	nullable := name == "DeletedAt"
+	nullable := name == "ArchivedAt"
 	goType := "time.Time"
 	if nullable {
 		goType = "*time.Time"
@@ -1788,9 +1788,9 @@ func managedReadField(s *spec.Spec, m *Model, name string) Field {
 		LabelKey: m.Entity.Pascal + name + "Field",
 		Example:  "2026-02-01T09:00:00Z",
 		Description: "Stamped by the framework: " + map[string]string{
-			"CreatedAt": "when the row was inserted.",
-			"UpdatedAt": "when the row was last written.",
-			"DeletedAt": "when the row was archived, when it was.",
+			"CreatedAt":  "when the row was inserted.",
+			"UpdatedAt":  "when the row was last written.",
+			"ArchivedAt": "when the row was archived, when it was.",
 		}[name],
 	}
 }
@@ -3584,13 +3584,13 @@ func (c Child) Serves(verb string) bool {
 // opposed to `remove`, which is what the spec calls it.
 //
 // The two differ because one word covers two outcomes. `children[].operations`
-// says the collection lets a caller take one entry out; `softRemove` says how —
+// says the collection lets a caller take one entry out; `archiveOnRemove` says how —
 // archived, keeping the row and its history, or purged. The route already
 // follows that split (PATCH …/archive against DELETE, per PerEntryRoute), and
 // the generated names now follow it too: a file called archive_… over a route
 // that hard-deletes tells the reader the opposite of what the endpoint does.
 //
-// It reads ArchivedAt rather than SoftRemove because that is the field the
+// It reads ArchivedAt rather than ArchiveOnRemove because that is the field the
 // route reads, and two predicates for one decision drift. Validation already
 // refuses the combinations where they would disagree.
 func (c Child) RemoveVerb() string {
@@ -4270,7 +4270,7 @@ type ArchiveWhen struct {
 }
 
 func resolveArchiveWhen(s *spec.Spec, m *Model) *ArchiveWhen {
-	aw := s.Delete.ArchiveWhen
+	aw := s.Removal.ArchiveWhen
 	if aw == nil {
 		return nil
 	}

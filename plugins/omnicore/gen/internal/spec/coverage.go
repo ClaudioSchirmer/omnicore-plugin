@@ -53,7 +53,7 @@ const (
 	CapGroupedFact      Capability = "per-group facts, computed by the database (GROUP BY)"
 	CapFactCriteria     Capability = "facts narrowed by the full criteria vocabulary (a comparison other than equality, a set, an OR, or a value pinned in the spec)"
 	CapMultiAggregate   Capability = "facts answering SEVERAL numbers in one query (count, sum, avg, min and max over the same rows, in a single pass)"
-	CapStampedFilter    Capability = "facts narrowed by a framework-stamped column (CreatedAt, UpdatedAt, DeletedAt) — a time window, or the archived rows alone"
+	CapStampedFilter    Capability = "facts narrowed by a framework-stamped column (CreatedAt, UpdatedAt, ArchivedAt) — a time window, or the archived rows alone"
 	CapIdentityFilter   Capability = "facts narrowed by the aggregate id (ID) — the framework's own fixed logical name, so a manual fact's body receives the id instead of re-deriving it from a natural key"
 	CapCompositeVO      Capability = "composite value objects (a value spanning several columns)"
 	CapManualVO         Capability = "hand-written value objects (declared here, written by you): a scalar with kind: manual, a composite with written: manual"

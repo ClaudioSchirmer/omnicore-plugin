@@ -12,7 +12,7 @@ fields:
   - {name: Titulo, type: string, column: titulo, length: 120, livesOn: root, example: Ideia, description: Título do rascunho.}
 modes: [display, insert, update, delete]
 update: {shape: put}
-delete: {root: hard}
+removal: {root: delete}
 read:
   backing: relational
   view: {name: rascunhos}
