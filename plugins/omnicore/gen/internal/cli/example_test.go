@@ -88,14 +88,19 @@ func TestExamplesTogetherCoverTheLanguage(t *testing.T) {
 // on the same day. What is written out is only what needs a reason beyond
 // "refused".
 var notShownOnPurpose = map[string]string{
-	"authz.tenantField": "needs dataAccess: tenant, and both examples show " +
+	"authz.scopes": "needs dataAccess: scoped, and both examples show " +
 		"anyone-with-permission; a third example for one key is not worth its " +
 		"maintenance — `explain keys` lists it and `explain vocabulary` says what " +
-		"the choice decides",
+		"the choice decides, over three entries (from, applies, and dataAccess " +
+		"itself). The golden gate's scoped fixtures are the worked example",
+	"authz.scopes[].applies": "narrows ONE scope to some verbs, which presupposes a " +
+		"scope — same reason as authz.scopes, and the same two places document it, " +
+		"including the one default that is not \"everywhere\" (a scope on ID skips " +
+		"the insert)",
 	"authz.bypass": "modifies a SCOPED dataAccess, which neither example uses — same " +
-		"reason as authz.tenantField, and the same two places document it",
+		"reason as authz.scopes, and the same two places document it",
 	"authz.noIdentity": "modifies a SCOPED dataAccess, which neither example uses — same " +
-		"reason as authz.tenantField; `explain vocabulary` carries both answers and " +
+		"reason as authz.scopes; `explain vocabulary` carries both answers and " +
 		"what each one decides",
 	"fields[].bypassMaySet": "needs BOTH a scoped dataAccess and an authz.bypass, and " +
 		"neither example has either — it is the same third example the two keys above " +

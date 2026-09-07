@@ -1,0 +1,59 @@
+# Eixo: authz Layer 2 — VÁRIOS escopos ao mesmo tempo, e um deles por uma claim
+# que o framework nunca ouviu falar.
+#
+# O negócio real quase nunca para no tenant. Uma rede tem tenant E filial; um
+# grupo tem tenant E centro de custo. Antes só cabia UM escopo, e o lado do
+# chamador era um de dois acessores fixos (`Identity.Subject` ou
+# `Identity.TenantID`) — qualquer outra chave do token ficava de fora.
+#
+# Aqui são três, e eles são ANDados: a linha é do chamador quando TODOS batem.
+#
+#   TenantID   = Identity.TenantID()   o acessor do framework, que lê a claim que
+#                                      a implantação configurou (o nome não é
+#                                      fixado aqui de propósito).
+#   FilialID   = claim filial_id       lida pelo NOME. É a razão de `from: claim`
+#                                      existir: o framework não tem acessor para
+#                                      ela e não precisa ter.
+#   CriadoPor  = Identity.Subject      e só nas escritas: a leitura da listagem é
+#                                      da filial inteira, mas EDITAR é de quem
+#                                      criou. `applies` é o que diz isso.
+specVersion: 1
+entity: Pedido
+plural: Pedidos
+language: pt-BR
+storage:
+  kind: flat
+  table: pedidos
+  description: Pedidos de uma filial.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
+fields:
+  - {name: TenantID, type: string, column: tenant_id, length: 60, livesOn: root, assignedFrom: identity-claim, claim: tenant_id, example: escola-alfa, description: O inquilino dono do pedido.}
+  - {name: FilialID, type: string, column: filial_id, length: 60, livesOn: root, assignedFrom: identity-claim, claim: filial_id, example: filial-centro, description: A filial dona do pedido.}
+  - {name: CriadoPor, type: string, column: criado_por, length: 160, livesOn: root, assignedFrom: identity-subject, example: ana@escola.br, description: Quem abriu o pedido.}
+  - {name: Descricao, type: string, column: descricao, length: 400, livesOn: root, example: Compra de material, description: O que foi pedido.}
+modes: [display, insert, update, archive]
+update: {shape: both}
+removal: {root: archive}
+read:
+  backing: relational
+  view: {name: pedidos}
+  byId: true
+  byParams:
+    filters: [{field: Descricao, ops: [icontains]}]
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: pedido
+  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant}
+    - {field: FilialID, from: claim, claim: filial_id}
+    # Ler é da filial; mexer é de quem criou. `read` fica de fora.
+    - {field: CriadoPor, from: subject, applies: [insert, update, archive, unarchive]}
+  permissions:
+    insert: "pedido:escrever"
+    update: "pedido:escrever"
+    patch: "pedido:escrever"
+    archive: "pedido:arquivar"
+    unarchive: "pedido:arquivar"
+    read: "pedido:ler"

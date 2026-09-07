@@ -615,10 +615,59 @@ Four things to get right, because they are the ones that cost a migration later:
     reads); `permission:` on any other source or on a persisted field; `modes:` (an identity
     rides every verb, the bodyless ones included, which is exactly where an archive guard
     reads it); a `vo:` (the value comes from the framework, through no constructor of
-    yours); a field named `RequestingTenant`, `RequestingSubject`, `RequestingMayCrossScope`
-    or `RequestingIdentityPresent` (the row scope synthesises those names itself).
-- **A scoped entity's tenant/owner: `assignedFrom` alone is a trap, and the way out is
-  `bypassMaySet`.** `assignedFrom: identity-claim` on the field `authz.tenantField` names is
+    yours); a field named `RequestingMayCrossScope`, `RequestingIdentityPresent`, or
+    `Requesting<ScopeField>` for a field `authz.scopes` narrows by (the row scope
+    synthesises those names itself — one carrier per scope, named after the field it is
+    compared against).
+- **Row scoping is `authz.scopes`, a LIST, and each entry is one equality: a value the ROW
+  carries and a fact about the CALLER.** `dataAccess` answers only the posture —
+  `anyone-with-permission` or `scoped` — because "which fact narrows the rows" is not a
+  posture, and answering both in one word is what limited this to the two shapes it was
+  born with.
+
+  ```yaml
+  authz:
+    dataAccess: scoped
+    scopes:
+      - {field: TenantID, from: tenant}                      # the framework's own accessor
+      - {field: FilialID, from: claim, claim: filial_id}     # a claim it never heard of
+      - {field: CriadoPor, from: subject, applies: [insert, update, archive]}
+    bypass: "*:*"
+  ```
+
+  - **`from` is the caller's half.** `subject` is `Identity.Subject`; `tenant` is
+    `Identity.TenantID()`, which reads whichever claim the DEPLOYMENT configured
+    (`authorization.tenant.claim`) — that is why you do not name a claim beside it, and
+    `check` refuses one. `claim` is the ELSE, and the reason the key exists: a service
+    scoped by `branch_id`, by `cost_center` or by anything else an issuer puts in a token
+    needs nothing from the framework to be scoped by it. A token that does not carry the
+    claim scopes to `""`, which matches no row — never to "no filter".
+  - **`field: ID` is the registry whose rows ARE the scope.** A tenant registry has no
+    `tenant_id` column, because the tenant is the row's own identity. Naming `ID` is how
+    you say that; the guard reads it through the framework's managed carrier and the 403
+    is reported against the logical name `ID`, since there is no `e.ID` to point at.
+    **Its insert is skipped by default** — on that verb the framework has just minted the
+    id and it belongs to nobody, so comparing it would refuse every creation. Who may
+    create one is `authz.permissions.insert`, and the gen-report says so.
+  - **Several scopes are ANDed, never ORed.** A row is the caller's when EVERY scope
+    matches. There is no OR on purpose: an OR between two row scopes WIDENS what a caller
+    reaches, and a widening posture that reads like a narrowing one is exactly what this
+    key exists to make unwritable.
+  - **`applies` narrows ONE scope to some verbs.** Omitted means everywhere the entity is
+    served (minus the `field: ID` insert above). Spell it for "the listing shows the whole
+    branch, but only the author may edit" — `applies: [insert, update, archive]` with
+    `read` left out — or the reverse. `update` covers PUT and PATCH together, which is the
+    granularity the framework's write gates have; `check` refuses `patch` as a word.
+  - **`bypass` is ONE key for the whole set**: whoever crosses, crosses every scope. A
+    bypass that crossed the branch but not the tenant would be a second, narrower posture
+    hiding inside the first, and nothing in the generated code would make the difference
+    visible to a reviewer.
+  - **Both halves are generated, per scope.** The read filter forces each scope's value
+    into the query; a `refuseForeign<Field>` guard in `BuildRules` runs under each write
+    gate the scope covers, and reports against the field the write fell outside of — one
+    body per scope rather than one with an `&&`, so a 403 says WHICH rule was broken.
+- **A scoped entity's scope field: `assignedFrom` alone is a trap, and the way out is
+  `bypassMaySet`.** `assignedFrom: identity-claim` on a field an `authz.scopes` entry names is
   the right shape — the server fills it, so no caller can file a record under someone
   else's scope. What it also does is remove the field from EVERY write body, and that is
   the trap: the one caller `authz.bypass` lets cross the scope, the operator supporting a
@@ -1626,7 +1675,7 @@ none of them is a Go error:
   catalogs and the hard-coded cap in the comparison — and raised `Notification{}`, so the
   422 read "at most  permissions", with a hole, in every language. Only an end user ever
   saw it;
-- `authz.dataAccess: tenant` generated its write guard and fed it on the root's mappers
+- a tenant-scoped `authz` generated its write guard and fed it on the root's mappers
   and not on the per-entry child ones, so a caller holding the update permission could
   grant into and revoke from another tenant's aggregate. The build was green, the
   generated suite was green, and the read filter hid the damage from the caller's own
@@ -1654,10 +1703,10 @@ Do not re-read every file. Read against the plan the dev approved and against th
    one engine that has nowhere to store one, so there it stays a `--` line) — which is
    what makes a vague description expensive: it is what a DBA, a BI tool and the next
    developer read off the catalogue, not something only this file carries.
-4. **Authz** — the permission per operation, and whether `dataAccess` narrows rows the
-   way the domain needs (`owner-only`/`tenant` are a different question from the
-   permission). A scoped `dataAccess` generates BOTH halves: the read filter in the
-   query, and a guard in `BuildRules` under every write gate — insert, update/patch,
+4. **Authz** — the permission per operation, and whether the rows are narrowed the way
+   the domain needs (`dataAccess: scoped` is a different question from the permission).
+   A scoped entity generates BOTH halves per scope: the read filter in the query, and a
+   guard in `BuildRules` under every write gate the scope covers — insert, update/patch,
    archive, unarchive, delete — answering `TenantMismatchNotification` (403). Read both;
    for a while only the read half existed, and the output LOOKED complete, so a reviewer
    read tenant isolation on the listings and reasonably concluded the posture was in
@@ -1731,6 +1780,10 @@ this order — each step is cheap and most problems die at the first:
    "adding to this collection needs a permission of its own,
    not the one that edits the record" is `children[].permissions`,
    "a super-admin crosses the tenant" is `authz.bypass: "*:*"`,
+   "the rows are narrowed by something about the caller" is `authz.scopes` — including
+   the three shapes the old `dataAccess: tenant` could not say: the row's OWN id as the
+   scope (`field: ID`, for the tenant registry), a claim the framework has no accessor
+   for (`from: claim, claim: branch_id`), and SEVERAL scopes at once,
    "the server fills this from the caller" is
    `assignedFrom`, "the framework dates this fact with the write's own instant, and no
    caller may state it" is `stamped: time` (its counter twin is `stamped: counter`),

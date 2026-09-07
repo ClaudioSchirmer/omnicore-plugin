@@ -133,9 +133,13 @@ func TestModesIsRefusedOnAnIdentitySource(t *testing.T) {
 // TestTheRowScopesOwnNamesAreReserved. The resolver synthesises these onto the
 // aggregate; an author who declared one would get two Go struct fields with one
 // name, and a build failure with no line pointing back at the spec.
+//
+// These two are FIXED words: one bypass and one presence flag per entity,
+// whatever the scopes are. The caller's half of a scope is named after the field
+// it compares (Requesting<Field>), so it is not a word at all and is refused
+// beside the scope that synthesises it — TestAScopesOwnCarrierNameIsRefused.
 func TestTheRowScopesOwnNamesAreReserved(t *testing.T) {
 	for _, name := range []string{
-		"RequestingTenant", "RequestingSubject",
 		"RequestingMayCrossScope", "RequestingIdentityPresent",
 	} {
 		t.Run(name, func(t *testing.T) {

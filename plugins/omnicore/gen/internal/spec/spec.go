@@ -2283,11 +2283,16 @@ type Authz struct {
 	// instead is how one project ends up granting three words for one verb.
 	// A project with its own taxonomy keeps it: this is the default, not a rule.
 	Permissions map[string]string `yaml:"permissions"`
-	// DataAccess is who may reach which rows: anyone-with-permission = every
-	// holder sees every row; owner-only = only their own; tenant = only their
-	// tenant's.
+	// DataAccess is whether the rows a caller reaches are narrowed by WHO IS
+	// ASKING: anyone-with-permission = every permission holder sees and writes
+	// every row; scoped = the rows are narrowed, and Scopes says by what.
 	//
-	// owner-only and tenant scope BOTH SIDES. The read side narrows what a
+	// It has no third value. Which fact about the caller narrows the rows —
+	// their tenant, their subject, a claim this framework has never heard of —
+	// is Scopes' question, not this one, and answering it here is what limited
+	// the language to the two shapes it happened to be born with.
+	//
+	// A scoped dataAccess generates BOTH SIDES. The read side narrows what a
 	// caller sees; the write side refuses a caller who creates, edits or
 	// archives a row outside their scope, with the framework's
 	// TenantMismatchNotification (403). Both halves are generated together on
@@ -2298,15 +2303,24 @@ type Authz struct {
 	// and archive one. The asymmetry was what made it dangerous: they could not
 	// read back the row they had just archived.
 	DataAccess string `yaml:"dataAccess"`
-	// OwnerField is the persisted field that records the row's owner, for
-	// owner-only access — declare it with assignedFrom: identity-subject.
-	OwnerField string `yaml:"ownerField"`
-	// TenantField is the persisted field the tenant claim is matched against,
-	// for tenant access — declare it with assignedFrom: identity-claim.
-	TenantField string `yaml:"tenantField"`
-	// Bypass says WHO crosses the row scope — the platform operator supporting
-	// a customer, who must read and repair rows that are not theirs. Without it
+	// Scopes is what narrows the rows, one entry per fact that has to match.
+	// Required under dataAccess: scoped, refused otherwise.
+	//
+	// Several entries are ANDed: a row is the caller's when EVERY scope matches,
+	// which is what an entity living under a tenant AND a branch AND a cost
+	// centre needs. There is no OR, deliberately — an OR between two row scopes
+	// widens what a caller reaches, and a widening posture that reads like a
+	// narrowing one is the shape this whole key exists to make impossible to
+	// write by accident.
+	Scopes []Scope `yaml:"scopes"`
+	// Bypass says WHO crosses the row scope — the platform operator supporting a
+	// customer, who must read and repair rows that are not theirs. Without it
 	// even a `*:*` holder is filtered to their own tenant like anybody else.
+	//
+	// It is ONE key for the whole set: whoever crosses, crosses every scope the
+	// entity declares. A bypass that crossed the branch but not the tenant would
+	// be a second, narrower posture hiding inside the first, and nothing in the
+	// generated code would make the difference visible to a reviewer.
 	//
 	// Two spellings, answering two different policies:
 	//
@@ -2358,6 +2372,59 @@ type Authz struct {
 	//
 	// Refused unless dataAccess scopes the rows at all.
 	NoIdentity string `yaml:"noIdentity"`
+}
+
+// Scope is ONE fact the rows are narrowed by: a value the row carries, and the
+// value the CALLER carries, which have to be equal.
+//
+// It replaced a pair of fixed shapes — owner-only compared a named field to
+// Identity.Subject, tenant compared another named field to Identity.TenantID —
+// and the replacement is not a generalisation for its own sake. Both shapes
+// refused the case that pays for this key: a tenant registry, where the tenant
+// is not A FIELD of the row but the row's own identity, so there is no
+// tenant_id column to name and the entity could not be scoped at all. The same
+// two shapes also refused the second scope an entity with a branch, a cost
+// centre or a franchise needs, and refused any claim the framework does not
+// itself have an accessor for.
+type Scope struct {
+	// Field is the ROW's half: a persisted field of this entity, or ID — the
+	// aggregate's own identity, for the registry whose rows ARE the thing the
+	// caller is scoped to.
+	//
+	// A runtime-only field is refused: a row scope is a WHERE clause, and a
+	// field with no column has nothing to put in it.
+	Field string `yaml:"field"`
+	// From is the CALLER's half — which question about the identity answers it:
+	//
+	//   subject   Identity.Subject, the authenticated principal.
+	//   tenant    Identity.TenantID(), whichever claim the DEPLOYMENT configured
+	//             as the tenant (authorization.tenant.claim). Not a claim read
+	//             by name: the name is the deployment's to change.
+	//   claim     Claim, read off the token by the name given here. This is the
+	//             one the framework has no opinion about, and the reason it
+	//             exists: a service scoped by branch_id, by cost_center or by
+	//             anything else an issuer puts in a token needs no accessor in
+	//             the framework to be scoped by it.
+	From string `yaml:"from"`
+	// Claim names the token claim, required for from: claim and refused for the
+	// other two — those accessors own which claim they read, and naming one
+	// beside them would state a name the deployment is free to change.
+	Claim string `yaml:"claim"`
+	// Applies is where this scope is enforced: `read` narrows the listings and
+	// the by-id read, and each write verb registers the guard under its own
+	// gate. Omitted means EVERYWHERE the entity is served — every mounted write
+	// verb plus the reads — with one exception, which is the reason the key is
+	// spellable at all:
+	//
+	// a scope on ID skips `insert` by default, because on an insert the identity
+	// has just been minted by the framework and is nobody's yet. Scoping it
+	// would compare a fresh id against the caller's claim and refuse every
+	// creation there is. Who may create a row in a registry like that is the
+	// permission's question (authz.permissions.insert), not the scope's.
+	//
+	// Spell it to say something else — a scope enforced on the reads alone while
+	// a domain rule owns the writes, or one deliberately enforced on insert.
+	Applies []string `yaml:"applies"`
 }
 
 // ValueObjectsNamed is every value-object type a spec depends on: the ones it

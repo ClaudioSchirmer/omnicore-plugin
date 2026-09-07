@@ -246,7 +246,35 @@ var (
 		"ieq", "ine", "iin", "inin", "istartswith", "icontains",
 	)
 
-	DataAccess = set("anyone-with-permission", "owner-only", "tenant")
+	// DataAccess is the POSTURE, and it has exactly two answers because the
+	// question is a yes/no: are the rows narrowed by who is asking? WHAT narrows
+	// them is authz.scopes, which is why owner-only and tenant are gone — they
+	// answered the posture and the mechanism in one word, and the mechanism they
+	// could name was two fixed shapes.
+	DataAccess = set("anyone-with-permission", "scoped")
+
+	// ScopeSources is the CALLER's half of a row scope: which question about the
+	// identity the row's value is compared against.
+	//
+	// `subject` and `tenant` are the framework's own accessors — Identity.Subject
+	// and Identity.TenantID(), the latter reading whichever claim the DEPLOYMENT
+	// configured, which is why it is not spelled as a claim by name here.
+	// `claim` is the ELSE, and the reason this set exists at all: a token claim
+	// read by the name the spec gives, so an entity scoped by branch_id or by
+	// cost_center needs nothing from the framework to be scoped by it.
+	ScopeSources = set("subject", "tenant", "claim")
+
+	// ScopeAppliances is where ONE row scope is enforced. `read` is both reads —
+	// a listing and a by-id — because they are one filter in one query. The
+	// write verbs are named one by one because the framework dispatches a clause
+	// by mode and there is no "any write" gate: an archive does not dispatch
+	// under IfUpdate, which is exactly the verb a caller once used on another
+	// tenant's row.
+	//
+	// `update` covers PUT and PATCH together, for the same reason fields[].modes
+	// does: both dispatch into IfInsertOrUpdate, so a third value would promise
+	// a distinction the gates cannot make.
+	ScopeAppliances = set("read", "insert", "update", "archive", "unarchive", "delete")
 
 	// NoIdentityPolicies is what an ABSENT identity means under a scoped
 	// dataAccess. It is a closed set because it is a policy with exactly two
@@ -528,7 +556,24 @@ func Vocabularies() []Vocabulary {
 		{"read.byParams.filters[].ops", FilterOps,
 			"the operators this field is filterable by; an undeclared one is a typed 400."},
 		{"authz.dataAccess", DataAccess,
-			"whether every permission holder sees every row, or only their own / their tenant's."},
+			"whether every permission holder reaches every row, or the rows are narrowed " +
+				"by who is asking. It is the POSTURE only — WHAT narrows them is " +
+				"authz.scopes, one entry per fact that has to match, ANDed."},
+		{"authz.scopes[].from", ScopeSources,
+			"the CALLER's half of a row scope. subject and tenant are the framework's own " +
+				"accessors (Identity.Subject, Identity.TenantID — the latter reading " +
+				"whichever claim the DEPLOYMENT configured, which is why it is not named " +
+				"here); claim reads the token by the name you give, for the scope the " +
+				"framework has no accessor for (branch_id, cost_center, anything an " +
+				"issuer puts in a token). The ROW's half is authz.scopes[].field: a " +
+				"persisted field, or ID for the registry whose rows ARE the thing the " +
+				"caller is scoped to."},
+		{"authz.scopes[].applies", ScopeAppliances,
+			"where ONE scope is enforced; omitted means everywhere the entity is served. " +
+				"`read` is both reads (one filter, one query); the write verbs are named " +
+				"one by one because the framework has no \"any write\" gate. A scope on " +
+				"ID skips insert by default: the identity is minted by the framework on " +
+				"that verb and is nobody's yet, so scoping it would refuse every creation."},
 		{"authz.noIdentity", NoIdentityPolicies,
 			"what an absent identity means under a scoped dataAccess. stand-down " +
 				"(the default) applies the scope to every authenticated caller and " +

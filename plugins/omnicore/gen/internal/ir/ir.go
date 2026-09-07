@@ -550,10 +550,59 @@ type Filter struct {
 	Ops   []string
 }
 
+// Scope is ONE fact the rows are narrowed by, resolved: the row's own value,
+// the caller's, and where the pair is compared.
+type Scope struct {
+	// Subject is the ROW's half. For a scope over the aggregate's own identity
+	// it is the id leaf — a field NO entity declares, whose value is read
+	// through the framework's managed carrier rather than off a struct field,
+	// which is what OnIdentity says.
+	Subject Field
+	// OnIdentity says the subject is the aggregate id. Every emitter that reads
+	// a value off the entity has to branch on it: there is no e.ID.
+	OnIdentity bool
+	// From is subject | tenant | claim, and Claim is the token claim's name,
+	// set for `claim` alone.
+	From, Claim string
+	// Identity is the runtime field the resolver synthesises to carry the
+	// CALLER's half onto the aggregate, named Requesting<Subject>. It is what
+	// lets BuildRules refuse a foreign write, which is the only place a write
+	// can be refused: the read filter lives in the query and never sees one.
+	Identity *Field
+	// Applies is where this scope is enforced — `read` plus the write verbs —
+	// with the default already materialised and everything the entity does not
+	// serve already dropped. See spec.ScopeApplies.
+	Applies []string
+}
+
+// Reads reports whether this scope narrows the two read endpoints.
+func (sc Scope) Reads() bool { return sc.appliesTo("read") }
+
+// AppliesTo reports whether this scope's guard runs for a write verb, spelled
+// as the spec spells it: insert, update (PUT and PATCH together), archive,
+// unarchive, delete.
+func (sc Scope) AppliesTo(verb string) bool { return sc.appliesTo(verb) }
+
+func (sc Scope) appliesTo(what string) bool {
+	for _, a := range sc.Applies {
+		if a == what {
+			return true
+		}
+	}
+	return false
+}
+
+// GuardName is the method BuildRules calls to refuse a write outside this
+// scope. One per scope, named after the field it compares, because two scopes
+// on one entity ask two different questions and a shared body could only answer
+// the last one written.
+func (sc Scope) GuardName() string { return "refuseForeign" + sc.Subject.Name }
+
 type Authz struct {
-	DataAccess  string
-	OwnerField  *Field
-	TenantField *Field
+	DataAccess string
+	// Scopes is every fact the rows are narrowed by, ANDed, in the spec's own
+	// order. Empty when the rows are not scoped.
+	Scopes []Scope
 	// Bypass is what crosses the row scope, empty when nothing does: a concrete
 	// permission, or the framework's super-admin wildcard. NoIdentity is what an
 	// absent identity means — always resolved, never empty, so the emitters read
@@ -566,12 +615,10 @@ type Authz struct {
 	// guard have to know which of the two they are writing.
 	BypassWildcard bool
 	NoIdentity     string
-	// ScopeField and BypassField are RUNTIME fields this resolver synthesises
-	// for a scoped dataAccess: the caller's own scope value, and whether they
-	// hold the bypass. They are what carries the identity into BuildRules, which
-	// is the only place a write can be refused for being outside its scope —
-	// the read filter lives in the query and never sees a write at all.
-	ScopeField  *Field
+	// BypassField is a RUNTIME field this resolver synthesises for a scoped
+	// dataAccess: whether the caller holds the bypass. One for the whole set,
+	// because the bypass is one policy — whoever crosses, crosses every scope.
+	// The caller's own scope VALUES are per scope, on Scope.Identity.
 	BypassField *Field
 	// PresenceField answers "was there an identity at all", which the scope
 	// value cannot: an empty scope is either no identity or a token without the
@@ -601,16 +648,32 @@ const SuperAdminMethod = "IsSuperAdmin"
 const SuperAdminGrant = spec.SuperAdminClaim
 
 // Scoped reports whether the rows are narrowed by who is asking.
-func (a Authz) Scoped() bool {
-	return a.DataAccess == "owner-only" || a.DataAccess == "tenant"
+func (a Authz) Scoped() bool { return len(a.Scopes) > 0 }
+
+// ReadScopes is the scopes that narrow the two read endpoints, which is not
+// every scope: one can be declared for the writes alone.
+func (a Authz) ReadScopes() []Scope {
+	var out []Scope
+	for _, sc := range a.Scopes {
+		if sc.Reads() {
+			out = append(out, sc)
+		}
+	}
+	return out
 }
 
-// ScopeSubject is the persisted field a write is checked against.
-func (a Authz) ScopeSubject() *Field {
-	if a.DataAccess == "tenant" {
-		return a.TenantField
+// WriteScopes is the scopes whose guard runs for at least one write verb.
+func (a Authz) WriteScopes() []Scope {
+	var out []Scope
+	for _, sc := range a.Scopes {
+		for _, v := range []string{"insert", "update", "archive", "unarchive", "delete"} {
+			if sc.AppliesTo(v) {
+				out = append(out, sc)
+				break
+			}
+		}
 	}
-	return a.OwnerField
+	return out
 }
 
 // Constraint is a database constraint the migration creates AND the repository
@@ -752,12 +815,6 @@ func Resolve(s *spec.Spec, p *discover.Project) (*Model, error) {
 	// After the surfaces, because a collection FOLLOWS its entity: what the
 	// child inherits does not exist until the entity's own answer does.
 	resolveChildSurfaces(s, m)
-	if f := lookupField(m, s.Authz.OwnerField); f != nil {
-		m.Authz.OwnerField = f
-	}
-	if f := lookupField(m, s.Authz.TenantField); f != nil {
-		m.Authz.TenantField = f
-	}
 	resolveRowScope(s, m)
 	return m, nil
 }
@@ -789,6 +846,7 @@ func standsDown(m *Model) bool {
 }
 
 func resolveRowScope(s *spec.Spec, m *Model) {
+	m.Authz.Scopes = resolveScopes(s, m)
 	m.Authz.Bypass = s.Authz.Bypass
 	m.Authz.BypassWildcard = s.Authz.Bypass == spec.SuperAdminClaim
 	m.Authz.NoIdentity = s.Authz.NoIdentity
@@ -835,19 +893,9 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 		}
 		m.Runtime = append(m.Runtime, *m.Authz.PresenceField)
 	}
-	if !m.Authz.Scoped() || m.Authz.ScopeSubject() == nil {
+	if !m.Authz.Scoped() {
 		return
 	}
-	source, what := "tenant", "tenant"
-	if m.Authz.DataAccess == "owner-only" {
-		source, what = "subject", "owner"
-	}
-	m.Authz.ScopeField = &Field{
-		Name: "Requesting" + naming.Pascal(source), GoType: "string", BaseGoType: "string",
-		SpecType: "string", Runtime: true, IdentitySource: source, Synthesised: true,
-		Description: "The caller's own " + what + ", from the request identity",
-	}
-	m.Runtime = append(m.Runtime, *m.Authz.ScopeField)
 	if m.Authz.Bypass == "" {
 		return
 	}
@@ -865,6 +913,77 @@ func resolveRowScope(s *spec.Spec, m *Model) {
 		Description: "Whether the caller " + held + ", which crosses the row scope",
 	}
 	m.Runtime = append(m.Runtime, *m.Authz.BypassField)
+}
+
+// resolveScopes lowers authz.scopes into the pairs every emitter reads: the
+// row's value, the caller's, and where the two are compared.
+//
+// The caller's half is SYNTHESISED here, one runtime field per scope, because a
+// write is checked in BuildRules and the entity is all BuildRules has. A read is
+// narrowed inside the query, where the identity is already in hand; a write has
+// no ctx to ask, so the caller's own scope has to travel onto the entity —
+// exactly as a hand-written ownerCheck already did. Synthesising it is what
+// makes the guard follow from the spec instead of from remembering to declare
+// three more things per scope.
+func resolveScopes(s *spec.Spec, m *Model) []Scope {
+	if !spec.Scoped(s.Authz.DataAccess) {
+		return nil
+	}
+	out := make([]Scope, 0, len(s.Authz.Scopes))
+	for _, sc := range s.Authz.Scopes {
+		res := Scope{
+			From: sc.From, Claim: sc.Claim,
+			Applies:    spec.ScopeApplies(s, sc),
+			OnIdentity: sc.Field == spec.IdentityName,
+		}
+		if res.OnIdentity {
+			// The id has no Go field on the aggregate — the framework's managed
+			// carrier holds it — so the leaf here is the same one a fact's
+			// criteria compares against, and every emitter reads its value
+			// through GetID() rather than off a struct field.
+			res.Subject = identityFilterField()
+		} else if f := lookupField(m, sc.Field); f != nil {
+			res.Subject = *f
+		} else {
+			// Validation refuses a name that resolves to nothing, so reaching
+			// here is generator inconsistency. Dropping the scope quietly would
+			// ship a service that says it is scoped and serves everything.
+			panic("row scope over " + sc.Field + ": validation should have refused this spec")
+		}
+		// A scope fed by a CLAIM BY NAME carries the same shape a declared
+		// `source: claim` field carries — an empty IdentitySource and the name
+		// in Claim — so the command mapper's identity feed, the test fixture and
+		// the report reach it through the branch they already have. Giving the
+		// synthesised one a vocabulary of its own would fork every switch that
+		// reads this string.
+		identitySource := sc.From
+		if sc.From == "claim" {
+			identitySource = ""
+		}
+		res.Identity = &Field{
+			Name:   spec.ScopeIdentityFieldName(res.Subject.Name),
+			GoType: "string", BaseGoType: "string", SpecType: "string",
+			Runtime: true, Synthesised: true,
+			IdentitySource: identitySource, Claim: sc.Claim,
+			Description: "The caller's own " + scopeWhat(sc) + ", from the request identity",
+		}
+		m.Runtime = append(m.Runtime, *res.Identity)
+		out = append(out, res)
+	}
+	return out
+}
+
+// scopeWhat names what the caller's half of a scope holds, for the doc comment
+// a reader meets on the aggregate without the spec in front of them.
+func scopeWhat(sc spec.Scope) string {
+	switch sc.From {
+	case "subject":
+		return "subject"
+	case "tenant":
+		return "tenant"
+	default:
+		return sc.Claim + " claim"
+	}
 }
 
 func resolveNames(entity, plural string) Names {
@@ -3921,8 +4040,8 @@ func (m *Model) CommandFields(verb string) []Field {
 	// and only there: a row does not change tenant by being updated, and the
 	// update mappers deliberately leave every server-assigned field alone.
 	if verb == "insert" {
-		if f := m.BypassSettableField(); f != nil {
-			stated := *f
+		for _, f := range m.BypassSettableFields() {
+			stated := f
 			stated.WireOptional = true
 			out = append(out, stated)
 		}
@@ -3930,20 +4049,30 @@ func (m *Model) CommandFields(verb string) []Field {
 	return out
 }
 
-// BypassSettableField is the row scope's subject when the caller who crosses
-// that scope may state it, and nil otherwise.
+// BypassSettableFields is every row-scope subject the caller who crosses that
+// scope may state, empty when nobody crosses or nobody may state one.
 //
-// It is resolved from the AUTHZ side rather than by scanning the fields,
-// because the two have to agree: what makes the value safe to accept is the
-// row-scope guard comparing this exact field, and the guard is built from
-// Authz.ScopeSubject(). Reading the flag off some other field would produce a
-// request key nothing checks.
-func (m *Model) BypassSettableField() *Field {
-	subject := m.Authz.ScopeSubject()
-	if subject == nil || !subject.BypassMaySet || m.Authz.BypassField == nil {
+// They are resolved from the AUTHZ side rather than by scanning the fields,
+// because the two have to agree: what makes such a value safe to accept is the
+// row-scope guard comparing that exact field, and the guards are built from
+// Authz.Scopes. Reading the flag off some other field would produce a request
+// key nothing checks.
+//
+// The aggregate's own identity is never among them: it has no column the client
+// writes and no place on a write DTO, so there is nothing for a bypass holder
+// to state. What that entity's operator crosses is the READ filter and the
+// guards on the verbs that follow the insert.
+func (m *Model) BypassSettableFields() []Field {
+	if m.Authz.BypassField == nil {
 		return nil
 	}
-	return subject
+	var out []Field
+	for _, sc := range m.Authz.Scopes {
+		if !sc.OnIdentity && sc.Subject.BypassMaySet {
+			out = append(out, sc.Subject)
+		}
+	}
+	return out
 }
 
 // Mappable drops the fields a flat `e.X = c.X` must NOT be written for.

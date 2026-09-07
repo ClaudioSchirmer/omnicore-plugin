@@ -39,6 +39,7 @@ read:
 surfaces: {rest: true}
 authz:
   resource: fornecedor
-  dataAccess: tenant
-  tenantField: TenantID
+  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant}
   permissions: {insert: "fornecedor:escrever", patch: "fornecedor:escrever", read: "fornecedor:ler"}

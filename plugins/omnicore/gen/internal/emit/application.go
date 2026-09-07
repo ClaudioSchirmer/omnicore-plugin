@@ -347,25 +347,23 @@ func emitClientIPFields(s *src, m *ir.Model) {
 // And it is emitted for the INSERT alone, because that is the only verb whose
 // mapper calls it: a record does not change scope by being updated.
 func emitStatedScope(s *src, m *ir.Model) {
-	f := m.BypassSettableField()
-	if f == nil {
+	fields := m.BypassSettableFields()
+	if len(fields) == 0 {
 		return
 	}
-	what := "tenant"
-	if m.Authz.DataAccess == "owner-only" {
-		what = "owner"
-	}
 	s.Blank()
-	for _, line := range wrap(fmt.Sprintf("…unless the caller stated the %s themselves. "+
+	for _, line := range wrap("…unless the caller stated the scope themselves. "+
 		"Absent means \"mine\", which the line above already wrote. Present, it is applied "+
 		"HERE and judged in BuildRules: a caller who may not cross the row scope meets "+
-		"the same refusal a write into a foreign %s meets, instead of having the value "+
-		"quietly replaced by their own.", what, what), 70) {
+		"the same refusal a write into a foreign row meets, instead of having the value "+
+		"quietly replaced by their own.", 70) {
 		s.L("\t// %s", line)
 	}
-	s.L("\tif c.%s != nil {", f.Name)
-	s.L("\t\te.%s = %s", f.Name, entityValue(*f, "*c."+f.Name))
-	s.L("\t}")
+	for _, f := range fields {
+		s.L("\tif c.%s != nil {", f.Name)
+		s.L("\t\te.%s = %s", f.Name, entityValue(f, "*c."+f.Name))
+		s.L("\t}")
+	}
 }
 
 // superAdminTest is the expression that answers "is the caller a super-admin",
@@ -782,55 +780,54 @@ func emitFieldRestrictions(s *src, m *ir.Model, target string) {
 // whether the caller may use the endpoint at all, this decides WHICH ROWS the
 // answer contains. Leaving it out means anyone who can read, reads everything.
 func emitRowScoping(s *src, m *ir.Model, target string) {
-	if !m.Authz.Scoped() {
+	scopes := m.Authz.ReadScopes()
+	if len(scopes) == 0 {
 		return
 	}
-	field := m.Authz.ScopeSubject()
-	if field == nil {
-		// Validation refuses a runtime or missing scope field, so an empty one
-		// here is generator inconsistency — and returning quietly would ship a
-		// service that says owner-only and serves everything. Refuse loudly.
-		panic(m.Authz.DataAccess + " with no scope field: validation should have refused this spec")
-	}
-	whose, from := "their tenant's", "id.TenantID()"
-	if m.Authz.DataAccess == "owner-only" {
-		whose, from = "their own", "id.Subject"
-	}
 
-	s.L("\t// Callers see only %s rows. Filter is a map keyed by the Go field", whose)
-	s.L("\t// path, and the scope is FORCED: a value the caller sent for this field is")
-	s.L("\t// overwritten, never merged.")
+	s.L("\t// Callers see only the rows their identity reaches. Filter is a map keyed")
+	s.L("\t// by the Go field path, and each scope is FORCED: a value the caller sent")
+	s.L("\t// for one of these fields is overwritten, never merged.")
+	if len(scopes) > 1 {
+		s.L("\t//")
+		s.L("\t// The %d scopes are ANDed, which a filter map does for free: every entry", len(scopes))
+		s.L("\t// has to match, so a row is reachable only when all of them do.")
+	}
 	s.L("\tif %s.Filter == nil {", target)
 	s.L("\t\t%s.Filter = map[string]any{}", target)
 	s.L("\t}")
 	s.L("\tif id := ctx.Identity(); id != nil {")
+
+	indent := "\t\t"
 	switch {
 	case m.Authz.BypassWildcard:
 		// The same exception, asked of the wildcard itself. It cannot be handed
 		// to HasPermission — that panics — so it is asked with the framework's
 		// own question for it. See ir.SuperAdminMethod.
-		s.L("\t\t// A super-admin crosses the scope: the operator supporting a customer")
+		s.L("\t\t// A super-admin crosses every scope: the operator supporting a customer")
 		s.L("\t\t// reads across tenants. Not asked through HasPermission — the framework")
 		s.L("\t\t// panics when a wildcard is the QUESTION, so the %s a super-admin", m.Authz.Bypass)
 		s.L("\t\t// carries has a question of its own, and this is it.")
 		s.L("\t\tif !%s {", superAdminTest("id"))
-		s.L("\t\t\t%s.Filter[%s] = %s", target, quote(field.Name), from)
-		s.L("\t\t}")
+		indent = "\t\t\t"
 	case m.Authz.Bypass != "":
 		// Without this, a platform operator holding every permission there is
 		// was still filtered to their own tenant, so supporting a customer
 		// through the API was impossible. The permission is named CONCRETELY
 		// here on purpose: a wildcard is not a legal argument to HasPermission,
 		// and the policy "a super-admin crosses" is the other case above.
-		s.L("\t\t// %s crosses the scope: the operator supporting a customer", m.Authz.Bypass)
+		s.L("\t\t// %s crosses every scope: the operator supporting a customer", m.Authz.Bypass)
 		s.L("\t\t// reads across tenants. Asked as a CONCRETE permission — the framework")
 		s.L("\t\t// panics on a wildcard here, since the claim wildcards and the question")
 		s.L("\t\t// does not.")
 		s.L("\t\tif !id.HasPermission(%s) {", quote(m.Authz.Bypass))
-		s.L("\t\t\t%s.Filter[%s] = %s", target, quote(field.Name), from)
+		indent = "\t\t\t"
+	}
+	for _, sc := range scopes {
+		emitScopeFilter(s, sc, target, indent)
+	}
+	if indent != "\t\t" {
 		s.L("\t\t}")
-	default:
-		s.L("\t\t%s.Filter[%s] = %s", target, quote(field.Name), from)
 	}
 	s.L("\t} else {")
 	if m.Authz.NoIdentity == "stand-down" {
@@ -841,11 +838,37 @@ func emitRowScoping(s *src, m *ir.Model, target string) {
 		s.L("\t\t// No identity at all: the scope stands down, as authz.noIdentity says.")
 		s.L("\t\t// Reachable only on a dev bench — auth.mode disabled is refused outside")
 		s.L("\t\t// APP_PROFILE=dev — and it serves EVERY row, which is the point: a")
-		s.L("\t\t// tenant-scoped entity is otherwise unusable on the machine it is")
-		s.L("\t\t// first tried on, answering every listing empty.")
+		s.L("\t\t// scoped entity is otherwise unusable on the machine it is first tried")
+		s.L("\t\t// on, answering every listing empty.")
 	} else {
 		s.L("\t\t// No identity: no rows. Failing open here would expose every row.")
-		s.L("\t\t%s.Filter[%s] = \"\"", target, quote(field.Name))
+		for _, sc := range scopes {
+			s.L("\t\t%s.Filter[%s] = \"\"", target, quote(sc.Subject.Name))
+		}
 	}
 	s.L("\t}")
+}
+
+// emitScopeFilter forces ONE scope's value into the query filter.
+//
+// The framework's two accessors are read directly. A claim BY NAME is not: it
+// arrives as `any`, and the assertion's zero value is what a token carrying no
+// such claim must be scoped to — the empty string, matching nothing, rather than
+// the key being left out and the caller seeing every row.
+func emitScopeFilter(s *src, sc ir.Scope, target, indent string) {
+	key := quote(sc.Subject.Name)
+	switch sc.From {
+	case "subject":
+		s.L("%s%s.Filter[%s] = id.Subject", indent, target, key)
+	case "tenant":
+		s.L("%s// TenantID reads whichever claim the deployment configured", indent)
+		s.L("%s// (authorization.tenant.claim), so nothing here pins its name.", indent)
+		s.L("%s%s.Filter[%s] = id.TenantID()", indent, target, key)
+	default:
+		local := naming.Camel(sc.Subject.Name) + "Scope"
+		s.L("%s// The %s claim, by name: the framework has no accessor for it, and", indent, sc.Claim)
+		s.L("%s// a token that does not carry it scopes to \"\" — which matches no row.", indent)
+		s.L("%s%s, _ := id.Claims[%s].(string)", indent, local, quote(sc.Claim))
+		s.L("%s%s.Filter[%s] = %s", indent, target, key, local)
+	}
 }

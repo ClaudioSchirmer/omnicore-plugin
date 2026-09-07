@@ -546,12 +546,10 @@ var reservedFieldNames = map[string]string{
 	"ParentID": "the parent link is projected automatically as the read-only twin of ID",
 	"Revision": "the revision column is declared under storage.managed, not as a field",
 
-	"RequestingTenant": "the row scope synthesises this name for the caller's own tenant; " +
-		"to carry the tenant into a rule of your own, declare a runtime field with " +
-		"source: tenant under a different name",
-	"RequestingSubject": "the row scope synthesises this name for the caller's own subject; " +
-		"to carry the subject into a rule of your own, declare a runtime field with " +
-		"source: subject under a different name",
+	// The caller's half of a row scope is named after the field it is compared
+	// against — Requesting<Field> — so it is not a fixed word and cannot be an
+	// entry here. It is refused beside the scope that synthesises it, in
+	// validateScopes, which is the one place that knows the field's name.
 	"RequestingMayCrossScope": "the row scope synthesises this name for authz.bypass; " +
 		"to ask about a permission of your own, declare a runtime field with " +
 		"source: permission under a different name",
@@ -563,18 +561,37 @@ var reservedFieldNames = map[string]string{
 // isFacet distinguishes the two things isChild lumps together: a COLLECTION
 // entry, whose uniqueness this build now generates, and a 1:1 FACET's field,
 // whose uniqueness it still does not.
-// ScopeSubjectName is the field the row scope narrows BY: the owner under
-// owner-only access, the tenant under tenant access, and nothing at all when
-// the rows are not scoped.
-func ScopeSubjectName(s *Spec) string {
-	switch s.Authz.DataAccess {
-	case "owner-only":
-		return s.Authz.OwnerField
-	case "tenant":
-		return s.Authz.TenantField
+// ScopeSubjectNames is every field the row scope narrows BY, in declaration
+// order, and empty when the rows are not scoped.
+//
+// It is a LIST because a scope is a list: an entity can live under a tenant and
+// a branch at once, and each of them is a field a write is compared against.
+// IdentityName is a legal member — the registry whose rows ARE the thing the
+// caller is scoped to narrows by the aggregate's own identity, which is not a
+// field of the entity at all.
+func ScopeSubjectNames(s *Spec) []string {
+	if !Scoped(s.Authz.DataAccess) {
+		return nil
 	}
-	return ""
+	out := make([]string, 0, len(s.Authz.Scopes))
+	for _, sc := range s.Authz.Scopes {
+		out = append(out, sc.Field)
+	}
+	return out
 }
+
+// ScopeIdentityFieldName is the runtime field the resolver synthesises to carry
+// the CALLER's half of one scope onto the aggregate.
+//
+// It is derived from the field the scope compares against rather than from the
+// claim it is fed by, for two reasons: the name is unique by construction (two
+// scopes cannot narrow by the same field), and it reads as the pair it is —
+// e.BranchID != e.RequestingBranchID.
+//
+// Exported because three layers have to spell it identically: the validator
+// refusing an author's field that would collide with it, the resolver
+// synthesising it, and the emitters reading it.
+func ScopeIdentityFieldName(field string) string { return "Requesting" + field }
 
 // validateBypassMaySet holds the "yields to the bypass" key to the ONE seat
 // where it is safe.
@@ -611,26 +628,31 @@ func validateBypassMaySet(s *Spec, f Field, where string, ps *Problems, isChild 
 			"drop bypassMaySet; if the value really comes from the request, it is not derived")
 		return
 	}
-	subject := ScopeSubjectName(s)
+	subjects := ScopeSubjectNames(s)
 	switch {
 	case !Scoped(s.Authz.DataAccess):
 		ps.BlockerFix(at,
 			"nothing scopes the rows of this entity, so no caller crosses a scope",
-			"this key belongs to authz.dataAccess: owner-only or tenant, where the "+
+			"this key belongs to an entity with authz.dataAccess: scoped, where the "+
 				"server fills the scope from the caller's identity")
 	case s.Authz.Bypass == "":
 		ps.BlockerFix(at,
 			"no caller crosses the row scope, so the exception applies to nobody",
 			"declare authz.bypass — the permission (or the *:* wildcard) that lets an "+
 				"operator read and repair rows outside their own scope")
-	case subject != f.Name:
+	case !contains(subjects, f.Name):
+		// A scope's own subject and nothing else. The set is a list now, and the
+		// judgement is unchanged: on a field no scope compares, the stated value
+		// is simply taken, from everybody, on a field the spec advertises as
+		// server-assigned.
 		ps.BlockerFix(at,
-			fmt.Sprintf("%q is not the field the row scope narrows by, and what refuses a "+
-				"caller who may NOT state a value is that scope's own guard — over %q alone",
-				f.Name, orUnnamed(subject)),
-			fmt.Sprintf("declare it on %s, or leave this field server-assigned: on any "+
-				"other field the value would be accepted from every caller",
-				orUnnamed(subject)))
+			fmt.Sprintf("%q is not a field the row scope narrows by, and what refuses a "+
+				"caller who may NOT state a value is that scope's own guard — over the "+
+				"scope subjects alone (%s)",
+				f.Name, orUnnamed(strings.Join(subjects, ", "))),
+			fmt.Sprintf("declare it on one of %s, or leave this field server-assigned: on "+
+				"any other field the value would be accepted from every caller",
+				orUnnamed(strings.Join(subjects, ", "))))
 	}
 	// The value rides on the INSERT body, so an entity that mounts no insert
 	// offers it nowhere.
@@ -644,9 +666,7 @@ func validateBypassMaySet(s *Spec, f Field, where string, ps *Problems, isChild 
 
 // Scoped reports whether a dataAccess narrows the rows by something about the
 // caller, which is the precondition for anything crossing that scope.
-func Scoped(dataAccess string) bool {
-	return dataAccess == "owner-only" || dataAccess == "tenant"
-}
+func Scoped(dataAccess string) bool { return dataAccess == "scoped" }
 
 // SourceOf answers where a runtime-only field is fed from, with the default
 // materialised: a spec written before `source` existed says `claim`, which is
@@ -5276,13 +5296,13 @@ func validateChildSurfaces(s *Spec, ps *Problems) {
 // tenant-scoped entity answered every listing empty on the dev bench, which is
 // the first place anybody runs it.
 func validateRowScopePolicy(a Authz, ps *Problems) {
-	scoped := a.DataAccess == "owner-only" || a.DataAccess == "tenant"
+	scoped := Scoped(a.DataAccess)
 
 	if a.Bypass != "" {
 		if !scoped {
 			ps.BlockerFix("authz.bypass",
 				fmt.Sprintf("there is no row scope to cross: dataAccess is %q", a.DataAccess),
-				"drop it, or scope the rows with dataAccess: owner-only or tenant")
+				"drop it, or scope the rows with dataAccess: scoped and an authz.scopes entry")
 		}
 		switch {
 		case a.Bypass == SuperAdminClaim:
@@ -5309,7 +5329,7 @@ func validateRowScopePolicy(a Authz, ps *Problems) {
 		if !scoped {
 			ps.BlockerFix("authz.noIdentity",
 				fmt.Sprintf("nothing is scoped by the identity: dataAccess is %q", a.DataAccess),
-				"drop it, or scope the rows with dataAccess: owner-only or tenant")
+				"drop it, or scope the rows with dataAccess: scoped and an authz.scopes entry")
 		} else if !NoIdentityPolicies.Has(a.NoIdentity) {
 			ps.BlockerFix("authz.noIdentity",
 				fmt.Sprintf("%q is not a policy for an absent identity", a.NoIdentity),
@@ -5334,6 +5354,200 @@ func validateRowScopePolicy(a Authz, ps *Problems) {
 	}
 }
 
+// scopeVerbs is the write half of ScopeAppliances, in the order the report and
+// the generated guards list them. `read` is not here: it is the other half, and
+// it is not a verb the framework dispatches a write clause for.
+var scopeVerbs = []string{"insert", "update", "archive", "unarchive", "delete"}
+
+// ScopeApplies is where ONE scope is enforced, with the default materialised
+// and everything the entity does not serve dropped.
+//
+// Exported because the resolver, the report and the validator have to agree on
+// it. A default decided in three places is three places for it to drift, and
+// the drift would be silent: a scope that stopped covering a verb is a hole
+// nothing else in the build can see.
+func ScopeApplies(s *Spec, sc Scope) []string {
+	ops := mountedOperations(s)
+	served := func(a string) bool {
+		if a == "read" {
+			return true
+		}
+		if a == "update" {
+			return ops["update"] || ops["patch"]
+		}
+		return ops[a]
+	}
+	if len(sc.Applies) > 0 {
+		var out []string
+		for _, a := range append([]string{"read"}, scopeVerbs...) {
+			if contains(sc.Applies, a) && served(a) {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	out := []string{"read"}
+	for _, v := range scopeVerbs {
+		// The one default that is not "everywhere": on an insert the identity
+		// has just been minted by the framework and is nobody's yet, so a scope
+		// on ID would compare a fresh id against the caller's claim and refuse
+		// every creation the entity serves. See Scope.Applies.
+		if v == "insert" && sc.Field == IdentityName {
+			continue
+		}
+		if served(v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// validateScopes holds authz.scopes to what the generated code can actually do
+// with it.
+//
+// The row's half must be PERSISTED — row scoping is a WHERE clause, and a
+// runtime-only field has no column to put in it. Accepting one used to produce
+// the worst possible outcome: the spec validated, the report said the entity was
+// scoped, and the generated service quietly served every row to any caller
+// holding the read permission.
+//
+// The one member that is not a field is IdentityName. The aggregate's own id has
+// a column on every table this generator writes and the framework resolves the
+// name itself, so it is the row's half exactly as a declared field is — and it
+// is the case this key was widened for: a tenant registry has no tenant_id
+// column, because the tenant IS the row.
+func validateScopes(s *Spec, ps *Problems) {
+	a := s.Authz
+	if !Scoped(a.DataAccess) {
+		if len(a.Scopes) > 0 {
+			ps.BlockerFix("authz.scopes",
+				fmt.Sprintf("the rows are not scoped (dataAccess is %q), so nothing narrows them",
+					a.DataAccess),
+				"set dataAccess: scoped, or drop the scopes — a posture stated one way "+
+					"and mechanised the other is the shape a reviewer reads as isolation "+
+					"that is not there")
+		}
+		return
+	}
+	if len(a.Scopes) == 0 {
+		ps.BlockerFix("authz.scopes",
+			"the rows are scoped and the spec does not say by what",
+			"declare at least one scope: field (a persisted field, or ID for a registry "+
+				"whose rows ARE what the caller is scoped to) and from (subject, tenant, "+
+				"or claim with its name)")
+		return
+	}
+
+	seen := map[string]bool{}
+	for i, sc := range a.Scopes {
+		where := fmt.Sprintf("authz.scopes[%d]", i)
+		switch {
+		case sc.Field == "":
+			ps.BlockerFix(where+".field",
+				"a scope does not say which value of the ROW is compared",
+				"name a persisted field, or ID for the registry whose rows are "+
+					"themselves what the caller is scoped to")
+		case seen[sc.Field]:
+			ps.BlockerFix(where+".field",
+				fmt.Sprintf("%q is already narrowed by another scope", sc.Field),
+				"one field, one scope: two scopes over the same field are two "+
+					"conditions on one column, and the second can only ever narrow the "+
+					"first to nothing or repeat it")
+		case sc.Field == IdentityName:
+			// Nothing to look up: the framework's managed carrier holds the id,
+			// no entity declares it, and every read already addresses it under
+			// this exact logical name.
+		default:
+			if f := findField(s.Fields, sc.Field); f == nil {
+				ps.BlockerFix(where+".field",
+					fmt.Sprintf("%q does not name a field of this entity", sc.Field),
+					"name one of its persisted fields — or ID, for the entity whose own "+
+						"identity is what the caller is scoped to")
+			} else if f.Runtime {
+				ps.BlockerFix(where+".field",
+					fmt.Sprintf("%q is runtime-only — it has no column, so the rows cannot be narrowed by it",
+						sc.Field),
+					"make it a persisted field the server fills from the caller's identity "+
+						"(assignedFrom: identity-subject, or identity-claim with its claim), "+
+						"so every row records the scope it belongs to")
+			}
+		}
+		seen[sc.Field] = true
+
+		// The name the resolver will synthesise for the caller's half. It is
+		// derived from the author's own field, so it cannot be refused by the
+		// static reserved list — it is refused here, where the field is known.
+		if carrier := ScopeIdentityFieldName(sc.Field); findField(s.Fields, carrier) != nil {
+			ps.BlockerFix(where+".field",
+				fmt.Sprintf("this scope synthesises a runtime field named %q onto the "+
+					"aggregate, and the entity already declares one", carrier),
+				fmt.Sprintf("rename the declared %q — two Go struct fields with one name "+
+					"is a build failure with no line pointing back at this spec", carrier))
+		}
+
+		switch sc.From {
+		case "":
+			ps.BlockerFix(where+".from",
+				"a scope does not say which fact about the CALLER the row is compared against",
+				"one of: "+ScopeSources.String()+" — subject and tenant are the "+
+					"framework's own accessors; claim reads the token by the name you give")
+		case "claim":
+			if sc.Claim == "" {
+				ps.BlockerFix(where+".claim",
+					"a scope fed by a claim does not say which claim",
+					"name it, e.g. claim: branch_id — the framework does not opine on "+
+						"custom claim names, so there is no convention to fall back on. "+
+						"For the tenant claim the DEPLOYMENT configured, use from: tenant "+
+						"instead, which reads whichever name it is configured under")
+			}
+		case "subject", "tenant":
+			if sc.Claim != "" {
+				ps.BlockerFix(where+".claim",
+					fmt.Sprintf("from: %s reads the framework's own accessor, which owns "+
+						"which claim it looks at", sc.From),
+					"drop claim — naming one here would pin a name the deployment is free "+
+						"to change (authorization.tenant.claim); to read a claim by name, "+
+						"that is from: claim")
+			}
+		default:
+			ps.BlockerFix(where+".from",
+				fmt.Sprintf("%q is not a fact about the caller", sc.From),
+				"one of: "+ScopeSources.String())
+		}
+
+		ops := mountedOperations(s)
+		for _, ap := range sc.Applies {
+			if !ScopeAppliances.Has(ap) {
+				ps.BlockerFix(where+".applies",
+					fmt.Sprintf("%q is not a place a scope is enforced", ap),
+					"one of: "+ScopeAppliances.String()+" — update covers PUT and PATCH "+
+						"together, which is the granularity the framework's write gates have")
+				continue
+			}
+			served := ap == "read" || ops[ap] || (ap == "update" && ops["patch"])
+			if !served {
+				ps.BlockerFix(where+".applies",
+					fmt.Sprintf("this entity serves no %s, so scoping it enforces nothing", ap),
+					"add the mode that mounts the verb, or drop it from applies")
+			}
+		}
+		if sc.Field == IdentityName && contains(sc.Applies, "insert") {
+			ps.WarnFix(where+".applies",
+				"on an insert the aggregate's identity has just been minted by the "+
+					"framework and belongs to nobody, so this scope will refuse every "+
+					"creation this entity serves",
+				"drop insert from applies — who may create a row in a registry like this "+
+					"is the permission's question (authz.permissions.insert), not the "+
+					"scope's; keep it only if the ids are stated by the caller")
+		}
+		if len(ScopeApplies(s, sc)) == 0 {
+			ps.BlockerFix(where+".applies",
+				"this scope is enforced nowhere, so it narrows nothing",
+				"drop it, or name a place the entity actually serves")
+		}
+	}
+}
+
 func validateAuthz(s *Spec, ps *Problems) {
 	a := s.Authz
 	if a.Resource == "" {
@@ -5346,47 +5560,32 @@ func validateAuthz(s *Spec, ps *Problems) {
 			"the spec does not say who may read or modify which rows",
 			"anyone-with-permission is a valid answer, but it has to be stated")
 	} else if !DataAccess.Has(a.DataAccess) {
-		ps.BlockerFix("authz.dataAccess",
-			fmt.Sprintf("%q is not a data-access model", a.DataAccess),
-			"one of: "+DataAccess.String())
-	}
-	// The owner/tenant field must be PERSISTED: row scoping is a WHERE clause,
-	// and a runtime-only field has no column to put in it. Accepting one here
-	// used to produce the worst possible outcome — the spec validated, the
-	// report said "owner-only", and the generated service quietly served every
-	// row to any caller holding the read permission.
-	switch a.DataAccess {
-	case "owner-only":
-		if a.OwnerField == "" {
-			ps.BlockerFix("authz.ownerField",
-				"owner-only access needs the field that identifies the owner",
-				"name a persisted field the server fills from the caller's identity: "+
-					"declare it with assignedFrom: identity-subject")
-		} else if f := findField(s.Fields, a.OwnerField); f == nil {
-			ps.Blockerf("authz.ownerField", "%q does not name a field of this entity", a.OwnerField)
-		} else if f.Runtime {
-			ps.BlockerFix("authz.ownerField",
-				fmt.Sprintf("%q is runtime-only — it has no column, so the rows cannot be narrowed by it",
-					a.OwnerField),
-				"make it a persisted field the server fills from the caller's identity "+
-					"(assignedFrom: identity-subject), so every row records its owner")
-		}
-	case "tenant":
-		if a.TenantField == "" {
-			ps.BlockerFix("authz.tenantField",
-				"tenant access needs the field carrying the tenant",
-				"name a persisted field the tenant claim is matched against: "+
-					"declare it with assignedFrom: identity-claim and the claim's name")
-		} else if f := findField(s.Fields, a.TenantField); f == nil {
-			ps.Blockerf("authz.tenantField", "%q does not name a field of this entity", a.TenantField)
-		} else if f.Runtime {
-			ps.BlockerFix("authz.tenantField",
-				fmt.Sprintf("%q is runtime-only — it has no column, so the rows cannot be narrowed by it",
-					a.TenantField),
-				"make it a persisted field the server fills from the tenant claim "+
-					"(assignedFrom: identity-claim with claim: <name>), so every row records its tenant")
+		// The two RETIRED values are not typos and an edit-distance guess would
+		// never reach the answer: they each named a posture AND a mechanism, and
+		// the mechanism moved to authz.scopes. A spec written against 0.64 or
+		// below meets this, so the message is the migration.
+		switch a.DataAccess {
+		case "tenant":
+			ps.BlockerFix("authz.dataAccess",
+				"\"tenant\" retired in 0.65.0: it answered the posture and the mechanism "+
+					"in one word, and the mechanism is now a list",
+				"dataAccess: scoped, and move the old authz.tenantField into a scope — "+
+					"scopes: [{field: <that field>, from: tenant}]. `from: tenant` still "+
+					"reads Identity.TenantID(), so nothing about the deployment changes")
+		case "owner-only":
+			ps.BlockerFix("authz.dataAccess",
+				"\"owner-only\" retired in 0.65.0: it answered the posture and the "+
+					"mechanism in one word, and the mechanism is now a list",
+				"dataAccess: scoped, and move the old authz.ownerField into a scope — "+
+					"scopes: [{field: <that field>, from: subject}]. `from: subject` still "+
+					"reads Identity.Subject, so the generated comparison is the same one")
+		default:
+			ps.BlockerFix("authz.dataAccess",
+				fmt.Sprintf("%q is not a data-access model", a.DataAccess),
+				"one of: "+DataAccess.String())
 		}
 	}
+	validateScopes(s, ps)
 
 	validateRowScopePolicy(a, ps)
 

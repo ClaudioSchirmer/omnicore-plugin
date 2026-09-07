@@ -33,8 +33,11 @@ const (
 	CapExports          Capability = "CSV/XLSX exports"
 	CapFieldRestrict    Capability = "field-level read restriction"
 	CapIdentityView     Capability = "shared identity view"
-	CapOwnerAccess      Capability = "owner-only data access (read filter AND write guard)"
-	CapTenantAccess     Capability = "tenant data access (read filter AND write guard)"
+	CapRowScope         Capability = "row scoping: the rows a caller reaches narrowed by a fact about their identity (read filter AND write guard)"
+	CapClaimScope       Capability = "row scoping by a claim the FRAMEWORK has no accessor for, read off the token by name (branch_id, cost_center, anything an issuer puts there)"
+	CapIdentityScope    Capability = "row scoping by the aggregate's OWN identity — the registry whose rows ARE what the caller is scoped to, so there is no scope column to name"
+	CapMultiScope       Capability = "several row scopes at once, ANDed (a tenant AND a branch AND a cost centre)"
+	CapPartialScope     Capability = "a row scope enforced on some verbs and not others (authz.scopes[].applies)"
 	CapScopeBypass      Capability = "a permission that crosses the row scope (operator support)"
 	CapPerEntryFact     Capability = "per-entry facts (a service question about ONE entry of a collection)"
 	CapBatchedFact      Capability = "batched per-entry facts (ONE question about the whole collection, answered per entry — the loop leaves the rule and the answer stays keyed to the entry that caused it)"
@@ -99,8 +102,11 @@ var implemented = map[Capability]bool{
 	CapGraphQL:          true,
 	CapExports:          true,
 	CapFieldRestrict:    true,
-	CapOwnerAccess:      true,
-	CapTenantAccess:     true,
+	CapRowScope:         true,
+	CapClaimScope:       true,
+	CapIdentityScope:    true,
+	CapMultiScope:       true,
+	CapPartialScope:     true,
 	CapScopeBypass:      true,
 	CapPerEntryFact:     true,
 	CapBatchedFact:      true,
@@ -147,7 +153,8 @@ func AllCapabilities() []Capability {
 		CapFlat, CapSharedBase, CapValueObjects, CapChildren, CapSiblings,
 		CapRulesDSL, CapManualRules, CapService, CapMongoView, CapRelationalView,
 		CapREST, CapGraphQL, CapExports, CapFieldRestrict, CapIdentityView,
-		CapOwnerAccess, CapTenantAccess, CapScopeBypass, CapScopedUnique,
+		CapRowScope, CapClaimScope, CapIdentityScope, CapMultiScope, CapPartialScope,
+		CapScopeBypass, CapScopedUnique,
 		CapChildUnique, CapPerEntryFact, CapBatchedFact, CapArchivedScope, CapJoinedFact,
 		CapGeneratedTests, CapPerChild, CapPerChildPatch,
 		CapAssignedField, CapClientIPField, CapDerivedField, CapStampedField, CapMountedChild, CapGroupedFact, CapFactCriteria,
@@ -342,11 +349,23 @@ func CheckCoverage(s *Spec) *Problems {
 		}
 	}
 
-	switch s.Authz.DataAccess {
-	case "owner-only":
-		uses(CapOwnerAccess, "authz.dataAccess", "owner-only data access")
-	case "tenant":
-		uses(CapTenantAccess, "authz.dataAccess", "tenant data access")
+	if Scoped(s.Authz.DataAccess) {
+		uses(CapRowScope, "authz.dataAccess", "row scoping")
+		if len(s.Authz.Scopes) > 1 {
+			uses(CapMultiScope, "authz.scopes", "several row scopes at once")
+		}
+		for i, sc := range s.Authz.Scopes {
+			at := fmt.Sprintf("authz.scopes[%d]", i)
+			if sc.From == "claim" {
+				uses(CapClaimScope, at+".from", "a row scope fed by a claim read by name")
+			}
+			if sc.Field == IdentityName {
+				uses(CapIdentityScope, at+".field", "a row scope over the aggregate's own identity")
+			}
+			if len(sc.Applies) > 0 {
+				uses(CapPartialScope, at+".applies", "a row scope enforced on some verbs and not others")
+			}
+		}
 	}
 	if s.Authz.Bypass != "" {
 		uses(CapScopeBypass, "authz.bypass", "a permission that crosses the row scope")

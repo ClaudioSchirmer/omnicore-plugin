@@ -46,8 +46,9 @@ read:
 surfaces: {rest: true}
 authz:
   resource: perfil
-  dataAccess: tenant
-  tenantField: TenantID
+  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant}
   bypass: platform:cross-tenant
   permissions:
     insert: "perfil:escrever"
@@ -88,7 +89,7 @@ func bypassModel(t *testing.T) *ir.Model {
 func TestBypassSettableScopeIsOnTheInsertAlone(t *testing.T) {
 	m := bypassModel(t)
 
-	if f := m.BypassSettableField(); f == nil {
+	if fs := m.BypassSettableFields(); len(fs) == 0 {
 		t.Fatal("the scope subject was not recognised as stateable by the bypass")
 	}
 	if got := names(m.CommandFields("insert")); !contains(got, "TenantID") {
@@ -173,19 +174,19 @@ func TestTheStatedScopeIsAnsweredByTheRowScopeGuard(t *testing.T) {
 	if entity == "" {
 		t.Fatal("the aggregate was not emitted")
 	}
-	guard := entity[strings.Index(entity, "func (e *Perfil) refuseForeignTenant("):]
+	guard := entity[strings.Index(entity, "func (e *Perfil) refuseForeignTenantID("):]
 	guard = guard[:strings.Index(guard, "\n}")]
 
 	for _, want := range []string{
-		"e.TenantID != e.RequestingTenant", // the stated value, compared
-		"!e.RequestingMayCrossScope",       // and the bypass standing down
+		"e.TenantID != e.RequestingTenantID", // the stated value, compared
+		"!e.RequestingMayCrossScope",         // and the bypass standing down
 		"notifications.TenantMismatchNotification{}",
 	} {
 		if !strings.Contains(guard, want) {
 			t.Errorf("the row-scope guard does not carry %q:\n%s", want, guard)
 		}
 	}
-	if !strings.Contains(entity, "r.IfInsertOrUpdate(func() { e.refuseForeignTenant(r) })") {
+	if !strings.Contains(entity, "r.IfInsertOrUpdate(func() { e.refuseForeignTenantID(r) })") {
 		t.Error("the guard is not run on the insert, which is the verb the stated tenant rides on")
 	}
 }
