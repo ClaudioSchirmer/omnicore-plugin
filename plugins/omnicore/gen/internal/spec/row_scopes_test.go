@@ -257,14 +257,119 @@ func TestAnOrdinaryScopeCoversEverythingByDefault(t *testing.T) {
 	}
 }
 
-// TestAScopesOwnCarrierNameIsRefused. The caller's half is synthesised onto the
-// aggregate as Requesting<Field>; an author who declared one would get two Go
-// struct fields with one name and a build failure with no line pointing at the
-// spec. It is not a fixed word, so the static reserved list cannot hold it.
+// TestAScopesOwnCarrierNameIsRefused. A claim-fed scope's carrier is derived
+// from the field it compares — Requesting<Field> — so it is not a fixed word
+// and the static reserved list cannot hold it; an author who declared the same
+// name would get two Go struct fields with one name and a build failure with no
+// line pointing at the spec. It is refused beside the scope instead.
 func TestAScopesOwnCarrierNameIsRefused(t *testing.T) {
 	ps := scopeProblems(t, `  dataAccess: scoped
   scopes:
-    - {field: TenantID, from: tenant}`,
-		`  - {name: RequestingTenantID, type: string, runtime: true, source: subject, livesOn: root, example: x, description: Quem chamou.}`)
+    - {field: FilialID, from: claim, claim: filial_id}`,
+		`  - {name: RequestingFilialID, type: string, runtime: true, source: subject, livesOn: root, example: x, description: Quem chamou.}`)
 	mustBlock(t, ps, "the entity already declares one")
+}
+
+// TestTheAccessorFedCarrierNamesAreTheOldOnes is Bug 1's regression: migrating
+// `dataAccess: tenant` + `tenantField` to the documented one-scope equivalent
+// renamed RequestingTenant to RequestingTenantID — an EXPORTED field on a
+// generated aggregate that hand-written command handlers feed, so the
+// "mechanical" migration was a compile break at zero distance in files this
+// generator does not own. The accessor-fed shapes keep the 0.64.0 names.
+func TestTheAccessorFedCarrierNamesAreTheOldOnes(t *testing.T) {
+	scopes := []Scope{{Field: "TenantID", From: "tenant"}}
+	if c, g := ScopeNames(scopes, scopes[0]); c != "RequestingTenant" || g != "refuseForeignTenant" {
+		t.Errorf("a tenant-fed scope is named (%s, %s), not the 0.64.0 pair", c, g)
+	}
+	scopes = []Scope{{Field: "DonoEmail", From: "subject"}}
+	if c, g := ScopeNames(scopes, scopes[0]); c != "RequestingSubject" || g != "refuseForeignOwner" {
+		t.Errorf("a subject-fed scope is named (%s, %s), not the 0.64.0 pair", c, g)
+	}
+	// The shapes the old language could not spell derive from the field: there
+	// is nothing to be compatible with.
+	scopes = []Scope{{Field: "FilialID", From: "claim", Claim: "filial_id"}}
+	if c, g := ScopeNames(scopes, scopes[0]); c != "RequestingFilialID" || g != "refuseForeignFilialID" {
+		t.Errorf("a claim-fed scope is named (%s, %s), not after its field", c, g)
+	}
+	scopes = []Scope{{Field: "ID", From: "tenant"}}
+	if c, g := ScopeNames(scopes, scopes[0]); c != "RequestingID" || g != "refuseForeignID" {
+		t.Errorf("an identity scope is named (%s, %s), not after ID", c, g)
+	}
+	// Two scopes sharing one accessor cannot share a carrier, so BOTH go
+	// derived — deterministically, not first-come.
+	scopes = []Scope{
+		{Field: "TenantID", From: "tenant"},
+		{Field: "RegiaoID", From: "tenant"},
+	}
+	for _, sc := range scopes {
+		if c, _ := ScopeNames(scopes, sc); c != "Requesting"+sc.Field {
+			t.Errorf("a duplicated accessor still hands out the legacy name (%s for %s)", c, sc.Field)
+		}
+	}
+}
+
+// TestADerivedCarrierCannotCollideWithALegacyOne: a claim scope over a field
+// called Tenant would synthesise RequestingTenant — the same word the
+// tenant-fed scope is called — and the two guards would be one method emitted
+// twice. Caught in validation, not in the build.
+func TestADerivedCarrierCannotCollideWithALegacyOne(t *testing.T) {
+	ps := scopeProblems(t, `  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant}
+    - {field: Tenant, from: claim, claim: outro}`,
+		`  - {name: Tenant, type: string, column: outro_tenant, length: 60, livesOn: root, example: x, description: Outro tenant.}`)
+	mustBlock(t, ps, "both synthesise a carrier")
+}
+
+// TestBypassMaySetNeedsTheInsertCovered is Bug 2's sharp edge: the stated
+// value is judged by the scope's guard ON the insert, so a scope that does not
+// cover that verb leaves the mapper's unconditional assignment with nothing
+// judging it — the value would be applied from everybody.
+func TestBypassMaySetNeedsTheInsertCovered(t *testing.T) {
+	ps := scopeProblems(t, `  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant, applies: [read]}
+  bypass: "platform:cross-tenant"`,
+		`  - {name: Extra, type: string, column: extra, length: 10, livesOn: root, example: x, description: Extra.}`)
+	_ = ps // the template's TenantID has no bypassMaySet; the real case is below
+	raw := scopeSpecWithBypassMaySet(t)
+	s, err := Parse([]byte(raw), "pedido.omnicore.yaml")
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	mustBlock(t, Validate(s, Options{}), "nothing would judge the value")
+}
+
+// scopeSpecWithBypassMaySet is a tenant-scoped entity whose scope covers only
+// the reads while its subject claims bypassMaySet.
+func scopeSpecWithBypassMaySet(t *testing.T) string {
+	t.Helper()
+	return `
+specVersion: 1
+entity: Perfil
+plural: Perfis
+language: pt-BR
+storage:
+  kind: flat
+  table: perfis
+  description: Perfis.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at}
+fields:
+  - {name: TenantID, type: string, column: tenant_id, length: 60, livesOn: root, assignedFrom: identity-claim, claim: tenant_id, bypassMaySet: true, example: escola-alfa, description: O tenant.}
+  - {name: Chave, type: string, column: chave, length: 64, livesOn: root, example: adm, description: A chave.}
+modes: [display, insert, update]
+update: {shape: both}
+read:
+  backing: relational
+  view: {name: perfis}
+  byId: true
+surfaces: {rest: true}
+authz:
+  resource: perfil
+  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant, applies: [read]}
+  bypass: "platform:cross-tenant"
+  permissions: {insert: "perfil:escrever", update: "perfil:escrever", patch: "perfil:escrever", read: "perfil:ler"}
+`
 }

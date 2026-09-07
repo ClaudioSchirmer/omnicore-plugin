@@ -164,7 +164,7 @@ func identityFeedModel(t *testing.T, dataAccess string) *ir.Model {
 // that writes the root — not just the ones the root's own verbs use.
 //
 // A per-entry verb writes the aggregate under ModeUpdate, so IfInsertOrUpdate
-// fires and refuseForeignTenantID runs. With the context discarded the three
+// fires and refuseForeignTenant runs. With the context discarded the three
 // fields it reads stayed zero, RequestingIdentityPresent was false, and the
 // stand-down policy — the DEFAULT — turned the guard into a no-op on exactly
 // the routes that grant and revoke.
@@ -184,7 +184,7 @@ func TestPerEntryChildVerbsCarryTheIdentity(t *testing.T) {
 		}
 	}
 	got := all.String()
-	if n := strings.Count(got, "e.RequestingTenantID = id.TenantID()"); n != 3 {
+	if n := strings.Count(got, "e.RequestingTenant = id.TenantID()"); n != 3 {
 		t.Errorf("the caller reaches %d of the 3 per-entry mappers:\n%s", n, got)
 	}
 	if n := strings.Count(got, "e.RequestingIdentityPresent = true"); n != 3 {
@@ -201,7 +201,7 @@ func TestFacetClearVerbCarriesTheIdentity(t *testing.T) {
 	if !strings.Contains(got, "func (cmd *ClearContatoCommand) ApplyTo(ctx *configuration.AppContext") {
 		t.Errorf("the facet-clearing mutation discards the AppContext:\n%s", got)
 	}
-	if !strings.Contains(got, "e.RequestingTenantID = id.TenantID()") {
+	if !strings.Contains(got, "e.RequestingTenant = id.TenantID()") {
 		t.Errorf("clearing a facet of another tenant's row goes unguarded:\n%s", got)
 	}
 }
@@ -217,7 +217,7 @@ func TestUnscopedEntityLeavesTheContextUnnamed(t *testing.T) {
 	if strings.Contains(got, "ApplyTo(ctx *configuration.AppContext") {
 		t.Errorf("a mapper with nothing to carry names the context anyway:\n%s", got)
 	}
-	if strings.Contains(got, "RequestingTenantID") {
+	if strings.Contains(got, "RequestingTenant") {
 		t.Errorf("an unscoped entity got a feed it has no fields for:\n%s", got)
 	}
 }

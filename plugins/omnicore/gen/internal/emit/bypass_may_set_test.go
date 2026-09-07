@@ -174,19 +174,19 @@ func TestTheStatedScopeIsAnsweredByTheRowScopeGuard(t *testing.T) {
 	if entity == "" {
 		t.Fatal("the aggregate was not emitted")
 	}
-	guard := entity[strings.Index(entity, "func (e *Perfil) refuseForeignTenantID("):]
+	guard := entity[strings.Index(entity, "func (e *Perfil) refuseForeignTenant("):]
 	guard = guard[:strings.Index(guard, "\n}")]
 
 	for _, want := range []string{
-		"e.TenantID != e.RequestingTenantID", // the stated value, compared
-		"!e.RequestingMayCrossScope",         // and the bypass standing down
+		"e.TenantID != e.RequestingTenant", // the stated value, compared
+		"!e.RequestingMayCrossScope",       // and the bypass standing down
 		"notifications.TenantMismatchNotification{}",
 	} {
 		if !strings.Contains(guard, want) {
 			t.Errorf("the row-scope guard does not carry %q:\n%s", want, guard)
 		}
 	}
-	if !strings.Contains(entity, "r.IfInsertOrUpdate(func() { e.refuseForeignTenantID(r) })") {
+	if !strings.Contains(entity, "r.IfInsertOrUpdate(func() { e.refuseForeignTenant(r) })") {
 		t.Error("the guard is not run on the insert, which is the verb the stated tenant rides on")
 	}
 }

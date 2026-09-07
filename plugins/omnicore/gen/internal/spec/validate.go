@@ -546,10 +546,18 @@ var reservedFieldNames = map[string]string{
 	"ParentID": "the parent link is projected automatically as the read-only twin of ID",
 	"Revision": "the revision column is declared under storage.managed, not as a field",
 
-	// The caller's half of a row scope is named after the field it is compared
-	// against — Requesting<Field> — so it is not a fixed word and cannot be an
-	// entry here. It is refused beside the scope that synthesises it, in
-	// validateScopes, which is the one place that knows the field's name.
+	// The two accessor-fed carriers are FIXED words (see ScopeNames), so they
+	// are refused here like any other reserved name. A claim-fed or ID scope's
+	// carrier is named after the field it compares — Requesting<Field> — which
+	// is not a fixed word and cannot be an entry in this list: it is refused
+	// beside the scope that synthesises it, in validateScopes, the one place
+	// that knows the field's name.
+	"RequestingTenant": "the row scope synthesises this name for the caller's own tenant; " +
+		"to carry the tenant into a rule of your own, declare a runtime field with " +
+		"source: tenant under a different name",
+	"RequestingSubject": "the row scope synthesises this name for the caller's own subject; " +
+		"to carry the subject into a rule of your own, declare a runtime field with " +
+		"source: subject under a different name",
 	"RequestingMayCrossScope": "the row scope synthesises this name for authz.bypass; " +
 		"to ask about a permission of your own, declare a runtime field with " +
 		"source: permission under a different name",
@@ -580,18 +588,52 @@ func ScopeSubjectNames(s *Spec) []string {
 	return out
 }
 
-// ScopeIdentityFieldName is the runtime field the resolver synthesises to carry
-// the CALLER's half of one scope onto the aggregate.
+// ScopeNames answers what ONE scope's synthesised carrier field and write guard
+// are called. It is the single naming decision, exported because three layers
+// have to spell it identically: the validator refusing an author's field that
+// would collide with a carrier, the resolver synthesising it, and the emitters
+// reading it.
 //
-// It is derived from the field the scope compares against rather than from the
-// claim it is fed by, for two reasons: the name is unique by construction (two
-// scopes cannot narrow by the same field), and it reads as the pair it is —
-// e.BranchID != e.RequestingBranchID.
+// A scope fed by a FRAMEWORK ACCESSOR keeps the names this generator emitted
+// before authz.scopes existed — from: tenant is RequestingTenant and
+// refuseForeignTenant, from: subject is RequestingSubject and
+// refuseForeignOwner. That is a compatibility contract, not a taste: the
+// carrier is an EXPORTED field on a generated aggregate that hand-written code
+// feeds (the generated mappers do exactly that, so a hand-written command
+// handler doing the same writes to that name), and renaming it under a spec
+// migration documented as mechanical is a compile break at zero distance in
+// files this generator does not own. It happened, on a real service, before
+// this rule was written down.
 //
-// Exported because three layers have to spell it identically: the validator
-// refusing an author's field that would collide with it, the resolver
-// synthesising it, and the emitters reading it.
-func ScopeIdentityFieldName(field string) string { return "Requesting" + field }
+// Everything the old language could NOT express derives from the FIELD instead
+// — Requesting<Field> / refuseForeign<Field> — because there is nothing to be
+// compatible with: a claim-fed scope, a scope over the aggregate's own ID, and
+// the rare pair of scopes sharing one accessor (two carriers cannot share a
+// name, so a duplicated accessor takes every scope it feeds to derived names).
+// The names read as the pair they are — e.BranchID != e.RequestingBranchID.
+func ScopeNames(scopes []Scope, sc Scope) (carrier, guard string) {
+	if legacyScopeShape(sc) {
+		fed := 0
+		for _, other := range scopes {
+			if legacyScopeShape(other) && other.From == sc.From {
+				fed++
+			}
+		}
+		if fed == 1 {
+			if sc.From == "tenant" {
+				return "RequestingTenant", "refuseForeignTenant"
+			}
+			return "RequestingSubject", "refuseForeignOwner"
+		}
+	}
+	return "Requesting" + sc.Field, "refuseForeign" + sc.Field
+}
+
+// legacyScopeShape reports whether a scope is one the pre-scopes language could
+// spell: a DECLARED field compared against one of the two framework accessors.
+func legacyScopeShape(sc Scope) bool {
+	return sc.Field != IdentityName && (sc.From == "tenant" || sc.From == "subject")
+}
 
 // validateBypassMaySet holds the "yields to the bypass" key to the ONE seat
 // where it is safe.
@@ -661,6 +703,25 @@ func validateBypassMaySet(s *Spec, f Field, where string, ps *Problems, isChild 
 			"this entity has no insert verb, and the exception is on the insert alone — "+
 				"a row does not change scope by being updated",
 			"add insert to the entity's modes, or drop bypassMaySet")
+	}
+	// And the guard that judges the stated value runs under the scope's own
+	// gates — so a scope that does not cover the insert leaves the mapper's
+	// unconditional assignment with NOTHING judging it, which is a privilege
+	// escalation spelled as a convenience. The whole design of this key is
+	// "the mapper applies, the guard refuses"; without the guard on this verb
+	// there is only the first half.
+	for _, sc := range s.Authz.Scopes {
+		if sc.Field != f.Name {
+			continue
+		}
+		if !contains(ScopeApplies(s, sc), "insert") {
+			ps.BlockerFix(at,
+				fmt.Sprintf("the scope over %q does not cover the insert, so nothing "+
+					"would judge the value a caller states — it would be applied from "+
+					"everybody", f.Name),
+				"add insert to that scope's applies (or drop applies for the default), "+
+					"or drop bypassMaySet")
+		}
 	}
 }
 
@@ -5439,6 +5500,7 @@ func validateScopes(s *Spec, ps *Problems) {
 	}
 
 	seen := map[string]bool{}
+	seenCarriers, seenGuards := map[string]string{}, map[string]string{}
 	for i, sc := range a.Scopes {
 		where := fmt.Sprintf("authz.scopes[%d]", i)
 		switch {
@@ -5474,16 +5536,38 @@ func validateScopes(s *Spec, ps *Problems) {
 		}
 		seen[sc.Field] = true
 
-		// The name the resolver will synthesise for the caller's half. It is
-		// derived from the author's own field, so it cannot be refused by the
-		// static reserved list — it is refused here, where the field is known.
-		if carrier := ScopeIdentityFieldName(sc.Field); findField(s.Fields, carrier) != nil {
+		// The names the resolver will synthesise for this scope. The derived
+		// ones come from the author's own field, so they cannot be refused by
+		// the static reserved list — they are refused here, where the field is
+		// known. Two checks: against the entity's declared fields, and against
+		// the OTHER scopes' names, because a derived name can collide with a
+		// legacy one (a claim scope over a field called Tenant synthesises
+		// RequestingTenant, which is also what a from: tenant scope is called).
+		carrier, guard := ScopeNames(a.Scopes, sc)
+		if findField(s.Fields, carrier) != nil {
 			ps.BlockerFix(where+".field",
 				fmt.Sprintf("this scope synthesises a runtime field named %q onto the "+
 					"aggregate, and the entity already declares one", carrier),
 				fmt.Sprintf("rename the declared %q — two Go struct fields with one name "+
 					"is a build failure with no line pointing back at this spec", carrier))
 		}
+		if prior, dup := seenCarriers[carrier]; dup {
+			ps.BlockerFix(where+".field",
+				fmt.Sprintf("this scope and the one over %q both synthesise a carrier "+
+					"named %q", prior, carrier),
+				"rename one of the fields — the carrier is named after the field it "+
+					"compares (or after the accessor, for the tenant/subject shapes), and "+
+					"two Go struct fields with one name is a build failure")
+		}
+		seenCarriers[carrier] = sc.Field
+		if prior, dup := seenGuards[guard]; dup {
+			ps.BlockerFix(where+".field",
+				fmt.Sprintf("this scope and the one over %q both synthesise a guard "+
+					"named %q", prior, guard),
+				"rename one of the fields — each scope's write guard needs a method "+
+					"name of its own")
+		}
+		seenGuards[guard] = sc.Field
 
 		switch sc.From {
 		case "":
