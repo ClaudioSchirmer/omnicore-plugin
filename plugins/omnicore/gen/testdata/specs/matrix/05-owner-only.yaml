@@ -25,8 +25,9 @@ fields:
   # nunca envia. `derived` só promete tirar o campo de todo DTO de escrita e do
   # schema do OpenAPI; QUEM calcula é a regra manual abaixo, e o relatório cobra.
   - {name: Codigo, type: string, column: codigo, length: 40, livesOn: root, assignedFrom: derived, example: anot-7f3a91, description: Código público da anotação.}
-  # O dono NÃO vem do corpo: com owner-only, deixar o cliente escolher o dono é
-  # deixar qualquer um criar anotação no nome de outro. assignedFrom tira o campo
+  # O dono NÃO vem do corpo: com a linha escopada pelo dono, deixar o cliente
+  # escolher esse dono é deixar qualquer um criar anotação no nome de outro.
+  # assignedFrom tira o campo
   # de todo DTO de escrita e o preenche da identidade autenticada.
   - {name: DonoEmail, type: string, column: dono_email, length: 160, livesOn: root, assignedFrom: identity-subject, example: ana@escola.br, description: E-mail do dono da anotação.}
 modes: [display, insert, update]
@@ -49,6 +50,7 @@ read:
 surfaces: {rest: true}
 authz:
   resource: anotacao
-  dataAccess: owner-only
-  ownerField: DonoEmail
+  dataAccess: scoped
+  scopes:
+    - {field: DonoEmail, from: subject}
   permissions: {insert: "anotacao:escrever", patch: "anotacao:escrever", read: "anotacao:ler"}

@@ -1085,30 +1085,30 @@ func renderCheck(b *strings.Builder, in Input) {
 	// reviewer reading the insert DTO sees a caller choosing their own scope and
 	// is right to stop; what makes it safe is a guard in another file, and this
 	// is where the two are put side by side.
-	if f := m.BypassSettableField(); f != nil {
-		what, guardName := "tenant", "refuseForeignTenant"
-		if m.Authz.DataAccess == "owner-only" {
-			what, guardName = "owner", "refuseForeignOwner"
+	for _, sc := range m.Authz.Scopes {
+		f := sc.Subject
+		if sc.OnIdentity || !f.BypassMaySet || m.Authz.BypassField == nil {
+			continue
 		}
 		who := "a caller holding `" + m.Authz.Bypass + "`"
 		if m.Authz.BypassWildcard {
 			who = "a super-admin (`" + m.Authz.Bypass + "`)"
 		}
-		b.WriteString("### The " + what + " is server-assigned, and the insert accepts one anyway\n\n")
+		b.WriteString("### " + f.Name + " is server-assigned, and the insert accepts one anyway\n\n")
 		fmt.Fprintf(b, "`%s` is declared `assignedFrom: %s` with `bypassMaySet: true`, so it is "+
 			"filled from the caller's identity on every insert and is in no update or patch "+
 			"body. The INSERT body carries it as an OPTIONAL value, for one reason: %s crosses "+
-			"the row scope, and without a field to name the %s in they could repair a "+
+			"the row scope, and without a field to name the scope in they could repair a "+
 			"customer's records and never create one.\n\n",
-			f.Name, f.AssignedFrom, who, what)
+			f.Name, f.AssignedFrom, who)
 		fmt.Fprintf(b, "**Check the guard, not the mapper.** The mapper applies whatever was "+
-			"sent, deliberately: what refuses a caller who may not state a %s is `%s` in "+
+			"sent, deliberately: what refuses a caller who may not state one is `%s` in "+
 			"`internal/domain/%s.go`, which compares `%s` against the caller's own and stands "+
 			"down only for the bypass. Two things follow. A caller who names someone else's "+
-			"%s gets the same refusal a write into that %s gets — not a silent 201 filed "+
+			"scope gets the same refusal a write into that scope gets — not a silent 201 filed "+
 			"under their own. And if that guard is ever removed or narrowed, this field "+
-			"becomes a %s anyone can choose.\n\n",
-			what, guardName, m.Entity.Snake, f.Name, what, what, what)
+			"becomes one anyone can choose.\n\n",
+			sc.GuardName(), m.Entity.Snake, f.Name)
 	}
 
 	// Same principle, for rules: one declared on a collection but enforced from
@@ -1513,6 +1513,15 @@ func renderCheck(b *strings.Builder, in Input) {
 	fmt.Fprintf(b, "| Data access | %s | %s |\n", m.Authz.DataAccess,
 		dataAccessNote(m.Authz.DataAccess))
 
+	// One row per scope, and they are ANDed: a reviewer has to be able to count
+	// them and see where each is enforced, because a scope that covers fewer
+	// verbs than its neighbours is exactly what nothing else in the output says.
+	for _, sc := range m.Authz.Scopes {
+		what, against, where := scopeRow(sc)
+		fmt.Fprintf(b, "| Row scope | %s = %s | Enforced on: %s. %s |\n",
+			what, against, where, scopeNote(m, sc))
+	}
+
 	// A scope with an exception is two decisions, and the second one is the one
 	// a reviewer has to be told about: it is the line that lets somebody read
 	// and repair rows that are not theirs.
@@ -1808,12 +1817,46 @@ func dataAccessNote(kind string) string {
 	switch kind {
 	case "anyone-with-permission":
 		return "Any caller holding the permission sees and edits every row. If some callers should only see their own, this is the line to change."
-	case "owner-only":
-		return "Callers are restricted to rows they own."
-	case "tenant":
-		return "Callers are restricted to their tenant's rows."
+	case "scoped":
+		return "Callers reach only the rows their identity places them in — see the scopes below."
 	}
 	return ""
+}
+
+// scopeRows renders one row scope for the decisions table: what is compared,
+// against what, and where it is enforced. It is a table row rather than prose
+// because a reviewer counting scopes is the check this section exists for.
+func scopeRow(sc ir.Scope) (string, string, string) {
+	what := sc.Subject.Name
+	if sc.OnIdentity {
+		what = "`ID` (the row's own identity)"
+	} else {
+		what = "`" + what + "`"
+	}
+	var against string
+	switch sc.From {
+	case "subject":
+		against = "`Identity().Subject`"
+	case "tenant":
+		against = "`Identity().TenantID()` — whichever claim `authorization.tenant.claim` names"
+	default:
+		against = "the `" + sc.Claim + "` claim, read by name"
+	}
+	return what, against, strings.Join(sc.Applies, ", ")
+}
+
+// scopeNote is the sentence a reviewer needs beside one scope: what it costs to
+// get wrong, and the one asymmetry that is not obvious from the row.
+func scopeNote(m *ir.Model, sc ir.Scope) string {
+	if sc.OnIdentity && !sc.AppliesTo("insert") {
+		return "The INSERT is outside it on purpose: the framework mints the identity on " +
+			"that verb, so the row belongs to nobody yet and comparing it would refuse " +
+			"every creation. Who may create one is `authz.permissions.insert`."
+	}
+	if len(m.Authz.Scopes) > 1 {
+		return "ANDed with the other scopes: a row is this caller's only when every one of them matches."
+	}
+	return "Both halves are generated: the read filter in the query, and a guard in BuildRules."
 }
 
 // bypassNote explains the exception to the row scope, and each of the two forms

@@ -63,8 +63,7 @@ read:
 surfaces: {rest: true}
 authz:
   resource: perfil
-  dataAccess: %s
-  tenantField: TenantID
+%s
 %s
   permissions: {insert: "perfil:escrever", patch: "perfil:escrever", read: "perfil:ler"}
 `
@@ -73,7 +72,7 @@ type bypassCase struct {
 	onTenant   string // extra keys under the TenantID field, already indented
 	onOrdinary string // ... under Chave
 	onChild    string // ... under the entry's Rotulo
-	dataAccess string // defaults to tenant
+	dataAccess string // the whole authz posture block; defaults to a tenant scope
 	bypass     string // the authz.bypass line, already indented; empty = nobody crosses
 	modes      string // replaces the entity's own modes line when set
 }
@@ -82,7 +81,9 @@ func bypassProblems(t *testing.T, c bypassCase) *Problems {
 	t.Helper()
 	access := c.dataAccess
 	if access == "" {
-		access = "tenant"
+		// The row scope this key belongs beside: the tenant is a field, and the
+		// caller's half is the framework's own tenant accessor.
+		access = "  dataAccess: scoped\n  scopes:\n    - {field: TenantID, from: tenant}"
 	}
 	bypass := c.bypass
 	if bypass == "" {
@@ -96,9 +97,9 @@ func bypassProblems(t *testing.T, c bypassCase) *Problems {
 	if err != nil {
 		t.Fatalf("parsing:\n%v\n\n%s", err, raw)
 	}
-	// dataAccess: tenant with no tenantField is a different refusal; the cases
-	// that change the access also drop the field, so the template keeps both and
-	// the unused one is simply ignored by the validator.
+	// A case that changes the access substitutes the WHOLE block — posture and
+	// scopes together — because scopes under an unscoped posture is a refusal of
+	// its own, and it is not the one under test here.
 	return Validate(s, Options{})
 }
 
@@ -153,7 +154,7 @@ func TestBypassMaySetNeedsABypass(t *testing.T) {
 func TestBypassMaySetNeedsAScopedDataAccess(t *testing.T) {
 	ps := bypassProblems(t, bypassCase{
 		onTenant:   assignedTenant + "\n    bypassMaySet: true",
-		dataAccess: "anyone-with-permission",
+		dataAccess: "  dataAccess: anyone-with-permission",
 	})
 	mustBlock(t, ps, "nothing scopes the rows of this entity")
 }
@@ -171,7 +172,7 @@ func TestBypassMaySetIsRefusedOffTheScopeSubject(t *testing.T) {
 		onOrdinary: "    assignedFrom: identity-subject\n    bypassMaySet: true",
 		bypass:     `  bypass: platform:cross-tenant`,
 	})
-	mustBlock(t, ps, "is not the field the row scope narrows by")
+	mustBlock(t, ps, "is not a field the row scope narrows by")
 }
 
 // TestBypassMaySetIsRefusedOnACollectionEntry: an entry is not the subject of

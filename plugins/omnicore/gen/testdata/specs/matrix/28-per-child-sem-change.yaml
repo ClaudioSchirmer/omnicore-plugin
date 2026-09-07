@@ -87,7 +87,8 @@ read:
 surfaces: {rest: true}
 authz:
   resource: perfilpc
-  dataAccess: tenant
-  tenantField: TenantID
+  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant}
   bypass: "*:*"
   permissions: {insert: "perfilpc:escrever", patch: "perfilpc:escrever", archive: "perfilpc:arquivar", read: "perfilpc:ler"}

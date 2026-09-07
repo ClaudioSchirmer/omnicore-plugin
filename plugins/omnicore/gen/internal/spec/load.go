@@ -244,6 +244,12 @@ type renamedTo struct{ to, since string }
 var renamedKeys = map[renamedKey]renamedTo{
 	{goType: "Spec", from: "delete"}:      {to: "removal", since: "0.64.0"},
 	{goType: "Child", from: "softRemove"}: {to: "archiveOnRemove", since: "0.64.0"},
+	// The row scope stopped being two fixed shapes. Both old keys land on the
+	// same destination because both WERE the same thing — one equality between
+	// a field of the row and a fact about the caller — spelled twice so the
+	// language could only ever hold one of them.
+	{goType: "Authz", from: "tenantField"}: {to: "scopes", since: "0.65.0"},
+	{goType: "Authz", from: "ownerField"}:  {to: "scopes", since: "0.65.0"},
 }
 
 // shortTypeName reduces the decoder's "spec.Storage" to the bare "Storage" the
@@ -305,6 +311,7 @@ var specTypes = map[string]reflect.Type{
 	"CSVExport":     reflect.TypeOf(CSVExport{}),
 	"XLSXExport":    reflect.TypeOf(XLSXExport{}),
 	"Authz":         reflect.TypeOf(Authz{}),
+	"Scope":         reflect.TypeOf(Scope{}),
 	"Docs":          reflect.TypeOf(Docs{}),
 }
 

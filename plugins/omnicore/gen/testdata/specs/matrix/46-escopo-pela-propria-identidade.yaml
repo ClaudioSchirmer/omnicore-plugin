@@ -1,0 +1,73 @@
+# Eixo: authz Layer 2 — o cadastro cujo ESCOPO É A PRÓPRIA LINHA.
+#
+# É o caso que a linguagem antiga não conseguia escrever. `dataAccess: tenant`
+# exigia um `tenantField`, quer dizer uma COLUNA com o tenant — e num cadastro de
+# tenants não existe essa coluna: o tenant é o `id` da linha. O autor ficava sem
+# saída: ou escrevia o filtro e a guarda à mão, ou deixava o cadastro sem escopo
+# nenhum e confiava na permissão.
+#
+# Aqui o escopo é `field: ID`, comparado com o tenant que a implantação
+# configurou (`authorization.tenant.claim`). Duas consequências que o gerador
+# resolve sozinho e que valem ler:
+#
+#   - o INSERT fica de fora por padrão. Numa criação o `id` acabou de ser cunhado
+#     pelo framework e não é de ninguém, então comparar recusaria toda criação.
+#     Quem pode criar um tenant é a permissão (`inquilino:escrever`), e o
+#     gen-report diz isso;
+#   - o 403 é levantado pelo nome lógico `ID`, porque não existe campo Go para
+#     apontar — a carteira gerenciada do framework guarda o id.
+#
+# `authz.bypass: "*:*"` é o operador da plataforma: sem ele nem um superadmin
+# enxerga outro tenant, e o cadastro fica impossível de administrar.
+specVersion: 1
+entity: Inquilino
+plural: Inquilinos
+language: pt-BR
+storage:
+  kind: flat
+  table: inquilinos
+  description: Os inquilinos (tenants) da plataforma.
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
+fields:
+  - {name: Nome, type: string, column: nome, length: 160, livesOn: root, example: Escola Alfa, description: Nome do inquilino.}
+  - {name: Documento, type: string, column: documento, length: 20, livesOn: root, unique: {enforce: service-precheck+constraint, scope: all, notification: DocumentoEmUsoNotification}, example: "12345678000190", description: CNPJ do inquilino.}
+modes: [display, insert, update, archive, unarchive]
+update: {shape: both}
+removal: {root: archive}
+service:
+  required: true
+  facts:
+    - {name: DocumentoExiste, kind: exists, field: Documento, filters: [Documento], excludeSelf: true, description: Ja existe um inquilino com este documento.}
+notifications:
+  - name: DocumentoEmUsoNotification
+    semantic: conflict
+    text:
+      ptbr: Ja existe um inquilino com este documento.
+      eng: A tenant with this document already exists.
+      esp: Ya existe un inquilino con este documento.
+      fra: Un locataire avec ce document existe deja.
+      deu: Ein Mandant mit diesem Dokument existiert bereits.
+      ita: Esiste gia un inquilino con questo documento.
+      nld: Er bestaat al een huurder met dit document.
+read:
+  backing: relational
+  view: {name: inquilinos}
+  byId: true
+  byParams:
+    filters: [{field: Nome, ops: [icontains]}]
+    controls: {pagination: true}
+surfaces: {rest: true}
+authz:
+  resource: inquilino
+  dataAccess: scoped
+  scopes:
+    # A própria identidade da linha É o tenant. Sem coluna nenhuma para nomear.
+    - {field: ID, from: tenant}
+  bypass: "*:*"
+  permissions:
+    insert: "inquilino:escrever"
+    update: "inquilino:escrever"
+    patch: "inquilino:escrever"
+    archive: "inquilino:arquivar"
+    unarchive: "inquilino:arquivar"
+    read: "inquilino:ler"

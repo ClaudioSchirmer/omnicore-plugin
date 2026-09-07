@@ -90,11 +90,17 @@ func TestRefusedCapabilitiesAreActuallyRefused(t *testing.T) {
 		CapFieldRestrict: func(s *Spec) {
 			s.Read.FieldRestrict = []FieldRestrict{{Field: "Name", Permission: "x:y"}}
 		},
-		CapOwnerAccess: func(s *Spec) {
-			s.Authz.DataAccess = "owner-only"
+		CapRowScope: func(s *Spec) {
+			s.Authz.DataAccess = "scoped"
+			s.Authz.Scopes = []Scope{{Field: "Name", From: "tenant"}}
 		},
-		CapTenantAccess: func(s *Spec) {
-			s.Authz.DataAccess = "tenant"
+		CapClaimScope: func(s *Spec) {
+			s.Authz.DataAccess = "scoped"
+			s.Authz.Scopes = []Scope{{Field: "Name", From: "claim", Claim: "branch_id"}}
+		},
+		CapIdentityScope: func(s *Spec) {
+			s.Authz.DataAccess = "scoped"
+			s.Authz.Scopes = []Scope{{Field: "ID", From: "tenant"}}
 		},
 	}
 	for cap, mutate := range cases {

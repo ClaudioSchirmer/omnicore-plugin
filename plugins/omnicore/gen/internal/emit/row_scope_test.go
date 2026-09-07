@@ -45,8 +45,9 @@ read:
 surfaces: {rest: true}
 authz:
   resource: papel
-  dataAccess: tenant
-  tenantField: TenantID
+  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant}
 %s
   permissions: {insert: "papel:escrever", update: "papel:escrever", patch: "papel:escrever", archive: "papel:arquivar", unarchive: "papel:arquivar", read: "papel:ler"}
 `
@@ -78,12 +79,12 @@ func TestWriteGuardCoversEveryWriteVerb(t *testing.T) {
 	m := rowScopeModel(t, "")
 	got := fileNamed(t, m, "internal/domain/papel.go")
 	for _, gate := range []string{"IfInsertOrUpdate", "IfArchive", "IfUnarchive"} {
-		want := fmt.Sprintf("r.%s(func() { e.refuseForeignTenant(r) })", gate)
+		want := fmt.Sprintf("r.%s(func() { e.refuseForeignTenantID(r) })", gate)
 		if !strings.Contains(got, want) {
 			t.Errorf("no write guard under %s — that verb writes another tenant's row unchecked", gate)
 		}
 	}
-	if strings.Contains(got, "IfDisplay(func() { e.refuseForeignTenant") {
+	if strings.Contains(got, "IfDisplay(func() { e.refuseForeignTenantID") {
 		t.Error("the guard runs on a READ: the contract there is an empty page, not a 403")
 	}
 	if !strings.Contains(got, "notifications.TenantMismatchNotification{}") {
@@ -97,7 +98,7 @@ func TestWriteGuardCoversEveryWriteVerb(t *testing.T) {
 func TestWriteGuardComparesAnIDAgainstTheClaimAsText(t *testing.T) {
 	m := rowScopeModel(t, "")
 	got := fileNamed(t, m, "internal/domain/papel.go")
-	if !strings.Contains(got, "e.TenantID.Value() != e.RequestingTenant") {
+	if !strings.Contains(got, "e.TenantID.Value() != e.RequestingTenantID") {
 		t.Errorf("the guard does not compare the row's tenant against the caller's:\n%s", got)
 	}
 }
@@ -107,7 +108,7 @@ func TestWriteGuardComparesAnIDAgainstTheClaimAsText(t *testing.T) {
 func TestBodylessVerbCarriesTheIdentity(t *testing.T) {
 	m := rowScopeModel(t, "")
 	got := fileNamed(t, m, "internal/application/commands/archive_papel_command.go")
-	if !strings.Contains(got, "e.RequestingTenant = id.TenantID()") {
+	if !strings.Contains(got, "e.RequestingTenantID = id.TenantID()") {
 		t.Errorf("archive does not carry the caller onto the entity:\n%s", got)
 	}
 }
@@ -165,7 +166,7 @@ func TestStandDownAsksAboutPresenceNotAboutAnEmptyScope(t *testing.T) {
 	for _, policy := range []string{"", "  noIdentity: stand-down\n"} {
 		m := rowScopeModel(t, policy)
 		got := fileNamed(t, m, "internal/domain/papel.go")
-		if strings.Contains(got, `e.RequestingTenant != ""`) {
+		if strings.Contains(got, `e.RequestingTenantID != ""`) {
 			t.Error("the guard stands down on an EMPTY SCOPE — a token carrying no tenant " +
 				"claim would bypass every write check in production")
 		}

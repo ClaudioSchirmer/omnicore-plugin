@@ -7,6 +7,159 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.65.0] — 2026-09-07
+
+Row scoping stops being two shapes the language was born with and becomes what
+it always was: a list of equalities between a value the ROW carries and a fact
+about the CALLER.
+
+### Changed
+
+- **breaking spec** — **`authz.dataAccess` splits into a posture and a
+  mechanism, and `authz.scopes` is the mechanism.** `owner-only` and `tenant`
+  are retired, together with `authz.ownerField` and `authz.tenantField`.
+
+  ```yaml
+  # before                          # after
+  authz:                            authz:
+    dataAccess: tenant                dataAccess: scoped
+    tenantField: TenantID             scopes:
+                                        - {field: TenantID, from: tenant}
+
+  # before                          # after
+  authz:                            authz:
+    dataAccess: owner-only            dataAccess: scoped
+    ownerField: DonoEmail             scopes:
+                                        - {field: DonoEmail, from: subject}
+  ```
+
+  `from: tenant` still calls `Identity.TenantID()` and `from: subject` still
+  reads `Identity.Subject`, so **the generated comparison, the read filter and
+  the 403 are byte-for-byte what they were** for a one-scope spec. Nothing about
+  the deployment, the claim names or the permission model changes. The migration
+  is mechanical and the generator states it in place: the retired KEYS answer
+  `renamed to "scopes" in 0.65.0`, and the retired VALUES answer with the exact
+  two lines to write, since neither is a typo an edit-distance guess could
+  reach — the word did not change spelling, it split.
+
+  Why it had to break rather than keep both spellings: the old pair answered the
+  posture and the mechanism in one word, and the only mechanism a word can name
+  is a fixed one. Keeping it beside the list would have left two ways to say one
+  thing, which is how a spec stops being readable to the next person and how the
+  two halves drift.
+
+### Added
+
+- **A row scope can be fed by ANY claim, by name — `from: claim`.** Until now
+  the caller's half was one of two framework accessors, so a service scoped by
+  `branch_id`, by `cost_center` or by anything else an issuer puts in a token
+  had no way to say so and the scope was written by hand.
+
+  ```yaml
+  scopes:
+    - {field: FilialID, from: claim, claim: filial_id}
+  ```
+
+  The read filter forces `id.Claims["filial_id"]` into the query and the write
+  guard compares the same value off the entity. A token that does not carry the
+  claim scopes to `""`, which matches no row — never to "no filter at all",
+  which is the failure that answers with everybody's rows.
+
+- **A row scope can be the aggregate's OWN identity — `field: ID`.** This is the
+  case that paid for the whole change: **a tenant registry has no `tenant_id`
+  column, because the tenant IS the row**. `tenantField` demanded a column, so
+  the entity either went unscoped or had its filter and its guard hand-written.
+
+  ```yaml
+  authz:
+    dataAccess: scoped
+    scopes:
+      - {field: ID, from: tenant}
+    bypass: "*:*"
+  ```
+
+  Three things follow, all generated: the read filter is
+  `Filter["ID"] = id.TenantID()` under the framework's own logical name for the
+  aggregate id; the guard reads it through the managed carrier
+  (`e.GetID() != nil && e.GetID().Value() != …`, since there is no `e.ID` and a
+  never-persisted aggregate has none); and the 403 is raised with
+  `AddNotificationNamed("ID", …)`, there being no field reference to point at.
+
+  **The INSERT is skipped by default**, and that default is the point: on that
+  verb the framework has just minted the id and it belongs to nobody, so
+  comparing it would refuse every creation the entity serves. Who may create a
+  row in a registry like that is `authz.permissions.insert`. The gen-report says
+  so, and the generated suite proves it with its own case — a guard that was
+  silently never registered would otherwise look exactly like this policy.
+
+  The generated suite states the row's id in the CASES that can carry one — the
+  update and the archive — and never in `valid<Entity>()`, because the framework
+  refuses an insert on an aggregate that already has an id
+  (`validateForInsert`), which is the same fact the exemption above rests on. The
+  stated value is a UUID for the same reason: every verb carrying an id runs
+  `GetID().IsValid("id", …)` before any rule of yours, so a readable placeholder
+  would be rejected as a malformed id and read as the row-scope guard firing on
+  a caller it should have let through.
+
+- **SEVERAL scopes at once, ANDed.** A business that lives under a tenant AND a
+  branch AND a cost centre no longer picks which one the generator enforces. Each
+  scope gets its own read filter entry and its own `refuseForeign<Field>` guard —
+  one body per scope rather than one with an `&&`, so a refusal names the field
+  the write fell outside of. There is no OR, deliberately: an OR between two row
+  scopes WIDENS what a caller reaches, and a widening posture that reads like a
+  narrowing one is exactly what this key exists to make unwritable.
+
+  `authz.bypass` stays ONE key for the whole set: whoever crosses, crosses every
+  scope. A bypass that crossed the branch but not the tenant would be a second,
+  narrower posture hiding inside the first, with nothing in the output to make
+  the difference visible to a reviewer.
+
+- **`authz.scopes[].applies` narrows ONE scope to some verbs.** Omitted means
+  everywhere the entity is served, minus the `field: ID` insert above. Spell it
+  for "the listing shows the whole branch, but only the author may edit":
+
+  ```yaml
+  scopes:
+    - {field: FilialID, from: claim, claim: filial_id}
+    - {field: CriadoPor, from: subject, applies: [insert, update, archive]}
+  ```
+
+  `update` covers PUT and PATCH together, which is the granularity the
+  framework's write gates have; a scope covering only the insert or only the
+  update is registered under `IfInsert` / `IfUpdate` instead of
+  `IfInsertOrUpdate`, so nothing has to ask the entity for a mode it does not
+  expose. `check` refuses a verb the entity does not mount, and warns — rather
+  than refuses — when a `field: ID` scope is deliberately extended to the insert.
+
+- **Five capabilities replace two** in `explain coverage`: row scoping, claim
+  scoping, identity scoping, several scopes, and a partially applied scope. The
+  coverage gate names which of them a spec uses, so a build that cannot generate
+  one refuses the spec instead of silently narrowing it.
+
+- **Two coverage-matrix fixtures** for the shapes that had none: a tenant
+  registry scoped by its own id (`46-escopo-pela-propria-identidade`) and an
+  entity under three scopes, one of them a named claim and one of them
+  write-only (`47-escopos-multiplos-por-claim`).
+
+- **`TestEveryMatrixSpecValidates` — the check the matrix never had.** The
+  coverage matrix is the corpus every other test reaches for, and each of those
+  tests takes what it needs and SKIPS what it cannot use: the emitters' fixture
+  loader parses and resolves without validating, the IR's invariant sweep
+  `continue`s past a spec with blockers, the report's matrix does the same. Each
+  skip is right on its own; together they meant a fixture ADDED to the matrix
+  could be refused by `check` while the whole Go suite stayed green — and the
+  only thing that noticed was the golden gate, which needs Docker and five
+  engines and therefore runs late. It happened on this very change: both new
+  fixtures above went in refused.
+
+  The new test asserts the property nothing else did — a spec in the matrix is a
+  spec the generator ACCEPTS — over `Validate` **and** `CheckCoverage`, the two
+  `generate` runs before it writes anything. It is the cheapest possible version
+  of the gate, with no containers and no DDL, and it runs on every
+  `go test ./...`. One fixture is exempt, in a map that demands the reason
+  beside the name: `20-filho-de-base-montado` mounts a collection its shared
+  base owns, and validated ALONE that base is not there.
+
 ## [0.64.0] — 2026-09-06
 
 ### Changed

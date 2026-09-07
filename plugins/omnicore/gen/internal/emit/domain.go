@@ -8,7 +8,6 @@ import (
 
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/fsplan"
 	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/ir"
-	"github.com/ClaudioSchirmer/omnicore-plugin/gen/internal/naming"
 )
 
 func emitDomain(m *ir.Model) ([]fsplan.File, error) {
@@ -329,31 +328,88 @@ func emitBuildRules(s *src, m *ir.Model) {
 // Returns whether anything was emitted, so the "this aggregate declares no
 // rule" shortcut above does not fire over a guard that is right there.
 func emitRowScopeGuard(s *src, m *ir.Model) bool {
-	subject, caller := m.Authz.ScopeSubject(), m.Authz.ScopeField
-	if !m.Authz.Scoped() || subject == nil || caller == nil {
+	scopes := m.Authz.WriteScopes()
+	if len(scopes) == 0 {
 		return false
-	}
-	what := "tenant"
-	if m.Authz.DataAccess == "owner-only" {
-		what = "owner"
 	}
 
 	s.L("\t// Row scoping, WRITE side. The read filter decides what this caller may")
 	s.L("\t// SEE; this decides what they may create, edit and archive. Without it a")
-	s.L("\t// caller writes into a %s that is not theirs and cannot read back what", what)
+	s.L("\t// caller writes into a scope that is not theirs and cannot read back what")
 	s.L("\t// they wrote — damage that is invisible from the side that caused it.")
 	s.L("\t//")
 	s.L("\t// Every WRITE gate, one by one, and no display gate: a read is narrowed")
 	s.L("\t// by the query's filter, and refusing it here would answer 403 where the")
 	s.L("\t// contract is an empty page.")
-	for _, gate := range scopeGates(m) {
-		s.L("\tr.%s(func() { e.refuseForeign%s(r) })", gate, naming.Pascal(what))
+	if len(scopes) > 1 {
+		s.L("\t//")
+		s.L("\t// %d scopes, each its own guard: a row is this caller's when EVERY one of", len(scopes))
+		s.L("\t// them matches, and each reports against the field it compared, so a")
+		s.L("\t// refusal names which one the write fell outside of.")
+	}
+	for _, sc := range scopes {
+		gates := scopeGates(m, sc)
+		if len(gates) == 0 {
+			continue
+		}
+		if len(scopes) > 1 || len(sc.Applies) != len(scopeAppliesEverywhere(m)) {
+			s.L("\t// %s: %s.", sc.Subject.Name, scopeWhere(sc))
+		}
+		for _, gate := range gates {
+			s.L("\tr.%s(func() { e.%s(r) })", gate, sc.GuardName())
+		}
 	}
 	s.Blank()
 	return true
 }
 
-// scopeGates lists the write clauses the guard is registered under.
+// scopeWhere says, in one clause, where a scope is enforced — for the comment
+// above its gates, which is the only place a reader can see that one scope
+// covers less than the others without opening the spec.
+func scopeWhere(sc ir.Scope) string {
+	var verbs []string
+	for _, v := range []string{"insert", "update", "archive", "unarchive", "delete"} {
+		if sc.AppliesTo(v) {
+			verbs = append(verbs, v)
+		}
+	}
+	where := "the reads"
+	if !sc.Reads() {
+		where = ""
+	}
+	if len(verbs) > 0 {
+		w := strings.Join(verbs, ", ")
+		if where != "" {
+			where += " and " + w
+		} else {
+			where = w
+		}
+	}
+	return where
+}
+
+// scopeAppliesEverywhere is what a scope covering the whole entity looks like,
+// used only to decide whether the per-scope comment is worth writing.
+func scopeAppliesEverywhere(m *ir.Model) []string {
+	out := []string{"read"}
+	seen := map[string]bool{}
+	for _, op := range m.Ops {
+		v := op.Verb
+		if v == "patch" {
+			v = "update"
+		}
+		switch v {
+		case "insert", "update", "archive", "unarchive", "delete":
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// scopeGates lists the write clauses ONE scope's guard is registered under.
 //
 // Each verb is named EXPLICITLY rather than covered by one catch-all, because
 // the framework dispatches a clause by mode and there is no "any write" gate:
@@ -361,7 +417,11 @@ func emitRowScopeGuard(s *src, m *ir.Model) bool {
 // each their own EntityMode with their own entry point. Archive in particular
 // does NOT dispatch under IfUpdate — which is exactly the verb the report found
 // a caller could use on another tenant's row.
-func scopeGates(m *ir.Model) []string {
+//
+// Insert and update share IfInsertOrUpdate, which is why a scope that applies to
+// one and not the other cannot be gated by mode alone: the guard itself asks. See
+// emitRowScopeCheck.
+func scopeGates(m *ir.Model, sc ir.Scope) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(g string) {
@@ -370,35 +430,59 @@ func scopeGates(m *ir.Model) []string {
 			out = append(out, g)
 		}
 	}
+	var insert, update bool
 	for _, op := range m.Ops {
 		switch op.Verb {
-		case "insert", "update", "patch":
-			add("IfInsertOrUpdate")
+		case "insert":
+			insert = sc.AppliesTo("insert")
+		case "update", "patch":
+			update = update || sc.AppliesTo("update")
 		case "archive":
-			add("IfArchive")
+			if sc.AppliesTo("archive") {
+				add("IfArchive")
+			}
 		case "unarchive":
-			add("IfUnarchive")
+			if sc.AppliesTo("unarchive") {
+				add("IfUnarchive")
+			}
 		case "delete":
-			add("IfDelete")
+			if sc.AppliesTo("delete") {
+				add("IfDelete")
+			}
 		}
+	}
+	// The framework has a gate for each half AND one for both, so a scope that
+	// covers only one of them is separated by the REGISTRATION rather than by a
+	// condition inside the guard. That matters for the scope over the aggregate's
+	// own id, which skips the insert: the entity carries no readable mode, so a
+	// guard asking "is this an insert?" would have nothing to ask it with.
+	switch {
+	case insert && update:
+		add("IfInsertOrUpdate")
+	case insert:
+		add("IfInsert")
+	case update:
+		add("IfUpdate")
 	}
 	return out
 }
 
-// emitRowScopeCheck writes the guard's body, once, as a method the gates call.
+// emitRowScopeCheck writes each guard's body, once, as a method the gates call.
 //
-// One body rather than one per gate: the question is identical in every verb —
-// "is this row the caller's?" — and four copies of it are four places for the
-// bypass or the policy to be edited into disagreement.
+// One body per SCOPE rather than one per gate: within a scope the question is
+// identical in every verb — "is this row the caller's?" — and four copies of it
+// are four places for the bypass or the policy to be edited into disagreement.
+// Across scopes it is a different question each time, over a different field,
+// which is why they are not one body with an && in it: a refusal has to name
+// the field the write fell outside of.
 func emitRowScopeCheck(s *src, m *ir.Model) {
-	subject, caller := m.Authz.ScopeSubject(), m.Authz.ScopeField
-	if !m.Authz.Scoped() || subject == nil || caller == nil {
-		return
+	for _, sc := range m.Authz.WriteScopes() {
+		emitOneRowScopeCheck(s, m, sc)
 	}
-	what := "tenant"
-	if m.Authz.DataAccess == "owner-only" {
-		what = "owner"
-	}
+}
+
+func emitOneRowScopeCheck(s *src, m *ir.Model, sc ir.Scope) {
+	caller := sc.Identity
 
 	var conds []string
 	if m.Authz.NoIdentity == "stand-down" && m.Authz.PresenceField != nil {
@@ -418,16 +502,27 @@ func emitRowScopeCheck(s *src, m *ir.Model) {
 	if m.Authz.BypassField != nil {
 		conds = append(conds, "!e."+m.Authz.BypassField.Name)
 	}
-	conds = append(conds, fmt.Sprintf("%s != e.%s", scopeText(*subject, "e"), caller.Name))
+	if sc.OnIdentity {
+		// GetID returns nil for an aggregate that was never persisted, and
+		// Value() on it panics. The nil is not an error to report — it means
+		// there is no identity to compare yet — so the guard stands down.
+		//
+		// WHICH verbs the guard runs on is decided by the registration (see
+		// scopeGates); this is the belt under it, and it cannot be reasoned
+		// away: an entity that mounts an insert alone and scopes it anyway
+		// reaches this line with no id at all.
+		conds = append(conds, "e.GetID() != nil")
+	}
+	conds = append(conds, fmt.Sprintf("%s != e.%s", scopeText(sc, "e"), caller.Name))
 
 	doc := []string{
-		fmt.Sprintf("refuseForeign%s refuses a write to a row that is not the caller's.",
-			naming.Pascal(what)),
+		fmt.Sprintf("%s refuses a write to a row that is not the caller's.", sc.GuardName()),
 		"",
-		fmt.Sprintf("%s is filled from the request identity by every write command's "+
-			"mapper, including the bodyless ones — an archive is a write to the row like "+
-			"any other, and it loads through the repository, which the read side's filter "+
-			"never touches.", caller.Name),
+		fmt.Sprintf("It compares the row's %s against %s, which is filled from the "+
+			"request identity (%s) by every write command's mapper, including the "+
+			"bodyless ones — an archive is a write to the row like any other, and it "+
+			"loads through the repository, which the read side's filter never touches.",
+			scopeRowWord(sc), caller.Name, scopeFrom(sc)),
 	}
 	switch {
 	case m.Authz.NoIdentity == "stand-down":
@@ -454,20 +549,75 @@ func emitRowScopeCheck(s *src, m *ir.Model) {
 			fmt.Sprintf("%s crosses the scope: the operator supporting a customer, who "+
 				"has to be able to repair a row that is not theirs.", who))
 	}
+	if sc.OnIdentity && !sc.AppliesTo("insert") {
+		doc = append(doc, "",
+			"The INSERT is outside this check, and deliberately: the row's identity is "+
+				"minted by the framework on that verb, so it belongs to nobody yet and "+
+				"comparing it would refuse every creation this entity serves. Who may "+
+				"create one is the insert permission's question.")
+	}
 	s.Doc(doc...)
-	s.L("func (e *%s) refuseForeign%s(r *domain.Rules) {", m.Entity.Pascal, naming.Pascal(what))
+	s.L("func (e *%s) %s(r *domain.Rules) {", m.Entity.Pascal, sc.GuardName())
 	s.L("\tif %s {", strings.Join(conds, " && "))
-	s.L("\t\tr.AddNotification(%s, notifications.TenantMismatchNotification{}, false)",
-		fieldRef("e", subject.Name))
+	s.L("\t\t%s", scopeNotification(sc))
 	s.L("\t}")
 	s.L("}")
 	s.Blank()
 }
 
+// scopeNotification raises the 403 against the seat the caller can act on.
+//
+// A declared field resolves BY REFERENCE, which is the framework's default and
+// the binding that cannot drift from the field. The aggregate's id has no Go
+// field to point at — the managed carrier holds it — so it is addressed by the
+// logical name every read already filters it under.
+func scopeNotification(sc ir.Scope) string {
+	if sc.OnIdentity {
+		return fmt.Sprintf("r.AddNotificationNamed(%s, notifications.TenantMismatchNotification{})",
+			quote(sc.Subject.Name))
+	}
+	return fmt.Sprintf("r.AddNotification(%s, notifications.TenantMismatchNotification{}, false)",
+		fieldRef("e", sc.Subject.Name))
+}
+
+// scopeRowWord names the row's half in prose, for a doc comment read without
+// the spec in front of you.
+func scopeRowWord(sc ir.Scope) string {
+	if sc.OnIdentity {
+		return "own identity"
+	}
+	return sc.Subject.Name
+}
+
+// scopeFrom names the caller's half in prose: the framework accessor, or the
+// claim by name.
+func scopeFrom(sc ir.Scope) string {
+	switch sc.From {
+	case "subject":
+		return "Identity.Subject"
+	case "tenant":
+		return "Identity.TenantID(), whichever claim the deployment configured"
+	default:
+		return "the " + sc.Claim + " claim"
+	}
+}
+
 // scopeText renders the row's own scope value as TEXT, which is what the
 // caller's claim is. An id is unwrapped with Value(), a value object with the
 // same call, and a plain string is already there.
-func scopeText(f ir.Field, recv string) string {
+func scopeText(sc ir.Scope, recv string) string {
+	if sc.OnIdentity {
+		// No struct field to read: the framework's managed carrier holds the id,
+		// and GetID is how every other generated line reaches it.
+		return recv + ".GetID().Value()"
+	}
+	return fieldText(sc.Subject, recv)
+}
+
+// fieldText is the same question about a plain FIELD, which is what an
+// ownerCheck compares — a rule that predates the row scope and reaches the same
+// place through a field the author named rather than through a scope.
+func fieldText(f ir.Field, recv string) string {
 	if f.SpecType == "id" {
 		return recv + "." + f.Name + ".Value()"
 	}
@@ -1061,7 +1211,7 @@ func emitOwnerCheck(s *src, rule ir.Rule, recv string, m *ir.Model) {
 		present = fmt.Sprintf("%s.%s", recv, m.Authz.PresenceField.Name)
 	}
 	cond := fmt.Sprintf("%s && %s != %s.%s",
-		present, scopeText(target, recv), recv, owner.Name)
+		present, fieldText(target, recv), recv, owner.Name)
 	if rule.AdminField != nil {
 		// The bypass is a separate question from the permission: the permission
 		// says who may attempt the verb, this says who may attempt it on a row

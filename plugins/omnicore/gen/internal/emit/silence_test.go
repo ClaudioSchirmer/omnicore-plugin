@@ -418,18 +418,8 @@ func TestEveryScopedEntityProvesItsScope(t *testing.T) {
 		if !m.Read.ByParams {
 			continue
 		}
-		var field string
-		switch m.Authz.DataAccess {
-		case "owner-only":
-			if m.Authz.OwnerField != nil {
-				field = m.Authz.OwnerField.Name
-			}
-		case "tenant":
-			if m.Authz.TenantField != nil {
-				field = m.Authz.TenantField.Name
-			}
-		}
-		if field == "" {
+		scopes := m.Authz.ReadScopes()
+		if len(scopes) == 0 {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
@@ -445,15 +435,21 @@ func TestEveryScopedEntityProvesItsScope(t *testing.T) {
 			if src == "" {
 				t.Fatal("a scoped entity emitted no query tests at all")
 			}
-			for _, needed := range []string{
-				"SetIdentity",                           // a caller is attached, not assumed
-				"out.Filter[" + `"` + field + `"` + "]", // the scoping field is read back
-				"somebody-else",                         // the caller's own attempt to choose it
-			} {
-				if !strings.Contains(src, needed) {
+			needed := []string{
+				"SetIdentity",   // a caller is attached, not assumed
+				"somebody-else", // the caller's own attempt to choose it
+			}
+			// EVERY scope, not just the first: an entity narrowed by a tenant
+			// AND a branch leaks the whole branch dimension if only one of the
+			// two filters is proven, and the listing still returns rows.
+			for _, sc := range scopes {
+				needed = append(needed, "out.Filter["+`"`+sc.Subject.Name+`"`+"]")
+			}
+			for _, want := range needed {
+				if !strings.Contains(src, want) {
 					t.Errorf("the scope test does not %q — a scoped read whose filter is "+
 						"dropped answers with everybody's rows, and a test that only checks "+
-						"for an error passes anyway", needed)
+						"for an error passes anyway", want)
 				}
 			}
 		})

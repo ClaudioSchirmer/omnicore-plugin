@@ -5,11 +5,12 @@
 # used to be impossible to state, each of which cost a real project hand-written
 # code before it existed:
 #
-#   authz.dataAccess: tenant   the read filter AND the write guard. Only the read
-#                              half used to be generated, so a caller with the
-#                              ordinary permissions could create a row inside
-#                              another tenant, edit one and archive one — and
-#                              could not read back what they had just archived.
+#   authz.scopes               the read filter AND the write guard, one pair per
+#                              scope. Only the read half used to be generated, so
+#                              a caller with the ordinary permissions could create
+#                              a row inside another tenant, edit one and archive
+#                              one — and could not read back what they had just
+#                              archived.
 #   authz.bypass               a concrete permission that crosses the scope.
 #   authz.noIdentity           what an absent identity means. Left at its default
 #                              (stand-down) so the bench lane proves the default.
@@ -268,8 +269,9 @@ surfaces:
 
 authz:
   resource: role
-  dataAccess: tenant
-  tenantField: TenantID
+  dataAccess: scoped
+  scopes:
+    - {field: TenantID, from: tenant}
   # A CONCRETE permission, so crossing is delegable on its own — `*:*` is the
   # other spelling and it grants nothing new, being the claim a super-admin
   # already carries (that one is asked with Identity.IsSuperAdmin, since
