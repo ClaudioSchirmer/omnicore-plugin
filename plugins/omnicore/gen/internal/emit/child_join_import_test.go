@@ -34,7 +34,7 @@ storage:
   kind: flat
   table: papeis
   description: Papéis do sistema.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Admin, description: O nome do papel.}
 children:
@@ -55,7 +55,7 @@ joins:
     inChild: PapelPermissao
     fields:
       - {name: PermissaoNome, type: string, column: nome, example: "papel:ler", description: Nome da permissão.}
-      - {name: PermissaoArquivadaEm, type: time, column: deleted_at, nullable: true, example: "2026-01-01T00:00:00Z", description: Quando a permissão foi arquivada.}
+      - {name: PermissaoArquivadaEm, type: time, column: archived_at, nullable: true, example: "2026-01-01T00:00:00Z", description: Quando a permissão foi arquivada.}
       - {name: PermissaoVigenteEm, type: time, column: vigente_em, example: "2026-01-01T00:00:00Z", description: Desde quando a permissão vale.}
 modes: [display, insert]
 read:

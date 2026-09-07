@@ -27,12 +27,12 @@ storage:
   kind: flat
   table: chamados
   description: Chamados.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 30, livesOn: root, example: "CH-1", description: O código.}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: chamados}

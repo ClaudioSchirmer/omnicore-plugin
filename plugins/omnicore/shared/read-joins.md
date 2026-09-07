@@ -123,16 +123,16 @@ supplier's country, and it is not on this entity"*:
 
 **Every column of the target's OWN table — including the ones the framework stamps.** A
 schema registers those columns in SLOTS (`CreatedAt(col)`, `UpdatedAt(col)`,
-`DeletedAt(col)`, `Revision(col)`; `storage.managed.*` in the generator's spec), and the
+`ArchivedAt(col)`, `Revision(col)`; `storage.managed.*` in the generator's spec), and the
 column each slot holds is whatever that aggregate's author named it. What is fixed is the
-LOGICAL name the read path resolves it back to — `CreatedAt`, `UpdatedAt`, `DeletedAt` —
+LOGICAL name the read path resolves it back to — `CreatedAt`, `UpdatedAt`, `ArchivedAt` —
 and that resolution is exactly what the join's column check consults. So *"when was the
 campus archived?"* is a traversal like any other, and it costs no denormalized copy, even
 though no field declaration anywhere names those columns.
 
-**Name the column as the TARGET spells it.** `deleted_at` is a convention, not the
+**Name the column as the TARGET spells it.** `archived_at` is a convention, not the
 contract: the mapping is slot → column, per aggregate. Read the target's own declaration —
-its schema's `DeletedAt(...)` call, or its `storage.managed.archivedAt` — and write that.
+its schema's `ArchivedAt(...)` call, or its `storage.managed.archivedAt` — and write that.
 
 Two edges of that reach are worth knowing BEFORE the declaration is written:
 
@@ -293,7 +293,7 @@ collection's, and the fields land on the entry.
 - **The cost is a real join on every read through that loader**, `FindByID` included.
   Declare one because the aggregate genuinely reads that way — not "just in case".
 - **It is not gated on the target's archived state.** A join answers "what is on the other
-  side of this foreign key", and a soft-deleted counterpart is still what the key points at.
+  side of this foreign key", and an archived counterpart is still what the key points at.
   The read scope governs which ROOTS come back, never the rows reached across into. Where an
   archived counterpart must disappear from the answer, that is a filter the criteria states —
   not a join that silently drops rows.

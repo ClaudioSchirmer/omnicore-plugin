@@ -25,12 +25,12 @@ storage:
   kind: flat
   table: papeis
   description: Papéis.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Admin, description: O nome.}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 children:
   - name: PapelPermissao
     plural: Permissoes
@@ -40,8 +40,8 @@ children:
     ownedBy: root
     editStrategy: per-child
     businessIdentity: [PermissaoID]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     permissions: {add: "papel:conceder"}
 %CHILD%
     fields:

@@ -17,13 +17,13 @@ storage:
     link: separate-fk
     rowUniqueness: unique-fk
     orphanPolicy: delete-when-unreferenced
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "123.456.789-00", description: Documento — chave natural.}
   - {name: Nome, type: string, column: nome, length: 160, livesOn: base, example: Carlos Lima, description: Nome da pessoa.}
   - {name: Setor, type: string, column: setor, length: 40, livesOn: role, example: Acervo, description: Setor de atuação.}
 modes: [display, insert, archive, unarchive]
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: doc-obrigatorio, kind: required, scope: [insert], fields: [Documento], notification: RequiredFieldNotification}
@@ -55,7 +55,7 @@ children:
     editStrategy: per-child
     duplicateNotification: TituloJaExisteNotification
     businessIdentity: [Nome]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: Nome, type: string, column: nome, length: 80, example: Mestrado, description: Nome do titulo.}

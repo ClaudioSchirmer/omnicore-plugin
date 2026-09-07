@@ -36,7 +36,7 @@ storage:
   managed:
     createdAt: created_at
     updatedAt: updated_at
-    archivedAt: deleted_at
+    archivedAt: archived_at
     revision: revision
 
 fields:
@@ -546,7 +546,7 @@ valueObjects:
         text: {ptbr: Concluída, eng: Graduated, esp: Graduada, fra: Diplômé, deu: Abgeschlossen, ita: Diplomata, nld: Afgestudeerd}
       # Two members for ONE ending, and the pair is the point: "withdrawing" is
       # what a caller asks for, "dropped" is where the record rests. See
-      # delete.archiveWhen — without the pair there is nowhere to rest.
+      # removal.archiveWhen — without the pair there is nowhere to rest.
       - name: Withdrawing
         value: withdrawing
         text: {ptbr: Em trancamento, eng: Withdrawing, esp: En baja, fra: En retrait, deu: In Abmeldung, ita: In ritiro, nld: In afmelding}
@@ -655,8 +655,8 @@ update:
   # full replacement can express — PATCH cannot say "set this to null".
   shape: both
 
-delete:
-  root: soft
+removal:
+  root: archive
   # An ordinary PUT/PATCH that sets the status to "withdrawing" is really a
   # removal: the DOMAIN says so, not the caller and not the transport. The
   # framework then runs the whole archive — stamp, child cascade, ARCHIVED event,
@@ -949,8 +949,8 @@ children:
     ownedBy: root
     editStrategy: atomic-replace
     businessIdentity: [Document]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - name: FullName
         type: string
@@ -1110,7 +1110,7 @@ joins:
       # archivedAt slots of the target's storage.managed are declared BY
       # PRESENCE, and its TableSchema resolves whatever column sits in each one
       # under a fixed logical name — which is exactly what the join's column
-      # check consults. `column:` is still the TARGET's own spelling: deleted_at
+      # check consults. `column:` is still the TARGET's own spelling: archived_at
       # here because that is what this Campus calls it, not because the
       # framework fixes the name. When the target is a spec of this project both
       # the type and the nullability come off that declaration; here Campus is
@@ -1128,7 +1128,7 @@ joins:
       - name: CampusArchivedAt
         type: time
         nullable: true
-        column: deleted_at
+        column: archived_at
         example: "2026-02-01T09:00:00Z"
         description: When the campus was archived, if it was.
         labelKey: StudentCampusArchivedAtField
@@ -1354,7 +1354,7 @@ service:
     #
     # CreatedAt is not declared under fields[] and never will be: the framework
     # stamps it and resolves the name itself, exactly as read.managed relies on.
-    # The three stamped columns (CreatedAt, UpdatedAt, DeletedAt) are addressable
+    # The three stamped columns (CreatedAt, UpdatedAt, ArchivedAt) are addressable
     # in a fact's filters whenever storage.managed declares them, which is what
     # makes "since when" and "among the archived" askable at all. Filters only —
     # aggregating a timestamp has no carrier, and grouping BY one would be one
@@ -1408,7 +1408,7 @@ read:
   # The framework's OWN stamps on the read side. They are declared under
   # storage.managed and belong to no fields[] entry — the aggregate carries no Go
   # field for them — so the read side names them here, by the fixed logical names
-  # the framework resolves: CreatedAt, UpdatedAt, DeletedAt. Listing one projects
+  # the framework resolves: CreatedAt, UpdatedAt, ArchivedAt. Listing one projects
   # it into the view, returns it from the by-id read and every listing row, keeps
   # it in the CSV/XLSX export, and makes it filterable like any other field.
   #

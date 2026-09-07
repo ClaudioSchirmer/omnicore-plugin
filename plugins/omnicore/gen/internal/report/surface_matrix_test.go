@@ -37,7 +37,7 @@ func grantsCollection() []ir.Child {
 		// a change is a full replacement, so the collection mounts a PUT and no
 		// PATCH. Spelled here because this fixture builds the IR by hand.
 		ChangeShape: "put",
-		ArchivedAt:  "deleted_at",
+		ArchivedAt:  "archived_at",
 		Permissions: map[string]string{"add": "role:grant", "change": "role:update", "remove": "role:grant"},
 		// What the resolver fills in from the entity's surfaces and the
 		// collection's own block: on REST, and on the schema for all three.

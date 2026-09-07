@@ -29,7 +29,7 @@ storage:
   kind: flat
   table: notas
   description: Notas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - name: DonoID
     type: id
@@ -43,7 +43,7 @@ fields:
   - {name: SolicitanteID, type: string, runtime: true, livesOn: root, claim: user_id, example: 9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3, description: Quem pediu.}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - id: so-o-dono-arquiva

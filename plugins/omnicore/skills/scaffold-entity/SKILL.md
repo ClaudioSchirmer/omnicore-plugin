@@ -119,7 +119,7 @@ cannot change it."* That sentence is false.
   to guess everything, and not to interrogate them about everything. Split every decision by
   the cost of getting it wrong:
   - **High-risk = the MODELING.** Flat vs SharedBase, siblings, children + child-of-whom, the
-    child-edit strategy, modes, soft-vs-hard delete, which fields are unique, which
+    child-edit strategy, modes, archive-vs-hard-delete, which fields are unique, which
     surfaces/endpoints exist, the permission scheme. Wrong here = regenerate everything.
     **Never guess these — reason about them, PROPOSE with a clear "recommended" pick, and
     CONFIRM.** (The canonical failure to avoid: a run that asked NOTHING and emitted ~10
@@ -405,7 +405,7 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    immune to edit AND archive) · **freeze-once** (`Display,Insert,Archive,Unarchive`,
    no Update — issued documents) · **full CRUD** (the default six-ish) — but you
    MUST confirm — do NOT silently emit all six. (Archive modes ⟺ the schema's
-   archive/deleted-at column declaration — the pin's table-schema docs name the builder.)
+   archive/archived-at column declaration — the pin's table-schema docs name the builder.)
    **Settle the view BACKING FIRST (independent of modes/archive) — the archive regime
    below depends on it.** The project read-side posture (from `scaffold-service` /
    `scaffold-system`, if set) is the DEFAULT; with none on record (a lone entity run),
@@ -440,16 +440,16 @@ The guidance for filling each section — the reasoning, trade-offs, and what to
    closure with a specific notification. (**`IfDisplay` caveat**: no framework path
    dispatches Display to `BuildRules` today — don't generate dead display rules;
    confirm against the pin's `rules-dsl` before using it.)
-7. **Delete semantics — archive, hard delete, or BOTH.** The two are complementary verbs,
+7. **Removal semantics — archive, hard delete, or BOTH.** The two are complementary verbs,
    not rivals (`DELETE` = irreversible purge, `PATCH …/archive` = reversible removal; the
    framework serves all six modes side by side). One simple question; **default archive**;
    record the answer in §6 and emit exactly what it says — never silently add or drop
    either verb.
    - **The HTTP verb MUST match the truth (DDD/REST naming, not implicit surprises):** `DELETE`
-     is EXCLUSIVELY a hard purge; a soft removal is `PATCH …/archive` (+ its `…/unarchive`
-     undo). Never wire a soft/archive operation behind `DELETE` — it lies to the caller. This
-     applies to the ROOT **and to per-child ops** (a soft child-removal is `PATCH
-     …/:childId/archive`, not `DELETE`; see `aggregate-children.md`). A soft operation must
+     is EXCLUSIVELY a hard purge; an archive is `PATCH …/archive` (+ its `…/unarchive`
+     undo). Never wire an archive behind `DELETE` — it lies to the caller. This
+     applies to the ROOT **and to per-child ops** (an archiving child-removal is `PATCH
+     …/:childId/archive`, not `DELETE`; see `aggregate-children.md`). An archive must
      ship its inverse — if a specific unit needs its own reversible archive⇄unarchive
      lifecycle, that unit is an aggregate, not a nested value object.
 8. **Unique fields.** Which fields are unique (email? a document/tax id? a number)? A real
@@ -759,7 +759,7 @@ Four DISTINCT levels — do not conflate them:
      mechanical: `grep -rln 'Fields \*string' internal/web/requests/` → for each hit, open the
      paired list Response + its nested types and confirm EVERY field is `*T`/slice WITH
      `,omitempty` (a bare value type, or a tag missing `,omitempty`, IS the panic).
-   - `Modes()` lists Archive ⟺ the schema declares its archive (deleted-at) column ⟺ the
+   - `Modes()` lists Archive ⟺ the schema declares its archive (archived-at) column ⟺ the
      migration carries that column.
    - model has children (model B): in each `*_routes.go`, the ROOT-archive auto handler
      (name per `auto-handlers.html`) is instantiated AT MOST once per SURFACE (its own

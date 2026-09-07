@@ -23,7 +23,7 @@ storage:
     # domain.Managed nao sao exportados, entao a checagem reflexiva dele nao tem
     # onde apontar e responde "nao anulavel"). O framework so exige o contrario —
     # arquivar sem a coluna e que e recusado no boot.
-    archivedAt: deleted_at
+    archivedAt: archived_at
 
 valueObjects:
   # Um VO que nomeia uma notificacao DO FRAMEWORK — que e o que a propria

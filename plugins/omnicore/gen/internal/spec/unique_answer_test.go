@@ -20,7 +20,7 @@ storage:
   kind: flat
   table: permissions
   description: The catalog of enforceable permissions.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - name: Key
     livesOn: root
@@ -49,7 +49,7 @@ notifications:
     text: {eng: This permission already exists., ptbr: x, esp: x, fra: x, deu: x, ita: x, nld: x}
 modes: [display, insert, update, archive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 service:
   required: true
   facts:
@@ -178,12 +178,12 @@ storage:
   kind: flat
   table: papeis
   description: Papeis.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Admin, description: O nome.}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 children:
   - name: PapelPermissao
     plural: Permissoes
@@ -193,8 +193,8 @@ children:
     ownedBy: root
     editStrategy: atomic-replace
     businessIdentity: [PermissaoID]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - name: PermissaoID
         type: id

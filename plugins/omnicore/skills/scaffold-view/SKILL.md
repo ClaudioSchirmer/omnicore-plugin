@@ -123,7 +123,7 @@ session." Never a gate: this run continues on the installed skills.
   `UpstreamSubscription` must exist (boot-fatal when missing — a mirror that is declared
   but not subscribed does not count as "present"), and the subscription's
   `fields:` allowlist must cover every column the external schema declares —
-  `DeletedAt` included (boot-fatal; `views` at the pin). A subscription with NO linked
+  `ArchivedAt` included (boot-fatal; `views` at the pin). A subscription with NO linked
   transport is a different failure: it boots and silently never receives data (point-of-
   use error, `yaml-reference`) — check the transport block + build tag as a verify item,
   not as a boot symptom.
@@ -227,7 +227,7 @@ sections structural (`N/A — <why>`, never deleted):
    archived customer's name forever, renames still flowing in)? **The RETAIN lever does
    not exist on every source kind**: `Fields()` retention is JoinView-only (a
    `Fields`-bearing `Link*` leg is a fatal boot), and a `JoinUpstream` leg's lever is
-   the external schema's `DeletedAt(col)` + the subscription's `fields:` allowlist —
+   the external schema's `ArchivedAt(col)` + the subscription's `fields:` allowlist —
    offer per leg only the choices its kind actually has. (b) the view's OWN root:
    archived rows kept-but-hidden (default) or dropped (`DeleteOnArchive()` — hot tier;
    materialized kinds only — a ComposedView root has no `DeleteOnArchive`)?

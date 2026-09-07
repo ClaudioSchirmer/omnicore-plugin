@@ -146,7 +146,7 @@ storage:
     revision: revision
     createdAt: created_at
     updatedAt: updated_at
-    archivedAt: deleted_at
+    archivedAt: archived_at
 fields:
   - {name: Label, type: string, column: label, livesOn: root}
 `
@@ -171,7 +171,7 @@ fields:
 	}{
 		{"created_at", "CreatedAt", false, "stamped on insert, never NULL"},
 		{"updated_at", "UpdatedAt", false, "stamped on every write, never NULL"},
-		{"deleted_at", "DeletedAt", true,
+		{"archived_at", "ArchivedAt", true,
 			"NULL on every row that is not archived, which is the normal state"},
 	} {
 		got, ok := byColumn[tc.column]

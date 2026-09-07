@@ -23,7 +23,7 @@ storage:
   kind: flat
   table: cestas_t
   description: Cestas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "CST-1", description: O código.}
 children:
@@ -45,7 +45,7 @@ children:
         description: O rótulo da linha.
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: cestas_t}

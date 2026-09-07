@@ -33,7 +33,7 @@ storage:
   kind: flat
   table: perfis
   description: Perfis de acesso.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: TenantID, type: id, column: tenant_id, livesOn: root, example: 9f14b0a2-6d38-4c5e-b7a1-2e0c5d81f4a3, description: O tenant dono.}
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Admin, description: O nome.}
@@ -47,8 +47,8 @@ children:
     editStrategy: per-child
     operations: [add, change, remove]
     businessIdentity: [PermissaoID]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - {name: PermissaoID, type: id, column: permissao_id, example: 3b7c1a44-2f90-4d17-9e55-8c1d6f2a0b31, description: A permissão concedida.}
       - {name: Escopo, type: string, column: escopo, length: 20, example: leitura, description: O escopo da concessão.}
@@ -61,7 +61,7 @@ siblings:
       - {name: ResponsavelEmail, type: string, column: responsavel_email, length: 160, nullable: true, example: ana@empresa.br, description: E-mail do responsável.}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - id: teto-de-permissoes

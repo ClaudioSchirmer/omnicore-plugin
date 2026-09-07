@@ -198,7 +198,7 @@ full engine; the SQLite DSN only on SQLite), mark recommendations `(proposed)`:
    as the DEFAULT backing per entity view (still per-entity overridable there).
 
 9. **The write clock** — WHICH clock stamps the framework's managed timestamp columns
-   (`created_at`, `updated_at`, and the archive/unarchive `deleted_at` stamp): the
+   (`created_at`, `updated_at`, and the archive/unarchive `archived_at` stamp): the
    relational backend, or the writing process. `(proposed: db)`.
 
    **Ask it only when the pinned `yaml-reference` carries a `relational.clock` key** —

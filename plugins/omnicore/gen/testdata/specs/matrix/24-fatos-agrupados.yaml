@@ -20,7 +20,7 @@ storage:
   kind: flat
   table: turmas_g
   description: Turmas, com fatos agregados por grupo.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "3B-2026", description: Código da turma.}
   - {name: Situacao, type: string, column: situacao, length: 20, livesOn: root, example: aberta, description: Situação da turma., vo: {kind: enum, ref: SituacaoTurmaG}}
@@ -43,7 +43,7 @@ children:
       - {name: Disciplina, type: string, column: disciplina, length: 80, example: Matemática, description: Disciplina ministrada.}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: put}
-delete: {root: soft}
+removal: {root: archive}
 valueObjects:
   - name: SituacaoTurmaG
     kind: enum

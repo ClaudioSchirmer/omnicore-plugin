@@ -7,7 +7,7 @@
 #   B  multi COM grupo, sobre coluna nullable E nao-nullable no mesmo fato
 #   C  kind unico COM grupo sobre coluna nullable     -> ValueFound
 #   D  coluna gerenciada CreatedAt como janela        -> parametro time.Time
-#   E  coluna gerenciada DeletedAt notnull            -> so os arquivados
+#   E  coluna gerenciada ArchivedAt notnull            -> so os arquivados
 #   F  coluna gerenciada UpdatedAt entre dois instantes
 #   e quatro regras factRange: um slot sem Found, um slot com Found, um slot
 #   agrupado com Found e um fato de kind unico agrupado com ValueFound.
@@ -19,7 +19,7 @@ storage:
   kind: flat
   table: atendimentos
   description: Atendimentos prestados aos clientes.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 30, livesOn: root, example: "AT-2026-001", description: Codigo do atendimento.}
   - name: Setor
@@ -46,7 +46,7 @@ valueObjects:
       - {name: Vendas, value: vendas, text: {ptbr: Vendas, eng: Sales, esp: Ventas, fra: Ventes, deu: Vertrieb, ita: Vendite, nld: Verkoop}}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: codigo-obrigatorio, kind: required, scope: [insertOrUpdate], fields: [Codigo], notification: RequiredFieldNotification}
@@ -182,17 +182,17 @@ service:
       kind: count
       filters:
         - {field: CreatedAt, op: gte, as: desde}
-        - {field: DeletedAt, op: isnull}
+        - {field: ArchivedAt, op: isnull}
       description: Quantos atendimentos vivos foram abertos a partir de um instante.
 
     # E. So os ARQUIVADOS: sem activeOnly o escopo inclui os dois, e a condicao
-    #    sobre DeletedAt e o que separa. Com activeOnly: true isto e recusado —
+    #    sobre ArchivedAt e o que separa. Com activeOnly: true isto e recusado —
     #    juntos nao casam com nada.
     - name: ArquivadosDoCliente
       kind: count
       filters:
         - ClienteID
-        - {field: DeletedAt, op: notnull}
+        - {field: ArchivedAt, op: notnull}
       description: Quantos atendimentos deste cliente ja foram arquivados.
 
     # F. Uma janela sobre a coluna de atualizacao: dois parametros time.Time

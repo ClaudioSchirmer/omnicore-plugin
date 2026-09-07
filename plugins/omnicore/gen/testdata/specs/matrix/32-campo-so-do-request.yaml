@@ -21,7 +21,7 @@ storage:
   kind: flat
   table: cadastros
   description: Cadastros de contato.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana Ribeiro, description: Nome de quem se cadastrou.}
   - {name: Email, type: string, column: email, length: 160, livesOn: root, example: ana.ribeiro@escola.br, description: E-mail de contato., vo: {kind: raw, ref: Email}}
@@ -49,7 +49,7 @@ fields:
     description: De qual formulário veio o cadastro — lido por uma regra, nunca guardado.
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 valueObjects:
   - name: Email
     kind: raw

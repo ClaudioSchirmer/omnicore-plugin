@@ -95,7 +95,7 @@ They are always imported under an alias naming the layer — `cmddtos`, `qrydtos
 has always had) is a fourth package called `dtos` and a file may name two of them.
 
 **The removal verb is named for what it MOUNTS.** `children[].operations` keeps one word,
-`remove`, and `children[].softRemove` decides the outcome; the generated file and type say
+`remove`, and `children[].archiveOnRemove` decides the outcome; the generated file and type say
 which it is — `archive_<child>_command.go` / `Archive<Child>Command` over `PATCH …/archive`,
 `delete_<child>_command.go` / `Delete<Child>Command` over `DELETE`. Permissions stay keyed
 on `remove`, the spec's word.
@@ -291,7 +291,7 @@ Four things to get right, because they are the ones that cost a migration later:
     `fields:` names them: the three it registers under `storage.managed` — `createdAt`,
     `updatedAt` and `archivedAt` — are declared by presence, and its schema resolves them
     on the read path. So "when was it archived?" is a traversal, not a copied column.
-    **Write the column exactly as THAT spec spells it** (`deleted_at`, `dt_exclusao`,
+    **Write the column exactly as THAT spec spells it** (`archived_at`, `dt_exclusao`,
     whatever its author chose): the SLOT is what the framework fixes, never the column
     name, and `check` reads the name out of the target's own `storage.managed`. Two
     consequences: the archive column lands in a POINTER on EITHER kind of join (a row that
@@ -424,7 +424,7 @@ Four things to get right, because they are the ones that cost a migration later:
     or an initial capital leaves ONE field spelled unlike its neighbours in the same
     payload; a dot or a bracket forges a path segment a caller reads as nesting), a name
     the framework already answers under (`id`, `parentId`, `revision`, `createdAt`,
-    `updatedAt`, `deletedAt`), a name that restates the default, and two fields of one
+    `updatedAt`, `archivedAt`), a name that restates the default, and two fields of one
     payload landing on the same token.
   - **A composite has no single wire name** — it travels flat, one key per part — so both
     keys are refused on the owner and the parts are named by `fields[].parts[].as`.
@@ -729,7 +729,7 @@ Four things to get right, because they are the ones that cost a migration later:
     the read answers 200 and one column is empty on REST, on GraphQL and in the export at
     once. The gen-report lists them for exactly that reason.
 - **`read.managed` puts the framework's own timestamps on the reads.** `createdAt`,
-  `updatedAt` and `deletedAt` are stamped by the framework and declared under
+  `updatedAt` and `archivedAt` are stamped by the framework and declared under
   `storage.managed`, so no `fields[]` entry describes them and the aggregate carries no Go
   field for them. Listing them under `read.managed` projects them into the view, returns them
   from the by-id read and every listing row, keeps them in the CSV/XLSX export, and makes
@@ -876,7 +876,7 @@ Four things to get right, because they are the ones that cost a migration later:
     gone, and the only other thing in scope is the owner id the caller itself put in the
     path. A generated service must not answer `204` at `DELETE /<entity>/:id` and `200` at
     `DELETE /<entity>/:id/<collection>/:entryId` — same verb, same semantics, one contract.
-  - **A per-entry removal is ONE-WAY, whichever verb it mounts.** With `softRemove` the
+  - **A per-entry removal is ONE-WAY, whichever verb it mounts.** With `archiveOnRemove` the
     route is `PATCH …/:entryId/archive` (the row lingers, stamped, and stops being
     returned); without it, a real `DELETE`. Neither has an undo: `operations` is closed at
     `add | change | remove`, `unarchive` is a ROOT mode, and an archived entry is not
@@ -1082,14 +1082,14 @@ Four things to get right, because they are the ones that cost a migration later:
     **nullable** column and not otherwise. Read the flag before the value; a grouped
     average over a nullable column used to report "nothing to average" as `0`.
   - **The three columns the framework stamps are filterable by their fixed logical
-    names** — `CreatedAt`, `UpdatedAt`, `DeletedAt` — whenever `storage.managed` declares
+    names** — `CreatedAt`, `UpdatedAt`, `ArchivedAt` — whenever `storage.managed` declares
     them. No `fields[]` entry declares one and the aggregate carries no Go field; the
     framework's own resolver answers for the name, exactly as `read.managed` relies on.
 
     ```yaml
     - {field: CreatedAt, op: gte, as: desde}   # "quantos desde este instante"
-    - {field: DeletedAt, op: notnull}          # só os arquivados
-    - {field: DeletedAt, op: isnull}           # só os vivos
+    - {field: ArchivedAt, op: notnull}         # só os arquivados
+    - {field: ArchivedAt, op: isnull}          # só os vivos
     ```
 
     Filters only: aggregating a timestamp has no carrier, and grouping BY one is one
@@ -1396,7 +1396,7 @@ Four things to get right, because they are the ones that cost a migration later:
   header. `text:` takes the seven catalogs like a notification's, is optional, and may be
   partial: a catalog left out falls back to the field's own name. Give it to any field
   whose name does not read as a label in the languages the project serves.
-- **An update that RETIRES the row: `delete.archiveWhen`.** When a field reaching one
+- **An update that RETIRES the row: `removal.archiveWhen`.** When a field reaching one
   value means the record should not be left active ("dropped", "terminated", "cancelled"),
   declare it — `field` + `equals`, plus an optional `becomes` — and the generated
   `IfUpdate` clause ends by asking the framework to finish THAT write as an archive: the
@@ -1417,7 +1417,7 @@ Four things to get right, because they are the ones that cost a migration later:
   |---|---|---|
   | permission | who may attempt the verb on this ROUTE at all | `authz.permissions.<verb>` |
   | rule | whether that attempt is allowed on THIS row | `rules.list[].scope` |
-  | `archiveWhen` | what the write turns out to BE | `delete.archiveWhen` |
+  | `archiveWhen` | what the write turns out to BE | `removal.archiveWhen` |
 
   It changes the third, so the first two stay the update's. The write arrives under
   `<res>:update`, never `<res>:archive` — the archive permission guards the archive route,

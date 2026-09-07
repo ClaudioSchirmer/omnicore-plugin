@@ -17,7 +17,7 @@ import (
 // Supported is the framework version this build targets and is proven against
 // by the golden gate. Moving it is a deliberate act paired with reviewing the
 // emitters — never a silent bump.
-const Supported = "v0.73.0"
+const Supported = "v0.74.0"
 
 // SupportedIsPublished says whether Supported carries a tag anybody can pin
 // yet. It is false while the emitters are written against the framework's

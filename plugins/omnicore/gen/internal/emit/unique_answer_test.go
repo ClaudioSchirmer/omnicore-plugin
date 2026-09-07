@@ -31,7 +31,7 @@ storage:
   kind: flat
   table: permissions
   description: The catalog of enforceable permissions.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - name: Key
     livesOn: root
@@ -75,7 +75,7 @@ notifications:
     text: {eng: This slug already exists., ptbr: x, esp: x, fra: x, deu: x, ita: x, nld: x}
 modes: [display, insert, update, archive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 service:
   required: true
   facts:

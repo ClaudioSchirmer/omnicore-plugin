@@ -10,7 +10,7 @@ func TestVerdicts(t *testing.T) {
 	// pin counts as behind, exact or ahead only means anything relative to it.
 	// So the value is asserted first — a bump that leaves this table behind
 	// would otherwise keep passing while testing the wrong three relations.
-	if Supported != "v0.73.0" {
+	if Supported != "v0.74.0" {
 		t.Fatalf("Supported moved to %s — move the fixtures below with it, then update "+
 			"this guard; they only mean something relative to the supported line", Supported)
 	}
@@ -21,23 +21,28 @@ func TestVerdicts(t *testing.T) {
 		want   Level
 		blocks bool
 	}{
-		{"the supported line", "v0.73.0", false, Exact, false},
-		{"same line, later patch", "v0.73.9", false, Exact, false},
-		{"framework moved ahead", "v0.74.0", false, Ahead, false},
+		{"the supported line", "v0.74.0", false, Exact, false},
+		{"same line, later patch", "v0.74.9", false, Exact, false},
+		{"framework moved ahead", "v0.75.0", false, Ahead, false},
 		// The refusal reads the same at every distance, so what each distance
 		// actually COSTS is written down here — the nearest lines are a POSTURE
 		// and the ones below them are compile breaks, and treating those two as
 		// one thing is how a bump gets waved through or panicked over.
 		//
-		// v0.73.0 is where EVERY published pin now lands, and it is a compile
-		// break at zero distance: the notification redesign removed the
-		// string-named Rules.AddNotification, retyped ValidateEnum to take a
-		// field reference, and moved an AggregateValueObject's BuildRules onto
-		// the pointer receiver. Every generated entity, child, value object and
-		// composite calls at least one of those, so nothing this generator
-		// writes compiles against v0.72.1 or below — which is why the refusal at
-		// this distance is a compile break stated in advance rather than a
+		// v0.73.0 is the nearest published line below the target, and it is a
+		// compile break at zero distance: v0.74.0 renamed the managed archive
+		// slot, so TableSchema.DeletedAt is gone and every generated schema that
+		// declares storage.managed.archivedAt calls ArchivedAt instead. One call
+		// is enough, and almost every entity makes it — which is why the refusal
+		// at this distance is a compile break stated in advance rather than a
 		// posture, and why it blocks by default.
+		//
+		// v0.72.1 and below add a SECOND compile break on top of that one:
+		// v0.73.0's notification redesign removed the string-named
+		// Rules.AddNotification, retyped ValidateEnum to take a field reference,
+		// and moved an AggregateValueObject's BuildRules onto the pointer
+		// receiver. Every generated entity, child, value object and composite
+		// calls at least one of those.
 		//
 		// v0.72.1 was the first PATCH this generator required, and the reason is
 		// not a compile break — v0.72.0 emits and builds identically. What it costs
@@ -73,11 +78,12 @@ func TestVerdicts(t *testing.T) {
 		// nullable `stamped: counter` emits; and v0.64.0 has no
 		// StampedTimeField / StampedCounterField at all and no
 		// `relational.clock` key.
-		{"the last published line", "v0.72.1", false, Behind, true},
-		{"same published line, earlier patch", "v0.72.0", false, Behind, true},
-		{"project is one line older", "v0.71.0", false, Behind, true},
-		{"project is one line older, later patch", "v0.71.9", false, Behind, true},
-		{"project is two lines older", "v0.70.0", false, Behind, true},
+		{"the last published line", "v0.73.0", false, Behind, true},
+		{"one line older", "v0.72.1", false, Behind, true},
+		{"same line, earlier patch", "v0.72.0", false, Behind, true},
+		{"project is two lines older", "v0.71.0", false, Behind, true},
+		{"two lines older, later patch", "v0.71.9", false, Behind, true},
+		{"project is three lines older", "v0.70.0", false, Behind, true},
 		{"project is at the first hard break", "v0.68.0", false, Behind, true},
 		{"project is older", "v0.49.0", false, Behind, true},
 		{"local checkout", "", true, Unknown, false},

@@ -31,7 +31,7 @@ storage:
   kind: flat
   table: cestas_e
   description: Cestas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 20, livesOn: root, example: "CST-1", description: O código.}
 children:
@@ -56,7 +56,7 @@ children:
         description: O rótulo da linha.
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: cestas_e}
@@ -191,7 +191,7 @@ storage:
   kind: flat
   table: fichas
   description: Fichas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 40, livesOn: root, example: "Ana", description: O nome.}
   - {name: Apelido, type: string, column: apelido, length: 40, livesOn: root, example: "Aninha", description: O apelido.}

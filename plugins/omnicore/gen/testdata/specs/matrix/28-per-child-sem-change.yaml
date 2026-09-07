@@ -27,7 +27,7 @@ storage:
   kind: flat
   table: perfis_pc
   description: Perfis que cada tenant define para os seus membros.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Chave, type: string, column: chave, length: 64, livesOn: root, example: administrador, description: Chave do perfil dentro do tenant.}
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Administrador, description: Nome exibido do perfil.}
@@ -50,8 +50,8 @@ children:
     operations: [add, remove]
     duplicateNotification: PermissaoConcedidaDuasVezesNotification
     businessIdentity: [PermissaoID]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - name: PermissaoID
         type: id
@@ -60,7 +60,7 @@ children:
         description: Permissão do catálogo que esta entrada concede.
 modes: [display, insert, update, archive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 rules:
   list:
     - {id: chave-obrigatoria, kind: required, scope: [insertOrUpdate], fields: [Chave], notification: RequiredFieldNotification}

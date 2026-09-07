@@ -27,12 +27,12 @@ storage:
   kind: flat
   table: papeis
   description: Papéis.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Admin, description: O nome.}
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 children:
   - name: PapelPermissao
     plural: Permissoes
@@ -42,8 +42,8 @@ children:
     ownedBy: root
     editStrategy: atomic-replace
     businessIdentity: [PermissaoID]
-    softRemove: true
-    archivedAt: deleted_at
+    archiveOnRemove: true
+    archivedAt: archived_at
     fields:
       - name: PermissaoID
         type: id
@@ -98,7 +98,7 @@ func TestChildUniqueIndexIsScopedByTheOwner(t *testing.T) {
 	m := childUniqueModel(t)
 	got := fileNamed(t, m, "migrations/postgres/0001_papel_manual.up.sql")
 	want := `CREATE UNIQUE INDEX "papel_permissoes_papel_id_permissao_id_key" ` +
-		`ON "papel_permissoes" ("papel_id", "permissao_id") WHERE "deleted_at" IS NULL`
+		`ON "papel_permissoes" ("papel_id", "permissao_id") WHERE "archived_at" IS NULL`
 	if !strings.Contains(got, want) {
 		t.Errorf("the entry's index is not the per-owner, active-only one:\n%s", got)
 	}
@@ -123,12 +123,12 @@ func TestChildUniqueIsBoundToItsNotification(t *testing.T) {
 }
 
 // An entry's active-only scope is defined by the ENTRY's archive column, not the
-// root's: a soft-removed entry is what frees the value.
+// root's: an archived entry is what frees the value.
 func TestChildActiveOnlyUsesTheEntrysOwnArchiveColumn(t *testing.T) {
 	m := childUniqueModel(t)
 	for _, c := range m.Constraints {
 		if c.Table == "papel_permissoes" {
-			if c.Archived != "deleted_at" {
+			if c.Archived != "archived_at" {
 				t.Errorf("the entry's constraint archives by %q", c.Archived)
 			}
 			return

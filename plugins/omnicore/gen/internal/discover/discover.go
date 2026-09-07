@@ -522,7 +522,7 @@ func discoverSpecs(root string) []SpecClaim {
 		// The framework-stamped columns are columns of the target's own table
 		// like any other, and the READ path resolves them: whatever column the
 		// spec puts in each managed slot, TableSchema's goNameForRead answers it
-		// under a fixed logical name (CreatedAt, UpdatedAt, DeletedAt), which is
+		// under a fixed logical name (CreatedAt, UpdatedAt, ArchivedAt), which is
 		// exactly what read.WithJoins checks a mapped column against. The NAMES
 		// below are the logical ones and are the framework's; the columns are the
 		// author's, which is why they are read from this file rather than
@@ -549,7 +549,7 @@ func discoverSpecs(root string) []SpecClaim {
 		}{
 			{"CreatedAt", doc.Storage.Managed.CreatedAt, false},
 			{"UpdatedAt", doc.Storage.Managed.UpdatedAt, false},
-			{"DeletedAt", doc.Storage.Managed.ArchivedAt, true},
+			{"ArchivedAt", doc.Storage.Managed.ArchivedAt, true},
 		} {
 			if mc.column == "" {
 				continue // declared by presence: no name, no column

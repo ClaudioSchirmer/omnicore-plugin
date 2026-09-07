@@ -20,7 +20,7 @@ storage:
   kind: flat
   table: pessoas
   description: Pessoas.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana, description: O nome.}
   - name: DocumentoNacional
@@ -33,7 +33,7 @@ fields:
 %s
 modes: [display, insert, update, archive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: pessoas}
@@ -112,7 +112,7 @@ func TestAWireNameMustLookLikeTheOthersInThePayload(t *testing.T) {
 // on every aggregate; two fields under one key hand the caller whichever the
 // encoder wrote last, with nothing marking the loser.
 func TestAWireNameCannotTakeAManagedOne(t *testing.T) {
-	for _, taken := range []string{"id", "createdAt", "updatedAt", "deletedAt", "revision", "parentId"} {
+	for _, taken := range []string{"id", "createdAt", "updatedAt", "archivedAt", "revision", "parentId"} {
 		ps := wireNameProblems(t, "    jsonName: "+taken+"\n    notifyAs: "+taken+"\n")
 		if blockerSaying(ps, taken) == "" {
 			t.Errorf("%q was accepted, and it is the framework's own", taken)

@@ -21,7 +21,7 @@ storage:
   kind: flat
   table: atendimentos
   description: Atendimentos.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Codigo, type: string, column: codigo, length: 30, livesOn: root, example: "AT-1", description: O codigo.}
   - {name: Setor, type: string, column: setor, length: 20, livesOn: root, example: suporte, description: O setor.}
@@ -29,7 +29,7 @@ fields:
   - {name: Nota, type: float64, column: nota, livesOn: root, nullable: true, example: "8.5", description: "A nota, quando houver."}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: patch}
-delete: {root: soft}
+removal: {root: archive}
 read:
   backing: relational
   view: {name: atendimentos}
@@ -66,7 +66,7 @@ service:
       kind: count
       filters:
         - {field: CreatedAt, op: gte, as: desde}
-        - {field: DeletedAt, op: notnull}
+        - {field: ArchivedAt, op: notnull}
       description: Arquivados a partir de um instante.
 `
 
@@ -207,7 +207,7 @@ func TestStampedColumnsReachTheQuery(t *testing.T) {
 	impl := fileNamed(t, m, "internal/infra/atendimento_service.go")
 	for _, want := range []string{
 		`criteria.Gte("CreatedAt", desde)`,
-		`criteria.NotNull("DeletedAt")`,
+		`criteria.NotNull("ArchivedAt")`,
 	} {
 		if !strings.Contains(impl, want) {
 			t.Errorf("the query does not carry %s:\n%s", want, impl)

@@ -113,8 +113,8 @@ Per sibling: <field group> → attachment node (flat root | role | role-child).
 ## 5. Modes                                             [required]
 display + <subset of insert / update / delete / archive / unarchive> — <why this subset>
 
-## 6. Delete semantics                                  [required]
-soft | hard (rarely both). Verb truth: DELETE = hard purge only; soft = PATCH
+## 6. Removal semantics                                 [required]
+archive | delete (rarely both). Verb truth: DELETE = hard purge only; archive = PATCH
 archive (+ unarchive). Root AND per-child.
 
 ## 7. Business rules                        [required — never boilerplate-only]

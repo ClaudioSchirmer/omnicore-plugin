@@ -14,7 +14,7 @@ storage:
   kind: flat
   table: relatorios_ex
   description: Linhas de um relatório, servidas apenas como arquivo.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Referencia, type: string, column: referencia, length: 20, livesOn: root, example: "2026-08", description: Competência da linha.}
   - {name: Centro, type: string, column: centro, length: 80, livesOn: root, example: Operações, description: Centro de custo.}

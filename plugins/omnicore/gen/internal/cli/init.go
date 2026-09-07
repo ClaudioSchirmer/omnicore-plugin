@@ -157,7 +157,7 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("    revision: revision\n")
 	b.WriteString("    createdAt: created_at\n")
 	b.WriteString("    updatedAt: updated_at\n")
-	b.WriteString("    archivedAt: deleted_at\n\n")
+	b.WriteString("    archivedAt: archived_at\n\n")
 
 	b.WriteString("fields:\n")
 	b.WriteString("  # A string needs a length: a zero-length column is rejected outright by\n")
@@ -190,10 +190,10 @@ func renderTemplate(entity string, p *discover.Project) string {
 	b.WriteString("  # patch is the common case. A sibling facet forces put or both, because\n")
 	b.WriteString("  # PATCH cannot say \"set this to null\" and the facet could never be cleared.\n")
 	b.WriteString("  shape: patch\n\n")
-	b.WriteString("delete:\n")
-	b.WriteString("  # soft = archive, reversible. hard = DELETE, a permanent purge — and the\n")
+	b.WriteString("removal:\n")
+	b.WriteString("  # archive = reversible, the row stays. delete = a permanent purge — and the\n")
 	b.WriteString("  # HTTP verb has to tell the truth about which one it is.\n")
-	b.WriteString("  root: soft\n\n")
+	b.WriteString("  root: archive\n\n")
 
 	b.WriteString("rules:\n")
 	b.WriteString("  list:\n")

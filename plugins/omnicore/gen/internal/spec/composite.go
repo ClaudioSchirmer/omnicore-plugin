@@ -317,7 +317,7 @@ func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
 	// the framework owns.
 	if ManagedReads.Has(name) {
 		key := "storage.managed." + strings.ToLower(name[:1]) + name[1:]
-		if name == "DeletedAt" {
+		if name == "ArchivedAt" {
 			key = "storage.managed.archivedAt"
 		}
 		ps.BlockerFix(where,
@@ -333,7 +333,7 @@ func reportUnknownFactField(s *Spec, name, where string, ps *Problems) {
 // ManagedFilterField resolves one of the framework's stamped columns as the
 // field a fact's filter compares against.
 //
-// The three of them (CreatedAt, UpdatedAt, DeletedAt) are addressable by their
+// The three of them (CreatedAt, UpdatedAt, ArchivedAt) are addressable by their
 // fixed logical names all the way down: the framework's own schema resolver
 // answers for them, which is what read.managed already relies on. So "how many
 // were written since this instant" and "how many are archived" are questions
@@ -350,9 +350,9 @@ func ManagedFilterField(s *Spec, name string) *Field {
 	}
 	return &Field{
 		Name: name, Column: ManagedColumn(s, name), Type: "time",
-		// DeletedAt is the only one that is ever absent: a row that was never
+		// ArchivedAt is the only one that is ever absent: a row that was never
 		// archived has none, which is exactly what isnull/notnull ask about.
-		Nullable:    name == "DeletedAt",
+		Nullable:    name == "ArchivedAt",
 		Description: "Stamped by the framework.",
 	}
 }

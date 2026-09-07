@@ -31,13 +31,13 @@ storage:
   kind: flat
   table: alunos
   description: Alunos.
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Nome, type: string, column: nome, length: 120, livesOn: root, example: Ana, description: O nome.}
   - {name: CampusID, type: id, column: campus_id, livesOn: root, example: 1f6e6ac6-2a1e-4c22-9c0a-2b7a9c5f21d4, description: O campus.}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: both}
-delete: {root: soft}
+removal: {root: archive}
 joins:
   - to: Campus
     kind: inner

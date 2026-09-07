@@ -5,19 +5,19 @@ import (
 	"testing"
 )
 
-// retiringSpec is the smallest entity that can declare delete.archiveWhen: it
+// retiringSpec is the smallest entity that can declare removal.archiveWhen: it
 // updates, it archives, and it has a state field the decision can read.
 func retiringSpec() *Spec {
 	s := minimalSpec()
-	s.Storage.Managed.ArchivedAt = "deleted_at"
+	s.Storage.Managed.ArchivedAt = "archived_at"
 	s.Fields = append(s.Fields, Field{
 		Name: "Status", Type: "string", Column: "status", Length: 20,
 		LivesOn: "root", Example: "active", Description: "Situação da matrícula.",
 	})
 	s.Modes = []string{"display", "insert", "update", "archive", "unarchive"}
 	s.Update = Update{Shape: "patch"}
-	s.Delete = Delete{
-		Root: "soft",
+	s.Removal = Removal{
+		Root: "archive",
 		ArchiveWhen: &ArchiveWhen{
 			Field: "Status", Equals: "dropped",
 			Description: "Uma matrícula trancada não é um registro ativo.",
@@ -48,7 +48,7 @@ func TestRetiringSpecIsClean(t *testing.T) {
 	if ps.HasBlockers() {
 		t.Fatalf("the baseline should validate cleanly, got:\n%v", ps.Error())
 	}
-	if w := warningsAt(ps, "delete.archiveWhen.field"); len(w) > 0 {
+	if w := warningsAt(ps, "removal.archiveWhen.field"); len(w) > 0 {
 		t.Fatalf("the baseline already warns about the deciding field: %v", w)
 	}
 }
@@ -71,7 +71,7 @@ func TestTriggerNoUpdateCanReachWarns(t *testing.T) {
 		if ps.HasBlockers() {
 			t.Fatalf("this is a warning, not a refusal:\n%v", ps.Error())
 		}
-		got := strings.Join(warningsAt(ps, "delete.archiveWhen.field"), "\n")
+		got := strings.Join(warningsAt(ps, "removal.archiveWhen.field"), "\n")
 		for _, want := range []string{"patchExcludes", "INSERTED", "serve put as well"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("the warning omits %q, so it does not say what to do:\n%s", want, got)
@@ -87,7 +87,7 @@ func TestTriggerNoUpdateCanReachWarns(t *testing.T) {
 		s.Update.Shape = "both"
 		s.Update.PatchExcludes = []string{"Status"}
 
-		if w := warningsAt(Validate(s, Options{}), "delete.archiveWhen.field"); len(w) > 0 {
+		if w := warningsAt(Validate(s, Options{}), "removal.archiveWhen.field"); len(w) > 0 {
 			t.Errorf("a field a PUT can still set is reported as unreachable: %v", w)
 		}
 	})
@@ -103,7 +103,7 @@ func TestTriggerNoUpdateCanReachWarns(t *testing.T) {
 		if ps.HasBlockers() {
 			t.Fatalf("this is a warning, not a refusal:\n%v", ps.Error())
 		}
-		got := strings.Join(warningsAt(ps, "delete.archiveWhen.field"), "\n")
+		got := strings.Join(warningsAt(ps, "removal.archiveWhen.field"), "\n")
 		for _, want := range []string{"immutable", "status-imutavel", "never change"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("the warning omits %q, so the reader cannot find the other rule:\n%s",
@@ -121,7 +121,7 @@ func TestTriggerNoUpdateCanReachWarns(t *testing.T) {
 			Fields: []string{"Status"}, Notification: "RequiredFieldNotification",
 		}}
 
-		if w := warningsAt(Validate(s, Options{}), "delete.archiveWhen.field"); len(w) > 0 {
+		if w := warningsAt(Validate(s, Options{}), "removal.archiveWhen.field"); len(w) > 0 {
 			t.Errorf("a rule that does not fire on update is read as blocking one: %v", w)
 		}
 	})

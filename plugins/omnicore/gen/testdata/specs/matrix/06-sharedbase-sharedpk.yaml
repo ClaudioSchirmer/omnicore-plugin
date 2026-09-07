@@ -1,6 +1,6 @@
 # Eixos: SharedBase com link shared-PK (o papel usa a MESMA chave da identidade),
 # reuso de VO já existente no projeto, política de órfão "manter", e
-# delete.archiveWhen — um update que termina como archive — sobre um PAPEL.
+# removal.archiveWhen — um update que termina como archive — sobre um PAPEL.
 specVersion: 1
 entity: Professor
 plural: Professores
@@ -16,13 +16,13 @@ storage:
     naturalKey: Documento
     link: shared-pk
     orphanPolicy: keep
-  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: deleted_at}
+  managed: {revision: revision, createdAt: created_at, updatedAt: updated_at, archivedAt: archived_at}
 fields:
   - {name: Documento, type: string, column: documento, length: 20, livesOn: base, example: "123.456.789-00", description: Documento — chave natural da identidade.}
   - {name: NomeCompleto, type: string, column: nome_completo, length: 160, livesOn: base, example: Helena Duarte, description: Nome completo da pessoa.}
   - {name: Titulacao, type: string, column: titulacao, length: 40, livesOn: role, example: Doutorado, description: Titulação acadêmica.}
   # Situação do VÍNCULO, não da pessoa: por isso vive no papel. É ela que decide
-  # quando o vínculo deixa de estar ativo — ver delete.archiveWhen abaixo.
+  # quando o vínculo deixa de estar ativo — ver removal.archiveWhen abaixo.
   - name: Situacao
     type: string
     column: situacao
@@ -43,8 +43,8 @@ valueObjects:
       - {name: Desligado, value: desligado}
 modes: [display, insert, update, archive, unarchive]
 update: {shape: patch}
-delete:
-  root: soft
+removal:
+  root: archive
   # Um update que deixa o vínculo "desligado" É uma remoção: o DOMÍNIO decide, e
   # o framework roda o archive inteiro a partir do mesmo request.
   #

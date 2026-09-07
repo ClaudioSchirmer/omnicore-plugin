@@ -14,7 +14,7 @@ import (
 //
 // It is here to reach `removeOp`'s OTHER branch. Since framework v0.61.1 that
 // branch is honest for ANY child: `removeChild` routes on the child's own
-// DeletedAt column and nothing else, so a child that declares none — root-owned
+// ArchivedAt column and nothing else, so a child that declares none — root-owned
 // or base — has its row deleted. Against v0.60.0 this same fixture generated a
 // `DELETE` route that answered 500 on every call, because a root-owned child
 // reached the archive path with no column to stamp; that is the gap v0.61.1
@@ -22,9 +22,9 @@ import (
 func hardRemoveModel(t *testing.T) *ir.Model {
 	t.Helper()
 	src := strings.Replace(childOpsSpec, "%s\n", "", 1)
-	src = strings.Replace(src, "    softRemove: true\n    archivedAt: deleted_at\n", "", 1)
-	if strings.Contains(src, "softRemove") {
-		t.Fatal("the fixture still declares softRemove")
+	src = strings.Replace(src, "    archiveOnRemove: true\n    archivedAt: archived_at\n", "", 1)
+	if strings.Contains(src, "archiveOnRemove") {
+		t.Fatal("the fixture still declares archiveOnRemove")
 	}
 	s, err := spec.Parse([]byte(src), "papel.omnicore.yaml")
 	if err != nil {

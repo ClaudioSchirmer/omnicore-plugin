@@ -923,7 +923,7 @@ func emitPerChildRoutes(s *src, m *ir.Model, entity string) {
 
 // removeOp picks the VERB that tells the truth about what removal does here.
 //
-// A child that declares softRemove keeps its row and its archive stamp, so the
+// A child that declares archiveOnRemove keeps its row and its archive stamp, so the
 // entry stops being returned instead of being purged. Mounting that as DELETE
 // would promise an irreversible purge the endpoint does not perform — and
 // DELETE is the one verb a caller is entitled to read as permanent. A child
@@ -1002,7 +1002,7 @@ type perChildOp struct {
 	// children[].permissions is keyed by. It parts company with verb on the
 	// removal alone: the generated names say archive or delete, because that is
 	// what the route does, while the spec keeps one word for the operation and
-	// lets softRemove decide the outcome. Lower-casing verb would look for a
+	// lets archiveOnRemove decide the outcome. Lower-casing verb would look for a
 	// permission called "archive" that no spec declares.
 	permKey string
 	// handler is the framework handler this verb runs through, and it is empty

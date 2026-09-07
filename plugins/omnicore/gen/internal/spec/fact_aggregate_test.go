@@ -162,10 +162,10 @@ func TestStampedColumnsAreFilterable(t *testing.T) {
 		t.Fatalf("a stamped column the storage declares must be filterable:\n%v", ps.Error())
 	}
 
-	// DeletedAt is not declared by the minimal fixture's storage.
+	// ArchivedAt is not declared by the minimal fixture's storage.
 	missing := factSpec(Fact{
 		Name: "Arquivados", Kind: "count", Description: "d",
-		Filters: []FactFilter{{Field: "DeletedAt", Op: "notnull"}},
+		Filters: []FactFilter{{Field: "ArchivedAt", Op: "notnull"}},
 	})
 	ps := Validate(missing, Options{})
 	if !blockerAbout(ps, "storage.managed.archivedAt") {
@@ -173,27 +173,27 @@ func TestStampedColumnsAreFilterable(t *testing.T) {
 	}
 }
 
-// TestTheArchivedScopeAndDeletedAtDoNotArgue refuses the two readings that both
+// TestTheArchivedScopeAndArchivedAtDoNotArgue refuses the two readings that both
 // ship a query that runs and answers nothing anybody asked for.
-func TestTheArchivedScopeAndDeletedAtDoNotArgue(t *testing.T) {
+func TestTheArchivedScopeAndArchivedAtDoNotArgue(t *testing.T) {
 	archivable := func(f Fact) *Spec {
 		s := factSpec(f)
-		s.Storage.Managed.ArchivedAt = "deleted_at"
+		s.Storage.Managed.ArchivedAt = "archived_at"
 		return s
 	}
 	contradiction := archivable(Fact{
 		Name: "Arquivados", Kind: "count", Description: "d", ActiveOnly: true,
-		Filters: []FactFilter{{Field: "DeletedAt", Op: "notnull"}},
+		Filters: []FactFilter{{Field: "ArchivedAt", Op: "notnull"}},
 	})
 	if ps := Validate(contradiction, Options{}); !blockerAbout(ps, "together they match nothing") {
-		t.Fatalf("activeOnly beside DeletedAt notnull must be refused, got:\n%v", ps.Error())
+		t.Fatalf("activeOnly beside ArchivedAt notnull must be refused, got:\n%v", ps.Error())
 	}
 	redundant := archivable(Fact{
 		Name: "Vivos", Kind: "count", Description: "d", ActiveOnly: true,
-		Filters: []FactFilter{{Field: "DeletedAt", Op: "isnull"}},
+		Filters: []FactFilter{{Field: "ArchivedAt", Op: "isnull"}},
 	})
 	if ps := Validate(redundant, Options{}); !blockerAbout(ps, "asks it a second time") {
-		t.Fatalf("activeOnly beside DeletedAt isnull must be refused, got:\n%v", ps.Error())
+		t.Fatalf("activeOnly beside ArchivedAt isnull must be refused, got:\n%v", ps.Error())
 	}
 }
 

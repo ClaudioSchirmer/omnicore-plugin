@@ -7,6 +7,69 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.64.0] — 2026-09-06
+
+### Changed
+
+- **The generator emits the framework's renamed archive slot: `ArchivedAt`.**
+  The framework retired `DeletedAt` — the slot was the last place it still said
+  "deleted" while every verb said archive — so the emitted `TableSchema` chain
+  now calls `ArchivedAt(col)`, the managed-read vocabulary admits `ArchivedAt`
+  in place of the old name, and the fixed logical name in emitted criteria, leg
+  field allowlists and view specs moves with it.
+
+  The spec language does **not** change: `storage.managed.archivedAt:` was
+  already the key authors wrote, and the physical column it names is still
+  theirs (`archivedAt: deleted_at` remains valid). This release only ends the
+  translation the generator used to perform — the spec's word and the
+  framework's word are now the same word.
+
+  Like `0.63.0`, this is a **compile break at ZERO distance**: every generated
+  entity that declares an archive column calls the builder, so nothing this
+  generator writes compiles against `v0.73.0` or below.
+
+- **breaking spec** — **the removal block stops calling archiving a delete.**
+  `delete:` becomes `removal:`, and its values switch to the framework's own
+  words: `root: soft` → `root: archive`, `root: hard` → `root: delete`
+  (`both` unchanged); `children:` follows the same pair. The block already
+  hosted `archiveWhen`, so `removal:` is what it always described. Per child,
+  `softRemove:` becomes `archiveOnRemove:` — same boolean, same meaning, a name
+  that says which of the two removals happens.
+
+  ```yaml
+  # before                    # after
+  delete:                     removal:
+    root: soft                  root: archive
+    archiveWhen:                archiveWhen:
+      field: status               field: status
+  children:                   children:
+    - softRemove: true          - archiveOnRemove: true
+  ```
+
+  Note for a future round, not changed here: `archiveOnRemove` and `archivedAt`
+  are strictly redundant — the validator already refuses every combination where
+  they disagree, so one of them could be derived from the other.
+
+- **`omnicore-gen` now targets framework `v0.74.0`** (`compat.Supported`, its
+  fixture table, and `testdata/host/go.mod`). `v0.73.0` becomes a compile break
+  at zero distance — it has no `TableSchema.ArchivedAt` — so a project still
+  pinned there is refused rather than warned.
+
+### Added
+
+- **A renamed spec key now says where it went.** `unknown key "delete"` is true
+  and useless: the key was not misspelled, it moved. The decoder carries a table
+  of renames (`delete` → `removal`, `children[].softRemove` →
+  `archiveOnRemove`) and answers with the destination and the release that moved
+  it, instead of an edit-distance guess that could never reach a different word.
+
+### Fixed
+
+- **The Domain Model template stopped negotiating in words the validator
+  refuses.** `scaffold-entity`'s §6 read "Delete semantics — soft | hard", the
+  two values `removal.root` rejects; it is now "Removal semantics — archive |
+  delete", and the last "soft" spellings left in that skill follow.
+
 ## [0.63.0] — 2026-09-06
 
 A field's wire names become the author's to declare, and every emission moves to
