@@ -5,6 +5,29 @@ framework, delivered as a Claude Code plugin. This repository is **both** the pl
 its marketplace: add the marketplace, install the `omnicore` plugin, and the skills below
 become available in any omnicore-based project.
 
+## Built with these skills — [authcore](https://github.com/ClaudioSchirmer/authcore)
+
+**A real, public service scaffolded, evolved, QA'd and upgraded entirely through this plugin** —
+what the skills below produce, end to end, in one readable repository.
+
+> ### 🔐 [authcore](https://github.com/ClaudioSchirmer/authcore) — the identity provider of a multi-tenant platform
+>
+> Tenants, the people and machines acting inside them, the roles and permissions they hold, and
+> the signed tokens the rest of the mesh trusts — 57 management endpoints over seven aggregates
+> (Tenant, User, Client, Group, Role, Permission, Claim), on REST and GraphQL, over PostgreSQL as
+> the source of truth with relational views in front of it.
+>
+> Read it as the worked example of this repository's conventions: most of `internal/` is written
+> by **omnicore-gen** from the entity specs under `specs/omnicore-gen/` (with the per-entity
+> `lock.json` recording which framework release each was last generated against), the hand-written
+> half lives in `*_manual.go` files the generator never touches, every change goes through an
+> `/omnicore:*` command instead of a hand edit, and `qa/run.sh` is the contract suite
+> `/omnicore:qa` generated for it.
+>
+> It also shows the pairing this file is about: a service pinned to a published
+> [omnicore](https://github.com/ClaudioSchirmer/omnicore) release, maintained by a pinned release
+> of this plugin — the two versions moving independently.
+
 ## Skills
 
 Invoked as `/omnicore:<skill>` once installed:
@@ -15,14 +38,14 @@ Invoked as `/omnicore:<skill>` once installed:
 | `/omnicore:scaffold-system` | Turn a whole-system/MVP description — several entities, shared identities and read models in one prose drop — into an approved domain map, then scaffold it entity by entity by delegating to `scaffold-entity` (and cross-entity read models to `scaffold-view`). Decomposition only: it never generates code itself. |
 | `/omnicore:scaffold-entity` | Scaffold a complete CRUD entity across every layer (domain → application → web → infra → migrations → bootstrap) of an existing omnicore service. |
 | `/omnicore:omnicore-gen` | Drive **omnicore-gen** (beta), the spec-driven code generator, to write a whole entity from one YAML spec — then review it, implement the rules the spec language cannot express, and prove it with build + tests + a real boot — and to CHANGE one, by editing that spec and regenerating. Reached from a generation gateway — `scaffold-entity`'s when creating, `evolve-entity`'s when changing — where the dev chooses between the generator (seconds, a fraction of the tokens) and file by file by the agent. |
-| `/omnicore:gen` | Run ONE `omnicore-gen` command against an existing project and read the answer — `doctor` (drift between the spec, the lock and the files on disk), `check`, `explain`, `adopt`, `init`. The door to the generator's CLI for a project that already exists; creating an entity stays with `scaffold-entity` (model and plan gates) and changing one with `evolve-entity` (impact map + the migration a regeneration never writes). |
+| `/omnicore:gen` | Run ONE `omnicore-gen` command against an existing project and read the answer — `doctor` (drift between the spec, the lock and the files on disk), `check`, `explain`, `adopt`, `init`, `prune` (remove what an earlier shape of the spec left behind). The door to the generator's CLI for a project that already exists; creating an entity stays with `scaffold-entity` (model and plan gates) and changing one with `evolve-entity` (impact map + the migration a regeneration never writes). |
 | `/omnicore:evolve-entity` | Change an EXISTING entity — add/remove/rename fields, uniqueness, children, modes — with schema evolution done right: migration, TableSchema, DTOs, translations, view `Version` bump and OpenAPI move together, via an approved impact-map spec. When the entity is the generator's, it offers the same two-option gateway as `scaffold-entity`: edit the spec and regenerate (beta), or change every file by hand — the migration pair is hand-written either way. |
 | `/omnicore:remove-entity` | Surgically remove an entity from every layer via an inventory-first removal plan you approve before anything is deleted; shared bases, composed views and integration-event consumers are detected and block until you decide. |
 | `/omnicore:scaffold-view` | Create a NEW read model beyond an entity's own view — ComposedView across entities, SharedBaseView identity, Upstream/Embed composition — projected to Mongo and exposed on REST/GraphQL/gRPC, via an approved spec. |
 | `/omnicore:evolve-view` | Change an EXISTING view — projected fields, legs/roles, indexes, operators, surfaces — with the `Version` bump and rebuild discipline done right, write side untouched. |
 | `/omnicore:implement` | Wire a framework capability into an existing service — another surface (gRPC, GraphQL), an external API call from a handler (httpclient + middleware), cache, integration events, lifecycle hooks, authz, tracing — anything the pinned framework offers that no dedicated skill owns. Routes the request against the pin's docs (the capability catalog); if the framework doesn't offer it, it says so honestly. |
 | `/omnicore:run` | Boot the service locally (bench up, background boot, readiness) and hand you clickable links — OpenAPI UI, GraphQL, probes. The app stays running. |
-| `/omnicore:qa` | Generate and run a CONTRACT QA SUITE for the service: read its entities/views/surfaces/posture, derive the pinned framework's promised behaviors (verbs per mode, status codes, archive semantics, filter vocabulary, typed 400s), and produce an executable e2e suite at the project root (`qa/run.sh` + `qa/*.sh`) that proves them against the running service — fail-fast, honest GREEN/RED. |
+| `/omnicore:qa` | Generate and run a CONTRACT QA SUITE for the service: read its entities/views/surfaces/posture, derive the pinned framework's promised behaviors (verbs per mode, status codes, archive semantics, filter vocabulary, typed 400s), and produce an executable e2e suite at the project root (`qa/run.sh` + `qa/*.sh`, with optional `qa/run.cmd` + `qa/run.ps1` shims that forward to the one runner on Windows) that proves them against the running service — fail-fast, honest GREEN/RED. |
 | `/omnicore:configure` | Change a service's INFRASTRUCTURE POSTURE and configuration — convert a zero-infra/SQLite MVP into full distributed CQRS (add Mongo + broker + CDC relay + docker) or back, swap the relational engine, switch transport (kafka ⇄ nats), tune the `microservice.*.yaml` / devops glue. Every conversion is reversible and no application code is lost. |
 | `/omnicore:doctor` | Diagnose a misbehaving service or bench: walks the pipeline (build → boot → serve → write → relay → broker → projection), proves the cause with evidence, and prescribes the fix. Read-only — it never edits your files. |
 | `/omnicore:upgrade` | Upgrade a service's omnicore pin: check the current version, show the target release's changelog, and on your ok run `go get` + `go mod tidy` + build — with rollback to the previous version if the build breaks, or an approved migration plan to fix the breaking-change fallout. |
@@ -35,8 +58,8 @@ drift as the framework evolves.
 The **skills** work with any published omnicore release (docs-pinned by design). The
 **generator** is the one part that targets a single line — one supported version, one shape
 of emitted code, because branching templates per framework version is the largest drift
-source a generator can have: today that is the framework's **v0.68.0**, paired with plugin
-**0.55.0**. Publish the two in sync. An older pin is refused by default with the fix named;
+source a generator can have: today that is the framework's **v0.74.0**, paired with plugin
+**0.67.0**. Publish the two in sync. An older pin is refused by default with the fix named;
 a newer one generates anyway, and the compiler is the oracle.
 
 Those two numbers are the ones that rot fastest in this file, so do not trust them — read
@@ -156,18 +179,20 @@ omnicore-plugin/                     # repo root = marketplace
         ├── gen/                     # omnicore-gen: the generator, as Go source
         ├── hooks/                   # write-time guards (hooks.json + the scripts)
         ├── shared/
-        └── skills/
+        └── skills/                  # the 16 /omnicore:* skills
             ├── scaffold-service/
             ├── scaffold-system/
             ├── scaffold-entity/
             ├── omnicore-gen/
+            ├── gen/
             ├── evolve-entity/
             ├── remove-entity/
             ├── scaffold-view/
             ├── evolve-view/
             ├── implement/
-            ├── configure/
             ├── run/
+            ├── qa/
+            ├── configure/
             ├── doctor/
             ├── upgrade/
             └── help/
