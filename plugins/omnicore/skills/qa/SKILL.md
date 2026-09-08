@@ -146,6 +146,11 @@ session." Never a gate: this run continues on the installed skills.
   there is nothing to prove; say so and point at `scaffold-entity`.
 - **No version check here** (like `remove-entity`): the suite proves the CURRENT pin's
   contract; upgrading first is `/omnicore:upgrade`, separately.
+- **Host OS:** `go env GOOS` (`darwin`/`linux`/`windows`) — feeds the plan's
+  cross-platform runner question (Phase 1 §5): on `windows` the `qa/run.cmd` +
+  `qa/run.ps1` shims are the dev's native door into the suite; elsewhere they are a
+  purely additive offer for Windows teammates. Same detection scaffold-service's
+  Phase 0 does for its start wrappers.
 
 ## Phase 0b-1 — Surface inventory (read, don't ask)
 
@@ -483,6 +488,19 @@ route list): an inventory, never a value that becomes an expectation.
    runs on exit; the service is stopped with SIGTERM, **never** `kill -9` — and the
    runner WAITS on the server PID until the drain completes (default budget ~30s)
    before the next suite binds the same port.
+   **Cross-platform entry shims — the same question scaffold-service asks for its
+   start wrappers, asked here** (`AskUserQuestion`, in the same breath as the plan):
+   also generate `qa/run.cmd` + `qa/run.ps1`? `(proposed: yes)` — on a `windows`
+   host (Phase 0a) they are the native door; on darwin|linux they are purely
+   additive, for Windows teammates — decline if the team is single-OS. They are
+   SHIMS, never runners: each locates a bash (`bash` on PATH — Git for Windows /
+   WSL — else `%ProgramFiles%\Git\bin\bash.exe`; neither found → say plainly that
+   the suite needs Git for Windows or WSL and exit non-zero), forwards every
+   argument to `qa/run.sh` and exits with its exit code, and holds ZERO logic of
+   its own — lane list, fail-fast, report all stay in the ONE runner, so the shims
+   cannot drift and never become the second entry point this section forbids. The
+   suites themselves stay bash: a PowerShell mirror of every lane is a lockstep
+   nobody keeps. Record the resolved set in the plan.
 6. **Report contract — the run leaves a DOCUMENT behind: `qa/qa-report.md`.** A run whose
    only trace is terminal scrollback is a run the dev did not see: an agent boots the
    bench, executes hundreds of cases and hands back one sentence, and nothing on disk
@@ -523,6 +541,13 @@ route list): an inventory, never a value that becomes an expectation.
    per the approved plan, at the PROJECT ROOT (`chmod +x` every one — a suite the dev
    cannot execute is not delivered); the plan stays at `specs/qa/<suite>/plan.md`. Every
    generated `.sh` must appear in the runner's lane list before this step is done.
+   When the plan's §5 resolved the cross-platform question yes, also write the
+   `qa/run.cmd` + `qa/run.ps1` shims beside the runner (delegation only, per §5;
+   no `chmod` applies to them). Document the PowerShell invocation as
+   `pwsh -File .\qa\run.ps1` — the default execution policy may block a bare call —
+   and point a Windows dev at `run.cmd` as the zero-friction default, exactly as
+   scaffold-service does for its wrappers. On a non-Windows host they ship
+   unexercised: `qa/run.sh` is and remains the only verify gate below.
    **The security family gets its own lane** because it is the one that may need a
    different boot — the §3c suite-owned config, a token source to prime, an IdP the bench
    must have up — and folding it into each entity's lane would either drag that setup

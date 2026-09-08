@@ -40,7 +40,7 @@ lifetime.
 | `/omnicore:implement` | `specs/implement/<slug>/` |
 | `/omnicore:configure` | `specs/configure/<change>/plan.md` — one per CONVERSION |
 | `/omnicore:upgrade` | `specs/upgrade/<from>-to-<to>/` — one per UPGRADE, holding `migration-plan.md` and `rollback/` |
-| `/omnicore:qa` | `specs/qa/<suite>/plan.md` — the plan. **Its one exception:** the EXECUTABLE suite (`qa/run.sh` + `qa/<entity>.sh`) goes to `qa/` at the project root — a command the dev and CI run, not a document they read. Its OUTPUT (`qa/qa-report.md`, `qa/.logs/`) is an artifact, not a document — see *What IS ignored* |
+| `/omnicore:qa` | `specs/qa/<suite>/plan.md` — the plan. **Its one exception:** the EXECUTABLE suite (`qa/run.sh` + `qa/<entity>.sh`, plus the optional `qa/run.cmd`/`qa/run.ps1` Windows shims) goes to `qa/` at the project root — a command the dev and CI run, not a document they read. Its OUTPUT (`qa/qa-report.md`, `qa/.logs/`) is an artifact, not a document — see *What IS ignored* |
 | `omnicore-gen` (the generator) | `specs/omnicore-gen/` — the specs, their reports, the lock |
 
 A skill needing a shape not listed here still writes it under
@@ -90,7 +90,7 @@ Not just prose — anything the tooling writes that a human or a later run READS
 | `specs/omnicore-gen/<entity>.omnicore.yaml` | the generator's source of truth — the code is derived FROM it, so losing it inverts the dependency |
 | `specs/omnicore-gen/<entity>.gen-report.md` | what still needs implementing and what to check; the hand-off |
 | `specs/omnicore-gen/lock.json` | which files the generator owns, their hashes, the migration ordinals it already spent, and any adopted edit — without it a regeneration re-allocates ordinals and forgets every refusal |
-| `qa/run.sh` + `qa/*.sh` (project root) | the contract suite; it IS the proof the service keeps its promises — and the one thing here that is EXECUTED rather than read, which is why it lives at the root instead of under `specs/` |
+| `qa/run.sh` + `qa/*.sh` (project root, plus `qa/run.cmd`/`qa/run.ps1` when the plan shipped the Windows shims) | the contract suite; it IS the proof the service keeps its promises — and the one thing here that is EXECUTED rather than read, which is why it lives at the root instead of under `specs/` |
 
 ### Why, in the order it bites
 

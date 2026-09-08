@@ -7,6 +7,21 @@ is the commit bumping that field on `main`, tagged `v<version>`.
 
 ## [Unreleased]
 
+## [0.67.0] — 2026-09-08
+
+### Added
+
+- **`/omnicore:qa` can ship Windows entry shims for its runner — the same
+  cross-platform question scaffold-service already asks for its start
+  wrappers.** Phase 0a now reads `go env GOOS`, and the plan's runner contract
+  (§5) carries the question (`proposed: yes`; native door on a Windows host,
+  additive offer for Windows teammates elsewhere). On approval Phase 2 writes
+  `qa/run.cmd` + `qa/run.ps1` beside `qa/run.sh`: pure delegation shims that
+  locate a bash (Git for Windows / WSL) and forward to the one runner, holding
+  zero logic of their own. The lanes themselves stay bash — a PowerShell mirror
+  of every suite would be a lockstep nobody keeps — so the single-runner rule
+  is preserved: the shims are doors, never a second runner.
+
 ## [0.66.0] — 2026-09-07
 
 Two defects in `0.65.0`'s row-scope rollout, both reported from a real 7-entity
